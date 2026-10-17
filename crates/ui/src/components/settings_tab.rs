@@ -7,13 +7,14 @@ use config::{
 use domain::ids::ScanRootId;
 use domain::models::ScanRoot;
 use engine::AudioSource;
+use serde::{Deserialize, Serialize};
 use crate::theme::Theme;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Categories
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SettingsCategory {
     #[default]
     Playback,
@@ -212,6 +213,191 @@ impl Default for SettingsTabState {
             section_advanced: false,
         }
     }
+}
+
+/// Serde-serializable snapshot of Settings Tab state for persistent storage
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistentSettingsTabState {
+    pub active_category: SettingsCategory,
+    pub speed: f32,
+    pub pitch_semitones: f32,
+    pub speed_mode: SpeedMode,
+    pub transition_mode: TransitionMode,
+    pub crossfade_duration_secs: f32,
+    pub crossfade_curve: CrossfadeCurve,
+    pub loudness_mode: LoudnessMode,
+
+    pub output_backend: AudioBackend,
+    pub output_device: String,
+    pub sample_rate_policy: SampleRatePolicy,
+    pub volume_mode: VolumeMode,
+    pub bit_perfect: bool,
+    pub dither_enabled: bool,
+    pub resampler_quality: ResamplerQuality,
+    pub fallback_policy: FallbackPolicy,
+
+    pub spatial_quality: SpatialQuality,
+    pub hrtf_profile: String,
+    pub listener_smoothing_ms: f32,
+    pub listener_max_rate: f32,
+    pub room_enabled: bool,
+    pub room_width: f32,
+    pub room_depth: f32,
+    pub room_height: f32,
+    pub room_absorption: f32,
+    pub room_rt60_ms: f32,
+    pub room_wet: f32,
+    pub air_absorption_enabled: bool,
+    pub voice_budget_enabled: bool,
+    pub voice_capacity: usize,
+    pub stereo_enhancer_enabled: bool,
+}
+
+impl From<&SettingsTabState> for PersistentSettingsTabState {
+    fn from(s: &SettingsTabState) -> Self {
+        Self {
+            active_category: s.active_category,
+            speed: s.speed,
+            pitch_semitones: s.pitch_semitones,
+            speed_mode: s.speed_mode,
+            transition_mode: s.transition_mode,
+            crossfade_duration_secs: s.crossfade_duration_secs,
+            crossfade_curve: s.crossfade_curve,
+            loudness_mode: s.loudness_mode,
+            output_backend: s.output_backend,
+            output_device: s.output_device.clone(),
+            sample_rate_policy: s.sample_rate_policy.clone(),
+            volume_mode: s.volume_mode,
+            bit_perfect: s.bit_perfect,
+            dither_enabled: s.dither_enabled,
+            resampler_quality: s.resampler_quality,
+            fallback_policy: s.fallback_policy,
+            spatial_quality: s.spatial_quality,
+            hrtf_profile: s.hrtf_profile.clone(),
+            listener_smoothing_ms: s.listener_smoothing_ms,
+            listener_max_rate: s.listener_max_rate,
+            room_enabled: s.room_enabled,
+            room_width: s.room_width,
+            room_depth: s.room_depth,
+            room_height: s.room_height,
+            room_absorption: s.room_absorption,
+            room_rt60_ms: s.room_rt60_ms,
+            room_wet: s.room_wet,
+            air_absorption_enabled: s.air_absorption_enabled,
+            voice_budget_enabled: s.voice_budget_enabled,
+            voice_capacity: s.voice_capacity,
+            stereo_enhancer_enabled: s.stereo_enhancer_enabled,
+        }
+    }
+}
+
+impl PersistentSettingsTabState {
+    pub fn apply_to(&self, s: &mut SettingsTabState) {
+        s.active_category = self.active_category;
+        s.speed = self.speed;
+        s.pitch_semitones = self.pitch_semitones;
+        s.speed_mode = self.speed_mode;
+        s.transition_mode = self.transition_mode;
+        s.crossfade_duration_secs = self.crossfade_duration_secs;
+        s.crossfade_curve = self.crossfade_curve;
+        s.loudness_mode = self.loudness_mode;
+        s.output_backend = self.output_backend;
+        s.output_device = self.output_device.clone();
+        s.sample_rate_policy = self.sample_rate_policy.clone();
+        s.volume_mode = self.volume_mode;
+        s.bit_perfect = self.bit_perfect;
+        s.dither_enabled = self.dither_enabled;
+        s.resampler_quality = self.resampler_quality;
+        s.fallback_policy = self.fallback_policy;
+        s.spatial_quality = self.spatial_quality;
+        s.hrtf_profile = self.hrtf_profile.clone();
+        s.listener_smoothing_ms = self.listener_smoothing_ms;
+        s.listener_max_rate = self.listener_max_rate;
+        s.room_enabled = self.room_enabled;
+        s.room_width = self.room_width;
+        s.room_depth = self.room_depth;
+        s.room_height = self.room_height;
+        s.room_absorption = self.room_absorption;
+        s.room_rt60_ms = self.room_rt60_ms;
+        s.room_wet = self.room_wet;
+        s.air_absorption_enabled = self.air_absorption_enabled;
+        s.voice_budget_enabled = self.voice_budget_enabled;
+        s.voice_capacity = self.voice_capacity;
+        s.stereo_enhancer_enabled = self.stereo_enhancer_enabled;
+    }
+}
+
+/// Dual-tone horizontal slider matching the design system
+pub fn dual_tone_slider(
+    ui: &mut egui::Ui,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    step: f32,
+    width: f32,
+    theme: &Theme,
+) -> bool {
+    let desired_size = Vec2::new(width, 20.0);
+    let (rect, resp) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
+    let mut changed = false;
+
+    let min = *range.start();
+    let max = *range.end();
+
+    if resp.dragged() || resp.clicked() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let t = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            let raw_val = min + t * (max - min);
+            let stepped_val = if step > 0.0 {
+                ((raw_val / step).round() * step).clamp(min, max)
+            } else {
+                raw_val.clamp(min, max)
+            };
+            if (stepped_val - *value).abs() > 0.0001 {
+                *value = stepped_val;
+                changed = true;
+            }
+        }
+    }
+
+    // Background track
+    let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
+    ui.painter().rect_filled(track_rect, CornerRadius::same(2), theme.bg_input);
+
+    // Active dual-tone filled track
+    let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
+    let thumb_x = rect.left() + thumb_t * rect.width();
+    let filled_w = (thumb_x - track_rect.min.x).max(0.0);
+    if filled_w > 0.0 {
+        let num_slices = (filled_w / 3.0).clamp(1.0, 40.0) as usize;
+        for i in 0..num_slices {
+            let t0 = i as f32 / num_slices as f32;
+            let t1 = (i + 1) as f32 / num_slices as f32;
+            let x0 = track_rect.min.x + filled_w * t0;
+            let x1 = track_rect.min.x + filled_w * t1;
+            let r = (236.0 * (1.0 - t0) + 129.0 * t0) as u8;
+            let g = (72.0 * (1.0 - t0) + 140.0 * t0) as u8;
+            let b = (153.0 * (1.0 - t0) + 248.0 * t0) as u8;
+            let col = Color32::from_rgb(r, g, b);
+            let slice_rect = Rect::from_min_max(
+                Pos2::new(x0, track_rect.min.y),
+                Pos2::new(x1, track_rect.max.y),
+            );
+            ui.painter().rect_filled(slice_rect, CornerRadius::same(if i == 0 { 2 } else { 0 }), col);
+        }
+    }
+
+    // White thumb knob
+    let thumb_pos = Pos2::new(thumb_x, rect.center().y);
+    let is_hovered = resp.hovered() || resp.dragged();
+    ui.painter().circle_filled(
+        thumb_pos,
+        if is_hovered { 7.5 } else { 6.0 },
+        Color32::from_rgba_premultiplied(129, 140, 248, if is_hovered { 80 } else { 40 }),
+    );
+    ui.painter().circle_filled(thumb_pos, 5.0, Color32::WHITE);
+    ui.painter().circle_stroke(thumb_pos, 5.0, Stroke::new(1.2, theme.accent_magenta));
+
+    changed
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -443,7 +629,7 @@ fn render_playback_category(
             theme,
             |ui| {
                 let mut v = state.speed;
-                if ui.add_sized(Vec2::new(180.0, 20.0), egui::Slider::new(&mut v, 0.25..=4.0).step_by(0.05).show_value(false)).changed() {
+                if dual_tone_slider(ui, &mut v, 0.25..=4.0, 0.05, 180.0, theme) {
                     state.speed = v;
                     actions.speed_changed = Some(v);
                 }
@@ -463,7 +649,7 @@ fn render_playback_category(
             theme,
             |ui| {
                 let mut v = state.pitch_semitones;
-                if ui.add_sized(Vec2::new(180.0, 20.0), egui::Slider::new(&mut v, -24.0..=24.0).step_by(0.5).show_value(false)).changed() {
+                if dual_tone_slider(ui, &mut v, -24.0..=24.0, 0.5, 180.0, theme) {
                     state.pitch_semitones = v;
                     actions.pitch_changed = Some(v);
                 }
@@ -476,10 +662,11 @@ fn render_playback_category(
         );
 
         // Speed Processing Mode
-        setting_item(
+        setting_item_with_info(
             ui,
             "Processing Engine",
             "Varispeed (analog tape pitch shift) vs TimeStretch (formant-preserved tempo)",
+            Some(&crate::components::info_box::INFO_SPEED_PITCH),
             theme,
             |ui| {
                 let options = [
@@ -514,10 +701,11 @@ fn render_playback_category(
             theme,
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Transition Mode",
             "Gapless mode provides seamless album playback without clicks or silence gaps",
+            Some(&crate::components::info_box::INFO_TRANSITION_CROSSFADE),
             theme,
             |ui| {
                 let options = [
@@ -550,7 +738,7 @@ fn render_playback_category(
                     theme,
                     |ui| {
                         let mut v = state.crossfade_duration_secs;
-                        if ui.add_sized(Vec2::new(160.0, 20.0), egui::Slider::new(&mut v, 0.5..=15.0).step_by(0.1).show_value(false)).changed() {
+                        if dual_tone_slider(ui, &mut v, 0.5..=15.0, 0.1, 160.0, theme) {
                             state.crossfade_duration_secs = v;
                             actions.crossfade_config_changed = true;
                         }
@@ -590,10 +778,11 @@ fn render_playback_category(
             theme,
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Target Standard",
             "EBU R128 (-14 LUFS) or legacy ReplayGain 2.0 tags",
+            Some(&crate::components::info_box::INFO_LOUDNESS_NORMALIZATION),
             theme,
             |ui| {
                 let options = [
@@ -657,12 +846,21 @@ fn render_output_category(
             );
 
             ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new("Audiophile Bit-Perfect Direct Stream")
-                        .font(FontId::proportional(15.0))
-                        .strong()
-                        .color(if state.bit_perfect { theme.bit_perfect_green } else { theme.text_primary }),
-                );
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.label(
+                        egui::RichText::new("Audiophile Bit-Perfect Direct Stream")
+                            .font(FontId::proportional(15.0))
+                            .strong()
+                            .color(if state.bit_perfect { theme.bit_perfect_green } else { theme.text_primary }),
+                    );
+                    crate::components::info_box::render_info_icon_button(
+                        ui,
+                        "info_bit_perfect_banner",
+                        &crate::components::info_box::INFO_BIT_PERFECT,
+                        theme,
+                    );
+                });
                 ui.label(
                     egui::RichText::new(
                         if state.bit_perfect {
@@ -701,10 +899,11 @@ fn render_output_category(
             theme,
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Driver Architecture",
             "Exclusive ALSA, WASAPI Exclusive, or cross-platform automatic detection",
+            Some(&crate::components::info_box::INFO_AUDIO_BACKEND),
             theme,
             |ui| {
                 let options = [
@@ -781,10 +980,11 @@ fn render_output_category(
             theme,
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Sample Rate Target",
             "Follow Track switches your DAC rate on song change; Fixed resamples everything",
+            Some(&crate::components::info_box::INFO_SAMPLE_RATE_POLICY),
             theme,
             |ui| {
                 let options = [
@@ -801,10 +1001,11 @@ fn render_output_category(
             },
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Resampler Engine",
             "Polyphase FIR filter quality used when rate conversion is required",
+            Some(&crate::components::info_box::INFO_RESAMPLER_QUALITY),
             theme,
             |ui| {
                 let options = [
@@ -819,10 +1020,11 @@ fn render_output_category(
             },
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Volume Attenuation Mode",
             "Software volume scaling vs Fixed 100% line-out for external preamp/headphone amp",
+            Some(&crate::components::info_box::INFO_VOLUME_MODE),
             theme,
             |ui| {
                 let options = [
@@ -835,10 +1037,11 @@ fn render_output_category(
             },
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "TPDF Dither",
             "Triangular PDF dithering eliminates quantization distortion when converting bit depth",
+            Some(&crate::components::info_box::INFO_DITHER),
             theme,
             |ui| {
                 let mut d = state.dither_enabled;
@@ -908,10 +1111,11 @@ fn render_spatial_category(
             theme,
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Spatial Synthesis Quality",
             "Spherical harmonics order and convolution precision",
+            Some(&crate::components::info_box::INFO_SPATIAL_HRTF),
             theme,
             |ui| {
                 let options = [
@@ -943,14 +1147,15 @@ fn render_spatial_category(
             },
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Listener Motion Smoothing",
             "Low-pass filter time constant for head motion tracker interpolation",
+            Some(&crate::components::info_box::INFO_LISTENER_TRACKING),
             theme,
             |ui| {
                 let mut v = state.listener_smoothing_ms;
-                if ui.add_sized(Vec2::new(160.0, 20.0), egui::Slider::new(&mut v, 0.0..=500.0).step_by(5.0).show_value(false)).changed() {
+                if dual_tone_slider(ui, &mut v, 0.0..=500.0, 5.0, 160.0, theme) {
                     state.listener_smoothing_ms = v;
                     actions.listener_tracking_changed = true;
                 }
@@ -965,7 +1170,7 @@ fn render_spatial_category(
             theme,
             |ui| {
                 let mut r = state.listener_max_rate;
-                if ui.add_sized(Vec2::new(160.0, 20.0), egui::Slider::new(&mut r, 0.0..=720.0).step_by(10.0).show_value(false)).changed() {
+                if dual_tone_slider(ui, &mut r, 0.0..=720.0, 10.0, 160.0, theme) {
                     state.listener_max_rate = r;
                     actions.listener_tracking_changed = true;
                 }
@@ -989,10 +1194,11 @@ fn render_spatial_category(
             theme,
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Enable Room Acoustics",
             "Apply virtual listening room reverberation model",
+            Some(&crate::components::info_box::INFO_ROOM_ACOUSTICS),
             theme,
             |ui| {
                 let mut on = state.room_enabled;
@@ -1021,7 +1227,7 @@ fn render_spatial_category(
                     theme,
                     |ui| {
                         let mut v = state.room_wet;
-                        if ui.add_sized(Vec2::new(160.0, 20.0), egui::Slider::new(&mut v, 0.0..=1.0).step_by(0.01).show_value(false)).changed() {
+                        if dual_tone_slider(ui, &mut v, 0.0..=1.0, 0.01, 160.0, theme) {
                             state.room_wet = v;
                             actions.spatial_room_changed = true;
                         }
@@ -1036,7 +1242,7 @@ fn render_spatial_category(
                     theme,
                     |ui| {
                         let mut v = state.room_rt60_ms;
-                        if ui.add_sized(Vec2::new(160.0, 20.0), egui::Slider::new(&mut v, 50.0..=3000.0).step_by(25.0).show_value(false)).changed() {
+                        if dual_tone_slider(ui, &mut v, 50.0..=3000.0, 25.0, 160.0, theme) {
                             state.room_rt60_ms = v;
                             actions.spatial_room_changed = true;
                         }
@@ -1138,7 +1344,7 @@ fn render_mixbus_category(
             |ui| {
                 ui.label("Gain:");
                 let mut g = state.track_gain;
-                if ui.add_sized(Vec2::new(110.0, 20.0), egui::Slider::new(&mut g, 0.0..=2.0).step_by(0.01).show_value(false)).changed() {
+                if dual_tone_slider(ui, &mut g, 0.0..=2.0, 0.01, 110.0, theme) {
                     state.track_gain = g;
                     actions.track_gain_changed = Some((state.track_slot, g));
                 }
@@ -1146,7 +1352,7 @@ fn render_mixbus_category(
 
                 ui.label("Pan:");
                 let mut p = state.track_pan;
-                if ui.add_sized(Vec2::new(110.0, 20.0), egui::Slider::new(&mut p, -1.0..=1.0).step_by(0.02).show_value(false)).changed() {
+                if dual_tone_slider(ui, &mut p, -1.0..=1.0, 0.02, 110.0, theme) {
                     state.track_pan = p;
                     actions.track_pan_changed = Some((state.track_slot, p));
                 }
@@ -1199,10 +1405,11 @@ fn render_mixbus_category(
             },
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Threshold & Depth",
             "Level that activates ducking (dB) and total volume reduction depth (dB)",
+            Some(&crate::components::info_box::INFO_DUCKING),
             theme,
             |ui| {
                 ui.label("Threshold:");
@@ -1252,10 +1459,11 @@ fn render_mixbus_category(
             theme,
         );
 
-        setting_item(
+        setting_item_with_info(
             ui,
             "Stereo Field Enhancer",
             "Mid-side psychoacoustic stereo image width expander",
+            Some(&crate::components::info_box::INFO_STEREO_WIDTH),
             theme,
             |ui| {
                 let mut on = state.stereo_enhancer_enabled;
@@ -1280,7 +1488,7 @@ fn render_mixbus_category(
                 if state.aux_enabled {
                     ui.label("Return Gain:");
                     let mut v = state.aux_return_gain;
-                    if ui.add_sized(Vec2::new(120.0, 20.0), egui::Slider::new(&mut v, 0.0..=2.0).step_by(0.01).show_value(false)).changed() {
+                    if dual_tone_slider(ui, &mut v, 0.0..=2.0, 0.01, 120.0, theme) {
                         state.aux_return_gain = v;
                         actions.aux_changed = true;
                     }
@@ -1303,12 +1511,13 @@ fn render_tools_category(
 ) {
     // Card 1: Direct System Audio Capture
     setting_card(ui, theme, |ui| {
-        card_header(
+        card_header_with_info(
             ui,
             |ui, r, c| crate::components::icons::draw_speaker(ui, r, c, false),
             "High-Resolution Stream Capture",
             "Record live bit-perfect audio stream directly to uncompressed PCM WAV files",
             None,
+            Some(&crate::components::info_box::INFO_STREAM_CAPTURE),
             theme,
         );
 
@@ -1587,7 +1796,7 @@ fn render_library_category(
             |ui, r, c| crate::components::icons::draw_logo(ui, r, c),
             "About ShadowPlayer",
             "Audiophile Local Desktop Music Player",
-            Some(("v0.1.0-alpha", theme.bg_pill, theme.accent_violet)),
+            Some(("v0.2.0", theme.bg_pill, theme.accent_violet)),
             theme,
         );
 
@@ -1654,6 +1863,18 @@ pub fn card_header(
     status_badge: Option<(&str, Color32, Color32)>,
     theme: &Theme,
 ) {
+    card_header_with_info(ui, icon_fn, title, subtitle, status_badge, None, theme);
+}
+
+pub fn card_header_with_info(
+    ui: &mut egui::Ui,
+    icon_fn: impl FnOnce(&egui::Ui, Rect, Color32),
+    title: &str,
+    subtitle: &str,
+    status_badge: Option<(&str, Color32, Color32)>,
+    info: Option<&crate::components::info_box::InfoBoxContent>,
+    theme: &Theme,
+) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
 
@@ -1664,12 +1885,17 @@ pub fn card_header(
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                 ui.label(
                     egui::RichText::new(title)
                         .font(FontId::proportional(14.5))
                         .strong()
                         .color(theme.text_primary),
                 );
+                if let Some(info_content) = info {
+                    let id_str = format!("card_header_info_{}", title);
+                    crate::components::info_box::render_info_icon_button(ui, id_str, info_content, theme);
+                }
                 if let Some((badge_text, bg, fg)) = status_badge {
                     egui::Frame::NONE
                         .fill(bg)
@@ -1708,23 +1934,41 @@ pub fn setting_item(
     theme: &Theme,
     add_control: impl FnOnce(&mut egui::Ui),
 ) {
+    setting_item_with_info(ui, label, description, None, theme, add_control);
+}
+
+pub fn setting_item_with_info(
+    ui: &mut egui::Ui,
+    label: &str,
+    description: &str,
+    info: Option<&crate::components::info_box::InfoBoxContent>,
+    theme: &Theme,
+    add_control: impl FnOnce(&mut egui::Ui),
+) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(20.0, 0.0);
         let avail_w = ui.available_width();
         let label_w = 240.0_f32.min(avail_w * 0.40);
 
-        // Column 1: Label + description
+        // Column 1: Label + info icon + description
         ui.allocate_ui_with_layout(
             Vec2::new(label_w, 24.0),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-                ui.label(
-                    egui::RichText::new(label)
-                        .font(FontId::proportional(13.0))
-                        .strong()
-                        .color(theme.text_primary),
-                );
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.label(
+                        egui::RichText::new(label)
+                            .font(FontId::proportional(13.0))
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    if let Some(info_content) = info {
+                        let id_str = format!("setting_info_{}", label);
+                        crate::components::info_box::render_info_icon_button(ui, id_str, info_content, theme);
+                    }
+                });
                 if !description.is_empty() {
                     ui.label(
                         egui::RichText::new(description)

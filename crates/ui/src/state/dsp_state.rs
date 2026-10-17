@@ -24,6 +24,83 @@ impl Default for DspState {
 }
 
 impl DspState {
+    /// Sync all restored persistent DSP and EQ parameters to the active audio engine session
+    pub fn sync_all_to_session(&self, session: &AudioSession) {
+        // 1. Equalizer Studio & Tone Controls
+        session.set_eq_enabled(self.eq_panel.eq_enabled);
+        session.set_graphic_eq_enabled(self.eq_panel.graphic_enabled);
+        session.set_graphic_eq_layout(self.eq_panel.graphic_layout.clone());
+        let num = self.eq_panel.graphic_layout.num_bands();
+        for b in 0..num {
+            session.set_graphic_eq_slider(b, self.eq_panel.graphic_gains[b]);
+        }
+        session.set_graphic_eq_preamp(self.eq_panel.graphic_preamp_db);
+        session.set_preamp(self.eq_panel.preamp_db);
+        session.set_eq_auto_headroom(self.eq_panel.auto_headroom);
+
+        session.set_bass_shelf(self.eq_panel.bass_shelf_db);
+        session.set_treble_shelf(self.eq_panel.treble_shelf_db);
+        session.set_stereo_width(self.eq_panel.stereo_width);
+        session.set_balance(self.eq_panel.balance);
+        session.set_midside_eq(self.eq_panel.midside_eq);
+        session.set_dither_enabled(self.eq_panel.dither_enabled);
+
+        session.set_limiter_enabled(self.eq_panel.limiter_enabled);
+        session.set_limiter_mode(self.eq_panel.limiter_mode);
+        session.set_compressor_enabled(self.eq_panel.compressor_enabled);
+        session.set_crossfeed_enabled(self.eq_panel.crossfeed_enabled);
+        session.set_crossfeed_profile(self.eq_panel.crossfeed_profile);
+
+        // 2. Settings Tab & Audio Engine parameters
+        let st = &self.settings_tab;
+        session.set_speed(st.speed);
+        session.set_pitch(st.pitch_semitones);
+        session.set_speed_mode(st.speed_mode);
+        session.set_transition_mode(st.transition_mode);
+        session.set_crossfade_config(CrossfadeConfig {
+            enabled: true,
+            duration_ms: (st.crossfade_duration_secs * 1000.0) as u64,
+            curve: st.crossfade_curve,
+        });
+        session.set_crossfade_curve(st.crossfade_curve);
+        session.set_loudness_mode(st.loudness_mode);
+        session.set_output_backend(st.output_backend);
+        if !st.output_device.is_empty() {
+            session.set_output_device(Some(st.output_device.clone()));
+        }
+        session.set_sample_rate_policy(st.sample_rate_policy.clone());
+        session.set_volume_mode(st.volume_mode);
+        session.set_bit_perfect(st.bit_perfect);
+        session.set_dither_enabled(st.dither_enabled);
+        session.set_resampler_quality(st.resampler_quality);
+        session.set_fallback_policy(st.fallback_policy);
+        session.set_spatial_quality(st.spatial_quality);
+        if !st.hrtf_profile.is_empty() {
+            session.set_hrtf_profile(st.hrtf_profile.clone());
+        }
+        session.set_spatial_listener_tracking(st.listener_smoothing_ms, st.listener_max_rate);
+        session.set_spatial_room(
+            st.room_enabled,
+            st.room_width,
+            st.room_depth,
+            st.room_height,
+            st.room_absorption,
+            2,
+            st.room_rt60_ms,
+            0.8,
+            false,
+            st.room_wet,
+        );
+        session.set_spatial_screen(st.screen_center_az, st.screen_half_w, st.screen_elevation, st.screen_gain);
+        session.set_spatial_voice(
+            st.voice_budget_enabled,
+            st.voice_capacity,
+            st.voice_capacity / 2,
+            config::VoicePriority::DistanceWeighted,
+        );
+        session.set_stereo_enhancer_enabled(st.stereo_enhancer_enabled);
+    }
+
     /// Dispatch settings actions to the audio session
     pub fn handle_settings_actions(&mut self, session: &AudioSession, s: &SettingsTabActions) {
         if let Some(v) = s.speed_changed { session.set_speed(v); }

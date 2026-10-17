@@ -2,14 +2,16 @@ use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, Pos2, Rect, Sens
 use config::{CrossfeedProfile, GraphicEqLayout};
 use engine::dsp::equalizer::EqFilterType;
 use engine::dsp::limiter::LimiterMode;
+use serde::{Deserialize, Serialize};
 use crate::theme::Theme;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Presets
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EqPreset {
+    #[default]
     Flat,
     Pop,
     Rock,
@@ -107,7 +109,7 @@ fn interpolate_preset_gain(target_freq: f32, base_freqs: &[f32; 10], base_gains:
     0.0
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomEqPreset {
     pub name: String,
     pub gains: Vec<f32>,
@@ -118,8 +120,9 @@ pub struct CustomEqPreset {
 // State & Models
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EqTab {
+    #[default]
     Graphic,
     Tone,
     Advanced,
@@ -159,6 +162,7 @@ pub struct EqPanelState {
     pub is_saving_preset: bool,
     pub new_preset_name: String,
     pub extended_range: bool, // Extended ±24 dB range toggle
+    pub window_pos: Option<[f32; 2]>, // Persisted center or user placed position
 
     // Parametric (legacy / AutoEQ targets)
     pub eq_enabled: bool,
@@ -233,7 +237,7 @@ impl Default for EqPanelState {
             eq_enabled: false,
             bands,
             preamp_db: 0.0,
-            auto_headroom: false,
+            auto_headroom: true, // Audiophile default: prevents digital clipping when positive EQ boosts are applied
 
             graphic_enabled: false,
             graphic_layout: GraphicEqLayout::TenBand,
@@ -274,7 +278,105 @@ impl Default for EqPanelState {
             correction_enabled: false,
             correction_depth: 1.0,
             correction_ir_path: String::new(),
+            window_pos: None,
         }
+    }
+}
+
+/// Serde-serializable snapshot of EQ panel settings for persistent storage across sessions
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistentEqState {
+    pub is_open: bool,
+    pub window_pos: Option<[f32; 2]>,
+    pub active_tab: EqTab,
+    pub eq_enabled: bool,
+    pub graphic_enabled: bool,
+    pub graphic_layout: GraphicEqLayout,
+    pub graphic_gains: Vec<f32>,
+    pub graphic_preamp_db: f32,
+    pub selected_preset: EqPreset,
+    pub custom_presets: Vec<CustomEqPreset>,
+    pub selected_custom_preset_idx: Option<usize>,
+    pub extended_range: bool,
+    pub preamp_db: f32,
+    pub auto_headroom: bool,
+    pub bass_shelf_db: f32,
+    pub treble_shelf_db: f32,
+    pub midside_eq: bool,
+    pub stereo_width: f32,
+    pub balance: f32,
+    pub dither_enabled: bool,
+    pub limiter_enabled: bool,
+    pub compressor_enabled: bool,
+    pub crossfeed_enabled: bool,
+    pub crossfeed_profile: CrossfeedProfile,
+}
+
+impl From<&EqPanelState> for PersistentEqState {
+    fn from(s: &EqPanelState) -> Self {
+        Self {
+            is_open: s.is_open,
+            window_pos: s.window_pos,
+            active_tab: s.active_tab,
+            eq_enabled: s.eq_enabled,
+            graphic_enabled: s.graphic_enabled,
+            graphic_layout: s.graphic_layout.clone(),
+            graphic_gains: s.graphic_gains.to_vec(),
+            graphic_preamp_db: s.graphic_preamp_db,
+            selected_preset: s.selected_preset,
+            custom_presets: s.custom_presets.clone(),
+            selected_custom_preset_idx: s.selected_custom_preset_idx,
+            extended_range: s.extended_range,
+            preamp_db: s.preamp_db,
+            auto_headroom: s.auto_headroom,
+            bass_shelf_db: s.bass_shelf_db,
+            treble_shelf_db: s.treble_shelf_db,
+            midside_eq: s.midside_eq,
+            stereo_width: s.stereo_width,
+            balance: s.balance,
+            dither_enabled: s.dither_enabled,
+            limiter_enabled: s.limiter_enabled,
+            compressor_enabled: s.compressor_enabled,
+            crossfeed_enabled: s.crossfeed_enabled,
+            crossfeed_profile: s.crossfeed_profile,
+        }
+    }
+}
+
+impl Default for PersistentEqState {
+    fn default() -> Self {
+        Self::from(&EqPanelState::default())
+    }
+}
+
+impl PersistentEqState {
+    pub fn apply_to(&self, state: &mut EqPanelState) {
+        state.is_open = self.is_open;
+        state.window_pos = self.window_pos;
+        state.active_tab = self.active_tab;
+        state.eq_enabled = self.eq_enabled;
+        state.graphic_enabled = self.graphic_enabled;
+        state.graphic_layout = self.graphic_layout.clone();
+        for (i, &g) in self.graphic_gains.iter().take(64).enumerate() {
+            state.graphic_gains[i] = g;
+        }
+        state.graphic_preamp_db = self.graphic_preamp_db;
+        state.selected_preset = self.selected_preset;
+        state.custom_presets = self.custom_presets.clone();
+        state.selected_custom_preset_idx = self.selected_custom_preset_idx;
+        state.extended_range = self.extended_range;
+        state.preamp_db = self.preamp_db;
+        state.auto_headroom = self.auto_headroom;
+        state.bass_shelf_db = self.bass_shelf_db;
+        state.treble_shelf_db = self.treble_shelf_db;
+        state.midside_eq = self.midside_eq;
+        state.stereo_width = self.stereo_width;
+        state.balance = self.balance;
+        state.dither_enabled = self.dither_enabled;
+        state.limiter_enabled = self.limiter_enabled;
+        state.compressor_enabled = self.compressor_enabled;
+        state.crossfeed_enabled = self.crossfeed_enabled;
+        state.crossfeed_profile = self.crossfeed_profile;
     }
 }
 
@@ -342,13 +444,21 @@ pub fn show_eq_panel(
         return actions;
     }
 
+    let screen = ctx.input(|i| i.raw.screen_rect).unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 830.0)));
+    let default_w = 760.0_f32.min((screen.width() - 40.0).max(400.0));
+    let default_h = 550.0_f32.min((screen.height() - 40.0).max(350.0));
+    let default_x = ((screen.width() - default_w) / 2.0).max(10.0);
+    let default_y = ((screen.height() - default_h) / 2.0).max(10.0);
+    let initial_pos = state.window_pos.map(|[x, y]| Pos2::new(x, y)).unwrap_or_else(|| Pos2::new(default_x, default_y));
+
     // Floating studio panel styled directly with active design system tokens
-    Window::new("equalizer_floating_studio")
+    let win_response = Window::new("equalizer_floating_studio")
         .resizable(true)
         .movable(true)
         .collapsible(false)
         .title_bar(false)
-        .default_size(Vec2::new(760.0, 550.0))
+        .default_pos(initial_pos)
+        .default_size(Vec2::new(default_w, default_h))
         .min_size(Vec2::new(580.0, 480.0))
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
@@ -368,61 +478,79 @@ pub fn show_eq_panel(
                 render_more_menu(ui, state, &mut actions, theme);
             }
 
-            // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
+            // ── 3. Tab Switcher: [ 🎚 Graphic Equalizer ]   [ 🎛 Tone & Acoustics ]   [ ⚙ Advanced ]
+            render_tab_navigation(ui, state, theme);
+
+            // ── 4. Enabled UI Wrapper with Visual Greying-Out ─────────────────
             let eq_active = state.graphic_enabled || state.eq_enabled;
+            let content_start_y = ui.cursor().top();
 
-            ui.add_enabled_ui(eq_active, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+            match state.active_tab {
+                EqTab::Advanced => {
+                    // Advanced tab options (headroom, dynamic range, dither, AutoEQ) can be configured anytime
+                    render_advanced_tab(ui, state, &mut actions, theme);
+                }
+                _ => {
+                    // Graphic EQ and Tone tabs are live filter stages
+                    ui.add_enabled_ui(eq_active, |ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 
-                // Tab Switcher: [ 🎚 Graphic Equalizer ]   [ 🎛 Tone & Acoustics ]
-                render_tab_navigation(ui, state, theme);
+                        match state.active_tab {
+                            EqTab::Graphic => {
+                                render_graphic_eq_tab(ui, state, &mut actions, theme);
+                            }
+                            EqTab::Tone => {
+                                render_tone_acoustics_tab(ui, state, &mut actions, theme);
+                            }
+                            _ => {
+                                render_graphic_eq_tab(ui, state, &mut actions, theme);
+                            }
+                        }
+                    });
 
-                // Tab Content
-                match state.active_tab {
-                    EqTab::Graphic => {
-                        render_graphic_eq_tab(ui, state, &mut actions, theme);
-                    }
-                    EqTab::Tone => {
-                        render_tone_acoustics_tab(ui, state, &mut actions, theme);
-                    }
-                    EqTab::Advanced => {
-                        render_advanced_tab(ui, state, &mut actions, theme);
-                    }
-                    _ => {
-                        render_graphic_eq_tab(ui, state, &mut actions, theme);
+                    // If EQ is bypassed, draw subtle darkening overlay & informative badge
+                    if !eq_active {
+                        let rect = ui.min_rect();
+                        let overlay_rect = Rect::from_min_max(
+                            Pos2::new(rect.left(), content_start_y),
+                            Pos2::new(rect.right(), rect.bottom()),
+                        );
+                        ui.painter().rect_filled(
+                            overlay_rect,
+                            CornerRadius::same(14),
+                            Color32::from_rgba_unmultiplied(10, 15, 30, 130),
+                        );
+
+                        let badge_pos = overlay_rect.center();
+                        let badge_text = "Equalizer Bypassed (Toggle Switch in Header to Enable)";
+                        let font = FontId::proportional(12.5);
+                        let galley = ui.painter().layout_no_wrap(badge_text.to_string(), font, theme.text_muted);
+                        let badge_rect = Rect::from_center_size(badge_pos, galley.size() + Vec2::new(26.0, 12.0));
+
+                        ui.painter().rect_filled(badge_rect, CornerRadius::same(12), theme.bg_pill);
+                        ui.painter().rect_stroke(
+                            badge_rect,
+                            CornerRadius::same(12),
+                            Stroke::new(1.0, theme.border_card),
+                            egui::StrokeKind::Inside,
+                        );
+                        ui.painter().galley(badge_rect.min + Vec2::new(13.0, 6.0), galley, theme.text_secondary);
                     }
                 }
-            });
-
-            // If EQ is disabled, draw elegant semi-transparent overlay & badge
-            if !eq_active {
-                let rect = ui.min_rect();
-                let overlay_rect = Rect::from_min_max(
-                    Pos2::new(rect.left(), rect.top() + 42.0),
-                    Pos2::new(rect.right(), rect.bottom()),
-                );
-                ui.painter().rect_filled(
-                    overlay_rect,
-                    CornerRadius::same(14),
-                    Color32::from_rgba_premultiplied(3, 9, 23, 160),
-                );
-
-                let badge_pos = overlay_rect.center();
-                let badge_text = "Equalizer Bypassed (Toggle Switch to Enable)";
-                let font = FontId::proportional(12.5);
-                let galley = ui.painter().layout_no_wrap(badge_text.to_string(), font, theme.text_muted);
-                let badge_rect = Rect::from_center_size(badge_pos, galley.size() + Vec2::new(26.0, 12.0));
-
-                ui.painter().rect_filled(badge_rect, CornerRadius::same(12), theme.bg_pill);
-                ui.painter().rect_stroke(
-                    badge_rect,
-                    CornerRadius::same(12),
-                    Stroke::new(1.0, theme.border_card),
-                    egui::StrokeKind::Inside,
-                );
-                ui.painter().galley(badge_rect.min + Vec2::new(13.0, 6.0), galley, theme.text_secondary);
             }
         });
+
+    if let Some(inner) = win_response {
+        let rect = inner.response.rect;
+        if let Some(pos) = state.window_pos {
+            if (pos[0] - rect.min.x).abs() > 1.0 || (pos[1] - rect.min.y).abs() > 1.0 {
+                state.window_pos = Some([rect.min.x, rect.min.y]);
+            }
+        } else if (rect.min.x - default_x).abs() > 2.0 || (rect.min.y - default_y).abs() > 2.0 {
+            // User moved window away from initial center position
+            state.window_pos = Some([rect.min.x, rect.min.y]);
+        }
+    }
 
     actions
 }
@@ -666,15 +794,15 @@ fn render_graphic_eq_tab(
 
                 let (bg, text_col, stroke) = if is_active {
                     (
-                        Color32::from_rgba_premultiplied(236, 72, 153, 32),
                         theme.accent_pink,
-                        Stroke::new(1.0, theme.accent_pink.linear_multiply(0.6)),
+                        Color32::WHITE,
+                        Stroke::NONE,
                     )
                 } else {
                     (
-                        theme.bg_card,
-                        theme.text_muted,
-                        Stroke::NONE,
+                        theme.bg_pill,
+                        theme.text_secondary,
+                        Stroke::new(1.0, theme.border_card),
                     )
                 };
 
@@ -695,6 +823,14 @@ fn render_graphic_eq_tab(
                     apply_active_preset(state, actions);
                 }
             }
+
+            ui.add_space(2.0);
+            crate::components::info_box::render_info_icon_button(
+                ui,
+                "eq_graphic_band_topology",
+                &crate::components::info_box::INFO_GRAPHIC_EQ_BANDS,
+                theme,
+            );
         });
 
         // 2. Right side: Preset Dropdown & Save Button (No "Preset:" label, moved to right, UI color)
@@ -807,6 +943,13 @@ fn render_graphic_eq_tab(
                         }
                     });
             });
+
+            crate::components::info_box::render_info_icon_button(
+                ui,
+                "eq_preset_curves",
+                &crate::components::info_box::INFO_EQ_PRESETS,
+                theme,
+            );
         });
     });
 
@@ -1163,7 +1306,7 @@ fn render_tone_acoustics_tab(
                 ui,
                 card_w,
                 "Bass Shelf",
-                "Low-frequency shelf boost/attenuation (100 Hz)",
+                &crate::components::info_box::INFO_BASS_SHELF,
                 &mut state.bass_shelf_db,
                 tone_range.clone(),
                 0.0,
@@ -1181,7 +1324,7 @@ fn render_tone_acoustics_tab(
                     ui,
                     card_w,
                     "Treble Shelf",
-                    "High-frequency shelf boost/attenuation (7.5 kHz)",
+                    &crate::components::info_box::INFO_TREBLE_SHELF,
                     &mut state.treble_shelf_db,
                     tone_range.clone(),
                     0.0,
@@ -1200,7 +1343,7 @@ fn render_tone_acoustics_tab(
                 ui,
                 card_w,
                 "Treble Shelf",
-                "High-frequency shelf boost/attenuation (7.5 kHz)",
+                &crate::components::info_box::INFO_TREBLE_SHELF,
                 &mut state.treble_shelf_db,
                 tone_range,
                 0.0,
@@ -1222,7 +1365,7 @@ fn render_tone_acoustics_tab(
                 ui,
                 card_w,
                 "Stereo Width",
-                "Acoustic soundstage width: 0% mono, 100% standard stereo, 200% ultra-wide",
+                &crate::components::info_box::INFO_STEREO_WIDTH,
                 &mut state.stereo_width,
                 0.0..=2.0,
                 1.0,
@@ -1240,7 +1383,7 @@ fn render_tone_acoustics_tab(
                     ui,
                     card_w,
                     "Balance",
-                    "Left/Right channel acoustic balance pan",
+                    &crate::components::info_box::INFO_BALANCE,
                     &mut state.balance,
                     -1.0..=1.0,
                     0.0,
@@ -1259,7 +1402,7 @@ fn render_tone_acoustics_tab(
                 ui,
                 card_w,
                 "Balance",
-                "Left/Right channel acoustic balance pan",
+                &crate::components::info_box::INFO_BALANCE,
                 &mut state.balance,
                 -1.0..=1.0,
                 0.0,
@@ -1303,8 +1446,8 @@ fn render_advanced_tab(
                 ui,
                 card_w,
                 "Extended Gain Range",
+                &crate::components::info_box::INFO_EXTENDED_RANGE,
                 "Unlocks full ±24.0 dB boost/cut across Graphic EQ bands, Tone shelves, and Preamp.",
-                "Engine supports maximum dynamic range up to ±24.0 dB. Standard mode defaults to ±12.0 dB for finer audiophile slider resolution.",
                 if state.extended_range { "±24 dB Unlocked" } else { "±12 dB Standard" },
                 state.extended_range,
                 &mut state.extended_range,
@@ -1319,8 +1462,8 @@ fn render_advanced_tab(
                     ui,
                     card_w,
                     "Auto Headroom Management",
+                    &crate::components::info_box::INFO_AUTO_HEADROOM,
                     "Dynamically lowers master digital gain when EQ boosts exceed 0 dBFS to prevent clipping.",
-                    "Prevents inter-sample peaks and DAC distortion during high positive EQ boosts.",
                     if ah { "Auto Attenuation ON" } else { "Headroom Bypass" },
                     ah,
                     &mut ah,
@@ -1339,8 +1482,8 @@ fn render_advanced_tab(
                 ui,
                 card_w,
                 "Auto Headroom Management",
+                &crate::components::info_box::INFO_AUTO_HEADROOM,
                 "Dynamically lowers master digital gain when EQ boosts exceed 0 dBFS to prevent clipping.",
-                "Prevents inter-sample peaks and DAC distortion during high positive EQ boosts.",
                 if ah { "Auto Attenuation ON" } else { "Headroom Bypass" },
                 ah,
                 &mut ah,
@@ -1362,8 +1505,8 @@ fn render_advanced_tab(
                 ui,
                 card_w,
                 "Mid/Side Processing (M/S)",
+                &crate::components::info_box::INFO_MIDSIDE_EQ,
                 "Splits audio into Mid (center) and Side (stereo field) channels for independent acoustic shaping.",
-                "Encodes L/R into Mid/Side components before DSP filtering, preserving lead vocals while sculpting wide ambience.",
                 if ms { "M/S Matrix Active" } else { "Stereo L/R Mode" },
                 ms,
                 &mut ms,
@@ -1381,8 +1524,8 @@ fn render_advanced_tab(
                     ui,
                     card_w,
                     "TPDF Triangular Dithering",
+                    &crate::components::info_box::INFO_DITHER,
                     "High-resolution noise shaping that eliminates low-level quantization distortion on 32-bit float output.",
-                    "Applies Triangular Probability Density Function dither to preserve spatial decay and micro-details.",
                     if dit { "32-bit TPDF Active" } else { "Truncation Mode" },
                     dit,
                     &mut dit,
@@ -1401,8 +1544,8 @@ fn render_advanced_tab(
                 ui,
                 card_w,
                 "TPDF Triangular Dithering",
+                &crate::components::info_box::INFO_DITHER,
                 "High-resolution noise shaping that eliminates low-level quantization distortion on 32-bit float output.",
-                "Applies Triangular Probability Density Function dither to preserve spatial decay and micro-details.",
                 if dit { "32-bit TPDF Active" } else { "Truncation Mode" },
                 dit,
                 &mut dit,
@@ -1430,12 +1573,21 @@ fn render_advanced_tab(
 
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-                        ui.label(
-                            egui::RichText::new("AutoEQ Headphone Target Calibration")
-                                .font(FontId::proportional(13.5))
-                                .strong()
-                                .color(theme.text_primary),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            ui.label(
+                                egui::RichText::new("AutoEQ Headphone Target Calibration")
+                                    .font(FontId::proportional(13.5))
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            crate::components::info_box::render_info_icon_button(
+                                ui,
+                                "autoeq_calibration_card",
+                                &crate::components::info_box::INFO_AUTOEQ,
+                                theme,
+                            );
+                        });
                         ui.label(
                             egui::RichText::new("Calibrate your headphones or IEMs using Harman/Diffuse-field acoustic targets from 4,000+ lab measurements.")
                                 .font(FontId::proportional(11.0))
@@ -1471,8 +1623,8 @@ fn render_advanced_toggle_card(
     ui: &mut egui::Ui,
     width: f32,
     title: &str,
+    info: &crate::components::info_box::InfoBoxContent,
     description: &str,
-    tooltip: &str,
     badge_text: &str,
     is_active: bool,
     value: &mut bool,
@@ -1489,7 +1641,7 @@ fn render_advanced_toggle_card(
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
 
-                // Row 1: Title, Info Icon, and Toggle Switch
+                // Row 1: Title, Clickable Info Icon, and Toggle Switch
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                     ui.label(
@@ -1498,9 +1650,7 @@ fn render_advanced_toggle_card(
                             .strong()
                             .color(theme.text_primary),
                     );
-                    let (info_rect, info_resp) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::hover());
-                    draw_info_icon(ui, info_rect, theme.text_muted);
-                    info_resp.on_hover_text(tooltip);
+                    crate::components::info_box::render_info_icon_button(ui, title, info, theme);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if custom_toggle_switch(ui, value, title, theme) {
@@ -1549,7 +1699,7 @@ fn render_slider_card(
     ui: &mut egui::Ui,
     width: f32,
     title: &str,
-    tooltip: &str,
+    info: &crate::components::info_box::InfoBoxContent,
     value: &mut f32,
     range: std::ops::RangeInclusive<f32>,
     default_val: f32,
@@ -1570,18 +1720,16 @@ fn render_slider_card(
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
 
-                // Row 1: Title + Info Vector Icon
+                // Row 1: Title + Clickable Info Icon
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(5.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                     ui.label(
                         egui::RichText::new(title)
                             .font(FontId::proportional(13.5))
                             .strong()
                             .color(theme.text_primary),
                     );
-                    let (info_rect, info_resp) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::hover());
-                    draw_info_icon(ui, info_rect, theme.text_muted);
-                    info_resp.on_hover_text(tooltip);
+                    crate::components::info_box::render_info_icon_button(ui, title, info, theme);
                 });
 
                 // Row 2: Range Labels (-12dB ... 0dB ... +12dB or -24dB ... 0dB ... +24dB)
@@ -1652,13 +1800,22 @@ fn render_footer_controls(
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
 
-                    // Row 1: Label
-                    ui.label(
-                        egui::RichText::new("Preamp (Master)")
-                            .font(FontId::proportional(12.5))
-                            .strong()
-                            .color(theme.text_primary),
-                    );
+                    // Row 1: Label + Info Button
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                        ui.label(
+                            egui::RichText::new("Preamp (Master)")
+                                .font(FontId::proportional(12.5))
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        crate::components::info_box::render_info_icon_button(
+                            ui,
+                            "eq_footer_master_preamp",
+                            &crate::components::info_box::INFO_MASTER_PREAMP,
+                            theme,
+                        );
+                    });
 
                     // Row 2: Range Labels & Slider
                     ui.horizontal(|ui| {
@@ -1730,18 +1887,20 @@ fn render_footer_controls(
         if reset_resp.on_hover_text(tooltip).clicked() {
             match tab {
                 EqTab::Graphic => {
-                    // Reset ONLY Graphic EQ bands
+                    // Reset Graphic EQ bands and master preamp to 0.0 dB flat
                     let num = state.graphic_layout.num_bands();
                     for i in 0..num {
                         state.graphic_gains[i] = 0.0;
                         actions.graphic_slider_changed = Some(i);
                     }
+                    state.graphic_preamp_db = 0.0;
+                    actions.graphic_preamp_changed = Some(0.0);
                     state.selected_preset = EqPreset::Flat;
                     state.selected_custom_preset_idx = None;
                     actions.graphic_reset = true;
                 }
                 EqTab::Tone => {
-                    // Reset ONLY Tone & Acoustics
+                    // Reset Tone shelves, stereo width, balance, and master preamp
                     state.bass_shelf_db = 0.0;
                     actions.bass_shelf_changed = Some(0.0);
 
@@ -1753,12 +1912,15 @@ fn render_footer_controls(
 
                     state.balance = 0.0;
                     actions.balance_changed = Some(0.0);
+
+                    state.graphic_preamp_db = 0.0;
+                    actions.graphic_preamp_changed = Some(0.0);
                 }
                 EqTab::Advanced => {
-                    // Reset Advanced settings
+                    // Reset Advanced settings to audiophile defaults
                     state.extended_range = false;
-                    state.auto_headroom = false;
-                    actions.eq_auto_headroom_changed = Some(false);
+                    state.auto_headroom = true;
+                    actions.eq_auto_headroom_changed = Some(true);
                     state.midside_eq = false;
                     actions.midside_eq_changed = Some(false);
                     state.dither_enabled = false;
@@ -1808,15 +1970,28 @@ fn gradient_horizontal_slider(
     let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
     ui.painter().rect_filled(track_rect, CornerRadius::same(2), theme.border_card);
 
-    // Paint active gradient track up to thumb
+    // Paint active gradient track up to thumb (dual-tone: rose pink -> luminous indigo)
     let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
     let thumb_x = rect.left() + thumb_t * rect.width();
-    let fill_rect = Rect::from_min_max(
-        track_rect.min,
-        Pos2::new(thumb_x, track_rect.max.y),
-    );
-    if fill_rect.width() > 0.0 {
-        ui.painter().rect_filled(fill_rect, CornerRadius::same(2), theme.accent_pink);
+    let filled_w = (thumb_x - track_rect.min.x).max(0.0);
+    if filled_w > 0.0 {
+        let num_slices = (filled_w / 3.0).clamp(1.0, 40.0) as usize;
+        for i in 0..num_slices {
+            let t0 = i as f32 / num_slices as f32;
+            let t1 = (i + 1) as f32 / num_slices as f32;
+            let x0 = track_rect.min.x + filled_w * t0;
+            let x1 = track_rect.min.x + filled_w * t1;
+            // Dual-tone: Rose Pink (236, 72, 153) to Luminous Soft Indigo (129, 140, 248)
+            let r = (236.0 * (1.0 - t0) + 129.0 * t0) as u8;
+            let g = (72.0 * (1.0 - t0) + 140.0 * t0) as u8;
+            let b = (153.0 * (1.0 - t0) + 248.0 * t0) as u8;
+            let col = Color32::from_rgb(r, g, b);
+            let slice_rect = Rect::from_min_max(
+                Pos2::new(x0, track_rect.min.y),
+                Pos2::new(x1, track_rect.max.y),
+            );
+            ui.painter().rect_filled(slice_rect, CornerRadius::same(if i == 0 { 2 } else { 0 }), col);
+        }
     }
 
     // Paint circular thumb
@@ -1826,7 +2001,7 @@ fn gradient_horizontal_slider(
     ui.painter().circle_filled(
         thumb_pos,
         if is_hovered { 8.5 } else { 7.0 },
-        Color32::from_rgba_premultiplied(236, 72, 153, if is_hovered { 90 } else { 45 }),
+        Color32::from_rgba_premultiplied(129, 140, 248, if is_hovered { 90 } else { 45 }),
     );
     ui.painter().circle_filled(
         thumb_pos,
@@ -1836,7 +2011,7 @@ fn gradient_horizontal_slider(
     ui.painter().circle_stroke(
         thumb_pos,
         if is_hovered { 5.8 } else { 5.0 },
-        Stroke::new(1.6, theme.accent_pink),
+        Stroke::new(1.6, theme.accent_magenta),
     );
 
     changed
@@ -1920,18 +2095,6 @@ fn draw_vertical_gradient_line(
     }
 }
 
-fn draw_info_icon(ui: &mut egui::Ui, rect: Rect, color: Color32) {
-    let p = ui.painter_at(rect);
-    p.circle_stroke(rect.center(), rect.width() * 0.45, Stroke::new(1.0, color));
-    p.circle_filled(Pos2::new(rect.center().x, rect.center().y - 3.0), 1.0, color);
-    p.line_segment(
-        [
-            Pos2::new(rect.center().x, rect.center().y - 1.0),
-            Pos2::new(rect.center().x, rect.center().y + 3.5),
-        ],
-        Stroke::new(1.2, color),
-    );
-}
 
 
 fn catmull_rom_spline(points: &[Pos2], segments: usize) -> Vec<Pos2> {

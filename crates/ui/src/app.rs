@@ -5,7 +5,7 @@ use eframe::egui::{self, Margin, Vec2};
 use audio_session::AudioSession;
 use database::{
     AlbumRepo, ArtistRepo, Database, FavoritesRepo, GenreRepo, HistoryRepo, PlaylistRepo,
-    ScanRootsRepo, TrackRepo,
+    ScanRootsRepo, SettingsRepo, TrackRepo,
 };
 use playback::PlaybackCoordinator;
 use search::SearchEngine;
@@ -21,7 +21,7 @@ use crate::state::{AppState, DspState, LibraryState, TelemetryState};
 use crate::theme::Theme;
 use crate::views::{
     render_albums_view, render_artists_view, render_folders_view, render_genres_view,
-    render_main_playback_view, render_settings_view,
+    render_help_view, render_main_playback_view, render_settings_view, HelpState,
 };
 
 /// Authoritative orchestrator for ShadowPlayer desktop interface
@@ -38,6 +38,7 @@ pub struct ShadowPlayerApp {
     artist_repo: ArtistRepo,
     genre_repo: GenreRepo,
     scan_roots_repo: ScanRootsRepo,
+    settings_repo: SettingsRepo,
 
     artwork_service: ArtworkService,
     lyrics_service: LyricsService,
@@ -46,7 +47,9 @@ pub struct ShadowPlayerApp {
     app_state: AppState,
     library_state: LibraryState,
     dsp_state: DspState,
+    help_state: HelpState,
     theme: Theme,
+    settings_dirty: bool,
 }
 
 impl ShadowPlayerApp {
@@ -65,6 +68,7 @@ impl ShadowPlayerApp {
         let artist_repo = ArtistRepo::new(db.clone());
         let genre_repo = GenreRepo::new(db.clone());
         let scan_roots_repo = ScanRootsRepo::new(db.clone());
+        let settings_repo = SettingsRepo::new(db.clone());
         let search_engine = SearchEngine::new(db.clone());
         let coordinator = PlaybackCoordinator::new(session.clone(), db.clone());
 
@@ -85,6 +89,7 @@ impl ShadowPlayerApp {
             artist_repo,
             genre_repo,
             scan_roots_repo,
+            settings_repo,
 
             artwork_service,
             lyrics_service,
@@ -93,8 +98,13 @@ impl ShadowPlayerApp {
             app_state: AppState::default(),
             library_state: LibraryState::default(),
             dsp_state: DspState::default(),
+            help_state: HelpState::default(),
             theme: Theme::default(),
+            settings_dirty: false,
         };
+
+        // Load all persistent settings (normal, theme, EQ, DSP)
+        app.load_persisted_settings();
 
         app.reload_library();
 
@@ -105,6 +115,100 @@ impl ShadowPlayerApp {
         }
 
         app
+    }
+
+    pub fn load_persisted_settings(&mut self) {
+        // 1. AppSettings (Theme, Volume, Mute, Sort, Shuffle, Repeat, Bit-Perfect)
+        if let Ok(app_settings) = self.settings_repo.load() {
+            self.theme = if app_settings.theme_dark {
+                Theme::dark()
+            } else {
+                Theme::light()
+            };
+            self.app_state.volume = app_settings.volume;
+            self.app_state.is_muted = app_settings.is_muted;
+            self.app_state.current_sort = match app_settings.sort_field {
+                domain::models::SortField::Title => crate::components::songs_table::SortField::Title,
+                domain::models::SortField::Artist => crate::components::songs_table::SortField::Artist,
+                domain::models::SortField::Album => crate::components::songs_table::SortField::Album,
+                domain::models::SortField::Duration => crate::components::songs_table::SortField::Duration,
+                domain::models::SortField::DateAdded => crate::components::songs_table::SortField::DateAdded,
+                _ => crate::components::songs_table::SortField::Default,
+            };
+            self.app_state.is_grid_view = app_settings.view_mode == domain::models::ViewMode::Grid;
+            self.coordinator.set_shuffle(app_settings.shuffle);
+            self.coordinator.set_repeat_mode(app_settings.repeat_mode);
+            self.dsp_state.settings_tab.bit_perfect = app_settings.bit_perfect_enabled;
+
+            let eff_vol = if app_settings.is_muted { 0.0 } else { app_settings.volume };
+            self.session.set_volume(eff_vol);
+        }
+
+        // 2. Persistent Eq Settings (EQ layout, bands, gains, preamp, tone controls, custom presets, window position)
+        if let Ok(Some(json)) = self.settings_repo.get_value("eq_settings") {
+            if let Ok(saved_eq) = serde_json::from_str::<crate::components::eq_panel::PersistentEqState>(&json) {
+                saved_eq.apply_to(&mut self.dsp_state.eq_panel);
+            }
+        }
+
+        // 3. Persistent Audio / DSP Settings (Speed, pitch, crossfade, spatial acoustics, dac config)
+        if let Ok(Some(json)) = self.settings_repo.get_value("dsp_settings") {
+            if let Ok(saved_dsp) = serde_json::from_str::<crate::components::settings_tab::PersistentSettingsTabState>(&json) {
+                saved_dsp.apply_to(&mut self.dsp_state.settings_tab);
+            }
+        }
+
+        // Sync restored state to audio session
+        self.dsp_state.sync_all_to_session(&self.session);
+    }
+
+    pub fn save_persisted_settings(&self) {
+        let domain_sort = match self.app_state.current_sort {
+            crate::components::songs_table::SortField::Title => domain::models::SortField::Title,
+            crate::components::songs_table::SortField::Artist => domain::models::SortField::Artist,
+            crate::components::songs_table::SortField::Album => domain::models::SortField::Album,
+            crate::components::songs_table::SortField::Duration => domain::models::SortField::Duration,
+            crate::components::songs_table::SortField::DateAdded => domain::models::SortField::DateAdded,
+            crate::components::songs_table::SortField::Default => domain::models::SortField::Title,
+        };
+
+        // 1. Save AppSettings
+        let app_settings = domain::models::AppSettings {
+            theme_dark: !self.theme.is_light,
+            volume: self.app_state.volume,
+            is_muted: self.app_state.is_muted,
+            sort_field: domain_sort,
+            sort_order: domain::models::SortOrder::Ascending,
+            view_mode: if self.app_state.is_grid_view {
+                domain::models::ViewMode::Grid
+            } else {
+                domain::models::ViewMode::List
+            },
+            audio_profile: domain::models::AudioProfileChoice::Normal,
+            repeat_mode: self.coordinator.repeat_mode(),
+            shuffle: self.coordinator.is_shuffle(),
+            selected_device: if self.dsp_state.settings_tab.output_device.is_empty() {
+                None
+            } else {
+                Some(self.dsp_state.settings_tab.output_device.clone())
+            },
+            bit_perfect_enabled: self.dsp_state.settings_tab.bit_perfect,
+            window_width: 1280.0,
+            window_height: 800.0,
+        };
+        let _ = self.settings_repo.save(&app_settings);
+
+        // 2. Save EQ Settings
+        let eq_persisted = crate::components::eq_panel::PersistentEqState::from(&self.dsp_state.eq_panel);
+        if let Ok(json) = serde_json::to_string(&eq_persisted) {
+            let _ = self.settings_repo.set_value("eq_settings", &json);
+        }
+
+        // 3. Save DSP & Settings Tab State
+        let dsp_persisted = crate::components::settings_tab::PersistentSettingsTabState::from(&self.dsp_state.settings_tab);
+        if let Ok(json) = serde_json::to_string(&dsp_persisted) {
+            let _ = self.settings_repo.set_value("dsp_settings", &json);
+        }
     }
 
     pub fn reload_library(&mut self) {
@@ -159,6 +263,7 @@ impl eframe::App for ShadowPlayerApp {
                     match cat_str.as_str() {
                         "spatial" => self.dsp_state.settings_tab.active_category = crate::components::settings_tab::SettingsCategory::Spatial,
                         "playback" => self.dsp_state.settings_tab.active_category = crate::components::settings_tab::SettingsCategory::Playback,
+                        "output" | "hardware" => self.dsp_state.settings_tab.active_category = crate::components::settings_tab::SettingsCategory::Output,
                         "library" => self.dsp_state.settings_tab.active_category = crate::components::settings_tab::SettingsCategory::Library,
                         "mixbus" => self.dsp_state.settings_tab.active_category = crate::components::settings_tab::SettingsCategory::MixBus,
                         "tools" => self.dsp_state.settings_tab.active_category = crate::components::settings_tab::SettingsCategory::Tools,
@@ -166,9 +271,41 @@ impl eframe::App for ShadowPlayerApp {
                     }
                 }
             }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_HELP").is_ok() {
+                self.app_state.active_nav = crate::components::sidebar::NavItem::Help;
+                if let Ok(tab_str) = std::env::var("SHADOWPLAYER_EVAL_HELP_TAB") {
+                    match tab_str.as_str() {
+                        "signal" => self.help_state.active_tab = crate::views::help_view::HelpTab::SignalPath,
+                        "eq" => self.help_state.active_tab = crate::views::help_view::HelpTab::EqualizerAcoustics,
+                        "bitperfect" => self.help_state.active_tab = crate::views::help_view::HelpTab::BitPerfectDac,
+                        "spatial" => self.help_state.active_tab = crate::views::help_view::HelpTab::SpatialBinaural,
+                        "playback" => self.help_state.active_tab = crate::views::help_view::HelpTab::PlaybackDsp,
+                        "mixbus" => self.help_state.active_tab = crate::views::help_view::HelpTab::MixBusStudio,
+                        "shortcuts" => self.help_state.active_tab = crate::views::help_view::HelpTab::KeyboardShortcuts,
+                        "glossary" => self.help_state.active_tab = crate::views::help_view::HelpTab::Glossary,
+                        _ => {},
+                    }
+                }
+                if let Ok(search_str) = std::env::var("SHADOWPLAYER_EVAL_HELP_SEARCH") {
+                    self.help_state.search_query = search_str;
+                }
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_EQ").is_ok() {
                 self.dsp_state.eq_panel.is_open = true;
-                if std::env::var("SHADOWPLAYER_EVAL_EQ_DISABLED").is_ok() {
+                if std::env::var("SHADOWPLAYER_EVAL_EQ_DEFAULT").is_ok() {
+                    self.dsp_state.eq_panel.graphic_enabled = false;
+                    self.dsp_state.eq_panel.eq_enabled = false;
+                    self.dsp_state.eq_panel.selected_preset = crate::components::eq_panel::EqPreset::Flat;
+                    for g in self.dsp_state.eq_panel.graphic_gains.iter_mut() {
+                        *g = 0.0;
+                    }
+                    self.dsp_state.eq_panel.graphic_preamp_db = 0.0;
+                    self.dsp_state.eq_panel.bass_shelf_db = 0.0;
+                    self.dsp_state.eq_panel.treble_shelf_db = 0.0;
+                    self.dsp_state.eq_panel.stereo_width = 1.0;
+                    self.dsp_state.eq_panel.balance = 0.0;
+                    self.dsp_state.eq_panel.auto_headroom = true;
+                } else if std::env::var("SHADOWPLAYER_EVAL_EQ_DISABLED").is_ok() {
                     self.dsp_state.eq_panel.graphic_enabled = false;
                     self.dsp_state.eq_panel.eq_enabled = false;
                 } else {
@@ -177,18 +314,20 @@ impl eframe::App for ShadowPlayerApp {
                 }
                 if std::env::var("SHADOWPLAYER_EVAL_TONE").is_ok() {
                     self.dsp_state.eq_panel.active_tab = crate::components::eq_panel::EqTab::Tone;
-                    self.dsp_state.eq_panel.bass_shelf_db = 4.0;
-                    self.dsp_state.eq_panel.treble_shelf_db = -1.5;
-                    self.dsp_state.eq_panel.stereo_width = 1.35;
-                    self.dsp_state.eq_panel.balance = 0.20;
-                    self.dsp_state.eq_panel.graphic_preamp_db = 1.5;
+                    if std::env::var("SHADOWPLAYER_EVAL_EQ_DEFAULT").is_err() {
+                        self.dsp_state.eq_panel.bass_shelf_db = 4.0;
+                        self.dsp_state.eq_panel.treble_shelf_db = -1.5;
+                        self.dsp_state.eq_panel.stereo_width = 1.35;
+                        self.dsp_state.eq_panel.balance = 0.20;
+                        self.dsp_state.eq_panel.graphic_preamp_db = 1.5;
+                    }
                 } else if std::env::var("SHADOWPLAYER_EVAL_ADVANCED").is_ok() {
                     self.dsp_state.eq_panel.active_tab = crate::components::eq_panel::EqTab::Advanced;
-                    self.dsp_state.eq_panel.extended_range = true;
+                    self.dsp_state.eq_panel.extended_range = false;
                     self.dsp_state.eq_panel.auto_headroom = true;
-                    self.dsp_state.eq_panel.midside_eq = true;
-                    self.dsp_state.eq_panel.graphic_preamp_db = 2.0;
-                } else {
+                    self.dsp_state.eq_panel.midside_eq = false;
+                    self.dsp_state.eq_panel.graphic_preamp_db = 0.0;
+                } else if std::env::var("SHADOWPLAYER_EVAL_EQ_DEFAULT").is_err() {
                     self.dsp_state.eq_panel.selected_preset = crate::components::eq_panel::EqPreset::Pop;
                     if let Some(g) = crate::components::eq_panel::EqPreset::Pop.gains() {
                         for i in 0..10 {
@@ -197,8 +336,13 @@ impl eframe::App for ShadowPlayerApp {
                     }
                 }
             }
+            if let Ok(info_key) = std::env::var("SHADOWPLAYER_EVAL_INFO_KEY") {
+                let active_key = egui::Id::NULL.with("shadowplayer_active_info_id");
+                let target_id = egui::Id::NULL.with(info_key);
+                ctx.data_mut(|d| d.insert_temp(active_key, target_id));
+            }
             if self.app_state.frame_count < 30 { ctx.request_repaint(); }
-            if self.app_state.frame_count == 8 {
+            if self.app_state.frame_count == 24 {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(
                     move |image: std::sync::Arc<egui::ColorImage>| {
                         let _ = image::save_buffer(
@@ -259,10 +403,12 @@ impl eframe::App for ShadowPlayerApp {
                     self.app_state.is_muted = !self.app_state.is_muted;
                     let target_vol = if self.app_state.is_muted { 0.0 } else { self.app_state.volume };
                     self.session.set_volume(target_vol);
+                    self.settings_dirty = true;
                 }
                 if i.key_pressed(egui::Key::S) {
                     let new_shuffle = !self.coordinator.is_shuffle();
                     self.coordinator.set_shuffle(new_shuffle);
+                    self.settings_dirty = true;
                 }
                 if i.key_pressed(egui::Key::R) {
                     let next_mode = match self.coordinator.repeat_mode() {
@@ -271,6 +417,7 @@ impl eframe::App for ShadowPlayerApp {
                         domain::models::RepeatModeChoice::One => domain::models::RepeatModeChoice::Off,
                     };
                     self.coordinator.set_repeat_mode(next_mode);
+                    self.settings_dirty = true;
                 }
                 if i.key_pressed(egui::Key::ArrowLeft) {
                     let cur = self.session.position_secs_compensated();
@@ -285,11 +432,13 @@ impl eframe::App for ShadowPlayerApp {
                     self.app_state.volume = (self.app_state.volume + 0.05).min(1.0);
                     self.app_state.is_muted = false;
                     self.session.set_volume(self.app_state.volume);
+                    self.settings_dirty = true;
                 }
                 if i.key_pressed(egui::Key::ArrowDown) {
                     self.app_state.volume = (self.app_state.volume - 0.05).max(0.0);
                     self.app_state.is_muted = false;
                     self.session.set_volume(self.app_state.volume);
+                    self.settings_dirty = true;
                 }
             }
             if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::N) {
@@ -386,14 +535,12 @@ impl eframe::App for ShadowPlayerApp {
         );
 
         if let Some(nav) = nav_to_select {
-            if nav == NavItem::Help {
-                self.app_state.help_modal_open = true;
-            } else {
-                self.app_state.active_nav = nav;
-                self.library_state.selected_album = None;
-                self.library_state.selected_artist = None;
-                self.library_state.selected_genre = None;
-                self.library_state.selected_folder = None;
+            self.app_state.active_nav = nav;
+            self.library_state.selected_album = None;
+            self.library_state.selected_artist = None;
+            self.library_state.selected_genre = None;
+            self.library_state.selected_folder = None;
+            if nav != NavItem::Settings && nav != NavItem::Help {
                 self.reload_library();
             }
         }
@@ -407,7 +554,8 @@ impl eframe::App for ShadowPlayerApp {
             .show(ui, |ui| {
                 let avail_w = ui.available_width();
                 let avail_h = ui.available_height();
-                let show_right_panel = avail_w > 420.0;
+                let is_help_view = self.app_state.active_nav == NavItem::Help;
+                let show_right_panel = !is_help_view && avail_w > 420.0;
                 let right_w = if show_right_panel { 285.0 } else { 0.0 };
                 let center_w = if show_right_panel { (avail_w - right_w - 16.0).max(300.0) } else { avail_w };
 
@@ -421,11 +569,13 @@ impl eframe::App for ShadowPlayerApp {
                         |ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 
-                            // Top Search Bar
-                            let mut search_buf = self.app_state.search_query.clone();
-                            if crate::components::topbar::render_search_input(ui, &mut search_buf, &self.theme) {
-                                self.app_state.search_query = search_buf;
-                                self.reload_library();
+                            // Top Search Bar (Only shown for library views; hidden in Help and Settings)
+                            if !is_help_view && self.app_state.active_nav != NavItem::Settings {
+                                let mut search_buf = self.app_state.search_query.clone();
+                                if crate::components::topbar::render_search_input(ui, &mut search_buf, &self.theme) {
+                                    self.app_state.search_query = search_buf;
+                                    self.reload_library();
+                                }
                             }
 
                             // View Switcher
@@ -486,6 +636,7 @@ impl eframe::App for ShadowPlayerApp {
                                     }
                                 }
                                 NavItem::Settings => {
+                                    let prev_light = self.theme.is_light;
                                     let mut scan_to_start = None;
                                     let is_scanning = self.scanner_service.is_scanning();
                                     render_settings_view(
@@ -498,9 +649,23 @@ impl eframe::App for ShadowPlayerApp {
                                         is_scanning,
                                         |path| scan_to_start = Some(path),
                                     );
+                                    if self.theme.is_light != prev_light {
+                                        self.settings_dirty = true;
+                                    }
+                                    // Settings view can mutate settings_tab directly
+                                    self.settings_dirty = true;
                                     if let Some(path) = scan_to_start {
                                         self.start_scan(path);
                                     }
+                                }
+                                NavItem::Help => {
+                                    render_help_view(
+                                        ui,
+                                        &mut self.help_state,
+                                        &self.theme,
+                                        &mut self.app_state,
+                                        &mut self.dsp_state,
+                                    );
                                 }
                                 _ => {
                                     let view_action = render_main_playback_view(
@@ -530,6 +695,7 @@ impl eframe::App for ShadowPlayerApp {
                                     }
                                     if view_action.open_eq_panel {
                                         self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
+                                        self.settings_dirty = true;
                                     }
                                 }
                             }
@@ -538,6 +704,9 @@ impl eframe::App for ShadowPlayerApp {
 
                     // B. Right Column Drawer
                     if show_right_panel {
+                        let prev_light = self.theme.is_light;
+                        let prev_vol = self.app_state.volume;
+                        let prev_muted = self.app_state.is_muted;
                         render_right_drawer(
                             ui,
                             &ctx,
@@ -553,6 +722,12 @@ impl eframe::App for ShadowPlayerApp {
                             active_lyric_idx,
                             &mut self.theme,
                         );
+                        if self.theme.is_light != prev_light
+                            || (self.app_state.volume - prev_vol).abs() > 0.001
+                            || self.app_state.is_muted != prev_muted
+                        {
+                            self.settings_dirty = true;
+                        }
                     }
                 });
             });
@@ -569,6 +744,9 @@ impl eframe::App for ShadowPlayerApp {
 
         let eq_actions = show_eq_panel(&ctx, &mut self.dsp_state.eq_panel, &self.theme);
         self.dsp_state.handle_eq_panel_actions(&self.session, eq_actions);
+        if self.dsp_state.eq_panel.is_open {
+            self.settings_dirty = true;
+        }
 
         show_autoeq_modal(
             &ctx,
@@ -605,6 +783,18 @@ impl eframe::App for ShadowPlayerApp {
             let _ = self.playlist_repo.create(&new_name, None);
             self.app_state.new_playlist_name.clear();
             self.reload_library();
+        }
+
+        // 11. Event-driven & periodic settings persistence across sessions
+        if std::env::var("SHADOWPLAYER_EVAL").is_err() && (self.settings_dirty || (self.app_state.frame_count % 120 == 0)) {
+            self.save_persisted_settings();
+            self.settings_dirty = false;
+        }
+    }
+
+    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
+        if std::env::var("SHADOWPLAYER_EVAL").is_err() {
+            self.save_persisted_settings();
         }
     }
 }

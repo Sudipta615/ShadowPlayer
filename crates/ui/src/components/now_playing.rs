@@ -201,10 +201,10 @@ impl<'a> NowPlayingCard<'a> {
                                 let t1 = (i + 1) as f32 / num_slices as f32;
                                 let x0 = bar_rect.min.x + filled_width * t0;
                                 let x1 = bar_rect.min.x + filled_width * t1;
-                                // Vibrant magenta-pink gradient matching mockup (#f43f5e -> #ec4899)
-                                let r = (244.0 * (1.0 - t0) + 236.0 * t0) as u8;
-                                let g = (63.0 * (1.0 - t0) + 72.0 * t0) as u8;
-                                let b = (94.0 * (1.0 - t0) + 153.0 * t0) as u8;
+                                // Vibrant dual-tone gradient matching mockup and volume slider (Rose Pink -> Luminous Soft Indigo)
+                                let r = (236.0 * (1.0 - t0) + 129.0 * t0) as u8;
+                                let g = (72.0 * (1.0 - t0) + 140.0 * t0) as u8;
+                                let b = (153.0 * (1.0 - t0) + 248.0 * t0) as u8;
                                 let col = Color32::from_rgb(r, g, b);
                                 let slice_rect = Rect::from_min_max(Pos2::new(x0, track_y - 2.0), Pos2::new(x1, track_y + 2.0));
                                 painter.rect_filled(slice_rect, CornerRadius::same(if i == 0 { 2 } else { 0 }), col);

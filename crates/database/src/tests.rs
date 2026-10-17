@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn test_settings_persistence() {
         let db = Database::in_memory().expect("In-memory DB creation failed");
-        let settings_repo = SettingsRepo::new(db);
+        let settings_repo = SettingsRepo::new(db.clone());
 
         let mut s = AppSettings::default();
         s.volume = 0.92;
@@ -146,6 +146,14 @@ mod tests {
         assert!((loaded.volume - 0.92).abs() < 1e-4);
         assert_eq!(loaded.sort_field, SortField::Duration);
         assert_eq!(loaded.sort_order, SortOrder::Descending);
+
+        // Test arbitrary key-value persistence for EQ and Studio Settings
+        settings_repo.set_value("eq_panel_v1", r#"{"layout":"TenBand","graphic_gains":[1.5,-2.0]}"#).unwrap();
+        let eq_json = settings_repo.get_value("eq_panel_v1").unwrap();
+        assert_eq!(eq_json, Some(r#"{"layout":"TenBand","graphic_gains":[1.5,-2.0]}"#.to_string()));
+
+        let non_existent = settings_repo.get_value("non_existent_key").unwrap();
+        assert_eq!(non_existent, None);
     }
 
     #[test]

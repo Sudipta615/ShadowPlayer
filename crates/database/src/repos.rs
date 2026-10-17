@@ -581,6 +581,30 @@ impl SettingsRepo {
             Ok(())
         })
     }
+
+    pub fn get_value(&self, key: &str) -> Result<Option<String>> {
+        self.db.with_conn(|conn| {
+            let val: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = ?1;",
+                    params![key],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(val)
+        })
+    }
+
+    pub fn set_value(&self, key: &str, value: &str) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+                params![key, value],
+            )?;
+            Ok(())
+        })
+    }
 }
 
 pub struct ScanRootsRepo {

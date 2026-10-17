@@ -25,7 +25,7 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
                     ui.label(
-                        egui::RichText::new("ShadowPlayer v0.1.0-alpha")
+                        egui::RichText::new("ShadowPlayer v0.2.0")
                             .font(FontId::proportional(16.0))
                             .strong()
                             .color(theme.text_primary),
