@@ -1,0 +1,28 @@
+# Cargo configuration tuned for low-end dual-core systems (minimizes CPU/RAM pressure)
+
+[build]
+# Limit parallel compilation jobs to 2 to prevent freezing physical CPU cores and swapping
+jobs = 2
+# Incremental builds consume massive RAM and disk space on HDD; disable by default for stability
+incremental = false
+
+[term]
+progress.when = "auto"
+
+# Reduce linker memory spikes and disk writes drastically while preserving line numbers for errors
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+[alias]
+# Fast workspace type & syntax check (avoids linking and gigabytes of HDD writes)
+c = "check --workspace"
+
+# Workspace check for library and binaries only (skips dev-dependencies/benches)
+check-fast = "check --workspace --bins --lib"
+
+# Test execution with 1 worker thread to avoid OOM or CPU freeze on dual-core
+t = "test -- --test-threads=1"
+t-seq = "test -- --test-threads=1"

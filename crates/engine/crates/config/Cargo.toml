@@ -1,0 +1,26 @@
+[package]
+name = "config"
+version = "1.2.1"
+rust-version = "1.98"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Sudipta615/audio_engine"
+description = "Shadow Desktop engine configuration model: Serde-serializable engine, DSP, output and spatial settings with versioned load/save"
+readme = "../../README.md"
+keywords = ["audio", "dsp", "config", "serde", "audiophile"]
+categories = ["multimedia::audio", "config"]
+# Not published: the crate name `config` is already owned on crates.io by
+# `config-rs`. Publishing would require a rename, which is a breaking change
+# for every downstream path and therefore not a 0.x minor. See the note in
+# the root `Cargo.toml`.
+publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# The engine's own headless CLI and TUI both read a config file, and the
+# loader belongs next to the model it deserializes rather than in a binary.
+toml = "0.8"
+
+[dev-dependencies]
+serde_json = "1.0"

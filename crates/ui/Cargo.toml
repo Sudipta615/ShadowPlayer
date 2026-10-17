@@ -1,0 +1,22 @@
+[package]
+name = "ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { path = "../domain" }
+audio-session = { path = "../audio-session" }
+database = { path = "../database" }
+metadata = { path = "../metadata" }
+library = { path = "../library" }
+lyrics = { path = "../lyrics" }
+search = { path = "../search" }
+playback = { path = "../playback" }
+config = { package = "config", path = "../engine/crates/config" }
+engine = { package = "audio-engine", path = "../engine" }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui_extras = { version = "0.37", features = ["image", "svg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+log = "0.4"
+crossbeam = "0.8"
+dirs = "6.0"

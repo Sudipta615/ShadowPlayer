@@ -1,0 +1,15 @@
+[package]
+name = "library"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { path = "../domain" }
+database = { path = "../database" }
+metadata = { path = "../metadata" }
+crossbeam = "0.8"
+notify = "8.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+walkdir = "2.5"
+thiserror = "2.0"
+log = "0.4"

@@ -1,0 +1,13 @@
+[package]
+name = "audio-session"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { path = "../domain" }
+engine = { package = "audio-engine", path = "../engine" }
+config = { package = "config", path = "../engine/crates/config" }
+crossbeam = "0.8"
+log = "0.4"
+parking_lot = "0.12"
+thiserror = "2.0"

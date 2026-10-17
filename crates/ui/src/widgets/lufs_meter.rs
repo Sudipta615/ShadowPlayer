@@ -1,0 +1,123 @@
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2};
+use engine::dsp::ProfessionalMeterSnapshot;
+use crate::theme::Theme;
+
+/// Professional ITU-R BS.1770-5 Broadcast Loudness & True-Peak Meter Widget
+pub struct LufsMeterWidget<'a> {
+    pub meters: Option<&'a ProfessionalMeterSnapshot>,
+    pub theme: &'a Theme,
+    pub height: f32,
+}
+
+impl<'a> LufsMeterWidget<'a> {
+    pub fn new(meters: Option<&'a ProfessionalMeterSnapshot>, theme: &'a Theme) -> Self {
+        Self {
+            meters,
+            theme,
+            height: 90.0,
+        }
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        self.height = h;
+        self
+    }
+
+    pub fn show(self, ui: &mut egui::Ui) {
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), self.height),
+            egui::Sense::hover(),
+        );
+
+        let painter = ui.painter_at(rect);
+
+        // Frame
+        painter.rect_filled(
+            rect,
+            8.0,
+            Color32::from_rgba_premultiplied(10, 12, 20, 240),
+        );
+        painter.rect_stroke(
+            rect,
+            8.0,
+            Stroke::new(1.0_f32, self.theme.border_subtle),
+            egui::StrokeKind::Inside,
+        );
+
+        let default_meters = ProfessionalMeterSnapshot::default();
+        let m = self.meters.unwrap_or(&default_meters);
+
+        // Split into 4 metric blocks: Momentary, Short-Term, Integrated, True-Peak
+        let block_w = (rect.width() - 32.0) / 4.0;
+        let block_h = rect.height() - 16.0;
+        let y_top = rect.top() + 8.0;
+
+        let metrics = [
+            ("MOMENTARY", m.lufs_momentary, "LUFS", -14.0_f32),
+            ("SHORT-TERM", m.lufs_short_term, "LUFS", -14.0_f32),
+            ("INTEGRATED", m.lufs_integrated, "LUFS", -14.0_f32),
+            ("TRUE PEAK", m.max_true_peak_dbtp, "dBTP", 0.0_f32),
+        ];
+
+        for (idx, (label, val, unit, target)) in metrics.iter().enumerate() {
+            let x_left = rect.left() + 16.0 + (idx as f32) * block_w;
+            let b_rect = Rect::from_min_size(Pos2::new(x_left, y_top), Vec2::new(block_w - 8.0, block_h));
+
+            // Metric container card
+            painter.rect_filled(b_rect, CornerRadius::same(6), Color32::from_rgb(16, 18, 28));
+            painter.rect_stroke(b_rect, CornerRadius::same(6), Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 12)), egui::StrokeKind::Inside);
+
+            // Label
+            painter.text(
+                Pos2::new(b_rect.left() + 8.0, b_rect.top() + 6.0),
+                egui::Align2::LEFT_TOP,
+                label,
+                FontId::proportional(8.5),
+                self.theme.text_muted,
+            );
+
+            // Large numeric readout
+            let display_val = if *val <= -100.0 {
+                "-∞".to_string()
+            } else {
+                format!("{:+.1}", val)
+            };
+
+            let val_color = if *label == "TRUE PEAK" {
+                if *val > 0.0 { Color32::from_rgb(255, 60, 60) } else { self.theme.bit_perfect_green }
+            } else if *val > *target {
+                self.theme.accent_magenta
+            } else {
+                self.theme.accent_blue
+            };
+
+            painter.text(
+                Pos2::new(b_rect.left() + 8.0, b_rect.top() + 20.0),
+                egui::Align2::LEFT_TOP,
+                display_val,
+                FontId::proportional(15.0),
+                val_color,
+            );
+
+            painter.text(
+                Pos2::new(b_rect.right() - 8.0, b_rect.top() + 24.0),
+                egui::Align2::RIGHT_TOP,
+                unit,
+                FontId::proportional(9.0),
+                self.theme.text_secondary,
+            );
+
+            // Miniature horizontal level bar at the bottom of the card
+            let bar_y = b_rect.bottom() - 10.0;
+            let bar_w = b_rect.width() - 16.0;
+            let bar_bg = Rect::from_min_size(Pos2::new(b_rect.left() + 8.0, bar_y), Vec2::new(bar_w, 4.0));
+            painter.rect_filled(bar_bg, CornerRadius::same(2), Color32::from_rgb(30, 32, 45));
+
+            // Level normalization (-40 to 0 dB)
+            let norm = ((*val + 40.0) / 40.0).clamp(0.0, 1.0);
+            let fill_w = bar_w * norm;
+            let bar_fill = Rect::from_min_size(Pos2::new(b_rect.left() + 8.0, bar_y), Vec2::new(fill_w, 4.0));
+            painter.rect_filled(bar_fill, CornerRadius::same(2), val_color);
+        }
+    }
+}

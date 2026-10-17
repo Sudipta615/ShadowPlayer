@@ -1,0 +1,16 @@
+pub mod advanced_audio;
+pub mod albums_view;
+pub mod artists_view;
+pub mod eq_panel;
+pub mod folders_view;
+pub mod genres_view;
+pub mod help_modal;
+pub mod icons;
+pub mod now_playing;
+pub mod right_panel;
+pub mod settings_tab;
+pub mod sidebar;
+pub mod songs_table;
+pub mod topbar;
+pub mod track_properties_modal;
+pub mod visualizer;

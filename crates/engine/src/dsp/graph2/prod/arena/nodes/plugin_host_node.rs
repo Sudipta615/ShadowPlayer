@@ -1,0 +1,460 @@
+//! The plugin host node — Rust-native effect plugins at the
+//! master insert seam of the production graph.
+//!
+//! One [`PluginHostNode`] lives in the arena (slot [`node_id::PLUGIN`])
+//! and hosts **one plugin instance chain**: the configured plugin slots
+//! are instantiated on the control path at generation build, and the
+//! plan step processes every active instance in order. The node is a
+//! plain pass-through (bit-exact) when disabled or when instantiation
+//! failed — a broken plugin never interrupts playback.
+//!
+//! ## Realtime contract
+//!
+//! - `process_block_*` calls [`PluginInstance::process`] — the plugin's
+//!   own `process` must not allocate/lock/block (enforced by the
+//!   `tests/fidelity/plugin_host.rs` suite and the worst-case reference
+//!   plugin).
+//! - Parameters travel as plain-data [`NodeCmd::SetPluginParams`] over
+//!   the per-node SPSC queue (see `controls.rs`); a failed
+//!   `set_param` is sticky-mirrored as dropped, never fatal.
+//! - State save/restore and (re)instantiation are control-path only.
+
+use crate::dsp::graph2::prod::arena::node::DspNode;
+use crate::dsp::pipeline::{DspStageCapability, StageChannelSupport, StagePrecision};
+
+/// Maximum plugin inserts in the master chain (bounded so the plan step
+/// stays a fixed-cost loop).
+pub const MAX_PLUGIN_SLOTS: usize = 4;
+
+/// One hosted plugin slot: the instance + its config-derived identity.
+struct HostedSlot {
+    /// Keeps the `dlopen` handle — and therefore the mapped library image —
+    /// alive for as long as `instance` can be called through.
+    ///
+    /// Named `_host` because it is deliberately never read: it is held purely
+    /// so the mapped image outlives `instance`.
+    ///
+    /// `PluginInstance` stores a **by-value copy** of the plugin's vtable, so
+    /// on its own it keeps nothing alive: if the last `Arc<PluginHost>` were
+    /// dropped, `PluginHost`'s `Library` would `dlclose` the image and every
+    /// subsequent `process` / `drop_instance` call would jump into unmapped
+    /// memory. That is a SIGSEGV rather than a glitch, and `catch_unwind`
+    /// cannot contain it. Holding the host here makes the instance's lifetime
+    /// a strict subset of the library's, which is the invariant the vtable
+    /// copy silently assumes.
+    _host: std::sync::Arc<plugin_abi::PluginHost>,
+    instance: plugin_abi::PluginInstance,
+    /// The configured source (path or `static:<uid>`) — for reports.
+    source: String,
+    enabled: bool,
+    /// The descriptor-reported ring-down tail (samples).
+    tail_samples: u32,
+    /// The channel count this slot's instance was actually prepared for, or
+    /// `None` when `prepare` failed and the slot is not runnable.
+    ///
+    /// `PluginInstance::process` is `unsafe` with a documented contract that the
+    /// plane count equals the prepared channel count. `attach` prepares with
+    /// `max_channels` at build time, but the block width is only known at
+    /// `process_block` time and can differ (a multichannel master with a stereo
+    /// plugin insert, a layout change that outlives a generation swap). The
+    /// contract is therefore enforced here, where it can be checked, rather than
+    /// asserted in a comment at the call site.
+    prepared_channels: Option<usize>,
+}
+
+/// The plugin host plan node.
+pub struct PluginHostNode {
+    slots: Vec<HostedSlot>,
+    sample_rate: f32,
+    max_channels: usize,
+    /// Cached "any slot enabled" (the plan-step gate; recomputed on the
+    /// control path only).
+    active: bool,
+    /// Sticky enable mirror: a runtime toggle survives swaps.
+    runtime_enabled: bool,
+    latency_samples: u32,
+    #[cfg(feature = "clap-host")]
+    pub clap_node: Option<super::plugin_clap_node::ClapPluginHostNode>,
+}
+
+impl PluginHostNode {
+    /// Control path: build the node with the given sample rate; plugins
+    /// are attached by [`Self::attach`] from the generation builder.
+    pub fn new(sample_rate: f32) -> Self {
+        Self {
+            slots: Vec::new(),
+            sample_rate,
+            max_channels: 2,
+            active: false,
+            runtime_enabled: true,
+            latency_samples: 0,
+            #[cfg(feature = "clap-host")]
+            clap_node: None,
+        }
+    }
+
+    /// Control path (generation build): instantiate one plugin host and
+    /// attach it as a slot. `Err` returns the structured load error so
+    /// the builder can surface it as a config issue without poisoning
+    /// the graph.
+    pub fn attach(
+        &mut self,
+        host: &std::sync::Arc<plugin_abi::PluginHost>,
+        source: &str,
+        enabled: bool,
+        params: &[(u32, f32)],
+        state: Option<&[u8]>,
+    ) -> Result<(), plugin_abi::PluginAbiError> {
+        if self.slots.len() >= MAX_PLUGIN_SLOTS {
+            return Err(plugin_abi::PluginAbiError::InvalidDescriptor(format!(
+                "plugin host supports at most {MAX_PLUGIN_SLOTS} slots"
+            )));
+        }
+        let mut instance = host.instantiate(self.sample_rate)?;
+        // A failed `prepare` leaves the instance unable to satisfy `process`'s
+        // contract. Record that rather than dropping the error: the slot is
+        // still attached (so the config is visible in reports) but is bypassed
+        // at render time instead of being handed a block it cannot accept.
+        let prepared_channels =
+            match instance.prepare(self.max_channels, crate::buffer::MAX_AUDIO_BLOCK_FRAMES) {
+                Ok(()) => Some(self.max_channels),
+                Err(e) => {
+                    log::warn!(
+                        "Plugin host: prepare failed for '{}' ({} channels): {}",
+                        source,
+                        self.max_channels,
+                        e
+                    );
+                    None
+                }
+            };
+        for &(index, value) in params {
+            instance.set_param(index, value)?;
+        }
+        if let Some(bytes) = state {
+            instance.load_state(bytes)?;
+        }
+        self.latency_samples = self.latency_samples.max(host.descriptor().latency_samples);
+        let tail = host.descriptor().tail_samples;
+        self.slots.push(HostedSlot {
+            _host: std::sync::Arc::clone(host),
+            instance,
+            source: source.to_string(),
+            enabled,
+            tail_samples: tail,
+            prepared_channels,
+        });
+        self.recompute_active();
+        Ok(())
+    }
+
+    /// Control path: apply a runtime enable toggle to every slot.
+    pub fn set_runtime_enabled(&mut self, enabled: bool) {
+        self.runtime_enabled = enabled;
+        self.recompute_active();
+    }
+
+    /// The mirrored runtime enable flag.
+    pub fn runtime_enabled(&self) -> bool {
+        self.runtime_enabled
+    }
+
+    /// Apply one parameter batch (audio-side drain or control-path
+    /// configure). Errors are dropped (bounded posture) — a plugin that
+    /// refuses a param keeps its previous value.
+    pub fn apply_params(&mut self, batch: &plugin_abi::PluginParams) {
+        let Some(slot) = self.slots.first_mut() else {
+            return;
+        };
+        if !slot.enabled {
+            return;
+        }
+        for pv in batch.iter() {
+            let _ = slot.instance.set_param(pv.index, pv.value);
+        }
+    }
+
+    /// Apply a batch of sample-accurate parameter automations.
+    pub fn apply_automation(&mut self, batch: &plugin_abi::ParamAutomationBatch) {
+        let Some(slot) = self.slots.first_mut() else {
+            return;
+        };
+        if !slot.enabled {
+            return;
+        }
+        let _ = slot.instance.dispatch_automation(batch);
+    }
+
+    /// Set bypass state on a specific slot.
+    pub fn set_slot_bypass(&mut self, slot_idx: usize, bypass: bool) {
+        if let Some(slot) = self.slots.get_mut(slot_idx) {
+            slot.instance.set_bypass(bypass);
+        }
+    }
+
+    /// Broadcast musical transport / tempo clock to all plugin slots.
+    pub fn update_transport(&mut self, transport: plugin_abi::TransportInfo) {
+        for slot in &mut self.slots {
+            slot.instance.set_transport(transport);
+        }
+    }
+
+    /// Process multi-bus audio block (main channels + optional sidechain).
+    pub fn process_busses_f32(&mut self, busses: &mut plugin_abi::AudioBussesMut) {
+        if !self.active {
+            return;
+        }
+        for slot in &mut self.slots {
+            if !slot.enabled {
+                continue;
+            }
+            let _ = unsafe { slot.instance.process_busses(busses) };
+        }
+    }
+
+    #[cfg(feature = "clap-host")]
+    pub fn attach_clap(&mut self, clap: super::plugin_clap_node::ClapPluginHostNode) {
+        self.latency_samples = self.latency_samples.max(clap.latency_samples() as u32);
+        self.clap_node = Some(clap);
+        self.recompute_active();
+    }
+
+    #[cfg(feature = "clap-host")]
+    pub fn clap_node_mut(&mut self) -> Option<&mut super::plugin_clap_node::ClapPluginHostNode> {
+        self.clap_node.as_mut()
+    }
+
+    #[cfg(feature = "clap-host")]
+    pub fn clap_node(&self) -> Option<&super::plugin_clap_node::ClapPluginHostNode> {
+        self.clap_node.as_ref()
+    }
+
+    #[cfg(feature = "clap-host")]
+    pub fn apply_clap_params(&mut self, batch: &[(u32, f64)]) {
+        if let Some(ref mut clap) = self.clap_node {
+            clap.apply_params(batch);
+        }
+    }
+
+    #[cfg(feature = "clap-host")]
+    pub fn set_clap_enabled(&mut self, enabled: bool) {
+        if let Some(ref mut clap) = self.clap_node {
+            clap.set_enabled(enabled);
+        }
+        self.recompute_active();
+    }
+
+    #[cfg(not(feature = "clap-host"))]
+    pub fn set_clap_enabled(&mut self, _enabled: bool) {}
+
+    #[cfg(feature = "clap-host")]
+    pub fn set_clap_param(&mut self, id: u32, value: f64) {
+        if let Some(ref mut clap) = self.clap_node {
+            clap.set_param(id, value);
+        }
+    }
+
+    #[cfg(not(feature = "clap-host"))]
+    pub fn set_clap_param(&mut self, _id: u32, _value: f64) {}
+
+    #[cfg(feature = "clap-host")]
+    pub fn detach_clap(&mut self) {
+        self.clap_node = None;
+        self.recompute_active();
+    }
+
+    #[cfg(not(feature = "clap-host"))]
+    pub fn detach_clap(&mut self) {}
+
+    fn recompute_active(&mut self) {
+        let any_slot = self.slots.iter().any(|s| s.enabled);
+        #[cfg(feature = "clap-host")]
+        let clap_active = self.clap_node.as_ref().is_some_and(|c| c.is_active());
+        #[cfg(not(feature = "clap-host"))]
+        let clap_active = false;
+        self.active = self.runtime_enabled && (any_slot || clap_active);
+    }
+
+    /// Number of attached slots (diagnostics).
+    pub fn slot_count(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// The attached slot sources (diagnostics / reports).
+    pub fn slot_sources(&self) -> Vec<&str> {
+        self.slots.iter().map(|s| s.source.as_str()).collect()
+    }
+
+    /// The maximum descriptor-reported ring-down tail among ENABLED
+    /// slots, in samples (diagnostics / latency reports).
+    pub fn enabled_tail_samples(&self) -> u32 {
+        self.slots
+            .iter()
+            .filter(|s| s.enabled)
+            .map(|s| s.tail_samples)
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+impl DspNode for PluginHostNode {
+    fn capability(&self) -> DspStageCapability {
+        DspStageCapability {
+            name: "plugin_host",
+            channel_support: StageChannelSupport::AllChannels,
+            position: "master insert (post-volume, pre-limiter)",
+            stateful: true,
+            realtime_safe: true,
+            bit_perfect_compatible: false,
+            sample_rate_sensitive: true,
+            precision: StagePrecision::Any,
+        }
+    }
+
+    fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Inline slot table plus the owned descriptor strings.
+    ///
+    /// A plugin's *own* buffers live behind its ABI handle and are the
+    /// plugin's to report, not the host's to guess at, so what this claims is
+    /// exactly the memory the host node retains: the slot vector and the
+    /// per-slot source names.
+    fn persistent_bytes(&self) -> usize {
+        std::mem::size_of_val(self)
+            + self
+                .slots
+                .iter()
+                .map(|s| std::mem::size_of_val(s) + s.source.capacity())
+                .sum::<usize>()
+    }
+
+    fn latency_samples(&self) -> usize {
+        if self.active {
+            self.latency_samples as usize
+        } else {
+            0
+        }
+    }
+
+    fn tail_samples(&self) -> usize {
+        if self.active {
+            self.enabled_tail_samples() as usize
+        } else {
+            0
+        }
+    }
+
+    fn reset(&mut self) {
+        for slot in &mut self.slots {
+            slot.instance.reset();
+        }
+        #[cfg(feature = "clap-host")]
+        if let Some(ref mut clap) = self.clap_node {
+            clap.reset();
+        }
+    }
+
+    fn prepare(&mut self, sample_rate: f32, max_channels: usize) {
+        self.sample_rate = sample_rate;
+        self.max_channels = max_channels;
+        // Re-prepare attached instances (control path; may reallocate
+        // plugin-side).
+        for slot in &mut self.slots {
+            slot.prepared_channels = match slot
+                .instance
+                .prepare(max_channels, crate::buffer::MAX_AUDIO_BLOCK_FRAMES)
+            {
+                Ok(()) => Some(max_channels),
+                Err(e) => {
+                    // Previously discarded with `let _ =`, which left a slot
+                    // that looked attached and enabled but was never actually
+                    // prepared. Log it and mark the slot unrunnable.
+                    log::warn!(
+                        "Plugin host '{}': prepare failed at {} channels: {}",
+                        slot.source,
+                        max_channels,
+                        e
+                    );
+                    None
+                }
+            };
+        }
+        #[cfg(feature = "clap-host")]
+        if let Some(ref mut clap) = self.clap_node {
+            clap.prepare(sample_rate, max_channels);
+        }
+    }
+
+    fn process_block_f32(&mut self, planes: &mut [&mut [f32]]) {
+        if !self.active {
+            return;
+        }
+        for slot in &mut self.slots {
+            if !slot.enabled {
+                continue;
+            }
+            // Enforce `process`'s contract here, where the actual block width
+            // is known. A width mismatch is a layout change the plugin was not
+            // prepared for; bypass rather than hand it a shape it cannot accept.
+            // (The facade also clamps to MAX_PLUGIN_CHANNELS internally, so the
+            // worst case there is a narrow block — but a plugin handed fewer
+            // channels than it prepared for would still mis-index its own
+            // buffers.)
+            match slot.prepared_channels {
+                Some(n) if n == planes.len() => {}
+                _ => continue,
+            }
+            // SAFETY: the width is the prepared width (checked immediately
+            // above) and the plan runner guarantees every plane holds at least
+            // `frames` samples — the contract every arena node runs under.
+            let _ = unsafe { slot.instance.process(planes) };
+        }
+        #[cfg(feature = "clap-host")]
+        if let Some(ref mut clap) = self.clap_node {
+            if clap.is_active() {
+                clap.process_block_f32(planes);
+            }
+        }
+    }
+
+    fn process_block_f64(&mut self, planes: &mut [&mut [f64]]) {
+        if !self.active {
+            return;
+        }
+        let frames = planes.first().map(|p| p.len()).unwrap_or(0);
+        if frames == 0 || frames > crate::buffer::MAX_AUDIO_BLOCK_FRAMES {
+            return;
+        }
+        // f64 domain: demote the front pair to stack buffers (the ABI is
+        // f32-only), process, promote back. Fixed-size scratch — no
+        // allocation on the audio path.
+        let mut l32 = [0f32; crate::buffer::MAX_AUDIO_BLOCK_FRAMES];
+        let mut r32 = [0f32; crate::buffer::MAX_AUDIO_BLOCK_FRAMES];
+        if let Some(p) = planes.first() {
+            for (d, s) in l32.iter_mut().zip(p.iter()) {
+                *d = *s as f32;
+            }
+        }
+        if let Some(p) = planes.get(1) {
+            for (d, s) in r32.iter_mut().zip(p.iter()) {
+                *d = *s as f32;
+            }
+        }
+        {
+            let mut pair: [&mut [f32]; 2] = [&mut l32[..frames], &mut r32[..frames]];
+            self.process_block_f32(&mut pair);
+        }
+        if let Some(dst) = planes.first_mut() {
+            for (d, s) in dst.iter_mut().zip(l32[..frames].iter()) {
+                *d = *s as f64;
+            }
+        }
+        if let Some(dst) = planes.get_mut(1) {
+            for (d, s) in dst.iter_mut().zip(r32[..frames].iter()) {
+                *d = *s as f64;
+            }
+        }
+    }
+}

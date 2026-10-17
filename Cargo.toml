@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/audio-session",
+    "crates/database",
+    "crates/metadata",
+    "crates/lyrics",
+    "crates/search",
+    "crates/library",
+    "crates/playback",
+    "crates/ui",
+    "crates/app",
+]
+exclude = [
+    "crates/engine",
+]

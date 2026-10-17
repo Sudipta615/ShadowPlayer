@@ -1,0 +1,280 @@
+//! Core audio engine — wires decode → DSP → output pipeline
+//!
+
+mod buffers;
+mod clock;
+pub(crate) mod commands;
+mod construction;
+mod crossfade;
+pub mod cue_split;
+mod decode_loop;
+mod dsd_state;
+pub mod dsp_persistence;
+pub mod graph_plan;
+pub mod handle;
+mod helpers;
+mod lanes;
+mod loudness_state;
+pub mod offline;
+mod output_setup;
+pub(crate) mod preload;
+mod recovery;
+pub mod settings;
+mod spatial_persistence;
+mod stream;
+mod telemetry;
+#[cfg(test)]
+mod tests;
+mod tick;
+mod track_loading;
+mod volume;
+mod wake;
+
+pub(crate) use preload::{PreloadManager, PreparedTrack};
+
+pub(crate) use buffers::EngineScratch;
+#[allow(unused_imports)]
+pub use buffers::{
+    CROSSFADE_SCRATCH_FRAMES, MAX_PENDING_MULTICHANNEL_SAMPLES, MAX_PENDING_OUTPUT_FRAMES,
+    MIX_BLOCK_FRAMES,
+};
+pub use clock::AudioClock;
+pub(crate) use dsd_state::{dop_exclusive_reason, DsdTransportState};
+pub use graph_plan::GraphPlanReport;
+pub use handle::EngineHandle;
+pub(crate) use loudness_state::LoudnessScanState;
+pub(crate) use recovery::RecoveryState;
+pub use settings::{
+    AuxSettings, CompressorBandSetting, DynamicEqBandSetting, EngineSettings, EqBandSetting,
+    LimiterSettings,
+};
+pub(crate) use telemetry::EngineTelemetry;
+pub use telemetry::GraphBuildStats;
+pub use wake::EngineWake;
+
+use std::sync::{atomic::AtomicBool, Arc};
+
+use arc_swap::ArcSwap;
+use crossbeam::channel::{Receiver, Sender};
+
+// Re-export public types from submodules so the public API is unchanged.
+use config::EngineConfig;
+pub use offline::{OfflineRenderResult, OfflineRenderer};
+pub use stream::{EngineError, PlaybackStream};
+
+#[cfg(feature = "audio-output")]
+use crate::output::DeviceMonitor;
+use crate::{
+    buffer::{EngineCommand, FixedFrameBuffer, PlaybackInfo},
+    dsp::analyzer::AudioAnalyzer,
+    dsp::graph2::prod::Graph2Engine,
+    events::{EngineEvent, OutputEvent},
+    output::Output,
+    playlist::Playlist,
+    sink::SampleSink,
+    source::AudioSource,
+};
+
+pub struct AudioEngine {
+    /// The output ring buffer — retained so output backends can drain it directly.
+    output_buffer: Arc<FixedFrameBuffer>,
+    /// The pluggable sample sink. Processed samples are delivered here after
+    /// the resampler and final safety limiter. Defaults to a [`DacSink`](crate::sink::DacSink)
+    /// that pushes into `output_buffer`.
+    sample_sink: Box<dyn SampleSink>,
+    cmd_tx: Sender<EngineCommand>,
+    cmd_rx: Receiver<EngineCommand>,
+    /// Lets a tick pump idle without holding whatever lock owns this engine.
+    ///
+    /// See [`EngineWake`] for why the command channel alone cannot do this.
+    wake: Arc<EngineWake>,
+    /// Playback info stored in an ArcSwap for wait-free concurrent reads.
+    /// Writers use rcu() for atomic snapshot replacement; readers use load().
+    /// This makes the decode hot path lock-free — no OS scheduler involvement.
+    playback_info: Arc<ArcSwap<PlaybackInfo>>,
+    running: Arc<AtomicBool>,
+    /// The active output transport (cpal, or the native WASAPI exclusive
+    /// backend on Windows with `wasapi-native`).
+    audio_output: Option<Box<dyn Output>>,
+    /// The production DSP signal path: the Graph2 engine owns
+    /// the signal chain end-to-end — its generations carry plans **lowered
+    /// from the Graph2 production topology** over the single arena node
+    /// implementation (`graph2::prod::arena`).
+    graph: Graph2Engine,
+    /// The resource authority, when the host has one.
+    ///
+    /// `None` for a standalone integrator, which is the common case for a
+    /// published realtime library and the reason this is a trait rather than a
+    /// dependency. When it *is* installed, every graph preparation is admitted
+    /// before it allocates — including the one built by `set_config`, which is
+    /// the easiest way to build a multi-megabyte generation by accident.
+    governor: Option<Arc<dyn crate::governance::GraphGovernor>>,
+    /// Graphic EQ model (§9.1) — the slider state compiled into
+    /// `graph.eq()`. Always present; only authoritative while enabled.
+    graphic_eq: crate::dsp::GraphicEq,
+    /// Explicitly selected output profile (§10). When `None`, the engine
+    /// auto-selects from the built-in/user profile library by device name.
+    output_profile: Option<crate::output::OutputProfile>,
+    /// The dual-decoder state machine — replaces the single `decoder` field.
+    stream: Option<PlaybackStream>,
+    /// Ordered playback queue with shuffle/repeat/history.  The engine
+    /// auto-advances it at EndOfStream (honoring `RepeatMode::One` by
+    /// restarting the current track) and `Next`/`Previous` commands.
+    playlist: Playlist,
+    /// Real-time level/spectrum analyzer fed from the decode loop. Hosts
+    /// share the same `Arc` via [`Self::analyzer`] or the handle.
+    analyzer: Arc<AudioAnalyzer>,
+    config: EngineConfig,
+    /// The result of validating `config` at construction.
+    ///
+    /// Errors cause [`AudioEngine::new`] to refuse the config outright, so a
+    /// live engine's `errors` vector is always empty; the warnings and the
+    /// typed `issues` list are what a host can still act on. Kept on the
+    /// engine (rather than recomputed on demand) because a config mutates
+    /// across the session — the volume / convolution-wet-mix handlers write
+    /// back into it — so this is the snapshot as of construction.
+    config_validation: config::ConfigValidation,
+    duration_secs: f32,
+    output_sample_rate: u32,
+    speed: f32,
+    /// Sample-accurate integer playback clock — the single source of truth
+    /// for the playhead (position and current source sample rate).
+    clock: AudioClock,
+    current_source: Option<AudioSource>,
+    stream_ended: bool,
+    event_tx: Sender<EngineEvent>,
+    event_rx: Receiver<EngineEvent>,
+    /// Output device events (device connect/disconnect, list changes).
+    /// Separate channel so hosts that don't drive audio output never see these.
+    #[allow(dead_code)]
+    #[cfg(feature = "audio-output")]
+    output_event_tx: Sender<OutputEvent>,
+    #[allow(dead_code)]
+    #[cfg(feature = "audio-output")]
+    output_event_rx: Receiver<OutputEvent>,
+    #[cfg(feature = "audio-output")]
+    device_monitor: DeviceMonitor,
+
+    /// Active capture, if any. The capture backend's audio thread fills
+    /// `ActiveCapture.capture`'s ring; the tick loop drains it into the WAV
+    /// writer.
+    ///
+    /// Portable as of 0.9.2: previously gated to
+    /// `all(target_os = "windows", feature = "wasapi-native")`, which made both
+    /// recording and room measurement Windows-only even though the engine half
+    /// (writer, drain, sweep orchestration) never was.
+    capture: Option<ActiveCapture>,
+
+    /// Room measurement in flight (sweep playing + capture
+    /// scheduled). Control-thread only; `None` when idle.
+    pub(crate) measurement: Option<commands::PendingMeasurement>,
+
+    // ── Domain sub-structures ──
+    pub(crate) telemetry: EngineTelemetry,
+    pub(crate) dsd: DsdTransportState,
+    pub(crate) loudness_scan: LoudnessScanState,
+    pub(crate) recovery: RecoveryState,
+    pub(crate) scratch: EngineScratch,
+    /// Auto-save/restore of the active spatial scene. Control
+    /// thread only: restores at construction, writes on change + shutdown.
+    pub(crate) spatial_persistence: spatial_persistence::SpatialPersistence,
+    /// Auto-save/restore of the hand-tuned DSP settings: saved EQ presets,
+    /// limiter parameters, and the last output device/backend.
+    ///
+    /// Wired in 0.9.0. [`crate::engine::dsp_persistence::DspStateStore`] was
+    /// fully implemented and publicly exported since 0.2.0 but the engine
+    /// never constructed one, so `dsp_state.json` was never written or read
+    /// by anything: a user's limiter settings, EQ preset library and chosen
+    /// output device were silently lost on restart. Spatial persistence was
+    /// wired; this was the same idea that got left on the floor.
+    ///
+    /// Control thread only, exactly like `spatial_persistence`: restores at
+    /// construction, writes on change (the store skips the write when nothing
+    /// moved, so the steady path is a field compare rather than disk I/O).
+    pub(crate) dsp_persistence: dsp_persistence::DspStateStore,
+    /// Multi-track lane registry: independent streams mixed
+    /// onto bus slots ≥ 2. Control side adds/removes; the decode loop feeds
+    /// active lanes at every block boundary.
+    pub(crate) lanes: Vec<lanes::LaneTrack>,
+    /// Additional physical output endpoints. Each endpoint has an independent
+    /// ring and output worker; the decoded mix is fanned out without sharing
+    /// endpoint transport state.
+    #[cfg(feature = "audio-output")]
+    pub(crate) endpoints: Vec<crate::output::EndpointWorker>,
+    #[cfg(feature = "audio-output")]
+    pub(crate) endpoint_configs: Vec<config::EndpointConfig>,
+    #[cfg(feature = "audio-output")]
+    pub(crate) endpoint_dropped_frames: std::sync::atomic::AtomicU64,
+    /// Asynchronous next-track preloader and prepared-track coordinator.
+    pub(crate) preload: PreloadManager,
+    /// Bounded in-memory track/format metadata cache.
+    pub(crate) track_cache: crate::track_cache::TrackCache,
+    /// Professional audio metering subsystem.
+    pub(crate) meters: Arc<crate::dsp::meters::ProfessionalMeters>,
+    /// Rebuild-cost counters, shared with every `EngineHandle` this engine
+    /// hands out. See [`GraphBuildStats`] for why this is separate from the
+    /// ordinary CPU telemetry.
+    graph_build: Arc<GraphBuildStats>,
+}
+
+impl AudioEngine {
+    /// Professional unified audio metering subsystem.
+    pub fn meters(&self) -> Arc<crate::dsp::meters::ProfessionalMeters> {
+        self.meters.clone()
+    }
+
+    /// Read-only access to bounded track/metadata cache.
+    pub fn track_cache(&self) -> &crate::track_cache::TrackCache {
+        &self.track_cache
+    }
+
+    /// Mutable access to bounded track/metadata cache.
+    pub fn track_cache_mut(&mut self) -> &mut crate::track_cache::TrackCache {
+        &mut self.track_cache
+    }
+
+    /// Primary output sample rate in Hz.
+    pub fn output_sample_rate(&self) -> u32 {
+        self.output_sample_rate
+    }
+
+    /// Current track duration in seconds.
+    pub fn duration_secs(&self) -> f32 {
+        self.duration_secs
+    }
+
+    /// Number of additional output endpoints (routing-matrix size).
+    #[cfg(feature = "audio-output")]
+    pub fn additional_endpoint_count(&self) -> usize {
+        self.endpoints.len()
+    }
+
+    /// Sample rates of the additional endpoints (only opened/started
+    /// endpoints appear; same-rate endpoints report the primary rate).
+    #[cfg(feature = "audio-output")]
+    pub fn additional_endpoint_sample_rates(&self) -> Vec<u32> {
+        self.endpoints
+            .iter()
+            .map(|ep| {
+                ep.output()
+                    .map(|o| o.sample_rate())
+                    .unwrap_or(self.output_sample_rate)
+            })
+            .collect()
+    }
+}
+
+/// An active capture: the endpoint backend plus the WAV file the tick loop
+/// streams into.
+///
+/// `capture` is a [`SystemCapture`](crate::output::capture::SystemCapture)
+/// trait object rather than a concrete backend, which is what lets the same
+/// handler serve a portable cpal input device on every platform and the
+/// Windows-only system-mix loopback.
+pub(crate) struct ActiveCapture {
+    pub(crate) capture: Box<dyn crate::output::capture::SystemCapture>,
+    pub(crate) writer: crate::output::wav_writer::WavFileWriter,
+    pub(crate) path: std::path::PathBuf,
+}
+
+impl AudioEngine {}

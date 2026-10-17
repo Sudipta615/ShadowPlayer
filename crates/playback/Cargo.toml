@@ -1,0 +1,16 @@
+[package]
+name = "playback"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { path = "../domain" }
+audio-session = { path = "../audio-session" }
+database = { path = "../database" }
+crossbeam = "0.8"
+log = "0.4"
+thiserror = "2.0"
+rand = "0.8"
+
+[dev-dependencies]
+engine = { package = "audio-engine", path = "../engine" }

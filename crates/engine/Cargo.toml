@@ -1,0 +1,386 @@
+[package]
+name = "audio-engine"
+# Independently versioned (UE-R013), and deliberately NOT
+# `[workspace.package]`-inherited.
+#
+# `audio-engine` and its in-tree siblings (`config`, `plugin-abi`,
+# `plugin-test-echo`) are an independently versioned realtime product lineage:
+# they are published and consumed as a standalone realtime audio library, and
+# their versioning does not track Ultimate Engine's 1.x series. They are still
+# workspace MEMBERS (see `[workspace]` below) so `--workspace` covers all of
+# them, but each states its own version and moves in lockstep by policy.
+#
+# The practical contract this creates: an `audio-engine` release may change the
+# realtime DSP/IO surface in a way Ultimate Engine's 1.x does not, so the root
+# package is what an integrator should depend on.
+version = "1.2.1"
+rust-version = "1.98"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Sudipta615/audio_engine"
+description = "Shadow Desktop: a bit-perfect, headless audiophile audio playback and DSP engine written in pure Rust, with a node-graph realtime core, multi-endpoint output, spatial audio, room correction and a stable C ABI"
+readme = "README.md"
+keywords = ["audio", "dsp", "realtime", "audiophile", "bit-perfect"]
+categories = ["multimedia::audio", "multimedia::audio::playback"]
+publish = false
+
+# 0.9.0 distribution decision, deliberately chosen over the alternative of
+# renaming two crates:
+#
+# Publishing this workspace would require two renames that are breaking for
+# every downstream path, which a 0.x minor must not carry:
+#
+#   * `config` — the name is already taken on crates.io by `config-rs`
+#     (~107M all-time downloads), so publishing this crate is impossible
+#     without squatting someone else's name.
+#   * `opus-decoder` — this is an in-tree *fork* of the upstream crate of the
+#     same name. `cargo publish` rewrites a path dependency to a bare version
+#     requirement, so every consumer would silently receive the **unpatched
+#     upstream 0.1.1** — reinstating exactly the debug-build shift overflow at
+#     `celt/vq.rs` that this fork exists to fix. That failure is invisible: the
+#     build succeeds and the panic only appears on Ogg Opus input.
+#
+# So 0.9.0 ships from GitHub (source + prebuilt binaries via `release.yml`)
+# rather than from crates.io, and every crate that would be unsafe or
+# impossible to publish declares `publish = false`. `plugin-abi` is the one
+# exception: it is genuinely standalone and is publishable on its own.
+#
+# Revisit when the project is ready to publish under its own product-scoped
+# names (`shadow-config`, `shadow-opus-decoder`) in a major release.
+
+# `config`, `plugin-abi`, `plugin-test-echo` and `opus-decoder` are WORKSPACE
+# MEMBERS, not merely path dependencies.
+#
+# They were path dependencies without a `[workspace]` table, which made every
+# `--workspace` invocation in CI (clippy, test, both feature sets) resolve to
+# the root package alone. That had three consequences:
+#
+#   * 56 `#[test]` functions across the four crates were never compiled or run;
+#   * `cargo test -p config` failed with "not a member of the workspace", so
+#     there was no way to run them at all without a `--manifest-path` override;
+#   * a broken test in `config` (it referenced `AudioBackend::Alsa`, which does
+#     not exist — the variant is `ExclusiveAlsa`) stayed invisible.
+#
+# The versions stay independently declared rather than inherited from
+# `[workspace.package]`: this is a realtime product lineage whose versioning
+# does not track Ultimate Engine's 1.x series, so `audio-engine` and its
+# siblings each carry their own version and move in lockstep by policy (see
+# AGENTS.md "Versioning") rather than by Cargo inheritance. `opus-decoder` is
+# deliberately on its own 0.1.x line.
+[workspace]
+members = [
+    "crates/config",
+    "crates/plugin-abi",
+    "crates/opus-decoder",
+]
+resolver = "2"
+
+# `[workspace.package]` was removed in 0.9.0. It declared
+# `version = "0.6.0"`, but **no crate inherited anything from it** — not one
+# manifest used `workspace = true` — so it was dead configuration that had
+# been drifting since 0.6.0 and would have misled the next maintainer into
+# thinking a second version line existed. Every crate states its own
+# `version`, which is the lockstep policy AGENTS.md describes.
+#
+# `fuzz/` is deliberately NOT a member and is NOT excluded. It is its own
+# workspace, declared by `fuzz/Cargo.toml`'s own `[workspace]` table (added in
+# 0.9.0), because cargo-fuzz builds it out-of-tree with its own lockfile.
+
+[lib]
+name = "engine"
+path = "src/lib.rs"
+
+[features]
+default = ["audio-output", "resample", "all-codecs", "sofa-import"]
+# `output::endpoint` drives a `rubato` slip resampler for clock-drift
+# correction and the engine requires `output::endpoint`, so `audio-output`
+# implies `resample`.
+audio-output = ["cpal", "thread-priority", "resample"]
+pipewire = ["audio-output"]
+jack = ["audio-output"]
+# Dynamic plugin library loading (dlopen / LoadLibrary). The
+# static-registry path (`static:<uid>` sources) works without this
+# feature; enabling it adds the libloading-based loader.
+plugin-dylib = ["plugin-abi/host"]
+asio = ["cpal/asio"]
+# Native Steinberg ASIO backend in pure Rust (no C++ SDK). Bypasses cpal
+# entirely: COM vtable, IASIO interface, bufferSwitch callback, native DSD.
+# Windows-only; adds no dependency — just the `windows` crate already pulled
+# in for `wasapi-native`. Ignored on non-Windows targets.
+asio-native = ["audio-output"]
+# Native WASAPI exclusive-mode backend (no cpal): a real IAudioClient
+# AUDCLNT_SHAREMODE_EXCLUSIVE stream with OS-level exclusivity verification.
+# Windows-only; ignored on other platforms.
+wasapi-native = ["audio-output"]
+resample = ["rubato"]
+codec-mp3 = ["symphonia/mp3"]
+codec-flac = ["symphonia/flac"]
+# Ogg *container* + Vorbis *codec*. These are two separate Symphonia features
+# and both are required: without `symphonia/vorbis` the container opens but
+# `Decoder::open` fails with "unsupported audio codec", because Symphonia
+# gates the Vorbis decoder behind its own codec feature. The fixture corpus
+# (`tests/decode_fixture_smoke.rs`) caught this — an Ogg Vorbis file produced
+# by `scripts/make_fixtures.sh` was undecodable until this was added.
+# NOTE: `symphonia/vorbis` is deliberately NOT part of `codec-opus`, which
+# supplies its own Ogg demuxer (`ogg`) and RFC 8251 decoder (`opus-decoder`).
+codec-ogg = ["symphonia/ogg", "symphonia/vorbis"]
+codec-wav = ["symphonia/wav"]
+codec-aac = ["symphonia/aac"]
+# ALAC is supplied by Symphonia's maintained ALAC codec feature.
+codec-alac = ["symphonia/alac"]
+# NOTE: Symphonia has NO APE *audio decoder* — its `ape` feature only parses
+# APEv2 *tags* (metadata). Audio decoding is supplied by the `ape-decoder`
+# crate (a pure-Rust, MIT/Apache-2.0 Monkey's Audio decoder), which this
+# feature also enables.
+codec-ape = ["symphonia/ape", "dep:ape-decoder"]
+# DSD (DSF/DFF) decoding, decimation, DoP, and native wire packing are
+# compiled unconditionally (the `src/decode/dsd` module is not feature-gated),
+# so this feature is intentionally a no-op kept for API compatibility.
+codec-dsd = []
+codec-pcm = ["symphonia/pcm"]
+codec-aiff = ["symphonia/aiff"]
+codec-isomp4 = ["symphonia/isomp4"]
+# Matroska audio (MKA/MKV) container: the inner codec is decoded by the
+# codec features above (FLAC/AAC/Vorbis/PCM/...), so this feature only adds
+# the container reader. Pure-Rust (Symphonia's `symphonia-format-mkv`).
+codec-mkv = ["symphonia/mkv"]
+# Pure-Rust Ogg Opus: `ogg` demuxes the container and `opus-decoder`
+# (RFC 8251, no unsafe/FFI) decodes the packets at 48 kHz.
+codec-opus = ["dep:ogg", "dep:opus-decoder"]
+# Pure-Rust TTA (True Audio) decoder — implemented natively in
+# `src/decode/tta.rs` (no FFI, no external crates).
+codec-tta = []
+# NOTE: `codec-wavpack` above enables `wavicle`; keep it ordered after the
+# TTA entry for readability of the feature list.
+# WavPack — pure Rust via `wavicle` (MIT/Apache-2.0, no FFI, 100% safe
+# Rust): lossless v5 decode of 16/24/32-bit integer and 32-bit float,
+# mono/stereo, bit-exact and verified against the reference `wvunpack`.
+# Multichannel / DSD / hybrid WavPack is rejected explicitly at open with
+# a codec-named error (honest partial support — never a silent downmix).
+# The `encode` feature is enabled only for the dev-dependency so tests can
+# generate deterministic `.wv` fixtures at test time (no binary assets).
+codec-wavpack = ["dep:wavicle"]
+# DECLARED BUT NOT DECODABLE. Musepack (`.mpc`/`.mp+`/`.mpp`) is declared in
+# `decode::Codec` so the format is *named* and reported rather than silently
+# unknown, and opening one fails with an explicit, actionable error
+# (`src/decode/decoder.rs`). It is a no-op feature for the same reason
+# `codec-dsd` is: it enables no decoder, because **no pure-Rust Musepack
+# decoder exists to enable**. Symphonia 0.6.1 has no Musepack support in any
+# feature combination (its codec set is AAC/ADPCM/ALAC/FLAC/MP1/MP2/MP3/PCM/
+# Vorbis), and the only alternatives are an FFI binding to `libmpcdec` — which
+# this project deliberately does without — or writing a decoder from scratch.
+#
+# It is therefore NOT listed in `all-codecs` below. That aggregate means "every
+# codec this build can actually decode"; including a declared-but-undecodable
+# codec here would make `--all-features` imply a capability that does not
+# exist, which is the exact kind of false claim the codec registry's
+# `DeclaredUnavailable` status exists to prevent.
+codec-musepack = []
+
+# Native NetCDF-classic (CDF) SOFA / AES69 HRTF importer (`spatial::sofa::import_sofa`),
+# pure-Rust and dependency-free: parses the NetCDF-3 classic subset the SOFA C API
+# writes in SOFA_NETCDF3 / SOFA_NETCDF3_CLASSIC mode and reduces it to `HrtfCorpus`
+# for the existing `HrtfDataset` pipeline. NetCDF-4/HDF5 (`nc4`) SOFA is refused
+# with a typed error (documented HDF5 seam).
+sofa-import = []
+
+# Open and decode an `http(s)://` URI over HTTP Range requests, via
+# `decode::stream::open_remote`. Pulls in `ureq`, the blocking HTTP client
+# (pure Rust, no async runtime).
+#
+# This feature used to be non-functional: it compiled `NetworkByteSource`, but
+# nothing ever constructed one — no code path routed a URI into it and `Decoder`
+# had no streaming backend — so remote URIs were refused. It is now wired end to
+# end: `decode::resolve_uri` classifies an `AudioSource::Uri` as local or remote,
+# the four `Uri` call sites branch on that, and a remote target decodes through
+# the same Symphonia backend a local file uses. `tests/fidelity/network_streaming`
+# drives it against a loopback HTTP server and is the guard on that wiring.
+#
+# Not in `default`: a network dependency most local playback never uses, and
+# blocking HTTP I/O on the decode thread is a real cost to opt into knowingly.
+network-streaming = ["dep:ureq"]
+
+# Write loudness metadata (EBU R128 / ReplayGain) back into file tags.
+tag-write = ["dep:lofty"]
+
+# AcoustID/Chromaprint audio fingerprinting (`decode::extract_fingerprint`).
+fingerprint = ["dep:chromaprint-next"]
+
+# MPRIS2 D-Bus interface (Linux only): exposes transport controls and metadata
+# over the standard `org.mpris.MediaPlayer2` interface.
+mpris = ["dep:zbus"]
+
+# CLAP audio plugin hosting (C ABI): load and process standard CLAP plugins in the graph.
+clap-host = ["dep:clap-sys", "dep:libloading"]
+
+
+# Stable C FFI boundary behind `c-ffi`. Adds no dependencies — only `std::ffi`.
+# Hosts written in C/C++ (or any language with C interop) call through the
+# opaque-pointer API in `src/ffi.rs` instead of linking the Rust crate directly.
+c-ffi = []
+
+# Every codec this build can actually *decode*. Deliberately excludes
+# `codec-musepack`, which is a declared-but-undecodable no-op (see its entry
+# above), and `codec-dsd`, whose decoder is compiled unconditionally. Adding a
+# name here is a claim that `.ext` files decode — `decode::codecs` has a test
+# that holds the registry and the decode dispatch to that claim.
+all-codecs = [
+    "codec-mp3",
+    "codec-flac",
+    "codec-ogg",
+    "codec-wav",
+    "codec-aac",
+    "codec-alac",
+    "codec-ape",
+    "codec-pcm",
+    "codec-aiff",
+    "codec-isomp4",
+    "codec-mkv",
+    "codec-opus",
+    "codec-tta",
+    "codec-wavpack",
+]
+
+
+[dependencies]
+cpal = { version = "0.18", optional = true }
+rubato = { version = "5.0", optional = true }
+symphonia = { version = "0.6.1", default-features = false }
+crossbeam = "0.8"
+arc-swap = "1.9"
+log = "0.4.33"
+thiserror = "2.0"
+num-traits = "0.2"
+num-complex = "0.4"
+realfft = "3.5"
+# Complex-domain FFT for the correction chain: deconvolution,
+# cepstral minimum-phase, hybrid-phase rendering. Same crate realfft builds
+# on, so this adds no new compiled code.
+rustfft = "6.2"
+config = { path = "crates/config", version = "1.2.1" }
+# The Rust-native plugin ABI + host. Default features off —
+# the `plugin-dylib` engine feature pulls in the loader.
+plugin-abi = { path = "crates/plugin-abi", version = "1.2.1", default-features = false }
+thread-priority = { version = "3.1", optional = true }
+# Pure-Rust Monkey's Audio (APE) decoder, enabled by the `codec-ape` feature.
+ape-decoder = { version = "0.3.2", optional = true }
+# Pure-Rust WavPack v5 decoder (`codec-wavpack`). No FFI; the crate is
+# `#![forbid(unsafe_code)]`. See `src/decode/wavpack.rs`.
+wavicle = { version = "0.1", optional = true }
+# Pure-Rust Ogg demuxer and RFC 8251 Opus decoder, enabled by the
+# `codec-opus` feature.
+ogg = { version = "0.9", optional = true }
+# Pure-Rust RFC 8251 Opus decoder. Path dependency, NOT the crates.io
+# 0.1.1: the registry release panics in debug builds with "attempt to shift
+# left with overflow" at `celt/vq.rs:118` (`mask |= 1 << i` with `mask: u8` and
+# `i` up to `b`), which the fixture corpus hit immediately on any Ogg Opus
+# input. The in-tree fork at `crates/opus-decoder` carries the fix
+# (`mask: u32` plus an `i < 32` bound), so the fork is what gets built.
+#
+# It IS a workspace member (see `[workspace]`), so `cargo test --workspace`
+# now builds and runs its 33 unit tests, which were previously dormant. It
+# needs edition 2024, hence the workspace `resolver = "2"` and a toolchain of
+# 1.85 or newer.
+opus-decoder = { path = "crates/opus-decoder", version = "0.1.1", optional = true }
+# Blocking HTTP client for network audio streaming (`network-streaming` feature).
+# Pure Rust, no async runtime — fits the synchronous `AudioByteSource` trait.
+ureq = { version = "2.12", optional = true }
+etcetera = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+env_logger = "0.11"
+termcolor = "1.4"
+# Loudness/ReplayGain tag write-back (`tag-write` feature): pure-Rust
+# metadata library for reading & writing ID3v2, Vorbis, MP4, and APEv2 tags.
+lofty = { version = "0.22", optional = true }
+# AcoustID/Chromaprint audio fingerprinting (`fingerprint` feature): pure-Rust,
+# bit-identical drop-in for the reference Chromaprint, used for track
+# identification via the AcoustID service.
+chromaprint-next = { version = "0.1", optional = true }
+# Terminal UI for the `audio-engine-tui` binary. Both are pure Rust, so the
+# "100% pure Rust, no FFI" property of the workspace is preserved.
+ratatui = "0.30.2"
+crossterm = "0.29.0"
+# D-Bus client library for the MPRIS2 desktop interface (`mpris` feature).
+zbus = { version = "4", optional = true }
+# CLAP audio plugin host C-ABI bindings and dynamic library loader (`clap-host` feature).
+clap-sys = { version = "0.5", optional = true }
+libloading = { version = "0.8", optional = true }
+
+# (WavPack previously used a runtime-loaded `libwavpack` via `libloading`;
+# removed — see `codec-wavpack` above. No native codec backend now needs
+# `libloading`.)
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Must stay on the same line as cpal's ALSA requirement (both bind the same
+# `alsa` native library): cpal 0.18 requires alsa >= 0.11.
+alsa = "0.11"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# CoreAudio HAL bindings for hardware endpoint volume
+# (AudioObjectGetPropertyData / AudioObjectSetPropertyData) AND the native
+# hog-mode output backend (`src/output/coreaudio_output`). objc2-core-audio
+# ships pre-generated bindings (no build-time bindgen), unlike the older
+# coreaudio-sys crate. `objc2-core-audio-types` supplies AudioBufferList /
+# AudioStreamBasicDescription / AudioTimeStamp for the render IO proc.
+objc2-core-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AudioHardware",
+    "objc2-core-audio-types",
+] }
+# CoreAudio HAL data types (AudioStreamBasicDescription / AudioBufferList /
+# AudioTimeStamp / AudioValueRange / LinearPCM format flags) used directly by
+# the hog-mode backend's render IO proc and format negotiation. Same crate the
+# objc2-core-audio bindings re-export internally; feature-unification keeps
+# them on the same 0.3.2 build.
+objc2-core-audio-types = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CoreAudioBaseTypes",
+] }
+# CFString → Rust String conversion for device UIDs / names read from the
+# HAL (`kAudioDevicePropertyDeviceUID` / `DeviceNameCFString` are CFString
+# properties). Feature-unifies with objc2-core-audio's own dependency.
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFString",
+] }
+
+[target.'cfg(windows)'.dependencies]
+# Used only by the native WASAPI backend (`wasapi-native` feature). The API
+# below targets windows 0.59; if the pin is bumped, re-verify the COM call
+# signatures in src/output/wasapi_output.rs.
+# windows-core is a direct dependency so the `#[implement(...)]` COM
+# macro (re-exported as `windows::core::implement`) can resolve the
+# `::windows_core::` paths it generates.
+windows-core = "0.59"
+windows = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    # ASIO driver enumeration (asio-native backend).
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia",
+    # Target-device selection: IMMDeviceCollection enumeration + friendly
+    # names (PKEY_Device_FriendlyName via IPropertyStore).
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[dev-dependencies]
+criterion = "0.8.2"
+approx = "0.5.1"
+plugin-abi = { path = "crates/plugin-abi", version = "1.2.1", default-features = false }
+
+[profile.release]
+overflow-checks = true
+lto = "thin"
+
+[profile.bench]
+lto = "thin"
+

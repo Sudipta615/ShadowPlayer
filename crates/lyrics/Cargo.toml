@@ -1,0 +1,9 @@
+[package]
+name = "lyrics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { path = "../domain" }
+thiserror = "2.0"
+log = "0.4"

@@ -1,0 +1,35 @@
+# Rust / Cargo build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# Local scratch and test evaluation outputs
+scratch/
+eval_screenshot*.png
+
+# SQLite / Database runtime files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+
+# OS generated files
+.DS_Store
+Thumbs.db

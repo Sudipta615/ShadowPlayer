@@ -1,0 +1,26 @@
+[package]
+name = "shadowplayer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "shadowplayer"
+path = "src/main.rs"
+
+[dependencies]
+domain = { path = "../domain" }
+audio-session = { path = "../audio-session" }
+database = { path = "../database" }
+metadata = { path = "../metadata" }
+library = { path = "../library" }
+lyrics = { path = "../lyrics" }
+search = { path = "../search" }
+playback = { path = "../playback" }
+ui = { path = "../ui" }
+config = { package = "config", path = "../engine/crates/config" }
+engine = { package = "audio-engine", path = "../engine" }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+env_logger = "0.11"
+log = "0.4"
+dirs = "6.0"
+image = { version = "0.25", default-features = false, features = ["png"] }

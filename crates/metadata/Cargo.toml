@@ -1,0 +1,11 @@
+[package]
+name = "metadata"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { path = "../domain" }
+engine = { package = "audio-engine", path = "../engine" }
+log = "0.4"
+thiserror = "2.0"
+symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "flac", "ogg", "wav", "aac", "alac", "isomp4", "mkv"] }
