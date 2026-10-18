@@ -1,6 +1,7 @@
 use eframe::egui::{self, Color32, FontId, Stroke, Vec2};
 use audio_session::AudioSession;
 use database::{FavoritesRepo, PlaylistRepo, TrackRepo};
+use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
 use playback::PlaybackCoordinator;
 
@@ -155,9 +156,9 @@ pub fn render_main_playback_view(
                 ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
                 for (mode, lbl) in [
                     (VisualizerMode::Off, "Off"),
-                    (VisualizerMode::LufsRadar, "⚡ LUFS"),
-                    (VisualizerMode::VuMeters, "📻 Analog VU"),
-                    (VisualizerMode::Spectrum, "📊 FFT Spectrum"),
+                    (VisualizerMode::LufsRadar, "LUFS"),
+                    (VisualizerMode::VuMeters, "Analog VU"),
+                    (VisualizerMode::Spectrum, "FFT Spectrum"),
                 ] {
                     let is_sel = app_state.visualizer_mode == mode;
                     let bg = if is_sel { theme.accent_violet } else { theme.bg_pill };
@@ -209,10 +210,10 @@ pub fn render_main_playback_view(
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
 
             let standard_tabs = [
-                (NavItem::Home, "⌂ Library"),
-                (NavItem::Favorites, "♥ Favorites"),
-                (NavItem::RecentlyPlayed, "🕒 Recent"),
-                (NavItem::MostPlayed, "📊 Most Played"),
+                (NavItem::Home, "Library"),
+                (NavItem::Favorites, "Favorites"),
+                (NavItem::RecentlyPlayed, "Recent"),
+                (NavItem::MostPlayed, "Most Played"),
             ];
 
             egui::ScrollArea::horizontal()
@@ -258,7 +259,7 @@ pub fn render_main_playback_view(
                             };
 
                             let btn = egui::Button::new(
-                                egui::RichText::new(format!("♫ {}", pl.name))
+                                egui::RichText::new(pl.name.clone())
                                     .font(FontId::proportional(12.0))
                                     .color(text_color),
                             )
@@ -273,8 +274,8 @@ pub fn render_main_playback_view(
 
                         // Add playlist button
                         let add_btn = egui::Button::new(
-                            egui::RichText::new("＋")
-                                .font(FontId::proportional(13.0))
+                            egui::RichText::new("+")
+                                .font(FontId::proportional(14.0))
                                 .color(theme.text_muted),
                         )
                         .fill(theme.bg_pill)
@@ -298,7 +299,7 @@ pub fn render_main_playback_view(
                             };
 
                             let btn = egui::Button::new(
-                                egui::RichText::new(format!("✦ {}", sp.name))
+                                egui::RichText::new(sp.name.clone())
                                     .font(FontId::proportional(12.0))
                                     .color(text_color),
                             )
@@ -341,7 +342,7 @@ pub fn render_main_playback_view(
                         .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("🗑 Delete Playlist").clicked() {
+                    if ui.button("Delete Playlist").clicked() {
                         let _ = playlist_repo.delete(&pl_id);
                         view_action.switch_nav = Some(NavItem::Home);
                     }
@@ -352,7 +353,7 @@ pub fn render_main_playback_view(
         NavItem::HiRes => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("💎 Hi-Res Studio Master Collection")
+                    egui::RichText::new("Hi-Res Studio Master Collection")
                         .font(FontId::proportional(16.0))
                         .strong()
                         .color(theme.bit_perfect_green),
@@ -368,7 +369,7 @@ pub fn render_main_playback_view(
         NavItem::Lossless => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("✦ Pure Lossless Bit-Exact Collection")
+                    egui::RichText::new("Pure Lossless Bit-Exact Collection")
                         .font(FontId::proportional(16.0))
                         .strong()
                         .color(theme.accent_blue),
@@ -384,7 +385,7 @@ pub fn render_main_playback_view(
         NavItem::Favorites => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("♥ Favorites")
+                    egui::RichText::new("Favorites")
                         .font(FontId::proportional(16.0))
                         .strong()
                         .color(theme.accent_pink),
@@ -400,7 +401,7 @@ pub fn render_main_playback_view(
         NavItem::RecentlyPlayed => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("🕒 Recently Played History")
+                    egui::RichText::new("Recently Played History")
                         .font(FontId::proportional(16.0))
                         .strong()
                         .color(Color32::from_rgb(99, 102, 241)),
@@ -416,7 +417,7 @@ pub fn render_main_playback_view(
         NavItem::MostPlayed => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("📊 Most Played Tracks")
+                    egui::RichText::new("Most Played Tracks")
                         .font(FontId::proportional(16.0))
                         .strong()
                         .color(theme.accent_orange),
@@ -437,7 +438,7 @@ pub fn render_main_playback_view(
                 .unwrap_or_else(|| "Smart Playlist".into());
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("✦ {}", name))
+                    egui::RichText::new(name)
                         .font(FontId::proportional(16.0))
                         .strong()
                         .color(theme.accent_blue),
@@ -448,7 +449,7 @@ pub fn render_main_playback_view(
                         .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("✎ Edit Rules").clicked() {
+                    if ui.button("Edit Rules").clicked() {
                         view_action.edit_smart_playlist = Some(sp_id);
                     }
                 });
@@ -468,6 +469,8 @@ pub fn render_main_playback_view(
         playlists: &library_state.playlists,
         current_sort: app_state.current_sort,
         is_grid_view: app_state.is_grid_view,
+        selected_track_ids: &mut library_state.selected_track_ids,
+        last_clicked_index: &mut library_state.last_clicked_index,
         artwork: artwork_service,
         theme,
     }
@@ -477,10 +480,13 @@ pub fn render_main_playback_view(
         || table_action.remove_track.is_some()
         || table_action.toggle_favorite.is_some()
         || table_action.add_to_playlist.is_some()
+        || table_action.add_selected_to_playlist.is_some()
+        || table_action.favorite_selected
+        || table_action.remove_selected
     {
         view_action.needs_reload = true;
     }
-    if table_action.remove_track.is_some() {
+    if table_action.remove_track.is_some() || table_action.remove_selected {
         view_action.removed_track = true;
     }
 
@@ -491,6 +497,7 @@ pub fn render_main_playback_view(
         coordinator,
         track_repo,
         playlist_repo,
+        favorites_repo,
     );
 
     view_action
@@ -503,6 +510,7 @@ fn handle_songs_table_action(
     coordinator: &mut PlaybackCoordinator,
     track_repo: &TrackRepo,
     playlist_repo: &PlaylistRepo,
+    favorites_repo: &FavoritesRepo,
 ) {
     if let Some(play_id) = action.play_track {
         if let Some(track) = library_state.displayed_tracks.iter().find(|t| t.id == play_id).cloned() {
@@ -555,5 +563,48 @@ fn handle_songs_table_action(
         if let Some(t) = track {
             app_state.edit_track.open_with(&t);
         }
+    }
+
+    // ── Bulk (multi-select) actions ────────────────────────────────────────
+    if action.clear_selection {
+        library_state.clear_selection();
+    }
+    if action.play_selected {
+        let selected = library_state.selected_tracks_in_order();
+        if let Some(first) = selected.first().cloned() {
+            coordinator.play_track(first, Some(selected));
+        }
+    }
+    if action.queue_next_selected {
+        // Insert in reverse so the original order is preserved in the queue.
+        let selected = library_state.selected_tracks_in_order();
+        for track in selected.into_iter().rev() {
+            coordinator.add_to_queue_next(track);
+        }
+    }
+    if action.add_selected_to_queue {
+        let selected = library_state.selected_tracks_in_order();
+        for track in selected {
+            coordinator.add_to_queue(track);
+        }
+    }
+    if let Some(pl_id) = action.add_selected_to_playlist {
+        let selected = library_state.selected_tracks_in_order();
+        for track in selected {
+            let _ = playlist_repo.add_track(&pl_id, &track.id);
+        }
+    }
+    if action.favorite_selected {
+        let selected = library_state.selected_tracks_in_order();
+        for track in selected {
+            library_state.add_favorite(favorites_repo, track.id);
+        }
+    }
+    if action.remove_selected {
+        let ids: Vec<TrackId> = library_state.selected_track_ids.iter().copied().collect();
+        for id in ids {
+            let _ = track_repo.delete(&id);
+        }
+        library_state.clear_selection();
     }
 }

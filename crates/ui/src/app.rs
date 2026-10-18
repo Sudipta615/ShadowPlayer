@@ -551,6 +551,18 @@ impl eframe::App for ShadowPlayerApp {
                     }
                 }
             }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_SELECT").is_ok() {
+                let n: usize = std::env::var("SHADOWPLAYER_EVAL_SELECT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(3);
+                for t in self.library_state.displayed_tracks.iter().take(n) {
+                    self.library_state.selected_track_ids.insert(t.id);
+                }
+            }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_SMART").is_ok() {
+                self.smart_playlist_editor.open_new();
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_HELP").is_ok() {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Help;
                 if let Ok(tab_str) = std::env::var("SHADOWPLAYER_EVAL_HELP_TAB") {

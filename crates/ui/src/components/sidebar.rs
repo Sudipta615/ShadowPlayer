@@ -217,12 +217,10 @@ impl<'a> SideBar<'a> {
             self.theme.text_secondary
         };
 
-        // A small spark glyph marks rule-based playlists.
-        painter.text(
-            Pos2::new(rect.min.x + 16.0, rect.center().y),
-            egui::Align2::CENTER_CENTER,
-            "✦",
-            FontId::proportional(13.0),
+        // A filter glyph marks rule-based playlists.
+        crate::components::icons::draw_filter(
+            ui,
+            Rect::from_center_size(Pos2::new(rect.min.x + 16.0, rect.center().y), Vec2::new(13.0, 13.0)),
             if is_active { Color32::WHITE } else { self.theme.accent_blue },
         );
 

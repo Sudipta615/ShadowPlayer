@@ -23,6 +23,10 @@ pub struct LibraryState {
     pub smart_playlists: Vec<SmartPlaylist>,
     /// Tracks matched by the smart playlist currently open in the editor.
     pub smart_playlist_tracks: Vec<Track>,
+    /// Multi-selection for the songs table (survives tab switches).
+    pub selected_track_ids: HashSet<TrackId>,
+    /// Anchor row for shift-range selection.
+    pub last_clicked_index: Option<usize>,
     pub albums: Vec<Album>,
     pub selected_album: Option<(String, String)>,
     pub album_tracks: Vec<Track>,
@@ -56,6 +60,8 @@ impl Default for LibraryState {
             playlists: Vec::new(),
             smart_playlists: Vec::new(),
             smart_playlist_tracks: Vec::new(),
+            selected_track_ids: HashSet::new(),
+            last_clicked_index: None,
             albums: Vec::new(),
             selected_album: None,
             album_tracks: Vec::new(),
@@ -101,6 +107,8 @@ impl LibraryState {
         ) {
             self.all_tracks = tracks;
         }
+        // Selected ids may reference tracks that were just removed.
+        self.prune_selection();
 
         if let Ok(favs) = favorites_repo.list() {
             self.favorite_ids = favs.into_iter().map(|t| t.id).collect();
@@ -254,5 +262,50 @@ impl LibraryState {
     /// Materialise the tracks matched by a smart playlist (editor preview).
     pub fn evaluate_smart(&mut self, repo: &SmartPlaylistRepo, sp: &SmartPlaylist) {
         self.smart_playlist_tracks = repo.evaluate(sp).unwrap_or_default();
+    }
+
+    /// Mark a track as favourite (idempotent; used by bulk actions).
+    pub fn add_favorite(&mut self, favorites_repo: &FavoritesRepo, track_id: TrackId) {
+        if !self.favorite_ids.contains(&track_id) {
+            let _ = favorites_repo.add(&track_id);
+            self.favorite_ids.insert(track_id);
+            self.displayed_key = None;
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected_track_ids.clear();
+        self.last_clicked_index = None;
+    }
+
+    /// The selected tracks in a stable, user-visible order: the current view's
+    /// order first, then any remaining ids (e.g. carried over from another tab)
+    /// resolved from the full library.
+    pub fn selected_tracks_in_order(&self) -> Vec<Track> {
+        if self.selected_track_ids.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<Track> = self
+            .displayed_tracks
+            .iter()
+            .filter(|t| self.selected_track_ids.contains(&t.id))
+            .cloned()
+            .collect();
+        let mut seen: HashSet<TrackId> = out.iter().map(|t| t.id).collect();
+        for t in &self.all_tracks {
+            if self.selected_track_ids.contains(&t.id) && seen.insert(t.id) {
+                out.push(t.clone());
+            }
+        }
+        out
+    }
+
+    /// Drop selected ids that no longer exist in the library.
+    pub fn prune_selection(&mut self) {
+        if self.selected_track_ids.is_empty() {
+            return;
+        }
+        let alive: HashSet<TrackId> = self.all_tracks.iter().map(|t| t.id).collect();
+        self.selected_track_ids.retain(|id| alive.contains(id));
     }
 }

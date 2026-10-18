@@ -33,6 +33,18 @@ pub struct SongsTableAction {
     pub remove_track: Option<TrackId>,
     /// User chose "Edit Song Info" from the context menu.
     pub edit_track: Option<TrackId>,
+
+    // ── Bulk (multi-select) actions ─────────────────────────────────────────
+    // The selected ids themselves live in `LibraryState`; these flags only say
+    // *what* to do with them.
+    pub play_selected: bool,
+    pub queue_next_selected: bool,
+    pub add_selected_to_queue: bool,
+    pub add_selected_to_playlist: Option<PlaylistId>,
+    /// Add every selected track to Favorites.
+    pub favorite_selected: bool,
+    pub remove_selected: bool,
+    pub clear_selection: bool,
 }
 
 pub struct SongsTable<'a> {
@@ -43,6 +55,10 @@ pub struct SongsTable<'a> {
     pub playlists: &'a [Playlist],
     pub current_sort: SortField,
     pub is_grid_view: bool,
+    /// Multi-selection, shared with the app so it survives tab changes.
+    pub selected_track_ids: &'a mut HashSet<TrackId>,
+    /// Anchor for shift-range selection.
+    pub last_clicked_index: &'a mut Option<usize>,
     /// Artwork service used to lazily fetch textures for visible rows only.
     pub artwork: &'a mut ArtworkService,
     pub theme: &'a Theme,
@@ -62,6 +78,13 @@ impl<'a> SongsTable<'a> {
             show_properties: None,
             remove_track: None,
             edit_track: None,
+            play_selected: false,
+            queue_next_selected: false,
+            add_selected_to_queue: false,
+            add_selected_to_playlist: None,
+            favorite_selected: false,
+            remove_selected: false,
+            clear_selection: false,
         };
 
         // Split the borrows so the scroll-area closures can mutably borrow
@@ -74,6 +97,8 @@ impl<'a> SongsTable<'a> {
             playlists,
             current_sort,
             is_grid_view,
+            selected_track_ids,
+            last_clicked_index,
             artwork,
             theme,
         } = self;
@@ -166,6 +191,12 @@ impl<'a> SongsTable<'a> {
 
         ui.add_space(8.0);
 
+        // Bulk action bar — only shown while a selection exists.
+        if !selected_track_ids.is_empty() {
+            render_bulk_bar(ui, selected_track_ids.len(), playlists, theme, &mut action);
+            ui.add_space(6.0);
+        }
+
         if is_grid_view {
             // ── Grid View (virtualized in horizontal bands) ─────────────────
             let card_w = 140.0;
@@ -199,6 +230,8 @@ impl<'a> SongsTable<'a> {
                                     active_track_id,
                                     favorite_track_ids,
                                     playlists,
+                                    selected_track_ids,
+                                    last_clicked_index,
                                     artwork,
                                     &ctx,
                                     &mut art_budget,
@@ -211,7 +244,7 @@ impl<'a> SongsTable<'a> {
                 });
         } else {
             // ── List View (virtualized, renders only visible rows) ──────────
-            let col_num_w = 32.0;
+            let col_num_w = 54.0;
             let col_time_w = 52.0;
             let col_fav_w = 32.0;
             let col_menu_w = 26.0;
@@ -229,9 +262,39 @@ impl<'a> SongsTable<'a> {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
                 let (num_h_rect, num_h_resp) = ui.allocate_exact_size(Vec2::new(col_num_w, 20.0), Sense::click());
-                ui.painter_at(num_h_rect).text(num_h_rect.center(), egui::Align2::CENTER_CENTER, "#", FontId::proportional(11.8), theme.text_muted);
-                if num_h_resp.on_hover_text("Sort by Track Number").clicked() {
-                    action.sort_field_changed = Some(SortField::Default);
+                // Select-all checkbox, independent of the column sort target.
+                let all_selected = !tracks.is_empty() && tracks.iter().all(|t| selected_track_ids.contains(&t.id));
+                let any_selected = tracks.iter().any(|t| selected_track_ids.contains(&t.id));
+                let h_painter = ui.painter_at(num_h_rect);
+                let cb = Rect::from_center_size(
+                    Pos2::new(num_h_rect.min.x + 16.0, num_h_rect.center().y),
+                    Vec2::new(15.0, 15.0),
+                );
+                paint_checkbox(&h_painter, cb, all_selected, any_selected && !all_selected, theme);
+                h_painter.text(
+                    Pos2::new(num_h_rect.min.x + 42.0, num_h_rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    "#",
+                    FontId::proportional(11.8),
+                    theme.text_muted,
+                );
+                if num_h_resp.on_hover_text("Click the box to select all · click # to sort").clicked() {
+                    let pointer = ui.input(|i| i.pointer.interact_pos());
+                    let over_box = pointer
+                        .map(|p| p.x < num_h_rect.min.x + 30.0)
+                        .unwrap_or(false);
+                    if over_box {
+                        if all_selected {
+                            selected_track_ids.clear();
+                        } else {
+                            for t in tracks.iter() {
+                                selected_track_ids.insert(t.id);
+                            }
+                        }
+                        *last_clicked_index = None;
+                    } else {
+                        action.sort_field_changed = Some(SortField::Default);
+                    }
                 }
 
                 let (title_h_rect, title_h_resp) = ui.allocate_exact_size(Vec2::new(title_w, 20.0), Sense::click());
@@ -285,6 +348,7 @@ impl<'a> SongsTable<'a> {
                         let track = &tracks[idx];
                         let is_active = active_track_id == Some(track.id);
                         let is_favorite = favorite_track_ids.contains(&track.id);
+                        let is_selected = selected_track_ids.contains(&track.id);
                         let full_width = ui.available_width();
 
                         let (row_rect, row_resp) = ui.allocate_exact_size(
@@ -304,6 +368,9 @@ impl<'a> SongsTable<'a> {
                         if is_active {
                             painter.rect_filled(vis_rect, CornerRadius::same(8), theme.bg_card_active);
                             painter.rect_stroke(vis_rect, CornerRadius::same(8), Stroke::new(1.0_f32, theme.accent_violet), egui::StrokeKind::Inside);
+                        } else if is_selected {
+                            painter.rect_filled(vis_rect, CornerRadius::same(8), theme.bg_card_hover);
+                            painter.rect_stroke(vis_rect, CornerRadius::same(8), Stroke::new(1.0_f32, theme.accent_blue), egui::StrokeKind::Inside);
                         } else if is_hovered {
                             painter.rect_filled(vis_rect, CornerRadius::same(8), theme.bg_card_hover);
                         }
@@ -317,19 +384,47 @@ impl<'a> SongsTable<'a> {
                             Pos2::new(vis_rect.max.x - 12.0, cy),
                             Vec2::new(20.0, 20.0),
                         );
+                        // Selection checkbox lives in the first column.
+                        let check_rect = Rect::from_center_size(
+                            Pos2::new(vis_rect.min.x + 16.0, cy),
+                            Vec2::new(20.0, 20.0),
+                        );
                         let pointer = ui.input(|i| i.pointer.interact_pos());
                         let over_widget = pointer
                             .map(|p| fav_rect.contains(p) || menu_rect.contains(p))
                             .unwrap_or(false);
+                        let over_check = pointer.map(|p| check_rect.contains(p)).unwrap_or(false);
 
-                        // Single click plays (matching the queue behaviour).
+                        // Click behaviour: plain click plays (matching the queue),
+                        // the checkbox toggles, Ctrl/Cmd toggles, Shift extends.
                         if row_resp.clicked() && !over_widget {
-                            action.play_track = Some(track.id);
+                            let modifiers = ui.input(|i| i.modifiers);
+                            if modifiers.shift && last_clicked_index.is_some() {
+                                let anchor = last_clicked_index.unwrap_or(idx);
+                                let (lo, hi) = if anchor <= idx { (anchor, idx) } else { (idx, anchor) };
+                                for i in lo..=hi {
+                                    if let Some(t) = tracks.get(i) {
+                                        selected_track_ids.insert(t.id);
+                                    }
+                                }
+                                *last_clicked_index = Some(idx);
+                            } else if modifiers.command || modifiers.ctrl || over_check {
+                                if !selected_track_ids.remove(&track.id) {
+                                    selected_track_ids.insert(track.id);
+                                }
+                                *last_clicked_index = Some(idx);
+                            } else {
+                                action.play_track = Some(track.id);
+                                *last_clicked_index = Some(idx);
+                            }
                         }
 
-                        // Column 1: Index Number or Hover Play Button
-                        if is_hovered {
-                            let play_icon_rect = Rect::from_center_size(Pos2::new(vis_rect.min.x + 14.0, cy), Vec2::new(14.0, 14.0));
+                        // Column 1: selection box, else hover play button, else index.
+                        if is_selected {
+                            paint_checkbox(&painter, check_rect.shrink(3.0), true, false, theme);
+                        } else if is_hovered {
+                            paint_checkbox(&painter, check_rect.shrink(3.0), false, false, theme);
+                            let play_icon_rect = Rect::from_center_size(Pos2::new(vis_rect.min.x + 40.0, cy), Vec2::new(14.0, 14.0));
                             let t1 = Pos2::new(play_icon_rect.min.x + 11.0, play_icon_rect.center().y);
                             let t2 = Pos2::new(play_icon_rect.min.x + 3.0, play_icon_rect.center().y - 5.5);
                             let t3 = Pos2::new(play_icon_rect.min.x + 3.0, play_icon_rect.center().y + 5.5);
@@ -338,7 +433,7 @@ impl<'a> SongsTable<'a> {
                             let num_text = format!("{}", idx + 1);
                             let num_col = if is_active { theme.accent_magenta } else { theme.text_muted };
                             painter.text(
-                                Pos2::new(vis_rect.min.x + 8.0, cy),
+                                Pos2::new(vis_rect.min.x + 34.0, cy),
                                 egui::Align2::LEFT_CENTER,
                                 &num_text,
                                 FontId::proportional(12.8),
@@ -448,6 +543,122 @@ impl<'a> SongsTable<'a> {
     }
 }
 
+/// Paint a small checkbox: filled with a tick when checked, a dash when
+/// indeterminate, otherwise an empty outline.
+fn paint_checkbox(
+    painter: &egui::Painter,
+    rect: Rect,
+    checked: bool,
+    indeterminate: bool,
+    theme: &Theme,
+) {
+    let radius = CornerRadius::same(4);
+    if checked || indeterminate {
+        painter.rect_filled(rect, radius, theme.accent_blue);
+        let c = rect.center();
+        if checked {
+            let s = rect.width() * 0.26;
+            painter.add(egui::Shape::line(
+                vec![
+                    Pos2::new(c.x - s, c.y + s * 0.05),
+                    Pos2::new(c.x - s * 0.25, c.y + s * 0.75),
+                    Pos2::new(c.x + s, c.y - s * 0.7),
+                ],
+                Stroke::new(1.7_f32, Color32::WHITE),
+            ));
+        } else {
+            painter.line_segment(
+                [
+                    Pos2::new(rect.min.x + rect.width() * 0.28, c.y),
+                    Pos2::new(rect.max.x - rect.width() * 0.28, c.y),
+                ],
+                Stroke::new(1.7_f32, Color32::WHITE),
+            );
+        }
+    } else {
+        painter.rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.2_f32, theme.text_muted),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+/// The context-sensitive action strip shown while tracks are multi-selected.
+fn render_bulk_bar(
+    ui: &mut Ui,
+    count: usize,
+    playlists: &[Playlist],
+    theme: &Theme,
+    action: &mut SongsTableAction,
+) {
+    egui::Frame::NONE
+        .fill(theme.bg_card)
+        .corner_radius(CornerRadius::same(8))
+        .stroke(Stroke::new(1.0_f32, theme.accent_blue))
+        .inner_margin(egui::Margin {
+            left: 10,
+            right: 10,
+            top: 6,
+            bottom: 6,
+        })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                ui.label(
+                    egui::RichText::new(format!("{count} selected"))
+                        .font(FontId::proportional(12.5))
+                        .strong()
+                        .color(theme.accent_blue),
+                );
+                ui.add_space(4.0);
+
+                if ui.button(egui::RichText::new("Play").font(FontId::proportional(12.0))).clicked() {
+                    action.play_selected = true;
+                }
+                if ui.button(egui::RichText::new("Play Next").font(FontId::proportional(12.0))).clicked() {
+                    action.queue_next_selected = true;
+                }
+                if ui.button(egui::RichText::new("Add to Queue").font(FontId::proportional(12.0))).clicked() {
+                    action.add_selected_to_queue = true;
+                }
+                if ui.button(egui::RichText::new("Favorite").font(FontId::proportional(12.0))).clicked() {
+                    action.favorite_selected = true;
+                }
+                if !playlists.is_empty() {
+                    ui.menu_button(
+                        egui::RichText::new("Add to Playlist").font(FontId::proportional(12.0)),
+                        |ui| {
+                            for pl in playlists {
+                                if ui.button(&pl.name).clicked() {
+                                    action.add_selected_to_playlist = Some(pl.id);
+                                    ui.close();
+                                }
+                            }
+                        },
+                    );
+                }
+                if ui
+                    .button(
+                        egui::RichText::new("Remove")
+                            .font(FontId::proportional(12.0))
+                            .color(theme.destructive),
+                    )
+                    .clicked()
+                {
+                    action.remove_selected = true;
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(egui::RichText::new("Clear").font(FontId::proportional(12.0))).clicked() {
+                        action.clear_selection = true;
+                    }
+                });
+            });
+        });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_grid_card(
     ui: &mut Ui,
@@ -458,6 +669,8 @@ fn render_grid_card(
     active_track_id: Option<TrackId>,
     favorite_track_ids: &HashSet<TrackId>,
     playlists: &[Playlist],
+    selected_track_ids: &mut HashSet<TrackId>,
+    last_clicked_index: &mut Option<usize>,
     artwork: &mut ArtworkService,
     ctx: &egui::Context,
     art_budget: &mut usize,
@@ -466,22 +679,43 @@ fn render_grid_card(
 ) {
     let is_cur = active_track_id == Some(track.id);
     let is_fav = favorite_track_ids.contains(&track.id);
+    let is_selected = selected_track_ids.contains(&track.id);
 
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::click());
     if resp.clicked() {
-        action.play_track = Some(track.id);
+        let modifiers = ui.input(|i| i.modifiers);
+        if modifiers.command || modifiers.ctrl || modifiers.shift {
+            if !selected_track_ids.remove(&track.id) {
+                selected_track_ids.insert(track.id);
+            }
+            *last_clicked_index = None;
+        } else {
+            action.play_track = Some(track.id);
+        }
     }
 
     let p = ui.painter_at(rect);
     let bg = if is_cur {
         theme.bg_card_active
-    } else if resp.hovered() {
+    } else if resp.hovered() || is_selected {
         theme.bg_card_hover
     } else {
         theme.bg_card
     };
     p.rect_filled(rect, CornerRadius::same(10), bg);
-    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0_f32, if is_cur { theme.accent_violet } else { theme.border_card }), egui::StrokeKind::Inside);
+    let stroke_col = if is_cur {
+        theme.accent_violet
+    } else if is_selected {
+        theme.accent_blue
+    } else {
+        theme.border_card
+    };
+    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0_f32, stroke_col), egui::StrokeKind::Inside);
+
+    if is_selected {
+        let cb = Rect::from_center_size(Pos2::new(rect.min.x + 18.0, rect.min.y + 18.0), Vec2::new(16.0, 16.0));
+        paint_checkbox(&p, cb, true, false, theme);
+    }
 
     let art_size = Vec2::new(card_w - 16.0, card_w - 16.0);
     let art_rect = Rect::from_min_size(Pos2::new(rect.min.x + 8.0, rect.min.y + 8.0), art_size);
@@ -539,29 +773,29 @@ fn render_track_context_menu(
     action: &mut SongsTableAction,
     theme: &Theme,
 ) {
-    if ui.button("▶ Play Now").clicked() {
+    if ui.button("Play Now").clicked() {
         action.play_track = Some(track.id);
         ui.close();
     }
-    if ui.button("⏭ Play Next").clicked() {
+    if ui.button("Play Next").clicked() {
         action.queue_next_track = Some(track.id);
         ui.close();
     }
-    if ui.button("➕ Add to Queue").clicked() {
+    if ui.button("Add to Queue").clicked() {
         action.add_to_queue = Some(track.id);
         ui.close();
     }
 
     ui.separator();
 
-    let fav_text = if is_fav { "💔 Remove from Favorites" } else { "♥ Add to Favorites" };
+    let fav_text = if is_fav { "Remove from Favorites" } else { "Add to Favorites" };
     if ui.button(fav_text).clicked() {
         action.toggle_favorite = Some(track.id);
         ui.close();
     }
 
     if !playlists.is_empty() {
-        ui.menu_button("📋 Add to Playlist", |ui| {
+        ui.menu_button("Add to Playlist", |ui| {
             for pl in playlists {
                 if ui.button(&pl.name).clicked() {
                     action.add_to_playlist = Some((track.id, pl.id));
@@ -573,26 +807,26 @@ fn render_track_context_menu(
 
     ui.separator();
 
-    if ui.button("📁 Open Containing Folder").clicked() {
+    if ui.button("Open Containing Folder").clicked() {
         if let Some(parent) = track.path.parent() {
             action.open_folder = Some(parent.to_path_buf());
         }
         ui.close();
     }
 
-    if ui.button("ℹ Track Properties").clicked() {
+    if ui.button("Track Properties").clicked() {
         action.show_properties = Some(track.id);
         ui.close();
     }
 
-    if ui.button("✏ Edit Song Info").clicked() {
+    if ui.button("Edit Song Info").clicked() {
         action.edit_track = Some(track.id);
         ui.close();
     }
 
     ui.separator();
 
-    if ui.button(egui::RichText::new("🗑 Remove from Library").color(theme.destructive)).clicked() {
+    if ui.button(egui::RichText::new("Remove from Library").color(theme.destructive)).clicked() {
         action.remove_track = Some(track.id);
         ui.close();
     }

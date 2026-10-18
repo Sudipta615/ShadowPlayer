@@ -139,6 +139,13 @@ pub fn draw_bar_chart(ui: &Ui, rect: Rect, color: Color32) {
         .paint_at(ui, fit_square(rect));
 }
 
+/// Funnel glyph marking rule-based ("smart") playlists.
+pub fn draw_filter(ui: &Ui, rect: Rect, color: Color32) {
+    egui::Image::new(egui::include_image!("../../assets/icons/filter.svg"))
+        .tint(color)
+        .paint_at(ui, fit_square(rect));
+}
+
 pub fn draw_speaker(ui: &Ui, rect: Rect, color: Color32, is_muted: bool) {
     let r = fit_square(rect);
     if is_muted {

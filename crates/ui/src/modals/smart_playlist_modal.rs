@@ -112,14 +112,14 @@ pub fn show_smart_playlist_editor(
                                         if ui
                                             .selectable_label(
                                                 is_sel,
-                                                egui::RichText::new(format!("✦ {}", sp.name))
+                                                egui::RichText::new(sp.name.clone())
                                                     .font(FontId::proportional(12.5)),
                                             )
                                             .clicked()
                                         {
                                             actions.open = Some(sp.id);
                                         }
-                                        if ui.small_button("✕").on_hover_text("Delete").clicked() {
+                                        if ui.small_button("Del").on_hover_text("Delete").clicked() {
                                             actions.delete = Some(sp.id);
                                         }
                                     });
@@ -169,7 +169,7 @@ pub fn show_smart_playlist_editor(
                         // AND / OR
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Match")
+                                egui::RichText::new("Match:")
                                     .font(FontId::proportional(12.0))
                                     .color(theme.text_secondary),
                             );
@@ -201,7 +201,7 @@ pub fn show_smart_playlist_editor(
                                         // Field
                                         egui::ComboBox::from_id_salt(("sf", i))
                                             .selected_text(rule.field.label())
-                                            .width(120.0)
+                                            .width(96.0)
                                             .show_ui(ui, |ui| {
                                                 for f in SmartField::ALL {
                                                     if ui
@@ -223,7 +223,7 @@ pub fn show_smart_playlist_editor(
                                         // Operator
                                         egui::ComboBox::from_id_salt(("so", i))
                                             .selected_text(rule.op.label())
-                                            .width(140.0)
+                                            .width(112.0)
                                             .show_ui(ui, |ui| {
                                                 for op in rule.field.operators() {
                                                     ui.selectable_value(&mut rule.op, *op, op.label());
@@ -236,11 +236,11 @@ pub fn show_smart_playlist_editor(
                                             ui.add(
                                                 egui::TextEdit::singleline(&mut rule.value)
                                                     .hint_text(hint)
-                                                    .desired_width(90.0),
+                                                    .desired_width(70.0),
                                             );
                                         }
 
-                                        if ui.small_button("🗑").on_hover_text("Remove rule").clicked() {
+                                        if ui.small_button("Del").on_hover_text("Remove rule").clicked() {
                                             remove = Some(i);
                                         }
                                     });
@@ -252,7 +252,7 @@ pub fn show_smart_playlist_editor(
                         }
 
                         ui.add_space(4.0);
-                        if ui.button("＋ Add rule").clicked() {
+                        if ui.button("+ Add rule").clicked() {
                             state.draft.rules.push(SmartRule::new(SmartField::Artist));
                             state.draft_dirty = true;
                         }
@@ -311,10 +311,10 @@ pub fn show_smart_playlist_editor(
                                     }
                                 });
                             if ui
-                                .selectable_value(&mut state.draft.sort_desc, false, "A→Z")
+                                .selectable_value(&mut state.draft.sort_desc, false, "A-Z")
                                 .clicked()
                                 || ui
-                                    .selectable_value(&mut state.draft.sort_desc, true, "Z→A")
+                                    .selectable_value(&mut state.draft.sort_desc, true, "Z-A")
                                     .clicked()
                             {
                                 state.draft_dirty = true;

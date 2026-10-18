@@ -222,7 +222,6 @@ impl LoudnessService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
 
     /// Write a minimal 16-bit mono PCM WAV containing a 1 kHz sine tone.
