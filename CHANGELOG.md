@@ -6,6 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-10-18
+
+### Added
+- **MPRIS2 / media-key integration (Linux)**:
+  - ShadowPlayer now appears on the D-Bus session bus as `org.mpris.MediaPlayer2.ShadowPlayer`, so the desktop shell, media keys, lock screens and tools like `playerctl` can play/pause, skip, seek, set shuffle/repeat and read the current track, position, volume and artwork.
+  - Transport commands are funnelled through a channel into the UI loop and the player state is published every frame, so the audio thread is never touched by D-Bus work.
+- **Smart playlists**:
+  - Rule-based, auto-updating playlists (field / operator / value) with *match all* or *match any*, an optional track limit and a sort order.
+  - Managed from a new **Smart Playlists** sidebar section and an editor with a live match preview.
+  - Stored as JSON rules in a new `smart_playlists` table (schema V2) and evaluated in SQL, so they stay fast on large libraries. Incomplete rules are ignored rather than matching nothing.
+- **Library-wide ReplayGain / EBU R128 scan**:
+  - **Settings → Tools → Library ReplayGain Scan** analyses every track that has no loudness data, in the background, with live progress and a Cancel button.
+  - Results feed both the library and the engine's on-disk loudness cache, so the existing Track/Album ReplayGain and EBU R128 loudness modes work library-wide. A small inter-track delay keeps the audio thread responsive on dual-core machines.
+- **Multi-select and bulk actions in the Songs table**:
+  - Checkbox column with a select-all header box (including an indeterminate state), Ctrl/Cmd-click to toggle, Shift-click to extend a range — while a plain click still plays the track.
+  - A bulk bar appears while tracks are selected: Play, Play Next, Add to Queue, Favorite, Add to Playlist, Remove and Clear. The selection survives tab switches and is pruned when tracks disappear.
+- **Stable track identity**:
+  - Every file now carries a cheap content fingerprint (size plus a hash of the first and last 64 KiB), stored in the new `tracks.content_hash` column (schema V3).
+  - Moving or renaming a file no longer orphans it: the scan re-links the existing row, preserving play counts, favourites, playlist membership, lyrics and artwork. Applies to both folder scans and single-file imports.
+  - Relinking only happens when the fingerprint matches exactly one row and the old file is gone, so duplicated copies are still indexed separately.
+
+### Changed
+- Replaced the symbol/emoji glyphs that the bundled fonts cannot render (they appeared as empty boxes in buttons, modal titles and headers) with plain text or vector-drawn equivalents, including a new funnel icon marking smart playlists.
+
+---
+
 ## [0.3.0] - 2026-10-18
 
 ### Added
