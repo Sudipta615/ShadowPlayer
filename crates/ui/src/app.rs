@@ -818,6 +818,22 @@ impl eframe::App for ShadowPlayerApp {
                         _ => {},
                     }
                 }
+                if std::env::var("SHADOWPLAYER_EVAL_BASS").is_ok() {
+                    {
+                        let st = &mut self.dsp_state.settings_tab;
+                        st.bass_management.enabled = true;
+                        st.lfe.enabled = true;
+                        st.lfe.crossover_hz = Some(120.0);
+                    }
+                    let bass = self.dsp_state.settings_tab.bass_management.clone();
+                    let lfe = self.dsp_state.settings_tab.lfe.clone();
+                    let a = crate::components::settings_tab::SettingsTabActions {
+                        bass_management_changed: Some(bass),
+                        lfe_changed: Some(lfe),
+                        ..Default::default()
+                    };
+                    self.dsp_state.handle_settings_actions(&self.session, &a);
+                }
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_SELECT").is_ok() {
                 let n: usize = std::env::var("SHADOWPLAYER_EVAL_SELECT")

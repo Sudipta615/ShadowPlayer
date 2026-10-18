@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use config::{
-    AudioBackend, CrossfadeCurve, FallbackPolicy, LoudnessMode, PrecisionMode, ResamplerQuality,
-    SampleRatePolicy, SpatialQuality, SpeedMode, TransitionMode, VolumeMode,
+    AudioBackend, BassManagementConfig, ChannelMixConfig, ChannelMixTemplate, CrossoverFilterType,
+    CrossoverSlope, CrossfadeCurve, FallbackPolicy, LfeConfig, LoudnessMode, PrecisionMode,
+    ResamplerQuality, SampleRatePolicy, SpatialQuality, SpeedMode, TransitionMode, VolumeMode,
 };
 use domain::ids::ScanRootId;
 use domain::models::ScanRoot;
@@ -88,6 +89,11 @@ pub struct SettingsTabState {
     // so the engine's own persisted setting is never clobbered at startup.
     pub precision_mode: Option<PrecisionMode>,
 
+    // Multichannel: subwoofer integration and up/downmix.
+    pub bass_management: BassManagementConfig,
+    pub lfe: LfeConfig,
+    pub channel_mix: ChannelMixConfig,
+
     // Spatial
     pub spatial_quality: SpatialQuality,
     pub hrtf_profile: String,
@@ -170,6 +176,9 @@ impl Default for SettingsTabState {
             resampler_quality: ResamplerQuality::HighQuality,
             fallback_policy: FallbackPolicy::Allow,
             precision_mode: None,
+            bass_management: BassManagementConfig::default(),
+            lfe: LfeConfig::default(),
+            channel_mix: ChannelMixConfig::default(),
 
             spatial_quality: SpatialQuality::High,
             hrtf_profile: String::new(),
@@ -249,6 +258,13 @@ pub struct PersistentSettingsTabState {
     #[serde(default)]
     pub precision_mode: Option<PrecisionMode>,
 
+    #[serde(default)]
+    pub bass_management: BassManagementConfig,
+    #[serde(default)]
+    pub lfe: LfeConfig,
+    #[serde(default)]
+    pub channel_mix: ChannelMixConfig,
+
     pub spatial_quality: SpatialQuality,
     pub hrtf_profile: String,
     pub listener_smoothing_ms: f32,
@@ -289,6 +305,9 @@ impl From<&SettingsTabState> for PersistentSettingsTabState {
             resampler_quality: s.resampler_quality,
             fallback_policy: s.fallback_policy,
             precision_mode: s.precision_mode,
+            bass_management: s.bass_management.clone(),
+            lfe: s.lfe.clone(),
+            channel_mix: s.channel_mix.clone(),
             spatial_quality: s.spatial_quality,
             hrtf_profile: s.hrtf_profile.clone(),
             listener_smoothing_ms: s.listener_smoothing_ms,
@@ -328,6 +347,9 @@ impl PersistentSettingsTabState {
         s.resampler_quality = self.resampler_quality;
         s.fallback_policy = self.fallback_policy;
         s.precision_mode = self.precision_mode;
+        s.bass_management = self.bass_management.clone();
+        s.lfe = self.lfe.clone();
+        s.channel_mix = self.channel_mix.clone();
         s.spatial_quality = self.spatial_quality;
         s.hrtf_profile = self.hrtf_profile.clone();
         s.listener_smoothing_ms = self.listener_smoothing_ms;
@@ -445,6 +467,9 @@ pub struct SettingsTabActions {
     pub resampler_quality_changed: Option<ResamplerQuality>,
     pub fallback_policy_changed: Option<FallbackPolicy>,
     pub precision_mode_changed: Option<PrecisionMode>,
+    pub bass_management_changed: Option<BassManagementConfig>,
+    pub lfe_changed: Option<LfeConfig>,
+    pub channel_mix_changed: Option<ChannelMixConfig>,
     pub open_asio_panel: bool,
     pub clear_output_profile: bool,
 
@@ -1567,6 +1592,290 @@ fn render_mixbus_category(
                 }
             },
         );
+    });
+
+    // Card 6: Bass Management (subwoofer integration)
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_equalizer_sliders(ui, r, c),
+            "Bass Management & Subwoofer Integration",
+            "Route low frequencies to a subwoofer with a proper crossover instead of relying on speaker roll-off",
+            None,
+            theme,
+        );
+
+        let mut changed = false;
+
+        setting_item(
+            ui,
+            "Bass Management",
+            "Enable a high-pass on the mains plus a matching low-pass for the subwoofer",
+            theme,
+            |ui| {
+                let mut on = state.bass_management.enabled;
+                if toggle_switch(ui, &mut on, theme) {
+                    state.bass_management.enabled = on;
+                    changed = true;
+                }
+            },
+        );
+
+        if state.bass_management.enabled {
+            setting_item(
+                ui,
+                "Crossover Frequency",
+                "Hand-off point between mains and subwoofer (60–120 Hz is the usual home-theatre range)",
+                theme,
+                |ui| {
+                    let mut v = state.bass_management.crossover_hz;
+                    if dual_tone_slider(ui, &mut v, 40.0..=200.0, 1.0, 140.0, theme) {
+                        state.bass_management.crossover_hz = v;
+                        changed = true;
+                    }
+                    badge_label(ui, format!("{:.0} Hz", state.bass_management.crossover_hz), theme);
+                },
+            );
+
+            setting_item(
+                ui,
+                "Crossover Slope",
+                "Steeper slopes protect the mains but add group delay",
+                theme,
+                |ui| {
+                    let options = [
+                        (CrossoverSlope::Db12, "12 dB/oct"),
+                        (CrossoverSlope::Db24, "24 dB/oct"),
+                        (CrossoverSlope::Db48, "48 dB/oct"),
+                    ];
+                    if segment_picker(ui, &mut state.bass_management.slope, &options, theme) {
+                        changed = true;
+                    }
+                },
+            );
+
+            setting_item(
+                ui,
+                "Filter Topology",
+                "Linkwitz-Riley sums flat at the crossover; Butterworth is −3 dB there",
+                theme,
+                |ui| {
+                    let options = [
+                        (CrossoverFilterType::LinkwitzRiley, "Linkwitz-Riley"),
+                        (CrossoverFilterType::Butterworth, "Butterworth"),
+                    ];
+                    if segment_picker(ui, &mut state.bass_management.filter_type, &options, theme) {
+                        changed = true;
+                    }
+                },
+            );
+
+            setting_item(
+                ui,
+                "Filter Q",
+                "1/√2 ≈ 0.707 is the Butterworth default",
+                theme,
+                |ui| {
+                    let mut v = state.bass_management.q;
+                    if dual_tone_slider(ui, &mut v, 0.4..=1.4, 0.01, 120.0, theme) {
+                        state.bass_management.q = v;
+                        changed = true;
+                    }
+                    badge_label(ui, format!("{:.3}", state.bass_management.q), theme);
+                },
+            );
+
+            setting_item(
+                ui,
+                "Mains High-Pass",
+                "Also high-pass the main speakers. Disable to high-pass only the sub path",
+                theme,
+                |ui| {
+                    let mut on = state.bass_management.mains_highpass_enabled;
+                    if toggle_switch(ui, &mut on, theme) {
+                        state.bass_management.mains_highpass_enabled = on;
+                        changed = true;
+                    }
+                },
+            );
+
+            setting_item(
+                ui,
+                "Subwoofer Distance/Delay",
+                "Align the sub's arrival with the mains (0–50 ms; 1 ms ≈ 34 cm)",
+                theme,
+                |ui| {
+                    let mut v = state.bass_management.sub_delay_ms;
+                    if dual_tone_slider(ui, &mut v, 0.0..=50.0, 0.1, 130.0, theme) {
+                        state.bass_management.sub_delay_ms = v;
+                        changed = true;
+                    }
+                    badge_label(ui, format!("{:.1} ms", state.bass_management.sub_delay_ms), theme);
+                },
+            );
+
+            setting_item(
+                ui,
+                "Subwoofer Phase",
+                "Continuously trim the sub's phase for the smoothest crossover sum",
+                theme,
+                |ui| {
+                    let mut v = state.bass_management.sub_phase_degrees;
+                    if dual_tone_slider(ui, &mut v, 0.0..=180.0, 1.0, 130.0, theme) {
+                        state.bass_management.sub_phase_degrees = v;
+                        changed = true;
+                    }
+                    badge_label(ui, format!("{:.0}°", state.bass_management.sub_phase_degrees), theme);
+                },
+            );
+
+            setting_item(
+                ui,
+                "Subwoofer Polarity",
+                "Invert the sub's polarity (use instead of, not with, coarse phase)",
+                theme,
+                |ui| {
+                    let mut inv = state.bass_management.sub_polarity_invert;
+                    if toggle_switch(ui, &mut inv, theme) {
+                        state.bass_management.sub_polarity_invert = inv;
+                        changed = true;
+                    }
+                },
+            );
+        }
+
+        if changed {
+            actions.bass_management_changed = Some(state.bass_management.clone());
+        }
+    });
+
+    // Card 7: LFE channel
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_equalizer_sliders(ui, r, c),
+            "LFE Channel",
+            "Gain and low-pass for content that already carries a dedicated .1 channel",
+            None,
+            theme,
+        );
+
+        let mut changed = false;
+
+        setting_item(
+            ui,
+            "LFE Processing",
+            "Apply gain and an optional low-pass to LFE-role channels",
+            theme,
+            |ui| {
+                let mut on = state.lfe.enabled;
+                if toggle_switch(ui, &mut on, theme) {
+                    state.lfe.enabled = on;
+                    changed = true;
+                }
+            },
+        );
+
+        if state.lfe.enabled {
+            setting_item(
+                ui,
+                "LFE Gain",
+                "Trim the .1 channel relative to the other speakers",
+                theme,
+                |ui| {
+                    let mut v = state.lfe.gain_db;
+                    if dual_tone_slider(ui, &mut v, -20.0..=20.0, 0.5, 140.0, theme) {
+                        state.lfe.gain_db = v;
+                        changed = true;
+                    }
+                    badge_label(ui, format!("{:+.1} dB", state.lfe.gain_db), theme);
+                },
+            );
+
+            let mut lp_on = state.lfe.crossover_hz.is_some();
+            let mut lp_hz = state.lfe.crossover_hz.unwrap_or(120.0);
+            setting_item(
+                ui,
+                "LFE Low-Pass",
+                "Standard LFE content is band-limited to 120 Hz",
+                theme,
+                |ui| {
+                    if toggle_switch(ui, &mut lp_on, theme) {
+                        changed = true;
+                    }
+                    if lp_on {
+                        let mut hz = lp_hz;
+                        if dual_tone_slider(ui, &mut hz, 40.0..=200.0, 1.0, 130.0, theme) {
+                            lp_hz = hz;
+                            changed = true;
+                        }
+                        badge_label(ui, format!("{:.0} Hz", lp_hz), theme);
+                    }
+                },
+            );
+            if changed {
+                state.lfe.crossover_hz = if lp_on { Some(lp_hz) } else { None };
+            }
+        }
+
+        if changed {
+            actions.lfe_changed = Some(state.lfe.clone());
+        }
+    });
+
+    // Card 8: Up / Down Mixing
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_equalizer_sliders(ui, r, c),
+            "Up / Down Mixing",
+            "Convert between stereo and multichannel with a deterministic, spec-based matrix",
+            None,
+            theme,
+        );
+
+        let mut changed = false;
+
+        setting_item(
+            ui,
+            "Channel Mapping",
+            "Identity by default; ITU-R BS.775 folds multichannel to stereo and can build 5.1/7.1 from stereo",
+            theme,
+            |ui| {
+                let mut on = state.channel_mix.enabled;
+                if toggle_switch(ui, &mut on, theme) {
+                    state.channel_mix.enabled = on;
+                    changed = true;
+                }
+            },
+        );
+
+        if state.channel_mix.enabled {
+            setting_item(
+                ui,
+                "Mapping Template",
+                "Choose the up-mix or down-mix matrix applied at the output boundary",
+                theme,
+                |ui| {
+                    let options = [
+                        (ChannelMixTemplate::ItuBs775, "ITU-R BS.775"),
+                        (ChannelMixTemplate::StereoToFiveOne, "Stereo → 5.1"),
+                        (ChannelMixTemplate::StereoToSevenOne, "Stereo → 7.1"),
+                        (ChannelMixTemplate::StereoToSevenPointOneFour, "Stereo → 7.1.4"),
+                        (ChannelMixTemplate::FiveOneToStereo, "5.1 → Stereo"),
+                        (ChannelMixTemplate::SevenOneToStereo, "7.1 → Stereo"),
+                        (ChannelMixTemplate::SevenPointOneFourToStereo, "7.1.4 → Stereo"),
+                    ];
+                    if segment_picker(ui, &mut state.channel_mix.template, &options, theme) {
+                        changed = true;
+                    }
+                },
+            );
+        }
+
+        if changed {
+            actions.channel_mix_changed = Some(state.channel_mix.clone());
+        }
     });
 }
 

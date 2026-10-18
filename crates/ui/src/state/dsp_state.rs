@@ -79,6 +79,9 @@ impl DspState {
         if let Some(mode) = st.precision_mode {
             session.set_precision_mode(mode);
         }
+        session.set_bass_management(st.bass_management.clone());
+        session.set_lfe_config(st.lfe.clone());
+        session.set_channel_mix(st.channel_mix.clone());
         session.set_spatial_quality(st.spatial_quality);
         if !st.hrtf_profile.is_empty() {
             session.set_hrtf_profile(st.hrtf_profile.clone());
@@ -130,6 +133,9 @@ impl DspState {
         if let Some(q) = s.resampler_quality_changed { session.set_resampler_quality(q); }
         if let Some(p) = s.fallback_policy_changed { session.set_fallback_policy(p); }
         if let Some(m) = s.precision_mode_changed { session.set_precision_mode(m); }
+        if let Some(ref c) = s.bass_management_changed { session.set_bass_management(c.clone()); }
+        if let Some(ref c) = s.lfe_changed { session.set_lfe_config(c.clone()); }
+        if let Some(ref c) = s.channel_mix_changed { session.set_channel_mix(c.clone()); }
         if s.open_asio_panel { session.open_asio_control_panel(); }
         if s.clear_output_profile { session.clear_output_profile(); }
         if let Some(q) = s.spatial_quality_changed { session.set_spatial_quality(q); }
