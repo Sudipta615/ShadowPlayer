@@ -39,6 +39,12 @@ pub struct EngineHandle {
     /// the engine thread on the telemetry cadence so a UI can read them
     /// without touching the graph. See [`Self::last_graph_build_ms`].
     graph_build: Arc<GraphBuildStats>,
+    /// Read-only view of the hosted CLAP plugin, plus the last library probe.
+    clap_view: Arc<ArcSwap<crate::dsp::clap_rack::ClapRackView>>,
+    /// Where `save_clap_state` leaves the plugin's state blob. Shared with the
+    /// engine rather than sent over a channel because a plugin's state can be
+    /// megabytes and only the caller wants it.
+    clap_state: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
 }
 
 impl std::fmt::Debug for EngineHandle {
@@ -62,6 +68,8 @@ impl EngineHandle {
         meters: Arc<crate::dsp::meters::ProfessionalMeters>,
         wake: Arc<crate::engine::EngineWake>,
         graph_build: Arc<GraphBuildStats>,
+        clap_view: Arc<ArcSwap<crate::dsp::clap_rack::ClapRackView>>,
+        clap_state: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
     ) -> Self {
         Self {
             cmd_tx,
@@ -73,6 +81,8 @@ impl EngineHandle {
             meters,
             wake,
             graph_build: Arc::clone(&graph_build),
+            clap_view,
+            clap_state,
         }
     }
 
@@ -837,6 +847,49 @@ impl EngineHandle {
     /// Runtime unload of the active CLAP plugin.
     pub fn unload_clap_plugin(&self) {
         let _ = self.send_command(EngineCommand::UnloadClapPlugin);
+    }
+
+    /// The hosted CLAP plugin — and whatever the last library probe found.
+    ///
+    /// Read straight out of shared memory rather than asked for, so a UI can
+    /// call it on every frame.
+    pub fn clap_view(&self) -> crate::dsp::clap_rack::ClapRackView {
+        (**self.clap_view.load()).clone()
+    }
+
+    /// Ask the engine to re-read the hosted plugin and republish
+    /// [`Self::clap_view`].
+    ///
+    /// Only needed after something the engine did not initiate — a graph
+    /// rebuilt from persisted config, for instance.
+    pub fn refresh_clap_plugin(&self) {
+        let _ = self.send_command(EngineCommand::RefreshClapPlugin);
+    }
+
+    /// Load the plugins inside a library file *without* loading any of them,
+    /// so a host can offer a choice. The result lands in [`Self::clap_view`].
+    pub fn probe_clap_library(&self, path: impl AsRef<std::path::Path>) {
+        let _ = self.send_command(EngineCommand::ProbeClapLibrary {
+            path: path.as_ref().to_string_lossy().to_string(),
+        });
+    }
+
+    /// Capture the hosted plugin's full state. The bytes land in
+    /// [`Self::take_clap_state`] when the engine has them.
+    pub fn save_clap_state(&self) {
+        let _ = self.send_command(EngineCommand::SaveClapState);
+    }
+
+    /// Take the state blob left by [`Self::save_clap_state`], if it has
+    /// arrived. The slot is emptied, so a stale blob is never mistaken for one
+    /// captured now.
+    pub fn take_clap_state(&self) -> Option<Vec<u8>> {
+        self.clap_state.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    /// Restore a state blob captured earlier.
+    pub fn load_clap_state(&self, bytes: Vec<u8>) {
+        let _ = self.send_command(EngineCommand::LoadClapState { bytes });
     }
 
     // ── Room & headphone correction ─────────────────────────

@@ -1,0 +1,21 @@
+[package]
+name = "clap-fixture-plugin"
+version = "0.4.0"
+edition = "2021"
+publish = false
+description = "A tiny CLAP plugin used only by this repository's tests and eval hooks."
+
+[lib]
+# A CLAP plugin *is* a dynamic library: the host opens it with `dlopen` and
+# looks for the `clap_entry` symbol, so the fixture has to be a cdylib. Nothing
+# links against it — the host-side tests open the built file at runtime, which
+# is also the only way to test the ABI honestly.
+crate-type = ["cdylib"]
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+# Generated bindings for the CLAP C ABI: structs and function-pointer types
+# only, no build script and no C compiler.
+clap-sys = "0.5"

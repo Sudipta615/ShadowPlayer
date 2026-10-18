@@ -5,7 +5,12 @@ edition = "2021"
 
 [dependencies]
 domain = { path = "../domain" }
-engine = { package = "audio-engine", path = "../engine" }
+# `clap-host` is enabled here rather than left to each front end: hosting CLAP
+# plugins is a capability of the player, not an experiment, and the rack is only
+# real if the UI can reach it. Enabling it anywhere in the graph enables it
+# everywhere, so this is the one place that decides it. Costs `clap-sys`
+# (generated C ABI bindings, no build script) and `libloading`.
+engine = { package = "audio-engine", path = "../engine", features = ["clap-host"] }
 config = { package = "config", path = "../engine/crates/config" }
 crossbeam = "0.8"
 log = "0.4"

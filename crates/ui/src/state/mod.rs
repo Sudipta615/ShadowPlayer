@@ -1,5 +1,6 @@
 pub mod app_state;
 pub mod chain_preset;
+pub mod clap_rack;
 pub mod dsp_state;
 pub mod library_state;
 pub mod sleep_timer;
@@ -7,6 +8,7 @@ pub mod telemetry_state;
 
 pub use app_state::{AppState, VisualizerMode};
 pub use chain_preset::{ChainEq, ChainPreset};
+pub use clap_rack::{ClapCardSummary, ClapRackPreset, ClapRackState};
 pub use dsp_state::DspState;
 pub use library_state::LibraryState;
 pub use sleep_timer::{SleepTimer, SleepTimerMode};

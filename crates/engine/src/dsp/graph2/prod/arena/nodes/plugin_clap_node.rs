@@ -31,25 +31,33 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
 #[cfg(feature = "clap-host")]
 use clap_sys::events::{
-    clap_event_header, clap_event_param_value, clap_input_events, CLAP_CORE_EVENT_SPACE_ID,
-    CLAP_EVENT_PARAM_VALUE,
+    clap_event_header, clap_event_param_value, clap_input_events, clap_output_events,
+    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
 };
 #[cfg(feature = "clap-host")]
-use clap_sys::ext::params::{clap_plugin_params, CLAP_EXT_PARAMS};
+use clap_sys::ext::params::{
+    clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_BYPASS,
+    CLAP_PARAM_IS_ENUM, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_PERIODIC, CLAP_PARAM_IS_READONLY,
+    CLAP_PARAM_IS_STEPPED,
+};
 #[cfg(feature = "clap-host")]
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
+#[cfg(feature = "clap-host")]
+use clap_sys::string_sizes::{CLAP_NAME_SIZE, CLAP_PATH_SIZE};
 #[cfg(feature = "clap-host")]
 use clap_sys::factory::plugin_factory::{clap_plugin_factory, CLAP_PLUGIN_FACTORY_ID};
 #[cfg(feature = "clap-host")]
 use clap_sys::host::clap_host;
 #[cfg(feature = "clap-host")]
-use clap_sys::plugin::clap_plugin;
+use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 #[cfg(feature = "clap-host")]
 use clap_sys::process::clap_process;
 #[cfg(feature = "clap-host")]
 use clap_sys::stream::{clap_istream, clap_ostream};
 #[cfg(feature = "clap-host")]
 use clap_sys::version::CLAP_VERSION;
+
+use crate::dsp::clap_rack::{ClapParamInfo, ClapPluginInfo, ClapRackReport};
 
 /// A thread-safe handle keeping the dynamically loaded plugin library in memory.
 #[cfg(feature = "clap-host")]
@@ -69,6 +77,10 @@ struct ClapInstance {
     _library: Arc<ClapLibrary>,
     plugin: *const clap_plugin,
     active: bool,
+    /// Whether `start_processing` has been called and not yet undone. CLAP
+    /// requires the pair around `activate`/`deactivate`, and a well-behaved
+    /// plugin answers `process` with silence until it has been started.
+    processing: bool,
     _sample_rate: f64,
     _max_frames: usize,
     in_channel_data: [*mut f32; 2],
@@ -87,6 +99,11 @@ impl Drop for ClapInstance {
         if !self.plugin.is_null() {
             unsafe {
                 let p = &*self.plugin;
+                if self.processing {
+                    if let Some(stop) = p.stop_processing {
+                        stop(self.plugin);
+                    }
+                }
                 if self.active {
                     if let Some(deactivate) = p.deactivate {
                         deactivate(self.plugin);
@@ -97,6 +114,27 @@ impl Drop for ClapInstance {
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "clap-host")]
+/// One `param_value` event, as a plugin expects to receive it.
+fn param_event(id: u32, value: f64) -> clap_event_param_value {
+    clap_event_param_value {
+        header: clap_event_header {
+            size: std::mem::size_of::<clap_event_param_value>() as u32,
+            time: 0,
+            space_id: CLAP_CORE_EVENT_SPACE_ID,
+            type_: CLAP_EVENT_PARAM_VALUE,
+            flags: 0,
+        },
+        param_id: id,
+        cookie: std::ptr::null_mut(),
+        note_id: -1,
+        port_index: 0,
+        channel: -1,
+        key: -1,
+        value,
     }
 }
 
@@ -179,6 +217,8 @@ pub struct ClapPluginHostNode {
     sample_rate: f32,
     enabled: bool,
     latency_samples: u32,
+    /// The library this instance came from, for display and for re-loading.
+    source_path: Option<String>,
     #[cfg(feature = "clap-host")]
     instance: Option<ClapInstance>,
     #[cfg(feature = "clap-host")]
@@ -233,6 +273,7 @@ impl ClapPluginHostNode {
                 sample_rate,
                 enabled: true,
                 latency_samples: 0,
+                source_path: None,
                 instance: None,
                 host_descriptor,
             }
@@ -244,6 +285,7 @@ impl ClapPluginHostNode {
                 sample_rate,
                 enabled: true,
                 latency_samples: 0,
+                source_path: None,
             }
         }
     }
@@ -382,6 +424,26 @@ impl ClapPluginHostNode {
             return Err("Plugin activate() returned false".to_string());
         }
 
+        // A conforming plugin stays silent until it is told processing has
+        // started, so activating without this would host a mute plugin.
+        let processing = unsafe {
+            match plugin.start_processing {
+                Some(start) => start(plugin_ptr),
+                None => true,
+            }
+        };
+        if !processing {
+            unsafe {
+                if let Some(deactivate) = plugin.deactivate {
+                    deactivate(plugin_ptr);
+                }
+                if let Some(destroy) = plugin.destroy {
+                    destroy(plugin_ptr);
+                }
+            }
+            return Err("Plugin start_processing() returned false".to_string());
+        }
+
         let params_ext = unsafe {
             if let Some(get_ext) = plugin.get_extension {
                 get_ext(plugin_ptr, CLAP_EXT_PARAMS.as_ptr()) as *const clap_plugin_params
@@ -403,10 +465,13 @@ impl ClapPluginHostNode {
             _entry: entry_ptr,
         });
 
+        self.source_path = Some(path.to_string_lossy().to_string());
+
         self.instance = Some(ClapInstance {
             _library: lib_arc,
             plugin: plugin_ptr,
             active: true,
+            processing: true,
             _sample_rate: self.sample_rate as f64,
             _max_frames: MAX_AUDIO_BLOCK_FRAMES,
             in_channel_data: [std::ptr::null_mut(); 2],
@@ -429,34 +494,350 @@ impl ClapPluginHostNode {
         self.enabled = enabled;
     }
 
-    /// Set a parameter value by ID.
-    pub fn set_param(&mut self, _id: u32, _value: f64) {
+    /// Whether a plugin is currently instantiated.
+    pub fn is_loaded(&self) -> bool {
         #[cfg(feature = "clap-host")]
-        if let Some(ref mut inst) = self.instance {
-            let ev = clap_event_param_value {
-                header: clap_event_header {
-                    size: std::mem::size_of::<clap_event_param_value>() as u32,
-                    time: 0,
-                    space_id: CLAP_CORE_EVENT_SPACE_ID,
-                    type_: CLAP_EVENT_PARAM_VALUE,
-                    flags: 0,
-                },
-                param_id: _id,
-                cookie: std::ptr::null_mut(),
-                note_id: -1,
-                port_index: 0,
-                channel: -1,
-                key: -1,
-                value: _value,
+        {
+            self.instance.is_some()
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            false
+        }
+    }
+
+    /// The dynamic library this node was loaded from.
+    pub fn source_path(&self) -> Option<&str> {
+        self.source_path.as_deref()
+    }
+
+    /// The plugin's own descriptor, read from the live instance.
+    pub fn describe(&self) -> Option<ClapPluginInfo> {
+        #[cfg(feature = "clap-host")]
+        {
+            let inst = self.instance.as_ref()?;
+            if inst.plugin.is_null() {
+                return None;
+            }
+            let desc_ptr = unsafe { (*inst.plugin).desc };
+            if desc_ptr.is_null() {
+                return None;
+            }
+            Some(plugin_info_from(unsafe { &*desc_ptr }))
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            None
+        }
+    }
+
+    /// Every parameter the plugin exposes, with the value it reports.
+    ///
+    /// Must run on a non-audio thread: the CLAP `params` extension reserves
+    /// `get_info` and `get_value` for the host's main thread, which is the
+    /// engine thread that called `load_plugin`.
+    pub fn param_infos(&self) -> Vec<ClapParamInfo> {
+        #[cfg(feature = "clap-host")]
+        {
+            let mut out = Vec::new();
+            let Some(inst) = self.instance.as_ref() else {
+                return out;
             };
-            inst.pending_param_events.push(ev);
+            if inst.params_ext.is_null() || inst.plugin.is_null() {
+                return out;
+            }
+            let ext = unsafe { &*inst.params_ext };
+            let Some(count) = ext.count else {
+                return out;
+            };
+            let total = unsafe { count(inst.plugin) };
+
+            for index in 0..total {
+                let mut raw = clap_param_info {
+                    id: 0,
+                    flags: 0,
+                    cookie: std::ptr::null_mut(),
+                    name: [0; CLAP_NAME_SIZE],
+                    module: [0; CLAP_PATH_SIZE],
+                    min_value: 0.0,
+                    max_value: 0.0,
+                    default_value: 0.0,
+                };
+                let have_info = match ext.get_info {
+                    Some(get_info) => unsafe { get_info(inst.plugin, index, &mut raw) },
+                    None => false,
+                };
+                if !have_info {
+                    continue;
+                }
+
+                let mut value = raw.default_value;
+                if let Some(get_value) = ext.get_value {
+                    let mut reported = 0.0f64;
+                    if unsafe { get_value(inst.plugin, raw.id, &mut reported) } {
+                        value = reported;
+                    }
+                }
+
+                // The plugin renders its own value: for an enumeration that is
+                // the name of the mode, which a bare number cannot convey.
+                let mut value_text = String::new();
+                if let Some(to_text) = ext.value_to_text {
+                    let mut buffer = [0 as c_char; CLAP_NAME_SIZE];
+                    let wrote = unsafe {
+                        to_text(
+                            inst.plugin,
+                            raw.id,
+                            value,
+                            buffer.as_mut_ptr(),
+                            buffer.len() as u32,
+                        )
+                    };
+                    if wrote {
+                        value_text = cstr_buf_to_string(&buffer);
+                    }
+                }
+
+                out.push(ClapParamInfo {
+                    id: raw.id,
+                    name: cstr_buf_to_string(&raw.name),
+                    module: cstr_buf_to_string(&raw.module),
+                    min: raw.min_value,
+                    max: raw.max_value,
+                    default: raw.default_value,
+                    value,
+                    value_text,
+                    is_stepped: raw.flags & CLAP_PARAM_IS_STEPPED != 0,
+                    is_periodic: raw.flags & CLAP_PARAM_IS_PERIODIC != 0,
+                    is_readonly: raw.flags & CLAP_PARAM_IS_READONLY != 0,
+                    is_hidden: raw.flags & CLAP_PARAM_IS_HIDDEN != 0,
+                    is_bypass: raw.flags & CLAP_PARAM_IS_BYPASS != 0,
+                    is_enum: raw.flags & CLAP_PARAM_IS_ENUM != 0,
+                });
+            }
+            out
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            Vec::new()
+        }
+    }
+
+    /// The plugin's own text for a value, for enumeration and unit labels.
+    pub fn param_text(&self, id: u32, value: f64) -> Option<String> {
+        #[cfg(feature = "clap-host")]
+        {
+            let inst = self.instance.as_ref()?;
+            if inst.params_ext.is_null() || inst.plugin.is_null() {
+                return None;
+            }
+            let ext = unsafe { &*inst.params_ext };
+            let to_text = ext.value_to_text?;
+            let mut buffer = [0 as c_char; CLAP_NAME_SIZE];
+            let ok = unsafe {
+                to_text(
+                    inst.plugin,
+                    id,
+                    value,
+                    buffer.as_mut_ptr(),
+                    CLAP_NAME_SIZE as u32,
+                )
+            };
+            if ok {
+                return Some(cstr_buf_to_string(&buffer));
+            }
+            None
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            let _ = (id, value);
+            None
+        }
+    }
+
+    /// Whether the plugin implements the `state` extension.
+    pub fn has_state(&self) -> bool {
+        #[cfg(feature = "clap-host")]
+        {
+            self.instance
+                .as_ref()
+                .is_some_and(|inst| !inst.state_ext.is_null())
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            false
+        }
+    }
+
+    /// Everything a host needs to draw the plugin rack.
+    pub fn rack_report(&self) -> ClapRackReport {
+        ClapRackReport {
+            plugin: self.describe(),
+            params: self.param_infos(),
+            path: self.source_path.clone(),
+            bypassed: !self.enabled,
+            has_state: self.has_state(),
+            latency_samples: self.latency_samples,
+            error: None,
+        }
+    }
+
+    /// Enumerate the plugins inside a CLAP library without keeping it loaded.
+    ///
+    /// A host must load the library to ask what it contains, but it need not
+    /// instantiate anything: the factory describes every plugin up front. The
+    /// library is unloaded again before returning, so probing a folder costs
+    /// nothing but the probe.
+    #[cfg(feature = "clap-host")]
+    pub fn discover(path: &Path) -> Result<Vec<ClapPluginInfo>, String> {
+        let lib = unsafe {
+            libloading::Library::new(path)
+                .map_err(|e| format!("Failed to dlopen CLAP library: {e}"))?
+        };
+
+        let entry_ptr: *const clap_plugin_entry = unsafe {
+            let sym: libloading::Symbol<*const clap_plugin_entry> = lib
+                .get(b"clap_entry\0")
+                .map_err(|e| format!("Missing clap_entry symbol: {e}"))?;
+            *sym
+        };
+        if entry_ptr.is_null() {
+            return Err("clap_entry symbol pointer is null".to_string());
+        }
+        let entry = unsafe { &*entry_ptr };
+
+        let c_path = CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|e| format!("Invalid path string: {e}"))?;
+        let init_ok = unsafe {
+            match entry.init {
+                Some(init) => init(c_path.as_ptr()),
+                None => false,
+            }
+        };
+        if !init_ok {
+            return Err("CLAP entry init() returned false".to_string());
+        }
+
+        // Every exit from here on must run `deinit`, because `init` succeeded.
+        let discovered = (|| -> Result<Vec<ClapPluginInfo>, String> {
+            let factory_ptr = unsafe {
+                match entry.get_factory {
+                    Some(get_factory) => get_factory(CLAP_PLUGIN_FACTORY_ID.as_ptr()),
+                    None => std::ptr::null(),
+                }
+            };
+            if factory_ptr.is_null() {
+                return Err("CLAP factory is null".to_string());
+            }
+            let factory = unsafe { &*(factory_ptr as *const clap_plugin_factory) };
+            let get_count = factory
+                .get_plugin_count
+                .ok_or_else(|| "Factory has no get_plugin_count".to_string())?;
+            let get_descriptor = factory
+                .get_plugin_descriptor
+                .ok_or_else(|| "Factory has no get_plugin_descriptor".to_string())?;
+
+            let count = unsafe { get_count(factory) };
+            let mut found = Vec::with_capacity(count as usize);
+            for index in 0..count {
+                let desc_ptr = unsafe { get_descriptor(factory, index) };
+                if desc_ptr.is_null() {
+                    continue;
+                }
+                found.push(plugin_info_from(unsafe { &*desc_ptr }));
+            }
+            Ok(found)
+        })();
+
+        if let Some(deinit) = entry.deinit {
+            unsafe { deinit() };
+        }
+        discovered
+    }
+
+    /// Without the host feature there is no loader, but callers still get a
+    /// reason rather than a silent empty list.
+    #[cfg(not(feature = "clap-host"))]
+    pub fn discover(_path: &std::path::Path) -> Result<Vec<ClapPluginInfo>, String> {
+        Err("This build was compiled without CLAP host support".to_string())
+    }
+
+    /// Set a parameter value by ID.
+    pub fn set_param(&mut self, id: u32, value: f64) {
+        #[cfg(feature = "clap-host")]
+        {
+            if let Some(ref mut inst) = self.instance {
+                inst.pending_param_events.push(param_event(id, value));
+            }
+            // A parameter only reaches a plugin as an event, and a plugin that
+            // is not processing never sees one. Handing it over now keeps the
+            // plugin's own `get_value` — and so anything a state capture records
+            // — in step with the host's cache even while no audio flows.
+            self.flush_pending_params();
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            let _ = (id, value);
         }
     }
 
     /// Apply a batch of parameter changes.
     pub fn apply_params(&mut self, batch: &[(u32, f64)]) {
-        for &(id, val) in batch {
-            self.set_param(id, val);
+        #[cfg(feature = "clap-host")]
+        {
+            for &(id, value) in batch {
+                if let Some(ref mut inst) = self.instance {
+                    inst.pending_param_events.push(param_event(id, value));
+                }
+            }
+            // Once for the batch, not once per parameter.
+            self.flush_pending_params();
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            let _ = batch;
+        }
+    }
+
+    /// Hand the plugin every parameter the host has queued, without processing
+    /// audio.
+    ///
+    /// CLAP offers `params.flush` for exactly this: the host calls it while it
+    /// is not processing, and the plugin applies the events there and then. The
+    /// queued events are deliberately *kept* when the plugin implements no
+    /// `flush`, because the next `process` call would otherwise lose them.
+    fn flush_pending_params(&mut self) {
+        #[cfg(feature = "clap-host")]
+        {
+            let Some(inst) = self.instance.as_mut() else {
+                return;
+            };
+            if inst.pending_param_events.is_empty()
+                || inst.params_ext.is_null()
+                || inst.plugin.is_null()
+            {
+                return;
+            }
+            let ext = unsafe { &*inst.params_ext };
+            let Some(flush) = ext.flush else {
+                return;
+            };
+
+            let in_events = clap_input_events {
+                ctx: &inst.pending_param_events as *const _ as *mut c_void,
+                size: Some(in_events_size),
+                get: Some(in_events_get),
+            };
+            // A valid but empty output list: the host takes nothing back from a
+            // flush, but a plugin is entitled to write into it and a null
+            // pointer would make that undefined.
+            let out_events = clap_output_events {
+                ctx: std::ptr::null_mut(),
+                try_push: None,
+            };
+
+            unsafe { flush(inst.plugin, &in_events, &out_events) };
+            inst.pending_param_events.clear();
         }
     }
 
@@ -613,16 +994,34 @@ impl DspNode for ClapPluginHostNode {
             if !inst.plugin.is_null() && inst.active {
                 unsafe {
                     let p = &*inst.plugin;
+                    if inst.processing {
+                        if let Some(stop) = p.stop_processing {
+                            stop(inst.plugin);
+                        }
+                        inst.processing = false;
+                    }
                     if let Some(deactivate) = p.deactivate {
                         deactivate(inst.plugin);
                     }
-                    if let Some(activate) = p.activate {
-                        activate(
+                    // A plugin with no `activate` cannot be re-configured, but
+                    // it is still live: `active` gates the `deactivate` call on
+                    // drop, so it must not be cleared for want of one.
+                    inst.active = match p.activate {
+                        Some(activate) => activate(
                             inst.plugin,
                             sample_rate as f64,
                             32,
                             MAX_AUDIO_BLOCK_FRAMES as u32,
-                        );
+                        ),
+                        None => true,
+                    };
+                    // A rate change is a fresh start, so the pair has to be
+                    // re-established or a conforming plugin stays silent.
+                    if inst.active {
+                        inst.processing = match p.start_processing {
+                            Some(start) => start(inst.plugin),
+                            None => true,
+                        };
                     }
                 }
             }
@@ -741,5 +1140,38 @@ mod tests {
         // Verification of pass-through behavior
         assert_eq!(l[0], 1.0);
         assert_eq!(r[0], 2.0);
+    }
+}
+
+/// Read a NUL-terminated string a plugin handed us, tolerating a null pointer
+/// and lossy UTF-8 (the C ABI says nothing about encoding).
+#[cfg(feature = "clap-host")]
+fn cstr_to_string(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+}
+
+/// Read one of CLAP's fixed-size inline char arrays.
+#[cfg(feature = "clap-host")]
+fn cstr_buf_to_string(buffer: &[c_char]) -> String {
+    let bytes: Vec<u8> = buffer
+        .iter()
+        .take_while(|c| **c != 0)
+        .map(|c| *c as u8)
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Copy a plugin descriptor out of plugin-owned memory.
+#[cfg(feature = "clap-host")]
+fn plugin_info_from(desc: &clap_plugin_descriptor) -> ClapPluginInfo {
+    ClapPluginInfo {
+        id: cstr_to_string(desc.id).unwrap_or_default(),
+        name: cstr_to_string(desc.name).unwrap_or_default(),
+        vendor: cstr_to_string(desc.vendor).unwrap_or_default(),
+        version: cstr_to_string(desc.version).unwrap_or_default(),
+        description: cstr_to_string(desc.description).unwrap_or_default(),
     }
 }

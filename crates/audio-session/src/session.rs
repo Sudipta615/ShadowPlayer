@@ -930,6 +930,70 @@ impl AudioSession {
         let _ = self.handle.send_command(EngineCommand::RecoverStream);
     }
 
+    // ── CLAP Plugin Rack ──────────────────────────────────────────────────
+
+    /// The hosted CLAP plugin, plus whatever the last library probe found.
+    ///
+    /// Read straight out of shared memory rather than asked for, so a UI can
+    /// call it on every frame without a round trip through the command channel.
+    pub fn clap_view(&self) -> engine::dsp::clap_rack::ClapRackView {
+        self.handle.clap_view()
+    }
+
+    /// Ask the engine to re-read the loaded plugin and republish
+    /// [`Self::clap_view`]. Needed after something the engine did not initiate,
+    /// such as a graph rebuilt from persisted config.
+    pub fn refresh_clap_plugin(&self) {
+        self.handle.refresh_clap_plugin();
+    }
+
+    /// List the plugins a library file contains *without* loading one, so the
+    /// user can choose. The result arrives in [`Self::clap_view`].
+    pub fn probe_clap_library(&self, path: impl AsRef<Path>) {
+        self.handle.probe_clap_library(path);
+    }
+
+    /// Load a CLAP plugin from a library path, optionally naming which plugin
+    /// inside that library to instantiate.
+    pub fn load_clap_plugin(&self, path: impl AsRef<Path>, plugin_id: Option<&str>) {
+        self.handle.load_clap_plugin(path, plugin_id);
+    }
+
+    /// Unload the hosted plugin. The insert goes back to pass-through.
+    pub fn unload_clap_plugin(&self) {
+        self.handle.unload_clap_plugin();
+    }
+
+    /// Bypass or un-bypass the hosted plugin without unloading it, so its
+    /// parameters and state survive the trip back.
+    pub fn set_clap_plugin_enabled(&self, enabled: bool) {
+        self.handle.set_clap_plugin_enabled(enabled);
+    }
+
+    /// Move one plugin parameter, by the id the plugin declared.
+    pub fn set_clap_plugin_param(&self, id: u32, value: f64) {
+        self.handle.set_clap_plugin_param(id, value);
+    }
+
+    /// Capture the plugin's full state. The bytes arrive through
+    /// [`Self::take_clap_state`], not as an event: a plugin's state can be
+    /// megabytes and only the caller wants it.
+    pub fn save_clap_state(&self) {
+        self.handle.save_clap_state();
+    }
+
+    /// Take the state blob captured by [`Self::save_clap_state`], if it has
+    /// arrived. The slot is emptied, so a stale blob is never mistaken for a
+    /// fresh one.
+    pub fn take_clap_state(&self) -> Option<Vec<u8>> {
+        self.handle.take_clap_state()
+    }
+
+    /// Restore a state blob captured earlier.
+    pub fn load_clap_state(&self, bytes: Vec<u8>) {
+        self.handle.load_clap_state(bytes);
+    }
+
     // ── Events ──────────────────────────────────────────────────────────
 
     pub fn try_recv_event(&self) -> Option<EngineEvent> {

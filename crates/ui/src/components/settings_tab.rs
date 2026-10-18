@@ -107,10 +107,20 @@ pub struct SettingsTabState {
     /// by the app and shown as a toast.
     pub chain_preset_notice: Option<String>,
 
+    // CLAP plugin insert. The card only describes the plugin; everything that
+    // changes it happens in the rack window.
+    /// Live summary of the hosted plugin, refreshed by the app each frame.
+    pub clap: crate::state::clap_rack::ClapCardSummary,
+
     // Library maintenance
     /// Set by the Settings > Library "Organize Files" button; the app raises the
     /// batch organizer and clears it.
     pub request_organize: bool,
+    /// Set by the CLAP card when the user asks for a plugin file; the app owns
+    /// the native picker, so the card can only ask. A flag rather than an action
+    /// because both settings surfaces can raise it and only one of them returns
+    /// actions.
+    pub request_clap_library: bool,
 
     // Spatial
     pub spatial_quality: SpatialQuality,
@@ -204,7 +214,9 @@ impl Default for SettingsTabState {
             chain_preset_renaming: None,
             chain_preset_rename_buffer: String::new(),
             chain_preset_notice: None,
+            clap: crate::state::clap_rack::ClapCardSummary::default(),
             request_organize: false,
+            request_clap_library: false,
 
             spatial_quality: SpatialQuality::High,
             hrtf_profile: String::new(),
@@ -526,6 +538,14 @@ pub struct SettingsTabActions {
     pub chain_preset_delete: Option<usize>,
     /// Rename the preset at this index to the given name.
     pub chain_preset_rename: Option<(usize, String)>,
+
+    // CLAP plugin insert
+    /// Open the plugin rack window.
+    pub clap_open_rack: bool,
+    /// Open the native picker for a `.clap` library file.
+    pub clap_choose_library: bool,
+    /// Unload the hosted plugin.
+    pub clap_unload: bool,
 
     // Capture
     pub start_capture: bool,
@@ -1602,6 +1622,11 @@ fn render_mixbus_category(
     // Card 0: Whole-chain presets (spans the EQ panel and the cards below).
     render_chain_presets_card(ui, state, theme, actions);
 
+    // CLAP plugin insert, placed above the mixer strips: whether a plugin is in
+    // the chain changes the chain, while the strips below are details of it. The
+    // rack window owns every control, so this card only reports and routes.
+    render_clap_plugin_card(ui, state, theme, actions);
+
     // Card 1: Multitrack Mixer Strip
     setting_card(ui, theme, |ui| {
         card_header(
@@ -2091,6 +2116,69 @@ fn render_mixbus_category(
         if changed {
             actions.channel_mix_changed = Some(state.channel_mix.clone());
         }
+    });
+}
+
+/// The CLAP plugin insert: what is loaded, and the way into its rack.
+fn render_clap_plugin_card(
+    ui: &mut egui::Ui,
+    state: &mut SettingsTabState,
+    theme: &Theme,
+    actions: &mut SettingsTabActions,
+) {
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_puzzle(ui, r, c),
+            "CLAP Plugin Insert",
+            "Host a standard CLAP audio plugin as the master insert, driven from its own rack",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Hosted Plugin",
+            "A plugin's own editor is a native window this UI cannot embed, so the rack drives every parameter the plugin publishes instead",
+            theme,
+            |ui| {
+                ui.label(
+                    egui::RichText::new(state.clap.status_line())
+                        .font(FontId::proportional(11.5))
+                        .color(if state.clap.error.is_some() {
+                            theme.destructive
+                        } else if state.clap.loaded {
+                            theme.text_primary
+                        } else {
+                            theme.text_secondary
+                        }),
+                );
+            },
+        );
+
+        setting_item(
+            ui,
+            "Plugin Rack",
+            "Parameters, host bypass, and named presets that capture the plugin's own state",
+            theme,
+            |ui| {
+                if ui
+                    .add(pill_btn("Open Rack…", true, theme))
+                    .clicked()
+                {
+                    actions.clap_open_rack = true;
+                }
+                if ui
+                    .add(pill_btn("Choose Plugin File…", false, theme))
+                    .clicked()
+                {
+                    actions.clap_choose_library = true;
+                }
+                if state.clap.loaded && ui.add(pill_btn("Unload", false, theme)).clicked() {
+                    actions.clap_unload = true;
+                }
+            },
+        );
     });
 }
 

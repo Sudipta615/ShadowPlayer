@@ -198,6 +198,10 @@ impl AudioEngine {
                 2,
             )),
             graph_build: Arc::new(super::GraphBuildStats::default()),
+            clap_view: Arc::new(ArcSwap::from_pointee(
+                crate::dsp::clap_rack::ClapRackView::default(),
+            )),
+            clap_state: Arc::new(std::sync::Mutex::new(None)),
         };
         // Let the graph mirror its rebuild cost into the block the handles
         // read. Done after construction because the graph is built inside the
@@ -402,6 +406,8 @@ impl AudioEngine {
             Arc::clone(&self.meters),
             Arc::clone(&self.wake),
             Arc::clone(&self.graph_build),
+            Arc::clone(&self.clap_view),
+            Arc::clone(&self.clap_state),
         )
     }
 }

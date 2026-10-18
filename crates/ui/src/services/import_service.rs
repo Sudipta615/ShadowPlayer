@@ -12,6 +12,14 @@ const AUDIO_EXTENSIONS: &[&str] = &[
 /// Extensions recognised as playlists.
 const PLAYLIST_EXTENSIONS: &[&str] = &["m3u", "m3u8"];
 
+/// Extensions offered when picking a CLAP plugin library.
+///
+/// A CLAP plugin *is* a shared library: the convention is a `.clap` file, but
+/// plenty of builds ship as a plain `.so` / `.dll` / `.dylib` and are loaded the
+/// same way. All of them are offered, and "All Files" is there for anything
+/// else.
+const CLAP_EXTENSIONS: &[&str] = &["clap", "so", "dll", "dylib"];
+
 /// What the user asked the picker to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportKind {
@@ -25,6 +33,8 @@ pub enum ImportKind {
     SaveM3u,
     /// Pick the root folder for a batch organize.
     OrganizeDestination,
+    /// Pick a CLAP plugin library file to host.
+    ClapLibrary,
 }
 
 /// Outcome of a native picker interaction, delivered off the UI thread.
@@ -38,6 +48,8 @@ pub enum ImportResult {
     SavePath(PathBuf),
     /// A root folder chosen for a batch organize.
     OrganizeDestination(PathBuf),
+    /// A CLAP plugin library chosen to host.
+    ClapLibrary(PathBuf),
     /// The picker was dismissed with no selection.
     Cancelled,
 }
@@ -94,6 +106,11 @@ impl ImportService {
     /// Open the native "choose a destination folder" dialog for the organizer.
     pub fn request_organize_destination(&mut self) {
         self.request(ImportKind::OrganizeDestination);
+    }
+
+    /// Open the native "choose a CLAP plugin" dialog.
+    pub fn request_clap_library(&mut self) {
+        self.request(ImportKind::ClapLibrary);
     }
 
     fn request(&mut self, kind: ImportKind) {
@@ -187,6 +204,16 @@ fn run_picker(kind: ImportKind, suggested_name: String) -> ImportResult {
         ImportKind::OrganizeDestination => {
             match dialog.set_title("Organize Into Folder").pick_folder() {
                 Some(path) => ImportResult::OrganizeDestination(path),
+                None => ImportResult::Cancelled,
+            }
+        }
+        ImportKind::ClapLibrary => {
+            let dialog = dialog
+                .set_title("Load CLAP Plugin")
+                .add_filter("CLAP Plugins", CLAP_EXTENSIONS)
+                .add_filter("All Files", &["*"]);
+            match dialog.pick_file() {
+                Some(path) => ImportResult::ClapLibrary(path),
                 None => ImportResult::Cancelled,
             }
         }

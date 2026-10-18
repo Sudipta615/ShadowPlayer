@@ -6,6 +6,7 @@ pub mod analyzer;
 pub mod autoeq;
 pub mod biquad;
 pub mod channel_trim;
+pub mod clap_rack;
 pub mod convolution;
 pub mod correction;
 pub mod crossfade;

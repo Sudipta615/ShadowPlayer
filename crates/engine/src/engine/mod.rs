@@ -215,6 +215,14 @@ pub struct AudioEngine {
     /// hands out. See [`GraphBuildStats`] for why this is separate from the
     /// ordinary CPU telemetry.
     graph_build: Arc<GraphBuildStats>,
+    /// Read-only view of the hosted CLAP plugin, shared with every
+    /// `EngineHandle`. Published rather than queried so a UI can poll it every
+    /// frame without a round trip through the command channel.
+    clap_view: Arc<ArcSwap<crate::dsp::clap_rack::ClapRackView>>,
+    /// Where `SaveClapState` leaves the plugin's state blob for the host to
+    /// take. A single slot, not a channel: the blob belongs to whoever asked
+    /// for it, and is far too large to broadcast to every event listener.
+    clap_state: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
 }
 
 impl AudioEngine {

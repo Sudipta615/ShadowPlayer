@@ -305,6 +305,68 @@ impl AudioEngine {
         }
     }
 
+    /// Republish the CLAP rack view from the live graph.
+    ///
+    /// Runs on the engine thread — which is the plugin's host main thread, the
+    /// only place CLAP allows `params.get_info`, `params.get_value` and
+    /// `state.save` to be called. The audio thread never touches this.
+    fn publish_clap_view(&mut self, error: Option<String>) {
+        #[cfg(feature = "clap-host")]
+        let mut report = self
+            .graph
+            .with_graph(|g| g.plugin_mut().clap_node().map(|c| c.rack_report()))
+            .unwrap_or_default();
+        #[cfg(not(feature = "clap-host"))]
+        let mut report = crate::dsp::clap_rack::ClapRackReport::default();
+
+        report.error = error;
+
+        // A probe result describes a library file, not the loaded plugin, so it
+        // outlives any change to what is loaded.
+        let library = (**self.clap_view.load()).library.clone();
+        self.clap_view
+            .store(std::sync::Arc::new(crate::dsp::clap_rack::ClapRackView {
+                rack: report,
+                library,
+            }));
+    }
+
+    /// Reflect a parameter the host just set, without asking the plugin for the
+    /// value.
+    ///
+    /// The change reaches the plugin only when the audio thread applies the
+    /// parameter event at the next block boundary, so re-reading the *value* now
+    /// would publish the previous one and make the control snap back under the
+    /// user's cursor.
+    ///
+    /// The *text* is a different matter: it is the plugin's own rendering of a
+    /// number the host has already decided on, so asking for it here is both
+    /// safe and necessary — an enumerated parameter would otherwise keep showing
+    /// the label of the value it used to have.
+    fn note_clap_param(&mut self, id: u32, value: f64) {
+        #[cfg(feature = "clap-host")]
+        let text = self
+            .graph
+            .with_graph(|g| {
+                g.plugin_mut()
+                    .clap_node()
+                    .and_then(|c| c.param_text(id, value))
+            })
+            .unwrap_or_default();
+        #[cfg(not(feature = "clap-host"))]
+        let text = String::new();
+
+        let mut view = (**self.clap_view.load()).clone();
+        if let Some(param) = view.rack.params.iter_mut().find(|p| p.id == id) {
+            param.value = value;
+            if !text.is_empty() {
+                param.value_text = text;
+            }
+            view.rack.error = None;
+            self.clap_view.store(std::sync::Arc::new(view));
+        }
+    }
+
     /// Dispatch a single engine command to the appropriate handler.
     fn handle_command(&mut self, cmd: EngineCommand) {
         match cmd {
@@ -477,6 +539,11 @@ impl AudioEngine {
                 {
                     slot.enabled = enabled;
                 }
+                {
+                    let mut view = (**self.clap_view.load()).clone();
+                    view.rack.bypassed = !enabled;
+                    self.clap_view.store(std::sync::Arc::new(view));
+                }
             }
             EngineCommand::SetClapPluginParam { id, value } => {
                 self.graph.set_clap_plugin_param(id, value);
@@ -493,47 +560,62 @@ impl AudioEngine {
                         slot.params.push((id, value as f32));
                     }
                 }
+                self.note_clap_param(id, value);
             }
             EngineCommand::LoadClapPlugin { path, plugin_id } => {
                 #[cfg(feature = "clap-host")]
-                {
+                let error = {
                     let p = std::path::Path::new(&path);
-                    if p.is_file() {
+                    if !p.is_file() {
+                        Some(format!("No such CLAP library: {path}"))
+                    } else {
                         let rate = self.output_sample_rate as f32;
-                        let mut clap_node = crate::dsp::graph2::prod::ClapPluginHostNode::new(rate);
-                        if let Ok(()) = clap_node.load_plugin(p, plugin_id.as_deref()) {
-                            self.graph.with_graph(|g| {
-                                g.plugin_mut().attach_clap(clap_node);
-                            });
-                            let src = if let Some(ref id) = plugin_id {
-                                format!("clap:{}#{}", path, id)
-                            } else {
-                                format!("clap:{}", path)
-                            };
-                            if let Some(slot) = self
-                                .config
-                                .plugins
-                                .slots
-                                .iter_mut()
-                                .find(|s| s.source.starts_with("clap:"))
-                            {
-                                slot.source = src;
-                                slot.enabled = true;
-                            } else {
-                                self.config.plugins.slots.push(config::PluginSlotConfig {
-                                    source: src,
-                                    enabled: true,
-                                    params: Vec::new(),
-                                    state: None,
+                        let mut clap_node =
+                            crate::dsp::graph2::prod::ClapPluginHostNode::new(rate);
+                        match clap_node.load_plugin(p, plugin_id.as_deref()) {
+                            Ok(()) => {
+                                self.graph.with_graph(|g| {
+                                    g.plugin_mut().attach_clap(clap_node);
                                 });
+                                let src = if let Some(ref id) = plugin_id {
+                                    format!("clap:{}#{}", path, id)
+                                } else {
+                                    format!("clap:{}", path)
+                                };
+                                if let Some(slot) = self
+                                    .config
+                                    .plugins
+                                    .slots
+                                    .iter_mut()
+                                    .find(|s| s.source.starts_with("clap:"))
+                                {
+                                    slot.source = src;
+                                    slot.enabled = true;
+                                } else {
+                                    self.config.plugins.slots.push(config::PluginSlotConfig {
+                                        source: src,
+                                        enabled: true,
+                                        params: Vec::new(),
+                                        state: None,
+                                    });
+                                }
+                                None
+                            }
+                            Err(e) => {
+                                warn!("CLAP load failed for {path}: {e}");
+                                Some(format!("{path}: {e}"))
                             }
                         }
                     }
-                }
+                };
+
                 #[cfg(not(feature = "clap-host"))]
-                {
+                let error = {
                     let _ = (&path, &plugin_id);
-                }
+                    Some("This build was compiled without CLAP host support".to_string())
+                };
+
+                self.publish_clap_view(error);
             }
             EngineCommand::UnloadClapPlugin => {
                 #[cfg(feature = "clap-host")]
@@ -545,6 +627,103 @@ impl AudioEngine {
                         .plugins
                         .slots
                         .retain(|s| !s.source.starts_with("clap:"));
+                }
+                self.publish_clap_view(None);
+            }
+            EngineCommand::RefreshClapPlugin => {
+                self.publish_clap_view(None);
+            }
+            EngineCommand::ProbeClapLibrary { path } => {
+                #[cfg(feature = "clap-host")]
+                {
+                    // Loading a library runs its static initialisers, and a
+                    // plugin is free to be slow about it. Nothing here is on
+                    // the audio path, so probe on a scratch thread rather than
+                    // stalling the engine thread that also drives playback.
+                    let view = std::sync::Arc::clone(&self.clap_view);
+                    std::thread::spawn(move || {
+                        let probe = match crate::dsp::graph2::prod::ClapPluginHostNode::discover(
+                            std::path::Path::new(&path),
+                        ) {
+                            Ok(plugins) => crate::dsp::clap_rack::ClapLibraryProbe {
+                                path,
+                                plugins,
+                                error: None,
+                            },
+                            Err(e) => {
+                                warn!("CLAP probe failed for {path}: {e}");
+                                crate::dsp::clap_rack::ClapLibraryProbe {
+                                    path,
+                                    plugins: Vec::new(),
+                                    error: Some(e),
+                                }
+                            }
+                        };
+                        let mut next = (**view.load()).clone();
+                        next.library = Some(probe);
+                        view.store(std::sync::Arc::new(next));
+                    });
+                }
+                #[cfg(not(feature = "clap-host"))]
+                {
+                    let _ = path;
+                }
+            }
+            EngineCommand::SaveClapState => {
+                #[cfg(feature = "clap-host")]
+                {
+                    let captured = self
+                        .graph
+                        .with_graph(|g| g.plugin_mut().clap_node().map(|c| c.save_state()));
+                    match captured {
+                        Some(Ok(bytes)) => {
+                            if let Ok(mut slot) = self.clap_state.lock() {
+                                *slot = Some(bytes);
+                            }
+                        }
+                        Some(Err(e)) => {
+                            warn!("CLAP state save failed: {e}");
+                            self.publish_clap_view(Some(e));
+                        }
+                        None => {
+                            self.publish_clap_view(Some("No CLAP plugin is loaded".to_string()));
+                        }
+                    }
+                }
+            }
+            EngineCommand::LoadClapState { bytes } => {
+                #[cfg(feature = "clap-host")]
+                {
+                    let restored = self
+                        .graph
+                        .with_graph(|g| g.plugin_mut().clap_node_mut().map(|c| c.load_state(&bytes)));
+                    let error = match restored {
+                        Some(Ok(())) => None,
+                        Some(Err(e)) => {
+                            warn!("CLAP state restore failed: {e}");
+                            Some(e)
+                        }
+                        None => Some("No CLAP plugin is loaded".to_string()),
+                    };
+                    if error.is_none() {
+                        // Keep the session restoring what the user hears:
+                        // graph construction replays `state` on startup.
+                        if let Some(slot) = self
+                            .config
+                            .plugins
+                            .slots
+                            .iter_mut()
+                            .find(|s| s.source.starts_with("clap:"))
+                        {
+                            slot.state = Some(bytes);
+                        }
+                    }
+                    // The plugin is the authority on its parameters again.
+                    self.publish_clap_view(error);
+                }
+                #[cfg(not(feature = "clap-host"))]
+                {
+                    let _ = bytes;
                 }
             }
 

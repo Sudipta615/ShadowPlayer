@@ -92,6 +92,12 @@ pub fn draw_equalizer_sliders(ui: &Ui, rect: Rect, color: Color32) {
         .paint_at(ui, fit_square(rect));
 }
 
+pub fn draw_puzzle(ui: &Ui, rect: Rect, color: Color32) {
+    egui::Image::new(egui::include_image!("../../assets/icons/puzzle.svg"))
+        .tint(color)
+        .paint_at(ui, fit_square(rect));
+}
+
 pub fn draw_shuffle(ui: &Ui, rect: Rect, color: Color32) {
     egui::Image::new(egui::include_image!("../../assets/icons/shuffle.svg"))
         .tint(color)

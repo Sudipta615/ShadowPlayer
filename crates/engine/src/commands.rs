@@ -199,6 +199,19 @@ pub enum EngineCommand {
     },
     /// CLAP audio plugin host: unload active CLAP plugin.
     UnloadClapPlugin,
+    /// CLAP host: re-read the hosted plugin and republish the rack view.
+    RefreshClapPlugin,
+    /// CLAP host: list the plugins a library file contains, without loading
+    /// any of them, so a host can offer a choice.
+    ProbeClapLibrary {
+        path: String,
+    },
+    /// CLAP host: capture the hosted plugin's state into the shared slot.
+    SaveClapState,
+    /// CLAP host: restore a state blob captured earlier.
+    LoadClapState {
+        bytes: Vec<u8>,
+    },
     /// Spatial master: renderer quality tier (spec §86).
     SetSpatialQuality(config::SpatialQuality),
     /// Spatial master: voice budget (spec §76). `enabled == false`

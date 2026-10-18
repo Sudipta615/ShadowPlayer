@@ -11,6 +11,7 @@ members = [
     "crates/playback",
     "crates/ui",
     "crates/app",
+    "crates/clap-fixture-plugin",
 ]
 exclude = [
     "crates/engine",
