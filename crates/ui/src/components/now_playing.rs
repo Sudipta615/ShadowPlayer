@@ -90,11 +90,11 @@ impl<'a> NowPlayingCard<'a> {
                     painter.rect_filled(art_rect, CornerRadius::same(14), self.theme.artwork_placeholder);
                     let moon_center = Pos2::new(art_rect.center().x, art_rect.center().y - 12.0);
                     painter.circle_filled(moon_center, 34.0, self.theme.accent_pink);
-                    painter.text(
-                        art_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "♫",
-                        FontId::proportional(34.0),
+                    // The bundled fonts have no "♫" glyph, so the note is
+                    // drawn from a vector icon instead.
+                    crate::components::icons::draw_music_note(
+                        ui,
+                        Rect::from_center_size(art_rect.center(), Vec2::splat(46.0)),
                         self.theme.accent_purple,
                     );
                 }

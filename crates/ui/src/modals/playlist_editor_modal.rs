@@ -128,14 +128,14 @@ pub fn show_playlist_editor(
                                             let edit = egui::TextEdit::singleline(&mut state.rename_buf)
                                                 .desired_width(ui.available_width() - 56.0);
                                             ui.add(edit);
-                                            if ui.small_button("✓").clicked() {
+                                            if ui.small_button("OK").clicked() {
                                                 let name = state.rename_buf.trim().to_string();
                                                 if !name.is_empty() {
                                                     actions.rename = Some((pl.id, name));
                                                 }
                                                 state.rename_id = None;
                                             }
-                                            if ui.small_button("✕").clicked() {
+                                            if ui.small_button("Cancel").clicked() {
                                                 state.rename_id = None;
                                             }
                                         });
@@ -254,7 +254,7 @@ pub fn show_playlist_editor(
                                                 .font(FontId::proportional(12.0))
                                                 .color(theme.text_secondary),
                                         );
-                                        if ui.small_button("✕").on_hover_text("Remove from playlist").clicked() {
+                                        if ui.small_button("Del").on_hover_text("Remove from playlist").clicked() {
                                             actions.remove_track = Some((selected_id, t.id));
                                         }
                                     });
@@ -308,7 +308,7 @@ pub fn show_playlist_editor(
                                     let Some(t) = library_tracks.get(i) else { continue };
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
-                                        if ui.small_button("＋").on_hover_text("Add to playlist").clicked() {
+                                        if ui.small_button("+").on_hover_text("Add to playlist").clicked() {
                                             actions.add_track = Some((selected_id, t.id));
                                         }
                                         ui.label(

@@ -84,11 +84,11 @@ impl<'a> SideBar<'a> {
             ui.add_space(16.0);
 
             // 2. Primary Navigation
-            self.render_nav_item(ui, NavItem::Home, "⌂", "Home");
-            self.render_nav_item(ui, NavItem::Albums, "◎", "Albums");
-            self.render_nav_item(ui, NavItem::Artists, "👤", "Artists");
-            self.render_nav_item(ui, NavItem::Genres, "♫", "Genres");
-            self.render_nav_item(ui, NavItem::Folders, "📁", "Folders");
+            self.render_nav_item(ui, NavItem::Home, "Home");
+            self.render_nav_item(ui, NavItem::Albums, "Albums");
+            self.render_nav_item(ui, NavItem::Artists, "Artists");
+            self.render_nav_item(ui, NavItem::Genres, "Genres");
+            self.render_nav_item(ui, NavItem::Folders, "Folders");
 
             ui.add_space(16.0);
 
@@ -115,21 +115,18 @@ impl<'a> SideBar<'a> {
             self.render_playlist_badge_item(
                 ui,
                 NavItem::Favorites,
-                "♥",
                 "Favorites",
                 self.theme.accent_magenta,
             );
             self.render_playlist_badge_item(
                 ui,
                 NavItem::RecentlyPlayed,
-                "🕒",
                 "Recently Played",
                 self.theme.accent_violet,
             );
             self.render_playlist_badge_item(
                 ui,
                 NavItem::MostPlayed,
-                "📊",
                 "Most Played",
                 self.theme.accent_orange,
             );
@@ -185,8 +182,8 @@ impl<'a> SideBar<'a> {
             }
 
             // Bottom items
-            self.render_nav_item(ui, NavItem::Settings, "⚙", "Settings");
-            self.render_nav_item(ui, NavItem::Help, "?", "Help & Feedback");
+            self.render_nav_item(ui, NavItem::Settings, "Settings");
+            self.render_nav_item(ui, NavItem::Help, "Help & Feedback");
             ui.add_space(4.0);
         });
     }
@@ -285,7 +282,7 @@ impl<'a> SideBar<'a> {
         );
     }
 
-    fn render_nav_item(&mut self, ui: &mut Ui, item: NavItem, _icon: &str, label: &str) {
+    fn render_nav_item(&mut self, ui: &mut Ui, item: NavItem, label: &str) {
         let is_active = self.active_item == item;
         let height = 38.0;
         let width = ui.available_width();
@@ -340,7 +337,6 @@ impl<'a> SideBar<'a> {
         &mut self,
         ui: &mut Ui,
         item: NavItem,
-        icon: &str,
         label: &str,
         badge_color: Color32,
     ) {
@@ -380,13 +376,7 @@ impl<'a> SideBar<'a> {
                 crate::components::icons::draw_bar_chart(ui, icon_sub_rect, Color32::WHITE);
             }
             _ => {
-                painter.text(
-                    badge_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    icon,
-                    FontId::proportional(12.0),
-                    Color32::WHITE,
-                );
+                painter.circle_filled(badge_rect.center(), 3.5, Color32::WHITE);
             }
         }
 

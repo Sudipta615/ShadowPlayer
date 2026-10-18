@@ -578,6 +578,34 @@ impl eframe::App for ShadowPlayerApp {
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_SMART").is_ok() {
                 self.smart_playlist_editor.open_new();
             }
+            // Generic navigation / modal selectors used to capture screenshots
+            // of individual views.
+            if self.app_state.frame_count == 1 {
+                use crate::components::sidebar::NavItem as Nav;
+                if let Ok(nav) = std::env::var("SHADOWPLAYER_EVAL_NAV") {
+                    self.app_state.active_nav = match nav.as_str() {
+                        "albums" => Nav::Albums,
+                        "artists" => Nav::Artists,
+                        "genres" => Nav::Genres,
+                        "folders" => Nav::Folders,
+                        "favorites" => Nav::Favorites,
+                        "recent" => Nav::RecentlyPlayed,
+                        "most" => Nav::MostPlayed,
+                        "settings" => Nav::Settings,
+                        "help" => Nav::Help,
+                        _ => Nav::Home,
+                    };
+                }
+                match std::env::var("SHADOWPLAYER_EVAL_MODAL").as_deref() {
+                    Ok("bitperfect") => self.app_state.bit_perfect_modal_open = true,
+                    Ok("autoeq") => self.dsp_state.autoeq.is_open = true,
+                    Ok("playlist") => {
+                        let first = self.library_state.playlists.first().map(|p| p.id);
+                        self.app_state.playlist_editor.open(first);
+                    }
+                    _ => {}
+                }
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_HELP").is_ok() {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Help;
                 if let Ok(tab_str) = std::env::var("SHADOWPLAYER_EVAL_HELP_TAB") {

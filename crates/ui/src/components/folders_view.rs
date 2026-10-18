@@ -116,7 +116,7 @@ impl<'a> FoldersView<'a> {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let play_all_btn = egui::Button::new(
-                                egui::RichText::new("▶ Play All")
+                                egui::RichText::new("Play All")
                                     .font(FontId::proportional(12.5))
                                     .color(Color32::WHITE),
                             )
@@ -128,7 +128,7 @@ impl<'a> FoldersView<'a> {
                             }
 
                             let queue_all_btn = egui::Button::new(
-                                egui::RichText::new("➕ Queue All")
+                                egui::RichText::new("Queue All")
                                     .font(FontId::proportional(12.5))
                                     .color(self.theme.text_primary),
                             )
@@ -140,7 +140,7 @@ impl<'a> FoldersView<'a> {
                             }
 
                             let rescan_btn = egui::Button::new(
-                                egui::RichText::new("🔄 Rescan")
+                                egui::RichText::new("Rescan")
                                     .font(FontId::proportional(12.5))
                                     .color(self.theme.text_primary),
                             )
@@ -312,7 +312,7 @@ impl<'a> FoldersView<'a> {
                         // Quick music directory shortcut if available
                         if let Some(audio_d) = dirs::audio_dir() {
                             let quick_btn = egui::Button::new(
-                                egui::RichText::new("📁 Use ~/Music")
+                                egui::RichText::new("Use ~/Music")
                                     .font(FontId::proportional(12.0))
                                     .color(self.theme.text_secondary),
                             )
@@ -329,7 +329,7 @@ impl<'a> FoldersView<'a> {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                         ui.label(
-                            egui::RichText::new("💡 Tip:")
+                            egui::RichText::new("Tip:")
                                 .font(FontId::proportional(11.5))
                                 .color(self.theme.accent_magenta),
                         );
@@ -422,7 +422,7 @@ impl<'a> FoldersView<'a> {
                                         ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
                                         let del_btn = egui::Button::new(
-                                            egui::RichText::new("✕")
+                                            egui::RichText::new("Del")
                                                 .font(FontId::proportional(12.0))
                                                 .color(self.theme.accent_magenta),
                                         )
@@ -434,7 +434,7 @@ impl<'a> FoldersView<'a> {
                                         }
 
                                         let scan_btn = egui::Button::new(
-                                            egui::RichText::new("🔄 Scan")
+                                            egui::RichText::new("Scan")
                                                 .font(FontId::proportional(12.0))
                                                 .color(self.theme.text_primary),
                                         )

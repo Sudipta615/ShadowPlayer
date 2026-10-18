@@ -82,7 +82,7 @@ pub fn show_advanced_audio_modal(
                 ui.horizontal(|ui| {
                     if bit_perfect {
                         ui.label(
-                            egui::RichText::new("● BIT-PERFECT DIRECT STREAM")
+                            egui::RichText::new("• BIT-PERFECT DIRECT STREAM")
                                 .font(FontId::proportional(12.5))
                                 .strong()
                                 .color(theme.bit_perfect_green),
@@ -94,7 +94,7 @@ pub fn show_advanced_audio_modal(
                         );
                     } else {
                         ui.label(
-                            egui::RichText::new("● DSP ACTIVE")
+                            egui::RichText::new("• DSP ACTIVE")
                                 .font(FontId::proportional(12.5))
                                 .strong()
                                 .color(theme.warning_yellow),

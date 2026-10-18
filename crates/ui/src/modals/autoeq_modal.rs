@@ -199,7 +199,7 @@ pub fn show_autoeq_modal(
     let mut is_open = state.is_open;
     let profiles = get_curated_autoeq_profiles();
 
-    Window::new("🎧 AutoEQ Headphone & IEM Calibration")
+    Window::new("AutoEQ Headphone & IEM Calibration")
         .open(&mut is_open)
         .resizable(false)
         .collapsible(false)
@@ -222,7 +222,7 @@ pub fn show_autoeq_modal(
 
             // Search Bar
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("🔍 Search:").font(FontId::proportional(13.0)).color(theme.text_primary));
+                ui.label(egui::RichText::new("Search:").font(FontId::proportional(13.0)).color(theme.text_primary));
                 ui.add(egui::TextEdit::singleline(&mut state.search_query).desired_width(ui.available_width() - 80.0));
                 if ui.button("Clear").clicked() {
                     state.search_query.clear();
@@ -316,7 +316,7 @@ pub fn show_autoeq_modal(
 
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("● Profile Ready: {}", prof_name))
+                        egui::RichText::new(format!("• Profile Ready: {}", prof_name))
                             .font(FontId::proportional(13.0))
                             .strong()
                             .color(theme.bit_perfect_green),
@@ -330,7 +330,7 @@ pub fn show_autoeq_modal(
 
                 ui.horizontal(|ui| {
                     let apply_btn = egui::Button::new(
-                        egui::RichText::new("⚡ Apply Calibration to Audio Engine")
+                        egui::RichText::new("Apply Calibration to Audio Engine")
                             .font(FontId::proportional(13.0))
                             .strong()
                             .color(Color32::WHITE),

@@ -27,7 +27,7 @@ pub fn show_bit_perfect_modal(
     let mut open = *is_open;
     let mut close_clicked = false;
 
-    Window::new("💎 Bit-Perfect Signal Path Inspector")
+    Window::new("Bit-Perfect Signal Path Inspector")
         .open(&mut open)
         .resizable(false)
         .collapsible(false)
@@ -66,11 +66,7 @@ pub fn show_bit_perfect_modal(
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
                         if is_bit_perfect {
-                            ui.label(
-                                egui::RichText::new("●")
-                                    .font(FontId::proportional(18.0))
-                                    .color(theme.bit_perfect_green),
-                            );
+                            paint_status_dot(ui, theme.bit_perfect_green, 6.5);
                             ui.vertical(|ui| {
                                 ui.label(
                                     egui::RichText::new("SIGNAL PATH IS 100% BIT-PERFECT")
@@ -85,11 +81,7 @@ pub fn show_bit_perfect_modal(
                                 );
                             });
                         } else {
-                            ui.label(
-                                egui::RichText::new("▲")
-                                    .font(FontId::proportional(18.0))
-                                    .color(theme.accent_purple),
-                            );
+                            paint_warning_triangle(ui, theme.accent_purple);
                             ui.vertical(|ui| {
                                 ui.label(
                                     egui::RichText::new("DSP SIGNAL ALTERATION ACTIVE")
@@ -205,13 +197,23 @@ pub fn show_bit_perfect_modal(
 
                 // Connector arrow to next stage
                 if idx < 4 {
+                    // A stroked chevron: the bundled fonts have no "▶" glyph.
                     let arrow_x = node_rect.right() + 4.0;
-                    painter.text(
-                        Pos2::new(arrow_x, node_rect.center().y),
-                        egui::Align2::CENTER_CENTER,
-                        "▶",
-                        FontId::proportional(8.0),
-                        theme.text_muted,
+                    let cy = node_rect.center().y;
+                    let stroke = Stroke::new(1.4_f32, theme.text_muted);
+                    painter.line_segment(
+                        [
+                            Pos2::new(arrow_x - 2.0, cy - 4.0),
+                            Pos2::new(arrow_x + 1.5, cy),
+                        ],
+                        stroke,
+                    );
+                    painter.line_segment(
+                        [
+                            Pos2::new(arrow_x + 1.5, cy),
+                            Pos2::new(arrow_x - 2.0, cy + 4.0),
+                        ],
+                        stroke,
                     );
                 }
             }
@@ -268,7 +270,7 @@ pub fn show_bit_perfect_modal(
             // 4. Action Row: 1-Click Bit-Perfect Pure Direct Mode
             ui.horizontal(|ui| {
                 let pure_direct_btn = egui::Button::new(
-                    egui::RichText::new("⚡ Enable Bit-Perfect Pure Direct")
+                    egui::RichText::new("Enable Bit-Perfect Pure Direct")
                         .font(FontId::proportional(12.5))
                         .strong()
                         .color(Color32::WHITE),
@@ -309,4 +311,27 @@ pub fn show_bit_perfect_modal(
         open = false;
     }
     *is_open = open;
+}
+
+/// A filled status dot. The bundled fonts have no "●" glyph, so it is painted.
+fn paint_status_dot(ui: &mut egui::Ui, color: Color32, radius: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(radius * 2.0 + 6.0), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), radius, color);
+}
+
+/// An upward warning triangle, replacing the missing "▲" glyph.
+fn paint_warning_triangle(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let c = rect.center();
+    let s = 7.5;
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            Pos2::new(c.x, c.y - s),
+            Pos2::new(c.x - s * 0.92, c.y + s * 0.72),
+            Pos2::new(c.x + s * 0.92, c.y + s * 0.72),
+        ],
+        color,
+        Stroke::NONE,
+    ));
 }

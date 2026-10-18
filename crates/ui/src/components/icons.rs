@@ -36,6 +36,13 @@ pub fn draw_genres(ui: &Ui, rect: Rect, color: Color32) {
         .paint_at(ui, fit_square(rect));
 }
 
+/// A music note, used for artwork placeholders.
+pub fn draw_music_note(ui: &Ui, rect: Rect, color: Color32) {
+    egui::Image::new(egui::include_image!("../../assets/icons/music.svg"))
+        .tint(color)
+        .paint_at(ui, fit_square(rect));
+}
+
 pub fn draw_folder(ui: &Ui, rect: Rect, color: Color32) {
     egui::Image::new(egui::include_image!("../../assets/icons/folder.svg"))
         .tint(color)

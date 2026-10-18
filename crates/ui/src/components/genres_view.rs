@@ -91,7 +91,7 @@ impl<'a> GenresView<'a> {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let play_all_btn = egui::Button::new(
-                                egui::RichText::new("▶ Play All")
+                                egui::RichText::new("Play All")
                                     .font(FontId::proportional(12.5))
                                     .color(Color32::WHITE),
                             )
@@ -103,7 +103,7 @@ impl<'a> GenresView<'a> {
                             }
 
                             let queue_all_btn = egui::Button::new(
-                                egui::RichText::new("➕ Queue All")
+                                egui::RichText::new("Queue All")
                                     .font(FontId::proportional(12.5))
                                     .color(self.theme.text_primary),
                             )
