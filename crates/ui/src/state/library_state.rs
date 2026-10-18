@@ -3,10 +3,11 @@ use std::path::PathBuf;
 
 use database::{
     AlbumRepo, ArtistRepo, FavoritesRepo, GenreRepo, HistoryRepo, PlaylistRepo, ScanRootsRepo,
-    TrackRepo,
+    SmartPlaylistRepo, TrackRepo,
 };
 use domain::ids::TrackId;
 use domain::models::{Album, Artist, Genre, Playlist, ScanRoot, Track};
+use domain::smart::SmartPlaylist;
 use search::SearchEngine;
 
 use crate::components::sidebar::NavItem;
@@ -19,6 +20,9 @@ pub struct LibraryState {
     pub favorite_ids: HashSet<TrackId>,
 
     pub playlists: Vec<Playlist>,
+    pub smart_playlists: Vec<SmartPlaylist>,
+    /// Tracks matched by the smart playlist currently open in the editor.
+    pub smart_playlist_tracks: Vec<Track>,
     pub albums: Vec<Album>,
     pub selected_album: Option<(String, String)>,
     pub album_tracks: Vec<Track>,
@@ -50,6 +54,8 @@ impl Default for LibraryState {
             favorite_ids: HashSet::new(),
 
             playlists: Vec::new(),
+            smart_playlists: Vec::new(),
+            smart_playlist_tracks: Vec::new(),
             albums: Vec::new(),
             selected_album: None,
             album_tracks: Vec::new(),
@@ -78,6 +84,7 @@ impl LibraryState {
         track_repo: &TrackRepo,
         favorites_repo: &FavoritesRepo,
         playlist_repo: &PlaylistRepo,
+        smart_repo: &SmartPlaylistRepo,
         album_repo: &AlbumRepo,
         artist_repo: &ArtistRepo,
         genre_repo: &GenreRepo,
@@ -103,6 +110,10 @@ impl LibraryState {
             self.playlists = pls;
         }
 
+        if let Ok(sps) = smart_repo.list() {
+            self.smart_playlists = sps;
+        }
+
         if let Ok(albs) = album_repo.list() {
             self.albums = albs;
         }
@@ -126,6 +137,7 @@ impl LibraryState {
             search_engine,
             history_repo,
             playlist_repo,
+            smart_repo,
             album_repo,
             artist_repo,
             genre_repo,
@@ -141,6 +153,7 @@ impl LibraryState {
         search_engine: &SearchEngine,
         history_repo: &HistoryRepo,
         playlist_repo: &PlaylistRepo,
+        smart_repo: &SmartPlaylistRepo,
         album_repo: &AlbumRepo,
         artist_repo: &ArtistRepo,
         genre_repo: &GenreRepo,
@@ -186,6 +199,12 @@ impl LibraryState {
                 NavItem::Playlist(pl_id) => {
                     playlist_repo.get_tracks(&pl_id).unwrap_or_default()
                 }
+                NavItem::SmartPlaylist(sp_id) => self
+                    .smart_playlists
+                    .iter()
+                    .find(|sp| sp.id == sp_id)
+                    .and_then(|sp| smart_repo.evaluate(sp).ok())
+                    .unwrap_or_default(),
                 _ => self.all_tracks.clone(),
             }
         };
@@ -230,5 +249,10 @@ impl LibraryState {
         }
         // Favorites membership changed; force the visible list to rebuild.
         self.displayed_key = None;
+    }
+
+    /// Materialise the tracks matched by a smart playlist (editor preview).
+    pub fn evaluate_smart(&mut self, repo: &SmartPlaylistRepo, sp: &SmartPlaylist) {
+        self.smart_playlist_tracks = repo.evaluate(sp).unwrap_or_default();
     }
 }

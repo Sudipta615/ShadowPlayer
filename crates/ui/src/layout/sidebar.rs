@@ -1,5 +1,6 @@
 use eframe::egui::{self, Margin};
 use domain::models::Playlist;
+use domain::smart::SmartPlaylist;
 
 use crate::components::sidebar::{NavItem, SideBar};
 use crate::theme::Theme;
@@ -9,9 +10,11 @@ pub fn render_sidebar(
     ui: &mut egui::Ui,
     active_nav: NavItem,
     playlists: &[Playlist],
+    smart_playlists: &[SmartPlaylist],
     theme: &Theme,
     on_select_nav: impl FnOnce(NavItem),
     on_create_playlist: impl FnOnce(),
+    on_create_smart_playlist: impl FnOnce(),
 ) {
     egui::Panel::left("left_sidebar")
         .exact_size(192.0)
@@ -29,13 +32,16 @@ pub fn render_sidebar(
         .show(ui, |ui| {
             let mut nav_to_select = None;
             let mut create_playlist_req = false;
+            let mut create_smart_req = false;
 
             SideBar::new(
                 active_nav,
                 playlists,
+                smart_playlists,
                 theme,
                 |nav| nav_to_select = Some(nav),
                 || create_playlist_req = true,
+                || create_smart_req = true,
             )
             .show(ui);
 
@@ -44,6 +50,9 @@ pub fn render_sidebar(
             }
             if create_playlist_req {
                 on_create_playlist();
+            }
+            if create_smart_req {
+                on_create_smart_playlist();
             }
         });
 }

@@ -27,6 +27,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v1(conn)?;
     }
 
+    if current_version < 2 {
+        apply_v2(conn)?;
+    }
+
     Ok(())
 }
 
@@ -179,6 +183,36 @@ fn apply_v1(conn: &mut Connection) -> Result<()> {
             VALUES (new.id, new.title, new.artist, new.album, coalesce(new.genre, ''), new.path);
         END;",
         "INSERT INTO schema_migrations (version, applied_at) VALUES (1, strftime('%s', 'now'));",
+    ];
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            eprintln!("Error executing statement: {}\nStmt: {}", e, stmt);
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+fn apply_v2(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V2 (smart playlists)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS smart_playlists (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL UNIQUE,
+            rules_json TEXT NOT NULL,
+            match_all INTEGER NOT NULL DEFAULT 1,
+            limit_count INTEGER,
+            sort_by TEXT,
+            sort_desc INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (2, strftime('%s', 'now'));",
     ];
 
     for stmt in statements {

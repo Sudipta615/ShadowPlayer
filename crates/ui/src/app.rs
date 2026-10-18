@@ -5,7 +5,7 @@ use eframe::egui::{self, Margin, Vec2};
 use audio_session::AudioSession;
 use database::{
     AlbumRepo, ArtistRepo, Database, FavoritesRepo, GenreRepo, HistoryRepo, PlaylistRepo,
-    ScanRootsRepo, SettingsRepo, TrackRepo,
+    ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
 };
 use playback::PlaybackCoordinator;
 use search::SearchEngine;
@@ -14,7 +14,8 @@ use crate::components::sidebar::NavItem;
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
     show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_edit_track_modal,
-    show_eq_panel, show_help_modal, show_playlist_editor, show_track_properties_modal,
+    show_eq_panel, show_help_modal, show_playlist_editor, show_smart_playlist_editor,
+    show_track_properties_modal, SmartPlaylistEditorState,
 };
 use crate::services::{
     ArtworkService, ImportKind, ImportResult, ImportService, LyricsService, MprisCommand,
@@ -42,6 +43,7 @@ pub struct ShadowPlayerApp {
     genre_repo: GenreRepo,
     scan_roots_repo: ScanRootsRepo,
     settings_repo: SettingsRepo,
+    smart_playlist_repo: SmartPlaylistRepo,
 
     artwork_service: ArtworkService,
     lyrics_service: LyricsService,
@@ -53,6 +55,7 @@ pub struct ShadowPlayerApp {
     library_state: LibraryState,
     dsp_state: DspState,
     help_state: HelpState,
+    smart_playlist_editor: SmartPlaylistEditorState,
     theme: Theme,
     settings_dirty: bool,
 
@@ -81,6 +84,7 @@ impl ShadowPlayerApp {
         let genre_repo = GenreRepo::new(db.clone());
         let scan_roots_repo = ScanRootsRepo::new(db.clone());
         let settings_repo = SettingsRepo::new(db.clone());
+        let smart_playlist_repo = SmartPlaylistRepo::new(db.clone());
         let search_engine = SearchEngine::new(db.clone());
         let coordinator = PlaybackCoordinator::new(session.clone(), db.clone());
 
@@ -104,6 +108,7 @@ impl ShadowPlayerApp {
             genre_repo,
             scan_roots_repo,
             settings_repo,
+            smart_playlist_repo,
 
             artwork_service,
             lyrics_service,
@@ -115,6 +120,7 @@ impl ShadowPlayerApp {
             library_state: LibraryState::default(),
             dsp_state: DspState::default(),
             help_state: HelpState::default(),
+            smart_playlist_editor: SmartPlaylistEditorState::default(),
             theme: Theme::default(),
             settings_dirty: false,
 
@@ -313,6 +319,7 @@ impl ShadowPlayerApp {
             &self.track_repo,
             &self.favorites_repo,
             &self.playlist_repo,
+            &self.smart_playlist_repo,
             &self.album_repo,
             &self.artist_repo,
             &self.genre_repo,
@@ -337,6 +344,7 @@ impl ShadowPlayerApp {
             &self.search_engine,
             &self.history_repo,
             &self.playlist_repo,
+            &self.smart_playlist_repo,
             &self.album_repo,
             &self.artist_repo,
             &self.genre_repo,
@@ -782,13 +790,16 @@ impl eframe::App for ShadowPlayerApp {
         // 8. Render Left Sidebar
         let mut nav_to_select = None;
         let mut create_playlist_req = false;
+        let mut create_smart_playlist_req = false;
         render_sidebar(
             ui,
             self.app_state.active_nav,
             &self.library_state.playlists,
+            &self.library_state.smart_playlists,
             &self.theme,
             |nav| nav_to_select = Some(nav),
             || create_playlist_req = true,
+            || create_smart_playlist_req = true,
         );
 
         if let Some(nav) = nav_to_select {
@@ -803,6 +814,9 @@ impl eframe::App for ShadowPlayerApp {
         }
         if create_playlist_req {
             self.app_state.new_playlist_modal_open = true;
+        }
+        if create_smart_playlist_req {
+            self.smart_playlist_editor.open_new();
         }
 
         // 9. Render Central Panel (Main Views + Right Drawer)
@@ -976,6 +990,17 @@ impl eframe::App for ShadowPlayerApp {
                                     if view_action.removed_track {
                                         self.reload_library();
                                     }
+                                    if let Some(sp_id) = view_action.edit_smart_playlist {
+                                        if let Some(sp) = self
+                                            .library_state
+                                            .smart_playlists
+                                            .iter()
+                                            .find(|s| s.id == sp_id)
+                                            .cloned()
+                                        {
+                                            self.smart_playlist_editor.open_existing(&sp);
+                                        }
+                                    }
                                 }
                             }
                         },
@@ -1052,6 +1077,59 @@ impl eframe::App for ShadowPlayerApp {
             &mut self.app_state.track_properties_open,
             &self.theme,
         );
+
+        // Smart playlist editor: rule-based, self-updating playlists. Re-evaluate
+        // the draft only when it changed, so typing never re-queries the library
+        // more than once per frame.
+        if self.smart_playlist_editor.is_open && self.smart_playlist_editor.draft_dirty {
+            let draft = self.smart_playlist_editor.draft.clone();
+            self.library_state
+                .evaluate_smart(&self.smart_playlist_repo, &draft);
+            self.smart_playlist_editor.draft_dirty = false;
+        }
+        let sp_actions = show_smart_playlist_editor(
+            &ctx,
+            &mut self.smart_playlist_editor,
+            &self.library_state.smart_playlists,
+            &self.library_state.smart_playlist_tracks,
+            &self.theme,
+        );
+        let mut sp_changed = false;
+        if let Some(sp) = sp_actions.save {
+            match self.smart_playlist_repo.save(&sp) {
+                Ok(saved) => {
+                    self.app_state.active_nav = NavItem::SmartPlaylist(saved.id);
+                    self.smart_playlist_editor.is_new = false;
+                    self.smart_playlist_editor.draft = saved;
+                    sp_changed = true;
+                }
+                Err(e) => log::warn!("Could not save smart playlist: {}", e),
+            }
+        }
+        if let Some(id) = sp_actions.delete {
+            let _ = self.smart_playlist_repo.delete(&id);
+            if self.app_state.active_nav == NavItem::SmartPlaylist(id) {
+                self.app_state.active_nav = NavItem::Home;
+            }
+            if !self.smart_playlist_editor.is_new && self.smart_playlist_editor.draft.id == id {
+                self.smart_playlist_editor.is_open = false;
+            }
+            sp_changed = true;
+        }
+        if let Some(id) = sp_actions.open {
+            if let Some(sp) = self
+                .library_state
+                .smart_playlists
+                .iter()
+                .find(|s| s.id == id)
+                .cloned()
+            {
+                self.smart_playlist_editor.open_existing(&sp);
+            }
+        }
+        if sp_changed {
+            self.reload_library();
+        }
 
         // Playlist manager: create / rename / delete / add songs.
         if self.app_state.new_playlist_modal_open {

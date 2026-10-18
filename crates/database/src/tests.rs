@@ -198,5 +198,123 @@ mod tests {
         let jazz_folder_tracks = track_repo.get_tracks_by_folder(&PathBuf::from("/music/jazz")).unwrap();
         assert_eq!(jazz_folder_tracks.len(), 1);
     }
+
+    #[test]
+    fn test_smart_playlists() {
+        use domain::ids::PlaylistId;
+        use domain::smart::{SmartField, SmartOp, SmartPlaylist, SmartRule};
+
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let track_repo = TrackRepo::new(db.clone());
+        let sp_repo = SmartPlaylistRepo::new(db.clone());
+
+        let t1 = sample_track(TrackId::new(), "/m/1.flac", "Alpha", "Artist A", "Album X");
+        let mut t2 = sample_track(TrackId::new(), "/m/2.mp3", "Beta", "Artist B", "Album Y");
+        t2.format = "MP3".to_string();
+        t2.is_lossless = false;
+        t2.bitrate_kbps = Some(320);
+        let mut t3 = sample_track(TrackId::new(), "/m/3.flac", "Gamma", "Artist A", "Album Z");
+        t3.play_count = 9;
+
+        track_repo.upsert(&t1).unwrap();
+        track_repo.upsert(&t2).unwrap();
+        track_repo.upsert(&t3).unwrap();
+
+        // Rule: lossless = yes  -> the two FLACs.
+        let mut sp = SmartPlaylist::draft(PlaylistId::new());
+        sp.name = "Lossless".to_string();
+        sp.rules = vec![SmartRule {
+            field: SmartField::Lossless,
+            op: SmartOp::IsTrue,
+            value: String::new(),
+        }];
+        let saved = sp_repo.save(&sp).unwrap();
+        assert_eq!(saved.name, "Lossless");
+        assert_eq!(sp_repo.evaluate(&saved).unwrap().len(), 2);
+
+        // AND: Artist = Artist A AND play_count > 5 -> only Gamma.
+        let mut sp2 = SmartPlaylist::draft(PlaylistId::new());
+        sp2.name = "A heavy".to_string();
+        sp2.match_all = true;
+        sp2.rules = vec![
+            SmartRule {
+                field: SmartField::Artist,
+                op: SmartOp::Equals,
+                value: "Artist A".to_string(),
+            },
+            SmartRule {
+                field: SmartField::PlayCount,
+                op: SmartOp::GreaterThan,
+                value: "5".to_string(),
+            },
+        ];
+        let sp2 = sp_repo.save(&sp2).unwrap();
+        let m2 = sp_repo.evaluate(&sp2).unwrap();
+        assert_eq!(m2.len(), 1);
+        assert_eq!(m2[0].title, "Gamma");
+
+        // OR: format contains "MP" OR title contains "Alpha" -> t1 + t2.
+        let mut sp3 = SmartPlaylist::draft(PlaylistId::new());
+        sp3.name = "Any".to_string();
+        sp3.match_all = false;
+        sp3.rules = vec![
+            SmartRule {
+                field: SmartField::Format,
+                op: SmartOp::Contains,
+                value: "MP".to_string(),
+            },
+            SmartRule {
+                field: SmartField::Title,
+                op: SmartOp::Contains,
+                value: "Alpha".to_string(),
+            },
+        ];
+        let sp3 = sp_repo.save(&sp3).unwrap();
+        assert_eq!(sp_repo.evaluate(&sp3).unwrap().len(), 2);
+
+        // Incomplete rules (empty value) are ignored, not fatal.
+        let mut sp4 = SmartPlaylist::draft(PlaylistId::new());
+        sp4.name = "Incomplete".to_string();
+        sp4.rules = vec![SmartRule {
+            field: SmartField::Title,
+            op: SmartOp::Contains,
+            value: "   ".to_string(),
+        }];
+        let sp4 = sp_repo.save(&sp4).unwrap();
+        assert_eq!(sp_repo.evaluate(&sp4).unwrap().len(), 3);
+
+        // Limit + sort descending by title -> only "Gamma".
+        let mut sp5 = SmartPlaylist::draft(PlaylistId::new());
+        sp5.name = "Top one".to_string();
+        sp5.rules = vec![];
+        sp5.limit_count = Some(1);
+        sp5.sort_by = Some(SmartField::Title);
+        sp5.sort_desc = true;
+        let sp5 = sp_repo.save(&sp5).unwrap();
+        let m5 = sp_repo.evaluate(&sp5).unwrap();
+        assert_eq!(m5.len(), 1);
+        assert_eq!(m5[0].title, "Gamma");
+
+        // A minute-based "in the last N days" rule excludes never-played tracks.
+        let mut sp6 = SmartPlaylist::draft(PlaylistId::new());
+        sp6.name = "Fresh".to_string();
+        sp6.rules = vec![SmartRule {
+            field: SmartField::LastPlayed,
+            op: SmartOp::InLastDays,
+            value: "7".to_string(),
+        }];
+        let sp6 = sp_repo.save(&sp6).unwrap();
+        assert_eq!(sp_repo.evaluate(&sp6).unwrap().len(), 0);
+
+        // Persistence round-trip.
+        let all = sp_repo.list().unwrap();
+        assert_eq!(all.len(), 6);
+        let got = sp_repo.get(&saved.id).unwrap().unwrap();
+        assert_eq!(got.rules.len(), 1);
+        assert_eq!(got.rules[0].field, SmartField::Lossless);
+
+        sp_repo.delete(&sp2.id).unwrap();
+        assert_eq!(sp_repo.list().unwrap().len(), 5);
+    }
 }
 

@@ -1,6 +1,7 @@
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Ui, Vec2};
 use domain::ids::PlaylistId;
 use domain::models::Playlist;
+use domain::smart::SmartPlaylist;
 use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub enum NavItem {
     HiRes,
     Lossless,
     Playlist(PlaylistId),
+    SmartPlaylist(PlaylistId),
     Settings,
     Help,
 }
@@ -23,25 +25,31 @@ pub enum NavItem {
 pub struct SideBar<'a> {
     pub active_item: NavItem,
     pub playlists: &'a [Playlist],
+    pub smart_playlists: &'a [SmartPlaylist],
     pub theme: &'a Theme,
     pub on_select: Box<dyn FnMut(NavItem) + 'a>,
     pub on_create_playlist: Box<dyn FnMut() + 'a>,
+    pub on_create_smart_playlist: Box<dyn FnMut() + 'a>,
 }
 
 impl<'a> SideBar<'a> {
     pub fn new(
         active_item: NavItem,
         playlists: &'a [Playlist],
+        smart_playlists: &'a [SmartPlaylist],
         theme: &'a Theme,
         on_select: impl FnMut(NavItem) + 'a,
         on_create_playlist: impl FnMut() + 'a,
+        on_create_smart_playlist: impl FnMut() + 'a,
     ) -> Self {
         Self {
             active_item,
             playlists,
+            smart_playlists,
             theme,
             on_select: Box::new(on_select),
             on_create_playlist: Box::new(on_create_playlist),
+            on_create_smart_playlist: Box::new(on_create_smart_playlist),
         }
     }
 
@@ -134,6 +142,42 @@ impl<'a> SideBar<'a> {
                 }
             }
 
+            // Smart (rule-based) Playlists
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Smart Playlists")
+                        .font(FontId::proportional(13.0))
+                        .color(self.theme.text_muted),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (plus_rect, plus_resp) =
+                        ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::click());
+                    let plus_color = if plus_resp.hovered() {
+                        self.theme.text_primary
+                    } else {
+                        self.theme.text_muted
+                    };
+                    crate::components::icons::draw_plus_circle(ui, plus_rect, plus_color);
+                    if plus_resp.clicked() {
+                        (self.on_create_smart_playlist)();
+                    }
+                });
+            });
+            ui.add_space(4.0);
+
+            if self.smart_playlists.is_empty() {
+                ui.label(
+                    egui::RichText::new("  e.g. FLAC · played > 5")
+                        .font(FontId::proportional(11.0))
+                        .color(self.theme.text_muted),
+                );
+            } else {
+                for sp in self.smart_playlists {
+                    self.render_smart_playlist_item(ui, sp);
+                }
+            }
+
             // 5. Anchor Settings & Help to the bottom
             let remaining_h = ui.available_height() - 94.0;
             if remaining_h > 0.0 {
@@ -145,6 +189,54 @@ impl<'a> SideBar<'a> {
             self.render_nav_item(ui, NavItem::Help, "?", "Help & Feedback");
             ui.add_space(4.0);
         });
+    }
+
+    fn render_smart_playlist_item(&mut self, ui: &mut Ui, playlist: &SmartPlaylist) {
+        let item = NavItem::SmartPlaylist(playlist.id);
+        let is_active = self.active_item == item;
+        let height = 34.0;
+        let width = ui.available_width();
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+
+        if response.clicked() {
+            (self.on_select)(item);
+        }
+
+        let painter = ui.painter_at(rect);
+        let is_hovered = response.hovered();
+
+        if is_active {
+            painter.rect_filled(rect, CornerRadius::same(7), self.theme.accent_blue);
+        } else if is_hovered {
+            painter.rect_filled(rect, CornerRadius::same(7), self.theme.bg_card_hover);
+        }
+
+        let text_color = if is_active || is_hovered {
+            self.theme.text_primary
+        } else {
+            self.theme.text_secondary
+        };
+
+        // A small spark glyph marks rule-based playlists.
+        painter.text(
+            Pos2::new(rect.min.x + 16.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            "✦",
+            FontId::proportional(13.0),
+            if is_active { Color32::WHITE } else { self.theme.accent_blue },
+        );
+
+        let label_pos = Pos2::new(rect.min.x + 30.0, rect.center().y);
+        let galley = painter.layout_no_wrap(
+            playlist.name.clone(),
+            FontId::proportional(12.8),
+            text_color,
+        );
+        painter.galley(
+            Pos2::new(label_pos.x, rect.center().y - galley.size().y * 0.5),
+            galley,
+            text_color,
+        );
     }
 
     fn render_user_playlist_item(&mut self, ui: &mut Ui, playlist: &Playlist) {

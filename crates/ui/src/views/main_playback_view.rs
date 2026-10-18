@@ -21,6 +21,8 @@ pub struct MainViewAction {
     pub needs_reload: bool,
     /// A track was removed from the library; a full reload is required.
     pub removed_track: bool,
+    /// The user asked to edit the rules of a smart playlist.
+    pub edit_smart_playlist: Option<domain::ids::PlaylistId>,
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
@@ -282,6 +284,32 @@ pub fn render_main_playback_view(
                         if ui.add(add_btn).on_hover_text("Create New Playlist").clicked() {
                             view_action.create_playlist = true;
                         }
+
+                        // Smart playlist tabs
+                        for sp in &library_state.smart_playlists {
+                            let item_nav = NavItem::SmartPlaylist(sp.id);
+                            let is_active = app_state.active_nav == item_nav;
+                            let text_color = if is_active { theme.accent_blue } else { theme.text_secondary };
+                            let bg = if is_active { theme.bg_card_active } else { theme.bg_pill };
+                            let stroke = if is_active {
+                                Stroke::new(1.0_f32, theme.accent_blue)
+                            } else {
+                                Stroke::new(1.0_f32, theme.border_subtle)
+                            };
+
+                            let btn = egui::Button::new(
+                                egui::RichText::new(format!("✦ {}", sp.name))
+                                    .font(FontId::proportional(12.0))
+                                    .color(text_color),
+                            )
+                            .fill(bg)
+                            .stroke(stroke)
+                            .corner_radius(egui::CornerRadius::same(6));
+
+                            if ui.add(btn).clicked() && !is_active {
+                                view_action.switch_nav = Some(item_nav);
+                            }
+                        }
                     });
                 });
         });
@@ -398,6 +426,32 @@ pub fn render_main_playback_view(
                         .font(FontId::proportional(12.0))
                         .color(theme.text_muted),
                 );
+            });
+            ui.add_space(4.0);
+        }
+        NavItem::SmartPlaylist(sp_id) => {
+            let sp = library_state.smart_playlists.iter().find(|s| s.id == sp_id).cloned();
+            let name = sp
+                .as_ref()
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "Smart Playlist".into());
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("✦ {}", name))
+                        .font(FontId::proportional(16.0))
+                        .strong()
+                        .color(theme.accent_blue),
+                );
+                ui.label(
+                    egui::RichText::new(format!("({} tracks)", library_state.displayed_tracks.len()))
+                        .font(FontId::proportional(12.0))
+                        .color(theme.text_muted),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("✎ Edit Rules").clicked() {
+                        view_action.edit_smart_playlist = Some(sp_id);
+                    }
+                });
             });
             ui.add_space(4.0);
         }

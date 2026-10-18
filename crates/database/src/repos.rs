@@ -1,7 +1,9 @@
 use crate::db::Database;
 use domain::ids::*;
 use domain::models::*;
-use rusqlite::{params, OptionalExtension, Result, Row};
+use domain::smart::*;
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{params, params_from_iter, OptionalExtension, Result, Row};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -950,6 +952,257 @@ impl GenreRepo {
                 tracks.push(t?);
             }
             Ok(tracks)
+        })
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn map_smart_playlist(row: &Row<'_>) -> Result<SmartPlaylist> {
+    let id_str: String = row.get("id")?;
+    let rules_json: String = row.get("rules_json")?;
+    let sort_by: Option<String> = row.get("sort_by")?;
+    let limit: Option<i64> = row.get("limit_count")?;
+
+    Ok(SmartPlaylist {
+        id: PlaylistId::from_str(&id_str).unwrap_or_default(),
+        name: row.get("name")?,
+        match_all: row.get::<_, i32>("match_all")? != 0,
+        rules: serde_json::from_str(&rules_json).unwrap_or_default(),
+        limit_count: limit.map(|n| n.max(0) as u32),
+        sort_by: sort_by.and_then(|s| serde_json::from_str(&s).ok()),
+        sort_desc: row.get::<_, i32>("sort_desc")? != 0,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+/// Translate one rule into a SQL fragment plus its bound parameters. Returns
+/// `None` when the rule is incomplete (e.g. an empty value), so half-typed
+/// rules are simply ignored rather than matching nothing.
+fn rule_to_clause(rule: &SmartRule) -> Option<(String, Vec<SqlValue>)> {
+    let col = rule.field.column();
+    let v = rule.value.trim();
+
+    match rule.op {
+        SmartOp::IsTrue => Some((format!("{col} = 1"), vec![])),
+        SmartOp::IsFalse => Some((format!("{col} = 0"), vec![])),
+        SmartOp::IsEmpty => Some((format!("({col} IS NULL OR {col} = '')"), vec![])),
+        SmartOp::IsNotEmpty => Some((format!("({col} IS NOT NULL AND {col} != '')"), vec![])),
+        SmartOp::Contains => {
+            if v.is_empty() {
+                None
+            } else {
+                Some((format!("{col} LIKE ?"), vec![SqlValue::Text(format!("%{v}%"))]))
+            }
+        }
+        SmartOp::NotContains => {
+            if v.is_empty() {
+                None
+            } else {
+                Some((
+                    format!("({col} IS NULL OR {col} NOT LIKE ?)"),
+                    vec![SqlValue::Text(format!("%{v}%"))],
+                ))
+            }
+        }
+        SmartOp::Equals | SmartOp::NotEquals => {
+            let neq = rule.op == SmartOp::NotEquals;
+            if rule.field.is_numeric() {
+                let n = parse_num(v)?;
+                Some((format!("{col} {} ?", if neq { "!=" } else { "=" }), vec![n]))
+            } else if v.is_empty() {
+                None
+            } else {
+                Some((
+                    format!("{col} {} ? COLLATE NOCASE", if neq { "!=" } else { "=" }),
+                    vec![SqlValue::Text(v.to_string())],
+                ))
+            }
+        }
+        SmartOp::GreaterThan | SmartOp::LessThan => {
+            let n = parse_num(v)?;
+            let op = if rule.op == SmartOp::GreaterThan { ">" } else { "<" };
+            Some((format!("{col} {op} ?"), vec![n]))
+        }
+        SmartOp::InLastDays | SmartOp::NotInLastDays => {
+            let days: i64 = v.parse().ok()?;
+            let cutoff = days.max(0) * 86_400;
+            if rule.op == SmartOp::InLastDays {
+                Some((
+                    format!("{col} >= strftime('%s','now') - ?"),
+                    vec![SqlValue::Integer(cutoff)],
+                ))
+            } else {
+                Some((
+                    format!("({col} IS NULL OR {col} < strftime('%s','now') - ?)"),
+                    vec![SqlValue::Integer(cutoff)],
+                ))
+            }
+        }
+    }
+}
+
+fn parse_num(v: &str) -> Option<SqlValue> {
+    if let Ok(i) = v.trim().parse::<i64>() {
+        Some(SqlValue::Integer(i))
+    } else {
+        v.trim().parse::<f64>().ok().map(SqlValue::Real)
+    }
+}
+
+/// Build the `SELECT` tail (WHERE/ORDER BY/LIMIT) for a smart playlist.
+fn build_smart_query(sp: &SmartPlaylist) -> (String, Vec<SqlValue>) {
+    let mut clauses = Vec::new();
+    let mut vals: Vec<SqlValue> = Vec::new();
+
+    for rule in &sp.rules {
+        if let Some((clause, mut v)) = rule_to_clause(rule) {
+            clauses.push(clause);
+            vals.append(&mut v);
+        }
+    }
+
+    let mut sql = String::new();
+    if !clauses.is_empty() {
+        let joiner = if sp.match_all { " AND " } else { " OR " };
+        sql.push_str(" WHERE (");
+        sql.push_str(&clauses.join(joiner));
+        sql.push(')');
+    }
+
+    let sort = sp.sort_by.unwrap_or(SmartField::Title);
+    let dir = if sp.sort_desc { "DESC" } else { "ASC" };
+    // Text columns sort case-insensitively, mirroring the rest of the library.
+    let collate = if sort.is_numeric() || sort.is_date() {
+        ""
+    } else {
+        " COLLATE NOCASE"
+    };
+    sql.push_str(&format!(" ORDER BY {}{collate} {dir}", sort.column()));
+
+    if let Some(n) = sp.limit_count {
+        if n > 0 {
+            sql.push_str(&format!(" LIMIT {}", n.min(100_000)));
+        }
+    }
+
+    (sql, vals)
+}
+
+/// Saved, self-updating ("smart") playlists and their evaluation.
+pub struct SmartPlaylistRepo {
+    db: Database,
+}
+
+impl SmartPlaylistRepo {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    pub fn list(&self) -> Result<Vec<SmartPlaylist>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, rules_json, match_all, limit_count, sort_by, sort_desc,
+                        created_at, updated_at
+                 FROM smart_playlists
+                 ORDER BY name COLLATE NOCASE ASC;",
+            )?;
+            let iter = stmt.query_map([], map_smart_playlist)?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn get(&self, id: &PlaylistId) -> Result<Option<SmartPlaylist>> {
+        self.db.with_conn(|conn| {
+            conn.query_row(
+                "SELECT id, name, rules_json, match_all, limit_count, sort_by, sort_desc,
+                        created_at, updated_at
+                 FROM smart_playlists WHERE id = ?1;",
+                params![id.to_string()],
+                map_smart_playlist,
+            )
+            .optional()
+        })
+    }
+
+    /// Insert (or replace) a smart playlist. Returns the stored definition.
+    pub fn save(&self, sp: &SmartPlaylist) -> Result<SmartPlaylist> {
+        let now = now_secs();
+        let created = if sp.created_at == 0 { now } else { sp.created_at };
+        let rules_json = serde_json::to_string(&sp.rules).unwrap_or_else(|_| "[]".to_string());
+        let sort_by = sp
+            .sort_by
+            .and_then(|f| serde_json::to_string(&f).ok());
+        let limit = sp.limit_count.map(|n| n as i64);
+
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO smart_playlists
+                    (id, name, rules_json, match_all, limit_count, sort_by, sort_desc,
+                     created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    rules_json = excluded.rules_json,
+                    match_all = excluded.match_all,
+                    limit_count = excluded.limit_count,
+                    sort_by = excluded.sort_by,
+                    sort_desc = excluded.sort_desc,
+                    updated_at = excluded.updated_at;",
+                params![
+                    sp.id.to_string(),
+                    sp.name,
+                    rules_json,
+                    sp.match_all as i32,
+                    limit,
+                    sort_by,
+                    sp.sort_desc as i32,
+                    created,
+                    now,
+                ],
+            )?;
+            Ok(())
+        })?;
+
+        Ok(SmartPlaylist {
+            created_at: created,
+            updated_at: now,
+            ..sp.clone()
+        })
+    }
+
+    pub fn delete(&self, id: &PlaylistId) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM smart_playlists WHERE id = ?1;",
+                params![id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Run a smart playlist's rules and return the matching tracks.
+    pub fn evaluate(&self, sp: &SmartPlaylist) -> Result<Vec<Track>> {
+        let (tail, vals) = build_smart_query(sp);
+        let sql = format!("SELECT * FROM tracks{tail};");
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(&sql)?;
+            let iter = stmt.query_map(params_from_iter(vals.iter()), map_track)?;
+            let mut out = Vec::new();
+            for t in iter {
+                out.push(t?);
+            }
+            Ok(out)
         })
     }
 }
