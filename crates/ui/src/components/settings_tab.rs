@@ -107,6 +107,11 @@ pub struct SettingsTabState {
     /// by the app and shown as a toast.
     pub chain_preset_notice: Option<String>,
 
+    // Library maintenance
+    /// Set by the Settings > Library "Organize Files" button; the app raises the
+    /// batch organizer and clears it.
+    pub request_organize: bool,
+
     // Spatial
     pub spatial_quality: SpatialQuality,
     pub hrtf_profile: String,
@@ -199,6 +204,7 @@ impl Default for SettingsTabState {
             chain_preset_renaming: None,
             chain_preset_rename_buffer: String::new(),
             chain_preset_notice: None,
+            request_organize: false,
 
             spatial_quality: SpatialQuality::High,
             hrtf_profile: String::new(),
@@ -2528,7 +2534,31 @@ fn render_library_category(
         }
     });
 
-    // Card 3: About ShadowPlayer
+    // Card 3: Organize Files
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_list_icon(ui, r, c),
+            "Organize Files",
+            "Rename and re-sort files on disk to a naming scheme, with a full preview before anything moves",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Batch Rename & Sort",
+            "Build names from tags — e.g. {artist}/{album}/{track} - {title}. Existing files are never overwritten.",
+            theme,
+            |ui| {
+                if ui.add(pill_btn("Organize Files...", false, theme)).clicked() {
+                    state.request_organize = true;
+                }
+            },
+        );
+    });
+
+    // Card 4: About ShadowPlayer
     setting_card(ui, theme, |ui| {
         card_header(
             ui,

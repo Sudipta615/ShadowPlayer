@@ -4,6 +4,7 @@ use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
 use log::info;
 use rand::seq::SliceRandom;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// A track counts as "played" once this many seconds have been listened to (or
@@ -234,6 +235,39 @@ impl PlaybackCoordinator {
         };
 
         self.play_index(prev_idx);
+    }
+
+    /// Repoint queued tracks after their files were moved on disk.
+    ///
+    /// Keeps ids, order and the current index — so playback continues — while
+    /// making sure the next track is opened from its new location.
+    pub fn remap_paths(&mut self, moved: &[(TrackId, PathBuf)]) {
+        if moved.is_empty() {
+            return;
+        }
+        let lookup = |id: &TrackId| {
+            moved
+                .iter()
+                .find(|(moved_id, _)| moved_id == id)
+                .map(|(_, path)| path.clone())
+        };
+
+        let mut changed = false;
+        for track in self.queue.iter_mut() {
+            if let Some(new_path) = lookup(&track.id) {
+                track.path = new_path;
+                changed = true;
+            }
+        }
+        if let Some(current) = self.current_track.as_mut() {
+            if let Some(new_path) = lookup(&current.id) {
+                current.path = new_path;
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist_queue();
+        }
     }
 
     pub fn clear_queue(&mut self) {

@@ -23,6 +23,8 @@ pub enum ImportKind {
     Playlist,
     /// Pick a destination file for an M3U export.
     SaveM3u,
+    /// Pick the root folder for a batch organize.
+    OrganizeDestination,
 }
 
 /// Outcome of a native picker interaction, delivered off the UI thread.
@@ -34,6 +36,8 @@ pub enum ImportResult {
     Playlist(PathBuf),
     /// A destination chosen for an M3U export.
     SavePath(PathBuf),
+    /// A root folder chosen for a batch organize.
+    OrganizeDestination(PathBuf),
     /// The picker was dismissed with no selection.
     Cancelled,
 }
@@ -85,6 +89,11 @@ impl ImportService {
         }
         self.suggested_name = suggested_name;
         self.request(ImportKind::SaveM3u);
+    }
+
+    /// Open the native "choose a destination folder" dialog for the organizer.
+    pub fn request_organize_destination(&mut self) {
+        self.request(ImportKind::OrganizeDestination);
     }
 
     fn request(&mut self, kind: ImportKind) {
@@ -172,6 +181,12 @@ fn run_picker(kind: ImportKind, suggested_name: String) -> ImportResult {
                 .add_filter("Playlists", PLAYLIST_EXTENSIONS);
             match dialog.save_file() {
                 Some(path) => ImportResult::SavePath(path),
+                None => ImportResult::Cancelled,
+            }
+        }
+        ImportKind::OrganizeDestination => {
+            match dialog.set_title("Organize Into Folder").pick_folder() {
+                Some(path) => ImportResult::OrganizeDestination(path),
                 None => ImportResult::Cancelled,
             }
         }

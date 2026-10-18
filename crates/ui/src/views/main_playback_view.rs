@@ -24,6 +24,8 @@ pub struct MainViewAction {
     pub removed_track: bool,
     /// The user asked to edit the rules of a smart playlist.
     pub edit_smart_playlist: Option<domain::ids::PlaylistId>,
+    /// The user asked to organize the current selection.
+    pub organize_tracks: Option<Vec<Track>>,
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
@@ -515,6 +517,11 @@ pub fn render_main_playback_view(
     }
     if table_action.remove_track.is_some() || table_action.remove_selected {
         view_action.removed_track = true;
+    }
+    if table_action.organize_selected {
+        // Hand the current selection to the app-level organizer; the modal and
+        // the disk work both live there.
+        view_action.organize_tracks = Some(library_state.selected_tracks_in_order());
     }
 
     handle_songs_table_action(

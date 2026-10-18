@@ -83,6 +83,8 @@ pub struct SongsTableAction {
     pub add_selected_to_playlist: Option<PlaylistId>,
     /// Add every selected track to Favorites.
     pub favorite_selected: bool,
+    /// Hand the selected tracks to the batch organizer.
+    pub organize_selected: bool,
     pub remove_selected: bool,
     pub clear_selection: bool,
 }
@@ -126,6 +128,7 @@ impl<'a> SongsTable<'a> {
             add_selected_to_queue: false,
             add_selected_to_playlist: None,
             favorite_selected: false,
+            organize_selected: false,
             remove_selected: false,
             clear_selection: false,
         };
@@ -714,6 +717,9 @@ fn render_bulk_bar(
                 }
                 if ui.button(egui::RichText::new("Favorite").font(FontId::proportional(12.0))).clicked() {
                     action.favorite_selected = true;
+                }
+                if ui.button(egui::RichText::new("Organize").font(FontId::proportional(12.0))).clicked() {
+                    action.organize_selected = true;
                 }
                 if !playlists.is_empty() {
                     ui.menu_button(

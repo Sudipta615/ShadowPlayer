@@ -14,9 +14,9 @@ use crate::components::sidebar::NavItem;
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
     show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_duplicates_modal,
-    show_edit_track_modal, show_eq_panel, show_help_modal, show_playlist_editor,
-    show_smart_playlist_editor, show_track_properties_modal, DuplicateGroup, DuplicatesState,
-    SmartPlaylistEditorState,
+    show_edit_track_modal, show_eq_panel, show_help_modal, show_organize_modal,
+    show_playlist_editor, show_smart_playlist_editor, show_track_properties_modal, DuplicateGroup,
+    DuplicatesState, OrganizeState, SmartPlaylistEditorState,
 };
 use crate::services::{
     ArtworkService, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
@@ -88,6 +88,11 @@ pub struct ShadowPlayerApp {
     pending_m3u_export: Option<(String, Vec<library::M3uEntry>)>,
     /// Duplicate-track finder state.
     duplicates: DuplicatesState,
+    /// Batch organize / rename state.
+    organize: OrganizeState,
+    /// Watcher events are ignored until this instant. Our own file moves would
+    /// otherwise look like external changes and start a needless rescan.
+    watch_suppress_until: Option<std::time::Instant>,
     /// Transient user-facing notifications.
     toasts: crate::components::toasts::ToastState,
 }
@@ -165,6 +170,8 @@ impl ShadowPlayerApp {
             wake_ctx: Some(_cc.egui_ctx.clone()),
             pending_m3u_export: None,
             duplicates: DuplicatesState::default(),
+            organize: OrganizeState::default(),
+            watch_suppress_until: None,
             toasts: crate::components::toasts::ToastState::default(),
         };
 
@@ -234,6 +241,19 @@ impl ShadowPlayerApp {
 
     /// Drain watcher signals and, after a short quiet period, enqueue a rescan.
     fn poll_watchers(&mut self) {
+        // A batch organize moves files itself. Those changes are already
+        // reflected in the library database, so re-scanning would be pure
+        // duplicate work — and the events trail the move by a moment, so a
+        // window is needed rather than a single drain.
+        if let Some(until) = self.watch_suppress_until {
+            if std::time::Instant::now() < until {
+                while self.watch_rx.try_recv().is_ok() {}
+                self.watch_pending = None;
+                return;
+            }
+            self.watch_suppress_until = None;
+        }
+
         while let Ok(root) = self.watch_rx.try_recv() {
             self.watch_pending = Some((root, std::time::Instant::now()));
         }
@@ -314,6 +334,17 @@ impl ShadowPlayerApp {
             }
         }
 
+        // 6. Batch-organizer preferences (last pattern and destination).
+        if let Ok(Some(json)) = self.settings_repo.get_value("organize_prefs") {
+            match serde_json::from_str::<crate::modals::OrganizePrefs>(&json) {
+                Ok(prefs) => {
+                    self.organize.pattern = prefs.pattern;
+                    self.organize.destination = prefs.destination;
+                }
+                Err(e) => log::warn!("Ignoring unreadable organizer preferences: {e}"),
+            }
+        }
+
         // Sync restored state to audio session
         self.dsp_state.sync_all_to_session(&self.session);
     }
@@ -374,6 +405,15 @@ impl ShadowPlayerApp {
         // 5. Save whole-chain DSP presets
         if let Ok(json) = serde_json::to_string(&self.dsp_state.settings_tab.chain_presets) {
             let _ = self.settings_repo.set_value("chain_presets", &json);
+        }
+
+        // 6. Save batch-organizer preferences
+        let organize_prefs = crate::modals::OrganizePrefs {
+            pattern: self.organize.pattern.clone(),
+            destination: self.organize.destination.clone(),
+        };
+        if let Ok(json) = serde_json::to_string(&organize_prefs) {
+            let _ = self.settings_repo.set_value("organize_prefs", &json);
         }
     }
 
@@ -440,6 +480,9 @@ impl ShadowPlayerApp {
             }
             ImportResult::SavePath(path) => {
                 self.write_pending_m3u_export(&path);
+            }
+            ImportResult::OrganizeDestination(path) => {
+                self.organize.set_destination(Some(path));
             }
         }
     }
@@ -640,6 +683,108 @@ impl ShadowPlayerApp {
         self.duplicates.is_open = true;
     }
 
+    /// Open the batch organizer for a set of tracks.
+    fn open_organize(&mut self, tracks: Vec<domain::models::Track>, scope_label: String) {
+        if tracks.is_empty() {
+            self.toasts.info("Nothing to organize".to_string());
+            return;
+        }
+        let label = format!(
+            "{} · {} track{}",
+            scope_label,
+            tracks.len(),
+            if tracks.len() == 1 { "" } else { "s" }
+        );
+        self.organize.open(tracks, label);
+    }
+
+    /// Move the files in the reviewed plan and relink the library.
+    ///
+    /// The plan is rebuilt from the board immediately before applying, so what
+    /// moves is exactly what is on screen — not what was on screen a keystroke
+    /// ago — and any destination that appeared meanwhile is caught as a
+    /// conflict rather than silently clobbered.
+    fn apply_organize_plan(&mut self) {
+        self.organize.plan = library::organize::build_plan(
+            &self.organize.tracks,
+            &self.organize.pattern,
+            self.organize.destination.as_deref(),
+        );
+        self.organize.plan_dirty = false;
+
+        let plan = self.organize.plan.clone();
+        let outcome = library::organize::apply_plan(&plan);
+
+        // Relink each moved row in place: the id, play counts, playlists and
+        // artwork all survive a rename.
+        let mut relinked = 0usize;
+        for (id, new_path, content_hash) in &outcome.moved {
+            match self.track_repo.relink_path(id, new_path, content_hash.as_deref()) {
+                Ok(true) => relinked += 1,
+                Ok(false) => log::warn!("Organizer moved {} but found no library row", new_path.display()),
+                Err(e) => log::warn!("Could not relink {}: {e}", new_path.display()),
+            }
+        }
+
+        // The queue holds resolved paths, so repoint it too.
+        let moved: Vec<(domain::ids::TrackId, PathBuf)> = outcome
+            .moved
+            .iter()
+            .map(|(id, path, _)| (*id, path.clone()))
+            .collect();
+        self.coordinator.remap_paths(&moved);
+
+        // The modal's scope still describes the pre-move world. Point it at the
+        // new locations and rebuild, so the preview afterwards says "already in
+        // place" instead of claiming the files have vanished.
+        for track in self.organize.tracks.iter_mut() {
+            if let Some((_, new_path, hash)) =
+                outcome.moved.iter().find(|(id, _, _)| *id == track.id)
+            {
+                track.path = new_path.clone();
+                track.content_hash = hash.clone();
+            }
+        }
+        self.organize.force_rebuild();
+
+        // Our own moves must not look like external edits.
+        self.watch_suppress_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+
+        let failed = outcome.failures.len();
+        if failed > 0 {
+            let detail = outcome
+                .failures
+                .iter()
+                .take(3)
+                .map(|(path, reason)| format!("{}: {reason}", path.display()))
+                .collect::<Vec<_>>()
+                .join("; ");
+            log::warn!("Organizer: {relinked} moved, {failed} failed — {detail}");
+        } else {
+            log::info!("Organizer: moved {relinked} file(s)");
+        }
+
+        self.organize.result = Some(if failed == 0 {
+            format!("Moved {relinked} file(s).")
+        } else {
+            format!("Moved {relinked}, {failed} left in place — see the log.")
+        });
+        self.organize.applied = true;
+
+        if relinked > 0 {
+            self.toasts.success(format!(
+                "Organized {relinked} file(s){}",
+                if failed > 0 {
+                    format!(" ({failed} skipped)")
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        self.reload_library();
+    }
+
     /// Stage an M3U export and ask the user where to save it.
     pub fn export_playlist_as_m3u(&mut self, name: String, tracks: Vec<domain::models::Track>) {
         let entries: Vec<library::M3uEntry> = tracks
@@ -792,9 +937,11 @@ impl ShadowPlayerApp {
         match kind {
             ImportKind::Files => self.import_service.request_files(),
             ImportKind::Folder => self.import_service.request_folder(),
-            // SaveM3u is driven by `export_playlist_as_m3u`, never from here.
+            // SaveM3u is driven by `export_playlist_as_m3u`, and the organize
+            // destination by the organizer, never from here.
             ImportKind::Playlist => self.import_service.request_playlist(),
             ImportKind::SaveM3u => {}
+            ImportKind::OrganizeDestination => {}
         }
     }
 }
@@ -856,6 +1003,13 @@ impl eframe::App for ShadowPlayerApp {
         if let Some(msg) = self.dsp_state.settings_tab.chain_preset_notice.take() {
             self.toasts.success(msg);
             self.settings_dirty = true;
+        }
+
+        // 2h. The Settings > Library card asks for the batch organizer. Raised
+        // here because neither settings surface owns app-level modals.
+        if std::mem::take(&mut self.dsp_state.settings_tab.request_organize) {
+            let tracks = self.library_state.all_tracks.clone();
+            self.open_organize(tracks, "Whole library".to_string());
         }
 
         // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
@@ -1001,6 +1155,151 @@ impl eframe::App for ShadowPlayerApp {
                             "CHAIN PRESET ROUND TRIP OK ({} saved): {}",
                             st.chain_presets.len(),
                             st.chain_presets[0].summary()
+                        );
+                    }
+                }
+            }
+
+            // Batch organizer: drive the real preview -> apply -> relink path
+            // with real files, so the app-level code (DB relink, queue repoint,
+            // watcher suppression) is exercised, not just the library crate.
+            // `preview` leaves the modal on screen; `apply` also moves and
+            // verifies. Rows are created fresh so their ids are real UUIDs, the
+            // same shape the scanner produces.
+            if self.app_state.frame_count == 1 {
+                if let Ok(mode) = std::env::var("SHADOWPLAYER_EVAL_ORGANIZE") {
+                    let root = std::path::PathBuf::from("/tmp/opencode/sp_organize");
+                    let incoming = root.join("incoming");
+                    let library_dir = root.join("library");
+                    // Start clean so a re-run sees the same empty destinations.
+                    let _ = std::fs::remove_dir_all(&root);
+                    std::fs::create_dir_all(&incoming).unwrap();
+                    std::fs::create_dir_all(&library_dir).unwrap();
+
+                    let seed = incoming.join("_seed.mp3");
+                    std::fs::write(&seed, b"organizer fixture").unwrap();
+
+                    const SPECS: [(&str, &str, &str, u32); 3] = [
+                        ("Midnight Drive", "Nova Pulse", "Neon Horizon", 1),
+                        ("Gravity Well", "Orbital Drift", "Aphelion", 3),
+                        ("Cathedral of Rain", "Aurelia Vox", "Hymnal", 2),
+                    ];
+                    let mut scope = Vec::new();
+                    for (i, (title, artist, album, track_no)) in SPECS.iter().enumerate() {
+                        let copy = incoming.join(format!("src{i}.mp3"));
+                        std::fs::copy(&seed, &copy).unwrap();
+                        let track = domain::models::Track {
+                            id: domain::ids::TrackId::new(),
+                            path: copy,
+                            title: title.to_string(),
+                            artist: artist.to_string(),
+                            album: album.to_string(),
+                            genre: Some("Ambient".to_string()),
+                            year: Some(1997),
+                            track_number: Some(*track_no),
+                            disc_number: None,
+                            duration_secs: 200.0,
+                            sample_rate: 44100,
+                            channels: 2,
+                            format: "MP3".to_string(),
+                            bitrate_kbps: Some(128),
+                            is_lossless: false,
+                            replaygain_track_db: None,
+                            replaygain_track_peak: None,
+                            r128_loudness_lufs: None,
+                            file_size_bytes: 18,
+                            mtime_unix_secs: 1,
+                            content_hash: Some(format!("eval-hash-{i}")),
+                            is_favorite: false,
+                            play_count: 0,
+                            last_played_at: None,
+                            added_at: 0,
+                        };
+                        self.track_repo.upsert(&track).unwrap();
+                        scope.push(track);
+                    }
+                    std::fs::remove_file(&seed).unwrap();
+                    self.reload_library();
+
+                    // A play count must survive the move, so bump one.
+                    self.track_repo.increment_play_count(&scope[0].id).unwrap();
+
+                    // Occupy one destination so the plan has a real conflict.
+                    let conflict = library_dir.join("Orbital Drift/Aphelion/03 - Gravity Well.mp3");
+                    std::fs::create_dir_all(conflict.parent().unwrap()).unwrap();
+                    std::fs::write(&conflict, b"existing").unwrap();
+
+                    // Queue one so the path remap is exercised too.
+                    self.coordinator.add_to_queue(scope[0].clone());
+
+                    let rows_before = self.track_repo.count().unwrap();
+                    self.open_organize(scope.clone(), format!("{mode} fixture"));
+                    self.organize.set_destination(Some(library_dir.clone()));
+                    self.organize.pattern = "{artist}/{album}/{track} - {title}".to_string();
+                    self.organize.plan_dirty = true;
+                    self.organize.rebuild_if_due();
+
+                    log::info!(
+                        "ORGANIZE PREVIEW: {} to move, {} conflict(s), {} unchanged",
+                        self.organize.plan.pending_count(),
+                        self.organize.plan.conflict_count(),
+                        self.organize.plan.unchanged_count()
+                    );
+
+                    if mode == "apply" {
+                        self.apply_organize_plan();
+
+                        let mut moved = 0usize;
+                        for track in &scope {
+                            let row = self
+                                .track_repo
+                                .get_by_id(&track.id)
+                                .unwrap()
+                                .expect("row must survive a move");
+                            assert_eq!(row.id, track.id, "identity must be preserved");
+                            if row.path == track.path {
+                                log::info!("  left in place: {}", track.title);
+                                continue;
+                            }
+                            moved += 1;
+                            assert!(
+                                row.path.exists(),
+                                "relinked path must exist: {}",
+                                row.path.display()
+                            );
+                            assert!(!track.path.exists(), "old path should be gone");
+                            assert!(row.path.starts_with(&library_dir));
+                            log::info!("  moved: {} -> {}", track.title, row.path.display());
+                        }
+                        assert_eq!(moved, 2, "two move, the occupied destination is skipped");
+
+                        let played = self
+                            .track_repo
+                            .get_by_id(&scope[0].id)
+                            .unwrap()
+                            .unwrap()
+                            .play_count;
+                        assert_eq!(played, 1, "play count must survive a move");
+
+                        let queued = self
+                            .coordinator
+                            .queue()
+                            .iter()
+                            .find(|t| t.id == scope[0].id)
+                            .expect("track is queued");
+                        assert!(
+                            queued.path.starts_with(&library_dir),
+                            "queued path must be repointed: {}",
+                            queued.path.display()
+                        );
+
+                        assert_eq!(
+                            self.track_repo.count().unwrap(),
+                            rows_before,
+                            "a move must not duplicate rows"
+                        );
+                        log::info!(
+                            "ORGANIZE APPLY OK: {moved} moved, {rows_before} rows, play count + queue path preserved"
                         );
                     }
                 }
@@ -1553,6 +1852,9 @@ impl eframe::App for ShadowPlayerApp {
                                             self.smart_playlist_editor.open_existing(&sp);
                                         }
                                     }
+                                    if let Some(tracks) = view_action.organize_tracks {
+                                        self.open_organize(tracks, "Selection".to_string());
+                                    }
                                 }
                             }
                         },
@@ -1783,6 +2085,21 @@ impl eframe::App for ShadowPlayerApp {
             self.reload_library();
             // Refresh so the list reflects what is left.
             self.scan_duplicates();
+        }
+
+        // Batch organizer.
+        let organize_actions = show_organize_modal(&ctx, &mut self.organize, &self.theme);
+        if organize_actions.reset_pattern {
+            self.organize.reset_pattern();
+        }
+        if organize_actions.clear_destination {
+            self.organize.set_destination(None);
+        }
+        if organize_actions.pick_destination {
+            self.import_service.request_organize_destination();
+        }
+        if organize_actions.apply {
+            self.apply_organize_plan();
         }
 
         // Edit Song Info dialog.
