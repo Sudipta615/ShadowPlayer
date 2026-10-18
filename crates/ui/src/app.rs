@@ -284,7 +284,22 @@ impl ShadowPlayerApp {
                     }
 
                     match metadata::extract_metadata(&path) {
-                        Ok(meta) => {
+                        Ok(mut meta) => {
+                            // Imported files bypass the scanner, so resolve their
+                            // identity here too: a re-imported file that was only
+                            // moved keeps its id, play counts and favourites.
+                            let already_indexed =
+                                self.track_repo.get_by_path(&path).ok().flatten().is_some();
+                            let path_derived_id = meta.track.id;
+                            if let Some(stable_id) = library::resolve_identity(
+                                &self.track_repo,
+                                &path,
+                                path_derived_id,
+                                already_indexed,
+                                &mut meta.track.content_hash,
+                            ) {
+                                meta.track.id = stable_id;
+                            }
                             if let Some((bytes, _mime)) = meta.embedded_artwork.as_ref() {
                                 let _ = self
                                     .artwork_service

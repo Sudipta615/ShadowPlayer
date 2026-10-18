@@ -34,6 +34,7 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         r128_loudness_lufs: row.get("r128_loudness_lufs")?,
         file_size_bytes: row.get("file_size_bytes")?,
         mtime_unix_secs: row.get("mtime_unix_secs")?,
+        content_hash: row.get("content_hash")?,
         is_favorite: is_fav_int != 0,
         play_count: row.get("play_count")?,
         last_played_at: row.get("last_played_at")?,
@@ -57,8 +58,9 @@ impl TrackRepo {
                     id, path, title, artist, album, genre, year, track_number, disc_number,
                     duration_secs, sample_rate, channels, format, bitrate_kbps, is_lossless,
                     replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
-                    file_size_bytes, mtime_unix_secs, is_favorite, play_count, last_played_at, added_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+                    file_size_bytes, mtime_unix_secs, content_hash,
+                    is_favorite, play_count, last_played_at, added_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
                 ON CONFLICT(path) DO UPDATE SET
                     title = excluded.title,
                     artist = excluded.artist,
@@ -77,7 +79,8 @@ impl TrackRepo {
                     replaygain_track_peak = excluded.replaygain_track_peak,
                     r128_loudness_lufs = excluded.r128_loudness_lufs,
                     file_size_bytes = excluded.file_size_bytes,
-                    mtime_unix_secs = excluded.mtime_unix_secs",
+                    mtime_unix_secs = excluded.mtime_unix_secs,
+                    content_hash = excluded.content_hash",
                 params![
                     track.id.to_string(),
                     track.path.to_string_lossy(),
@@ -99,6 +102,7 @@ impl TrackRepo {
                     track.r128_loudness_lufs,
                     track.file_size_bytes,
                     track.mtime_unix_secs,
+                    track.content_hash,
                     if track.is_favorite { 1 } else { 0 },
                     track.play_count,
                     track.last_played_at,
@@ -126,6 +130,55 @@ impl TrackRepo {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE path = ?1;")?;
             stmt.query_row(params![path.to_string_lossy()], map_track).optional()
+        })
+    }
+
+    /// The identity of the track that already owns this content fingerprint.
+    ///
+    /// Returns `None` when the hash is unknown, or when it matches more than one
+    /// row: an ambiguous match is ignored rather than risking the wrong relink.
+    pub fn find_by_content_hash(&self, hash: &str) -> Result<Option<(TrackId, PathBuf)>> {
+        self.db.with_conn(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT id, path FROM tracks WHERE content_hash = ?1 LIMIT 2;")?;
+            let mut rows = stmt.query(params![hash])?;
+            let mut found: Vec<(TrackId, PathBuf)> = Vec::new();
+            while let Some(row) = rows.next()? {
+                let id: String = row.get(0)?;
+                let path: String = row.get(1)?;
+                found.push((TrackId::from_str(&id).unwrap_or_default(), PathBuf::from(path)));
+            }
+            Ok(if found.len() == 1 { found.pop() } else { None })
+        })
+    }
+
+    /// Point an existing track at a new location, preserving its id and hence
+    /// its play counts, favourite flag, playlist membership, lyrics and
+    /// artwork. Returns `false` when no such track exists.
+    pub fn relink_path(
+        &self,
+        id: &TrackId,
+        new_path: &Path,
+        content_hash: Option<&str>,
+    ) -> Result<bool> {
+        self.db.with_conn(|conn| {
+            let changed = conn.execute(
+                "UPDATE tracks SET path = ?1, content_hash = ?2 WHERE id = ?3;",
+                params![new_path.to_string_lossy(), content_hash, id.to_string()],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// Store (or clear) a track's content fingerprint without touching anything
+    /// else. Used to backfill rows indexed before fingerprints existed.
+    pub fn set_content_hash(&self, id: &TrackId, content_hash: Option<&str>) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE tracks SET content_hash = ?1 WHERE id = ?2;",
+                params![content_hash, id.to_string()],
+            )?;
+            Ok(())
         })
     }
 

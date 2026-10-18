@@ -28,6 +28,7 @@ mod tests {
             r128_loudness_lufs: Some(-16.0),
             file_size_bytes: 25_000_000,
             mtime_unix_secs: 1700000000,
+            content_hash: None,
             is_favorite: false,
             play_count: 0,
             last_played_at: None,
@@ -226,6 +227,67 @@ mod tests {
         assert_eq!(got.r128_loudness_lufs, Some(-14.2));
 
         assert_eq!(repo.list_missing_replaygain().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_moved_file_keeps_identity() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+        let favorites = FavoritesRepo::new(db.clone());
+        let playlists = PlaylistRepo::new(db.clone());
+
+        let mut t1 = sample_track(TrackId::new(), "/music/old/album/01.flac", "Song", "Band", "Album");
+        t1.content_hash = Some("12345-abcdef".to_string());
+        repo.upsert(&t1).unwrap();
+
+        // The user favourites it and adds it to a playlist.
+        favorites.add(&t1.id).unwrap();
+        let pl = playlists.create("Mixtape", None).unwrap();
+        playlists.add_track(&pl.id, &t1.id).unwrap();
+
+        // The file is moved to a new folder; the new row has a fresh
+        // path-derived id but the same content fingerprint.
+        let moved = sample_track(TrackId::new(), "/music/new/album/01.flac", "Song", "Band", "Album");
+        assert_ne!(moved.id, t1.id, "a new path yields a new id");
+
+        let found = repo.find_by_content_hash("12345-abcdef").unwrap();
+        let (old_id, old_path) = found.expect("the original row is found by content hash");
+        assert_eq!(old_id, t1.id);
+        assert_eq!(old_path, t1.path);
+
+        assert!(repo
+            .relink_path(&old_id, &moved.path, Some("12345-abcdef"))
+            .unwrap());
+
+        // Identity, favourites and playlist membership all survived.
+        let after = repo.get_by_id(&t1.id).unwrap().unwrap();
+        assert_eq!(after.path, moved.path);
+        assert_eq!(repo.get_by_path(&moved.path).unwrap().unwrap().id, t1.id);
+        assert!(favorites.list().unwrap().iter().any(|t| t.id == t1.id));
+        assert!(playlists
+            .get_tracks(&pl.id)
+            .unwrap()
+            .iter()
+            .any(|t| t.id == t1.id));
+
+        // Re-upserting the moved file at its new path updates metadata in place
+        // rather than creating a second row.
+        let mut refreshed = moved.clone();
+        refreshed.id = t1.id;
+        refreshed.title = "Song (Remaster)".to_string();
+        repo.upsert(&refreshed).unwrap();
+        assert_eq!(repo.count().unwrap(), 1);
+        assert_eq!(repo.get_by_id(&t1.id).unwrap().unwrap().title, "Song (Remaster)");
+
+        // An ambiguous fingerprint (two rows sharing content) is never used to
+        // relink, so we can't silently steal the wrong row.
+        let mut dup_a = sample_track(TrackId::new(), "/m/dup-a.flac", "DupA", "X", "Y");
+        dup_a.content_hash = Some("same-hash".to_string());
+        let mut dup_b = sample_track(TrackId::new(), "/m/dup-b.flac", "DupB", "X", "Y");
+        dup_b.content_hash = Some("same-hash".to_string());
+        repo.upsert(&dup_a).unwrap();
+        repo.upsert(&dup_b).unwrap();
+        assert!(repo.find_by_content_hash("same-hash").unwrap().is_none());
     }
 
     #[test]

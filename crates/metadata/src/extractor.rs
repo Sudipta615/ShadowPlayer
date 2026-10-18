@@ -168,6 +168,8 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         r128_loudness_lufs: loudness.ebu_r128_loudness,
         file_size_bytes,
         mtime_unix_secs,
+        // Filled in by the scanner, which knows the on-disk file.
+        content_hash: None,
         is_favorite: false,
         play_count: 0,
         last_played_at: None,
@@ -268,6 +270,8 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             r128_loudness_lufs: None,
             file_size_bytes: audio_meta.track.file_size_bytes,
             mtime_unix_secs: audio_meta.track.mtime_unix_secs,
+            // CUE virtual tracks share one file, so they are never fingerprinted.
+            content_hash: None,
             is_favorite: false,
             play_count: 0,
             last_played_at: None,

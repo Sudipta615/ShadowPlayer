@@ -31,6 +31,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v2(conn)?;
     }
 
+    if current_version < 3 {
+        apply_v3(conn)?;
+    }
+
     Ok(())
 }
 
@@ -213,6 +217,30 @@ fn apply_v2(conn: &mut Connection) -> Result<()> {
             updated_at INTEGER NOT NULL
         );",
         "INSERT INTO schema_migrations (version, applied_at) VALUES (2, strftime('%s', 'now'));",
+    ];
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            eprintln!("Error executing statement: {}\nStmt: {}", e, stmt);
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+/// V3: content fingerprints, so a moved/renamed file keeps its identity
+/// (play counts, favourites, playlist membership) instead of becoming a
+/// brand-new track.
+fn apply_v3(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V3 (track content fingerprints)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        "ALTER TABLE tracks ADD COLUMN content_hash TEXT;",
+        "CREATE INDEX IF NOT EXISTS idx_tracks_content_hash ON tracks(content_hash);",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (3, strftime('%s', 'now'));",
     ];
 
     for stmt in statements {

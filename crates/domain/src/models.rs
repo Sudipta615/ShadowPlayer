@@ -24,6 +24,10 @@ pub struct Track {
     pub r128_loudness_lufs: Option<f32>,
     pub file_size_bytes: u64,
     pub mtime_unix_secs: i64,
+    /// Cheap content fingerprint (size + head/tail hash). Used to recognise a
+    /// file that was moved or renamed so its identity survives. `None` when the
+    /// fingerprint could not be computed (e.g. CUE-sheet virtual tracks).
+    pub content_hash: Option<String>,
     pub is_favorite: bool,
     pub play_count: u32,
     pub last_played_at: Option<i64>,
