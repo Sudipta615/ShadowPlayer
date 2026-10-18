@@ -127,6 +127,10 @@ pub struct SettingsTabState {
     pub stereo_enhancer_enabled: bool,
     pub loudness_tag_path: String,
     pub write_rg_path: String,
+    /// When set, the library ReplayGain scan also writes the measured values
+    /// into each file's tags. Off by default: the app never modifies files
+    /// without explicit consent.
+    pub loudness_write_tags: bool,
 
     // Library input
     pub new_scan_path: String,
@@ -202,6 +206,7 @@ impl Default for SettingsTabState {
             stereo_enhancer_enabled: false,
             loudness_tag_path: String::new(),
             write_rg_path: String::new(),
+            loudness_write_tags: false,
 
             new_scan_path: String::new(),
 
@@ -251,6 +256,9 @@ pub struct PersistentSettingsTabState {
     pub voice_budget_enabled: bool,
     pub voice_capacity: usize,
     pub stereo_enhancer_enabled: bool,
+    /// Write measured ReplayGain values into the audio files during a scan.
+    #[serde(default)]
+    pub loudness_write_tags: bool,
 }
 
 impl From<&SettingsTabState> for PersistentSettingsTabState {
@@ -287,6 +295,7 @@ impl From<&SettingsTabState> for PersistentSettingsTabState {
             voice_budget_enabled: s.voice_budget_enabled,
             voice_capacity: s.voice_capacity,
             stereo_enhancer_enabled: s.stereo_enhancer_enabled,
+            loudness_write_tags: s.loudness_write_tags,
         }
     }
 }
@@ -324,6 +333,7 @@ impl PersistentSettingsTabState {
         s.voice_budget_enabled = self.voice_budget_enabled;
         s.voice_capacity = self.voice_capacity;
         s.stereo_enhancer_enabled = self.stereo_enhancer_enabled;
+        s.loudness_write_tags = self.loudness_write_tags;
     }
 }
 
@@ -1638,7 +1648,7 @@ fn render_tools_category(
         setting_item(
             ui,
             "Library ReplayGain Scan",
-            "Analyse every track that has no loudness data (EBU R128 + ReplayGain 2.0). Results are cached for playback; your files are never modified.",
+            "Analyse every track that has no loudness data (EBU R128 + ReplayGain 2.0). Results are cached for playback.",
             theme,
             |ui| {
                 if extra.loudness_running {
@@ -1662,6 +1672,16 @@ fn render_tools_category(
                         actions.scan_loudness_library = true;
                     }
                 }
+            },
+        );
+
+        setting_item(
+            ui,
+            "Write Tags Into Files",
+            "Also save the measured ReplayGain / EBU R128 values into each file's tags (FLAC, MP3, M4A, WAV …). Off by default — this is the only setting that modifies your audio files; DSD and raw PCM are skipped.",
+            theme,
+            |ui| {
+                toggle_switch(ui, &mut state.loudness_write_tags, theme);
             },
         );
 

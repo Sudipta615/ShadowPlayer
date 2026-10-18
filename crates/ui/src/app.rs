@@ -1011,7 +1011,9 @@ impl eframe::App for ShadowPlayerApp {
                                         self.request_import(kind);
                                     }
                                     if sv_actions.start_loudness_scan {
-                                        self.loudness_service.start();
+                                        let write_tags =
+                                            self.dsp_state.settings_tab.loudness_write_tags;
+                                        self.loudness_service.start(write_tags);
                                     }
                                     if sv_actions.cancel_loudness_scan {
                                         self.loudness_service.cancel();

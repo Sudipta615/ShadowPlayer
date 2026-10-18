@@ -25,12 +25,16 @@ pub struct LoudnessProgress {
     pub current: String,
     /// `true` once at least one scan has completed (so the UI can show a summary).
     pub has_run: bool,
+    /// Number of files whose tags were written back (0 when tag write-back is off).
+    pub tagged: usize,
+    /// Whether the current/last scan wrote ReplayGain tags into the files.
+    pub write_tags: bool,
 }
 
 enum LoudnessEvent {
-    Progress { done: usize, failed: usize, current: String },
-    Finished { done: usize, failed: usize },
-    Cancelled { done: usize },
+    Progress { done: usize, failed: usize, tagged: usize, current: String },
+    Finished { done: usize, failed: usize, tagged: usize },
+    Cancelled { done: usize, tagged: usize },
 }
 
 /// Owns the loudness scan worker and its progress channel.
@@ -65,7 +69,12 @@ impl LoudnessService {
     }
 
     /// Begin a scan of every track that still lacks measured loudness.
-    pub fn start(&mut self) {
+    ///
+    /// When `write_tags` is set the measured ReplayGain / EBU R128 values are
+    /// also written back into each file's tags (the only place the app ever
+    /// modifies the user's files). Callers must only pass `true` after explicit
+    /// user consent.
+    pub fn start(&mut self, write_tags: bool) {
         if self.running {
             return;
         }
@@ -83,6 +92,7 @@ impl LoudnessService {
                 running: false,
                 current: "Nothing to scan — every track already has loudness data.".to_string(),
                 has_run: true,
+                write_tags,
                 ..Default::default()
             };
             return;
@@ -97,6 +107,7 @@ impl LoudnessService {
             total: items.len(),
             current: "Starting…".to_string(),
             has_run: true,
+            write_tags,
             ..Default::default()
         };
 
@@ -109,10 +120,11 @@ impl LoudnessService {
                 let repo = TrackRepo::new(db);
                 let mut done = 0usize;
                 let mut failed = 0usize;
+                let mut tagged = 0usize;
 
                 for (id, path) in items {
                     if cancel.load(Ordering::Relaxed) {
-                        let _ = tx.send(LoudnessEvent::Cancelled { done });
+                        let _ = tx.send(LoudnessEvent::Cancelled { done, tagged });
                         return;
                     }
 
@@ -123,6 +135,7 @@ impl LoudnessService {
                     let _ = tx.send(LoudnessEvent::Progress {
                         done,
                         failed,
+                        tagged,
                         current,
                     });
 
@@ -139,6 +152,28 @@ impl LoudnessService {
                             ) {
                                 log::warn!("Could not record loudness for {}: {e}", path.display());
                             }
+
+                            // Optional: persist the values into the file's own
+                            // tags so other players/gear can normalise too.
+                            if write_tags {
+                                let meta = engine::dsp::LoudnessMetadata {
+                                    replaygain_track_db: result.replaygain_track_db,
+                                    replaygain_album_db: None,
+                                    replaygain_track_peak: result.replaygain_track_peak,
+                                    replaygain_album_peak: None,
+                                    ebu_r128_loudness: result.ebu_r128_loudness,
+                                    ebu_r128_peak: result.ebu_r128_peak_dbtp,
+                                };
+                                match engine::decode::write_loudness_tags(&path, &meta) {
+                                    Ok(()) => tagged += 1,
+                                    // Unsupported containers (PCM/DSD) are
+                                    // expected; anything else is worth a log.
+                                    Err(e) => log::debug!(
+                                        "Not tagging {}: {e:?}",
+                                        path.display()
+                                    ),
+                                }
+                            }
                         }
                         None => failed += 1,
                     }
@@ -150,7 +185,7 @@ impl LoudnessService {
                     std::thread::sleep(std::time::Duration::from_millis(25));
                 }
 
-                let _ = tx.send(LoudnessEvent::Finished { done, failed });
+                let _ = tx.send(LoudnessEvent::Finished { done, failed, tagged });
             });
 
         if spawned.is_err() {
@@ -177,24 +212,31 @@ impl LoudnessService {
                     LoudnessEvent::Progress {
                         done,
                         failed,
+                        tagged,
                         current,
                     } => {
                         self.progress.done = done;
                         self.progress.failed = failed;
+                        self.progress.tagged = tagged;
                         self.progress.current = current;
                     }
-                    LoudnessEvent::Finished { done, failed } => {
+                    LoudnessEvent::Finished { done, failed, tagged } => {
                         self.progress.done = done;
                         self.progress.failed = failed;
+                        self.progress.tagged = tagged;
                         self.progress.running = false;
-                        self.progress.current =
-                            format!("Done: {done} analysed, {failed} skipped");
+                        self.progress.current = if self.progress.write_tags {
+                            format!("Done: {done} analysed, {failed} skipped, {tagged} tagged")
+                        } else {
+                            format!("Done: {done} analysed, {failed} skipped")
+                        };
                         self.running = false;
                         self.dirty = true;
                         finished = true;
                     }
-                    LoudnessEvent::Cancelled { done } => {
+                    LoudnessEvent::Cancelled { done, tagged } => {
                         self.progress.done = done;
+                        self.progress.tagged = tagged;
                         self.progress.running = false;
                         self.progress.current = format!("Cancelled after {done} track(s)");
                         self.running = false;
@@ -271,6 +313,40 @@ mod tests {
         assert!(
             result.replaygain_track_db.is_some(),
             "expected a ReplayGain track gain"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Tag write-back is opt-in, but when enabled it must actually land in the
+    /// file. A WAV carries an ID3v2 chunk, so the raw tag key is inspectable
+    /// without a second metadata dependency.
+    #[test]
+    fn scan_can_write_replaygain_tags_into_the_file() {
+        let dir = std::env::temp_dir().join(format!("sp_loudness_tags_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let wav = dir.join("tone.wav");
+        write_tone_wav(&wav, 2.0);
+
+        let before = std::fs::read(&wav).expect("read wav");
+
+        let result = engine::decode::scan_track_loudness(&wav).expect("scan should succeed");
+        let meta = engine::dsp::LoudnessMetadata {
+            replaygain_track_db: result.replaygain_track_db,
+            replaygain_album_db: None,
+            replaygain_track_peak: result.replaygain_track_peak,
+            replaygain_album_peak: None,
+            ebu_r128_loudness: result.ebu_r128_loudness,
+            ebu_r128_peak: result.ebu_r128_peak_dbtp,
+        };
+        engine::decode::write_loudness_tags(&wav, &meta).expect("tag write should succeed");
+
+        let after = std::fs::read(&wav).expect("read wav");
+        assert_ne!(before, after, "the file must have been modified");
+        let text = String::from_utf8_lossy(&after);
+        assert!(
+            text.contains("REPLAYGAIN_TRACK_GAIN"),
+            "expected a ReplayGain track gain tag in the file"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
