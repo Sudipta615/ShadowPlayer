@@ -66,6 +66,20 @@ pub struct ShadowPlayerApp {
     prev_track_id: Option<domain::ids::TrackId>,
     /// Whether playback was running on the previous frame (sleep-timer edge detection).
     prev_playing: bool,
+
+    /// Live filesystem watchers, one per scan root. Dropping one stops watching,
+    /// so they must be kept alive for the life of the app.
+    watchers: Vec<library::LibraryWatcher>,
+    /// Roots reported as changed by the watchers, drained on the UI thread.
+    watch_rx: crossbeam::channel::Receiver<PathBuf>,
+    /// Sender handed to each watcher (kept so watchers can be rebuilt).
+    watch_tx: crossbeam::channel::Sender<PathBuf>,
+    /// A watched root that changed, pending a debounced rescan.
+    watch_pending: Option<(PathBuf, std::time::Instant)>,
+    /// Roots still to scan (startup catch-up and watcher-triggered rescans).
+    scan_queue: std::collections::VecDeque<PathBuf>,
+    /// Context used to wake the idle UI loop when a watched file changes.
+    wake_ctx: Option<egui::Context>,
 }
 
 impl ShadowPlayerApp {
@@ -95,6 +109,7 @@ impl ShadowPlayerApp {
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
         let mpris_service = MprisService::start();
+        let (watch_tx, watch_rx) = crossbeam::channel::unbounded::<PathBuf>();
 
         let mut app = Self {
             session,
@@ -130,6 +145,13 @@ impl ShadowPlayerApp {
             playlist_editor_tracks: Vec::new(),
             prev_track_id: None,
             prev_playing: false,
+
+            watchers: Vec::new(),
+            watch_rx,
+            watch_tx,
+            watch_pending: None,
+            scan_queue: std::collections::VecDeque::new(),
+            wake_ctx: Some(_cc.egui_ctx.clone()),
         };
 
         // Load all persistent settings (normal, theme, EQ, DSP)
@@ -137,7 +159,87 @@ impl ShadowPlayerApp {
 
         app.reload_library();
 
+        // Keep the library fresh: rebuild watchers for the saved roots and run a
+        // catch-up scan so files added while the app was closed are picked up.
+        app.rebuild_watchers();
+        app.schedule_startup_scan();
+
         app
+    }
+
+    /// (Re)create one recursive filesystem watcher per scan root. A changed file
+    /// only signals the UI thread; the actual rescan is debounced and serialised
+    /// with the scanner so a slow disk never gets hammered.
+    fn rebuild_watchers(&mut self) {
+        self.watchers.clear();
+        let roots: Vec<PathBuf> = self
+            .library_state
+            .scan_roots
+            .iter()
+            .filter(|r| r.watch_enabled)
+            .map(|r| r.path.clone())
+            .collect();
+        for root in roots {
+            let tx = self.watch_tx.clone();
+            let wake = self.wake_ctx.clone();
+            let signal_root = root.clone();
+            match library::LibraryWatcher::watch(&root, move |_paths| {
+                // Coalesce: the drain side debounces anyway.
+                let _ = tx.send(signal_root.clone());
+                if let Some(ctx) = &wake {
+                    ctx.request_repaint();
+                }
+            }) {
+                Ok(w) => self.watchers.push(w),
+                Err(e) => log::warn!("Could not watch {}: {e}", root.display()),
+            }
+        }
+    }
+
+    /// Queue every known scan root once, so a launch after some downtime
+    /// reconciles files that appeared while the app was not running.
+    fn schedule_startup_scan(&mut self) {
+        let roots: Vec<PathBuf> = self.library_state.scan_roots.iter().map(|r| r.path.clone()).collect();
+        for root in roots {
+            if !self.scan_queue.contains(&root) {
+                self.scan_queue.push_back(root);
+            }
+        }
+        self.pump_scan_queue();
+    }
+
+    /// Start the next queued scan if the scanner is idle.
+    fn pump_scan_queue(&mut self) {
+        if self.scanner_service.is_scanning() {
+            return;
+        }
+        if let Some(next) = self.scan_queue.pop_front() {
+            self.scanner_service.start_scan(next);
+        }
+    }
+
+    /// Drain watcher signals and, after a short quiet period, enqueue a rescan.
+    fn poll_watchers(&mut self) {
+        while let Ok(root) = self.watch_rx.try_recv() {
+            self.watch_pending = Some((root, std::time::Instant::now()));
+        }
+
+        const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(2500);
+        if let Some((root, at)) = self.watch_pending.clone() {
+            if at.elapsed() < DEBOUNCE {
+                return;
+            }
+            // Never race the loudness scanner: with tag write-back enabled it
+            // modifies files, which would otherwise retrigger the watcher.
+            if self.loudness_service.is_running() {
+                return;
+            }
+            self.watch_pending = None;
+            if !self.scan_queue.contains(&root) {
+                self.scan_queue.push_back(root);
+            }
+            self.pump_scan_queue();
+        }
     }
 
     pub fn load_persisted_settings(&mut self) {
@@ -376,7 +478,12 @@ impl ShadowPlayerApp {
     pub fn start_scan(&mut self, path: PathBuf) {
         let _ = self.scan_roots_repo.add(&path);
         self.library_state.scan_roots = self.scan_roots_repo.list().unwrap_or_default();
-        self.scanner_service.start_scan(path);
+        // Watch the new root from now on, and scan it once the scanner is free.
+        self.rebuild_watchers();
+        if !self.scan_queue.contains(&path) {
+            self.scan_queue.push_back(path);
+        }
+        self.pump_scan_queue();
     }
 
     /// Bridge for the MPRIS2 desktop service: drain transport requests coming
@@ -516,7 +623,12 @@ impl eframe::App for ShadowPlayerApp {
         // 2. Poll Library Scanner progress
         if self.scanner_service.poll() {
             self.reload_library();
+            // A finished scan may unblock the next queued root.
+            self.pump_scan_queue();
         }
+
+        // 2a. Folders that changed on disk (debounced) feed the scan queue.
+        self.poll_watchers();
 
         // 2b. Poll the native import picker (runs on a worker thread)
         if let Some(result) = self.import_service.poll() {
@@ -546,6 +658,10 @@ impl eframe::App for ShadowPlayerApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         } else if self.app_state.sleep_timer.is_some() {
             // Tick the timer display roughly once per second while idle.
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        } else if self.watch_pending.is_some() || !self.scan_queue.is_empty() {
+            // A watched folder changed: keep ticking until the debounce elapses
+            // and the queued rescan starts.
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
 
