@@ -79,12 +79,17 @@ pub struct ShadowPlayerApp {
     watch_pending: Option<(PathBuf, std::time::Instant)>,
     /// Roots still to scan (startup catch-up and watcher-triggered rescans).
     scan_queue: std::collections::VecDeque<PathBuf>,
+    /// Whether the next completed scan deserves a notification (user- or
+    /// watcher-initiated) or should stay silent (startup catch-up).
+    scan_toast_wanted: bool,
     /// Context used to wake the idle UI loop when a watched file changes.
     wake_ctx: Option<egui::Context>,
     /// Playlist staged for M3U export, written once the save dialog returns.
     pending_m3u_export: Option<(String, Vec<library::M3uEntry>)>,
     /// Duplicate-track finder state.
     duplicates: DuplicatesState,
+    /// Transient user-facing notifications.
+    toasts: crate::components::toasts::ToastState,
 }
 
 impl ShadowPlayerApp {
@@ -156,9 +161,11 @@ impl ShadowPlayerApp {
             watch_tx,
             watch_pending: None,
             scan_queue: std::collections::VecDeque::new(),
+            scan_toast_wanted: false,
             wake_ctx: Some(_cc.egui_ctx.clone()),
             pending_m3u_export: None,
             duplicates: DuplicatesState::default(),
+            toasts: crate::components::toasts::ToastState::default(),
         };
 
         // Load all persistent settings (normal, theme, EQ, DSP)
@@ -245,6 +252,7 @@ impl ShadowPlayerApp {
             if !self.scan_queue.contains(&root) {
                 self.scan_queue.push_back(root);
             }
+            self.scan_toast_wanted = true;
             self.pump_scan_queue();
         }
     }
@@ -404,6 +412,13 @@ impl ShadowPlayerApp {
                     self.settings_dirty = true;
                     self.reload_library();
                     log::info!("Imported {} track(s) into the library", imported);
+                    if imported > 0 {
+                        self.toasts
+                            .success(format!("Imported {imported} track(s) into the library"));
+                    } else {
+                        self.toasts
+                            .warning("Nothing was imported — those files are not supported audio");
+                    }
                 }
             }
             ImportResult::Playlist(path) => {
@@ -511,6 +526,15 @@ impl ShadowPlayerApp {
             "Imported playlist '{name}': {added}/{} entries",
             entries.len()
         );
+        if added == 0 {
+            self.toasts
+                .warning(format!("'{name}' matched no files in the library"));
+        } else {
+            self.toasts.success(format!(
+                "Opened playlist '{name}' — {added} of {} tracks",
+                entries.len()
+            ));
+        }
         self.reload_library();
     }
 
@@ -523,8 +547,19 @@ impl ShadowPlayerApp {
         // the music, so it survives being copied alongside the library.
         let text = library::write_m3u(&entries, path.parent());
         match std::fs::write(path, text) {
-            Ok(()) => log::info!("Exported {} track(s) to {}", entries.len(), path.display()),
-            Err(e) => log::warn!("Could not write playlist {}: {e}", path.display()),
+            Ok(()) => {
+                log::info!("Exported {} track(s) to {}", entries.len(), path.display());
+                self.toasts.success(format!(
+                    "Exported {} track(s) to {}",
+                    entries.len(),
+                    path.display()
+                ));
+            }
+            Err(e) => {
+                log::warn!("Could not write playlist {}: {e}", path.display());
+                self.toasts
+                    .warning(format!("Could not write playlist: {e}"));
+            }
         }
     }
 
@@ -617,6 +652,7 @@ impl ShadowPlayerApp {
         if !self.scan_queue.contains(&path) {
             self.scan_queue.push_back(path);
         }
+        self.scan_toast_wanted = true;
         self.pump_scan_queue();
     }
 
@@ -762,6 +798,13 @@ impl eframe::App for ShadowPlayerApp {
             self.reload_library();
             // A finished scan may unblock the next queued root.
             self.pump_scan_queue();
+            // Only announce scans the user (or a watched folder) asked for;
+            // the quiet startup catch-up should not pop a toast on every launch.
+            if self.scan_toast_wanted {
+                self.scan_toast_wanted = false;
+                let msg = self.scanner_service.progress_text().to_string();
+                self.toasts.info(msg);
+            }
         }
 
         // 2a. Folders that changed on disk (debounced) feed the scan queue.
@@ -781,6 +824,10 @@ impl eframe::App for ShadowPlayerApp {
         // 2e. Library-wide loudness scan progress.
         if self.loudness_service.poll() {
             self.reload_library();
+            let summary = self.loudness_service.progress().current.clone();
+            if !summary.is_empty() {
+                self.toasts.info(summary);
+            }
         }
 
         // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
@@ -800,7 +847,14 @@ impl eframe::App for ShadowPlayerApp {
             // A watched folder changed: keep ticking until the debounce elapses
             // and the queued rescan starts.
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        } else if !self.toasts.is_empty() {
+            // Keep the fade-out animating while a notification is on screen.
+            ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }
+
+        // 3b. Toast notifications ride above everything else.
+        self.toasts.prune();
+        self.toasts.show(&ctx, &self.theme);
 
         // 4. Automated Evaluation Screenshot Hook (SHADOWPLAYER_EVAL only)
         self.app_state.frame_count += 1;
@@ -865,6 +919,9 @@ impl eframe::App for ShadowPlayerApp {
                         "favorites" => Nav::Favorites,
                         "recent" => Nav::RecentlyPlayed,
                         "most" => Nav::MostPlayed,
+                        "added" => Nav::RecentlyAdded,
+                        "lossless" => Nav::Lossless,
+                        "hires" => Nav::HiRes,
                         "settings" => Nav::Settings,
                         "help" => Nav::Help,
                         _ => Nav::Home,
@@ -878,6 +935,22 @@ impl eframe::App for ShadowPlayerApp {
                         self.app_state.playlist_editor.open(first);
                     }
                     _ => {}
+                }
+                if std::env::var("SHADOWPLAYER_EVAL_TOAST").is_ok() {
+                    self.toasts
+                        .success("Opened playlist 'Late Night Drive' — 12 of 14 tracks");
+                    self.toasts.info("Scan complete: 812 tracks (2410ms)");
+                }
+                if let Ok(f) = std::env::var("SHADOWPLAYER_EVAL_FILTER") {
+                    use crate::components::songs_table::QuickFilter as QF;
+                    self.library_state.quick_filter = match f.as_str() {
+                        "lossless" => QF::Lossless,
+                        "hires" => QF::HiRes,
+                        "favorites" => QF::Favorites,
+                        "played" => QF::Played,
+                        _ => QF::All,
+                    };
+                    self.refresh_view();
                 }
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_HELP").is_ok() {
@@ -1574,6 +1647,11 @@ impl eframe::App for ShadowPlayerApp {
                 }
             }
             log::info!("Removed {removed} duplicate track(s)");
+            if removed > 0 {
+                let verb = if delete_from_disk { "deleted" } else { "removed" };
+                self.toasts
+                    .success(format!("{removed} duplicate track(s) {verb}"));
+            }
             self.reload_library();
             // Refresh so the list reflects what is left.
             self.scan_duplicates();

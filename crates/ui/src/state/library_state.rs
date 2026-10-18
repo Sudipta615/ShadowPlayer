@@ -11,7 +11,7 @@ use domain::smart::SmartPlaylist;
 use search::SearchEngine;
 
 use crate::components::sidebar::NavItem;
-use crate::components::songs_table::SortField;
+use crate::components::songs_table::{QuickFilter, SortField};
 
 /// State store managing music tracks, collections, playlists, and drilldown views
 pub struct LibraryState {
@@ -27,6 +27,8 @@ pub struct LibraryState {
     pub selected_track_ids: HashSet<TrackId>,
     /// Anchor row for shift-range selection.
     pub last_clicked_index: Option<usize>,
+    /// Quality/format chips narrowing the current view.
+    pub quick_filter: QuickFilter,
     pub albums: Vec<Album>,
     pub selected_album: Option<(String, String)>,
     pub album_tracks: Vec<Track>,
@@ -47,7 +49,7 @@ pub struct LibraryState {
     /// Identity of the currently materialised `displayed_tracks`. Used to skip
     /// needless rebuilds (and the associated 10k-track clones) when the user
     /// bounces between tabs.
-    displayed_key: Option<(NavItem, String, SortField)>,
+    displayed_key: Option<(NavItem, String, SortField, QuickFilter)>,
 }
 
 impl Default for LibraryState {
@@ -62,6 +64,7 @@ impl Default for LibraryState {
             smart_playlist_tracks: Vec::new(),
             selected_track_ids: HashSet::new(),
             last_clicked_index: None,
+            quick_filter: QuickFilter::default(),
             albums: Vec::new(),
             selected_album: None,
             album_tracks: Vec::new(),
@@ -172,7 +175,7 @@ impl LibraryState {
     ) {
         // Skip the rebuild (and the clone of up to 10k tracks) if nothing that
         // affects the visible list has changed.
-        let key = (active_nav, search_query.to_string(), current_sort);
+        let key = (active_nav, search_query.to_string(), current_sort, self.quick_filter);
         if self.displayed_key.as_ref() == Some(&key) {
             return;
         }
@@ -192,6 +195,14 @@ impl LibraryState {
                     history_repo.list_recently_played(100).unwrap_or_default()
                 }
                 NavItem::MostPlayed => history_repo.list_most_played(100).unwrap_or_default(),
+                // Newest imports first. `all_tracks` is already in memory, so
+                // this is a sort rather than another query.
+                NavItem::RecentlyAdded => {
+                    let mut recent = self.all_tracks.clone();
+                    recent.sort_by_key(|t| std::cmp::Reverse(t.added_at));
+                    recent.truncate(200);
+                    recent
+                }
                 NavItem::HiRes => self
                     .all_tracks
                     .iter()
@@ -217,17 +228,36 @@ impl LibraryState {
             }
         };
 
-        match current_sort {
-            SortField::Default => tracks.sort_by_key(|t| t.track_number.unwrap_or(0)),
-            SortField::Title => {
-                tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        // Quality/format chips narrow whatever the view produced. Safe on top
+        // of search results too.
+        match self.quick_filter {
+            QuickFilter::All => {}
+            QuickFilter::Lossless => tracks.retain(|t| t.is_lossless),
+            QuickFilter::HiRes => {
+                tracks.retain(|t| t.sample_rate > 48000 || t.bitrate_kbps.unwrap_or(0) > 1000)
             }
-            SortField::Artist => {
-                tracks.sort_by(|a, b| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
+            QuickFilter::Favorites => {
+                let favs = &self.favorite_ids;
+                tracks.retain(|t| favs.contains(&t.id));
             }
-            SortField::Album => tracks.sort_by(|a, b| a.album.cmp(&b.album)),
-            SortField::Duration => tracks.sort_by(|a, b| a.duration_secs.total_cmp(&b.duration_secs)),
-            SortField::DateAdded => tracks.sort_by_key(|t| t.added_at),
+            QuickFilter::Played => tracks.retain(|t| t.play_count > 0),
+        }
+
+        // "Recently Added" defines itself by recency, so the user's global sort
+        // would fight the view. Everything else honours the chosen sort.
+        if active_nav != NavItem::RecentlyAdded {
+            match current_sort {
+                SortField::Default => tracks.sort_by_key(|t| t.track_number.unwrap_or(0)),
+                SortField::Title => {
+                    tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                }
+                SortField::Artist => {
+                    tracks.sort_by(|a, b| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
+                }
+                SortField::Album => tracks.sort_by(|a, b| a.album.cmp(&b.album)),
+                SortField::Duration => tracks.sort_by(|a, b| a.duration_secs.total_cmp(&b.duration_secs)),
+                SortField::DateAdded => tracks.sort_by_key(|t| t.added_at),
+            }
         }
 
         self.displayed_tracks = tracks;

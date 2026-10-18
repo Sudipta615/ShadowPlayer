@@ -212,6 +212,7 @@ pub fn render_main_playback_view(
             let standard_tabs = [
                 (NavItem::Home, "Library"),
                 (NavItem::Favorites, "Favorites"),
+                (NavItem::RecentlyAdded, "New Adds"),
                 (NavItem::RecentlyPlayed, "Recent"),
                 (NavItem::MostPlayed, "Most Played"),
             ];
@@ -398,6 +399,25 @@ pub fn render_main_playback_view(
             });
             ui.add_space(4.0);
         }
+        NavItem::RecentlyAdded => {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Recently Added")
+                        .font(FontId::proportional(16.0))
+                        .strong()
+                        .color(theme.accent_blue),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "({} tracks, newest first)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
+                );
+            });
+            ui.add_space(4.0);
+        }
         NavItem::RecentlyPlayed => {
             ui.horizontal(|ui| {
                 ui.label(
@@ -469,12 +489,19 @@ pub fn render_main_playback_view(
         playlists: &library_state.playlists,
         current_sort: app_state.current_sort,
         is_grid_view: app_state.is_grid_view,
+        quick_filter: library_state.quick_filter,
         selected_track_ids: &mut library_state.selected_track_ids,
         last_clicked_index: &mut library_state.last_clicked_index,
         artwork: artwork_service,
         theme,
     }
     .show(ui);
+
+    if let Some(f) = table_action.quick_filter_changed {
+        library_state.quick_filter = f;
+        // The displayed list is keyed on the filter, so a refresh rebuilds it.
+        view_action.needs_reload = true;
+    }
 
     if table_action.sort_field_changed.is_some()
         || table_action.remove_track.is_some()

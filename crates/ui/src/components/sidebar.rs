@@ -14,6 +14,8 @@ pub enum NavItem {
     Favorites,
     RecentlyPlayed,
     MostPlayed,
+    /// Newest additions to the library, by import time.
+    RecentlyAdded,
     HiRes,
     Lossless,
     Playlist(PlaylistId),
@@ -90,7 +92,19 @@ impl<'a> SideBar<'a> {
             self.render_nav_item(ui, NavItem::Genres, "Genres");
             self.render_nav_item(ui, NavItem::Folders, "Folders");
 
+            // Collections: quality-based views over the whole library.
             ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new("Collections")
+                    .font(FontId::proportional(13.0))
+                    .color(self.theme.text_muted),
+            );
+            ui.add_space(4.0);
+            self.render_nav_item(ui, NavItem::RecentlyAdded, "Recently Added");
+            self.render_nav_item(ui, NavItem::Lossless, "Lossless Only");
+            self.render_nav_item(ui, NavItem::HiRes, "Hi-Res Masters");
+
+            ui.add_space(10.0);
 
             // 3. Playlists Header with Circular "+" Button
             ui.horizontal(|ui| {

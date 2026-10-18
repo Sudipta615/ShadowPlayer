@@ -20,6 +20,44 @@ pub enum SortField {
     DateAdded,
 }
 
+/// Quality/format chips that narrow whatever view is open, so the user can
+/// filter the current list without navigating away. Lives here (next to
+/// [`SortField`]) because this is where the chips are rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum QuickFilter {
+    #[default]
+    All,
+    Lossless,
+    HiRes,
+    Favorites,
+    Played,
+}
+
+impl QuickFilter {
+    pub const ALL: [QuickFilter; 5] = [
+        QuickFilter::All,
+        QuickFilter::Lossless,
+        QuickFilter::HiRes,
+        QuickFilter::Favorites,
+        QuickFilter::Played,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            QuickFilter::All => "All",
+            QuickFilter::Lossless => "Lossless",
+            QuickFilter::HiRes => "Hi-Res",
+            QuickFilter::Favorites => "Favourites",
+            QuickFilter::Played => "Played",
+        }
+    }
+
+    /// Whether this chip narrows the list (i.e. is not the pass-through).
+    pub fn is_active_filter(self) -> bool {
+        self != QuickFilter::All
+    }
+}
+
 pub struct SongsTableAction {
     pub play_track: Option<TrackId>,
     pub queue_next_track: Option<TrackId>,
@@ -27,6 +65,8 @@ pub struct SongsTableAction {
     pub add_to_playlist: Option<(TrackId, PlaylistId)>,
     pub toggle_favorite: Option<TrackId>,
     pub sort_field_changed: Option<SortField>,
+    /// User tapped a quality/format chip.
+    pub quick_filter_changed: Option<QuickFilter>,
     pub toggle_view_mode: bool,
     pub open_folder: Option<PathBuf>,
     pub show_properties: Option<TrackId>,
@@ -55,6 +95,8 @@ pub struct SongsTable<'a> {
     pub playlists: &'a [Playlist],
     pub current_sort: SortField,
     pub is_grid_view: bool,
+    /// Active quality/format chip.
+    pub quick_filter: QuickFilter,
     /// Multi-selection, shared with the app so it survives tab changes.
     pub selected_track_ids: &'a mut HashSet<TrackId>,
     /// Anchor for shift-range selection.
@@ -73,6 +115,7 @@ impl<'a> SongsTable<'a> {
             add_to_playlist: None,
             toggle_favorite: None,
             sort_field_changed: None,
+            quick_filter_changed: None,
             toggle_view_mode: false,
             open_folder: None,
             show_properties: None,
@@ -97,6 +140,7 @@ impl<'a> SongsTable<'a> {
             playlists,
             current_sort,
             is_grid_view,
+            quick_filter,
             selected_track_ids,
             last_clicked_index,
             artwork,
@@ -118,9 +162,13 @@ impl<'a> SongsTable<'a> {
             );
 
             ui.label(
-                egui::RichText::new(format!("{} songs", tracks.len()))
-                    .font(FontId::proportional(13.0))
-                    .color(theme.text_muted),
+                egui::RichText::new(if quick_filter.is_active_filter() {
+                    format!("{} songs · {} filter", tracks.len(), quick_filter.label())
+                } else {
+                    format!("{} songs", tracks.len())
+                })
+                .font(FontId::proportional(13.0))
+                .color(theme.text_muted),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -187,6 +235,47 @@ impl<'a> SongsTable<'a> {
                     action.sort_field_changed = Some(next);
                 }
             });
+        });
+
+        ui.add_space(6.0);
+
+        // Quality/format chips: narrow the current view in place.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+            for filter in QuickFilter::ALL {
+                let selected = quick_filter == filter;
+                let (fill, text_color) = if selected {
+                    (theme.accent_violet, Color32::WHITE)
+                } else {
+                    (theme.bg_pill, theme.text_secondary)
+                };
+                let btn = egui::Button::new(
+                    egui::RichText::new(filter.label())
+                        .font(FontId::proportional(12.0))
+                        .color(text_color),
+                )
+                .fill(fill)
+                .stroke(Stroke::NONE)
+                .corner_radius(CornerRadius::same(12))
+                .min_size(Vec2::new(0.0, 24.0));
+                if ui.add(btn).clicked() && !selected {
+                    action.quick_filter_changed = Some(filter);
+                }
+            }
+
+            if quick_filter.is_active_filter() {
+                ui.add_space(8.0);
+                let clear = egui::Button::new(
+                    egui::RichText::new("Clear filter")
+                        .font(FontId::proportional(11.5))
+                        .color(theme.text_muted),
+                )
+                .fill(Color32::TRANSPARENT)
+                .stroke(Stroke::NONE);
+                if ui.add(clear).clicked() {
+                    action.quick_filter_changed = Some(QuickFilter::All);
+                }
+            }
         });
 
         ui.add_space(8.0);
