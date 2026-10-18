@@ -42,6 +42,8 @@ pub struct PlaylistEditorActions {
     pub remove_track: Option<(PlaylistId, TrackId)>,
     /// The user picked a different playlist; the caller should load its tracks.
     pub select_changed: Option<PlaylistId>,
+    /// Save the selected playlist to an `.m3u8` file.
+    pub export_m3u: bool,
 }
 
 const MAX_SEARCH_RESULTS: usize = 60;
@@ -89,6 +91,46 @@ pub fn show_playlist_editor(
             });
 
             ui.separator();
+
+            // ── Selected playlist summary + M3U export ─────────────────
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                let selected_name = state
+                    .selected
+                    .and_then(|id| playlists.iter().find(|p| p.id == id))
+                    .map(|p| p.name.clone());
+                match selected_name {
+                    Some(name) => {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{name} · {} track(s)",
+                                playlist_tracks.len()
+                            ))
+                            .font(FontId::proportional(12.0))
+                            .color(theme.text_muted),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new("Select a playlist")
+                                .font(FontId::proportional(12.0))
+                                .color(theme.text_muted),
+                        );
+                    }
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let can_export = state.selected.is_some() && !playlist_tracks.is_empty();
+                    let btn = egui::Button::new(egui::RichText::new("Export M3U").font(FontId::proportional(12.0)));
+                    if ui
+                        .add_enabled(can_export, btn)
+                        .on_hover_text("Save this playlist as an .m3u8 file")
+                        .clicked()
+                    {
+                        actions.export_m3u = true;
+                    }
+                });
+            });
 
             ui.horizontal_top(|ui| {
                 let col_w = (ui.available_width() * 0.42).max(180.0);

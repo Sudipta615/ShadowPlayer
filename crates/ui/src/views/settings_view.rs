@@ -141,6 +141,9 @@ pub fn render_settings_view(
         if s_actions.import_folder {
             on_import(ImportKind::Folder);
         }
+        if s_actions.import_playlist {
+            on_import(ImportKind::Playlist);
+        }
         if s_actions.scan_loudness_library {
             view_actions.start_loudness_scan = true;
         }

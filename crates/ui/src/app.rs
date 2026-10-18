@@ -80,6 +80,8 @@ pub struct ShadowPlayerApp {
     scan_queue: std::collections::VecDeque<PathBuf>,
     /// Context used to wake the idle UI loop when a watched file changes.
     wake_ctx: Option<egui::Context>,
+    /// Playlist staged for M3U export, written once the save dialog returns.
+    pending_m3u_export: Option<(String, Vec<library::M3uEntry>)>,
 }
 
 impl ShadowPlayerApp {
@@ -152,6 +154,7 @@ impl ShadowPlayerApp {
             watch_pending: None,
             scan_queue: std::collections::VecDeque::new(),
             wake_ctx: Some(_cc.egui_ctx.clone()),
+            pending_m3u_export: None,
         };
 
         // Load all persistent settings (normal, theme, EQ, DSP)
@@ -379,43 +382,11 @@ impl ShadowPlayerApp {
                         continue;
                     }
 
-                    // Skip anything that is not a supported audio file.
-                    if !library::scanner::is_supported_audio_path(&path) {
-                        log::debug!("Skipping unsupported import: {:?}", path);
-                        continue;
-                    }
-
-                    match metadata::extract_metadata(&path) {
-                        Ok(mut meta) => {
-                            // Imported files bypass the scanner, so resolve their
-                            // identity here too: a re-imported file that was only
-                            // moved keeps its id, play counts and favourites.
-                            let already_indexed =
-                                self.track_repo.get_by_path(&path).ok().flatten().is_some();
-                            let path_derived_id = meta.track.id;
-                            if let Some(stable_id) = library::resolve_identity(
-                                &self.track_repo,
-                                &path,
-                                path_derived_id,
-                                already_indexed,
-                                &mut meta.track.content_hash,
-                            ) {
-                                meta.track.id = stable_id;
-                            }
-                            if let Some((bytes, _mime)) = meta.embedded_artwork.as_ref() {
-                                let _ = self
-                                    .artwork_service
-                                    .manager()
-                                    .save_thumbnail(&meta.track.id, bytes);
-                            }
-                            if self.track_repo.upsert(&meta.track).is_ok() {
-                                imported += 1;
-                            }
-                            if let Some(parent) = path.parent() {
-                                dirs.push(parent.to_path_buf());
-                            }
+                    if self.import_file(&path).is_some() {
+                        imported += 1;
+                        if let Some(parent) = path.parent() {
+                            dirs.push(parent.to_path_buf());
                         }
-                        Err(e) => log::warn!("Could not read metadata for {:?}: {}", path, e),
                     }
                 }
 
@@ -431,6 +402,125 @@ impl ShadowPlayerApp {
                     log::info!("Imported {} track(s) into the library", imported);
                 }
             }
+            ImportResult::Playlist(path) => {
+                self.import_m3u_playlist(&path);
+            }
+            ImportResult::SavePath(path) => {
+                self.write_pending_m3u_export(&path);
+            }
+        }
+    }
+
+    /// Import one audio file into the library, resolving stable identity so a
+    /// moved-but-already-known file keeps its id, play counts and favourites.
+    /// Returns the track id on success.
+    fn import_file(&mut self, path: &std::path::Path) -> Option<domain::ids::TrackId> {
+        if !library::scanner::is_supported_audio_path(path) {
+            log::debug!("Skipping unsupported import: {:?}", path);
+            return None;
+        }
+
+        match metadata::extract_metadata(path) {
+            Ok(mut meta) => {
+                // Imported files bypass the scanner, so resolve their identity
+                // here too.
+                let already_indexed = self.track_repo.get_by_path(path).ok().flatten().is_some();
+                let path_derived_id = meta.track.id;
+                if let Some(stable_id) = library::resolve_identity(
+                    &self.track_repo,
+                    path,
+                    path_derived_id,
+                    already_indexed,
+                    &mut meta.track.content_hash,
+                ) {
+                    meta.track.id = stable_id;
+                }
+                if let Some((bytes, _mime)) = meta.embedded_artwork.as_ref() {
+                    let _ = self
+                        .artwork_service
+                        .manager()
+                        .save_thumbnail(&meta.track.id, bytes);
+                }
+                let id = meta.track.id;
+                match self.track_repo.upsert(&meta.track) {
+                    Ok(()) => Some(id),
+                    Err(e) => {
+                        log::warn!("Could not index {:?}: {e}", path);
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Could not read metadata for {:?}: {}", path, e);
+                None
+            }
+        }
+    }
+
+    /// Open an M3U playlist: every referenced file is matched against the
+    /// library, importing any that are missing, and the result becomes a new
+    /// playlist (named after the file) in playlist order.
+    fn import_m3u_playlist(&mut self, path: &std::path::Path) {
+        let entries = match library::parse_m3u_file(path) {
+            Ok(entries) => entries,
+            Err(e) => {
+                log::warn!("Could not read playlist {}: {e}", path.display());
+                return;
+            }
+        };
+        if entries.is_empty() {
+            log::info!("Playlist {} had no entries", path.display());
+            return;
+        }
+
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "Imported Playlist".to_string());
+
+        let playlist = match self.playlist_repo.create(&name, Some("Imported from M3U")) {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("Could not create playlist '{name}': {e}");
+                return;
+            }
+        };
+
+        let mut added = 0usize;
+        for entry in &entries {
+            let track_id = match self.track_repo.get_by_path(&entry.path) {
+                Ok(Some(t)) => Some(t.id),
+                // Not in the library yet — index it now (this is what makes
+                // "open a playlist from a friend" work for files you already
+                // own but have not scanned).
+                _ => self.import_file(&entry.path),
+            };
+            if let Some(id) = track_id {
+                if self.playlist_repo.add_track(&playlist.id, &id).is_ok() {
+                    added += 1;
+                }
+            }
+        }
+
+        log::info!(
+            "Imported playlist '{name}': {added}/{} entries",
+            entries.len()
+        );
+        self.reload_library();
+    }
+
+    /// Write the queued M3U export to the path the user chose in the save dialog.
+    fn write_pending_m3u_export(&mut self, path: &std::path::Path) {
+        let Some((_name, entries)) = self.pending_m3u_export.take() else {
+            return;
+        };
+        // Prefer relative paths when the playlist lands on the same volume as
+        // the music, so it survives being copied alongside the library.
+        let text = library::write_m3u(&entries, path.parent());
+        match std::fs::write(path, text) {
+            Ok(()) => log::info!("Exported {} track(s) to {}", entries.len(), path.display()),
+            Err(e) => log::warn!("Could not write playlist {}: {e}", path.display()),
         }
     }
 
@@ -473,6 +563,24 @@ impl ShadowPlayerApp {
             &self.app_state.search_query,
             self.app_state.current_sort,
         );
+    }
+
+    /// Stage an M3U export and ask the user where to save it.
+    pub fn export_playlist_as_m3u(&mut self, name: String, tracks: Vec<domain::models::Track>) {
+        let entries: Vec<library::M3uEntry> = tracks
+            .iter()
+            .map(|t| library::M3uEntry {
+                path: t.path.clone(),
+                duration_secs: Some(t.duration_secs.max(0.0).round() as u64),
+                artist: Some(t.artist.clone()).filter(|a| !a.trim().is_empty()),
+                title: Some(t.title.clone()).filter(|t| !t.trim().is_empty()),
+            })
+            .collect();
+        if entries.is_empty() {
+            return;
+        }
+        self.pending_m3u_export = Some((name.clone(), entries));
+        self.import_service.request_save_m3u(name);
     }
 
     pub fn start_scan(&mut self, path: PathBuf) {
@@ -608,6 +716,9 @@ impl ShadowPlayerApp {
         match kind {
             ImportKind::Files => self.import_service.request_files(),
             ImportKind::Folder => self.import_service.request_folder(),
+            // SaveM3u is driven by `export_playlist_as_m3u`, never from here.
+            ImportKind::Playlist => self.import_service.request_playlist(),
+            ImportKind::SaveM3u => {}
         }
     }
 }
@@ -1366,6 +1477,19 @@ impl eframe::App for ShadowPlayerApp {
         }
         if let Some(id) = pl_actions.select_changed {
             self.playlist_editor_tracks = self.playlist_repo.get_tracks(&id).unwrap_or_default();
+        }
+        if pl_actions.export_m3u {
+            if let Some(id) = self.app_state.playlist_editor.selected {
+                let name = self
+                    .library_state
+                    .playlists
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "playlist".to_string());
+                let tracks = self.playlist_editor_tracks.clone();
+                self.export_playlist_as_m3u(name, tracks);
+            }
         }
         if pl_changed {
             self.reload_library();

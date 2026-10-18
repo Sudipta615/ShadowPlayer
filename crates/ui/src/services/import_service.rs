@@ -9,6 +9,9 @@ const AUDIO_EXTENSIONS: &[&str] = &[
     "dsf", "dff", "cue",
 ];
 
+/// Extensions recognised as playlists.
+const PLAYLIST_EXTENSIONS: &[&str] = &["m3u", "m3u8"];
+
 /// What the user asked the picker to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportKind {
@@ -16,6 +19,10 @@ pub enum ImportKind {
     Files,
     /// Pick a directory to scan and monitor.
     Folder,
+    /// Pick an `.m3u` / `.m3u8` playlist to open into the library.
+    Playlist,
+    /// Pick a destination file for an M3U export.
+    SaveM3u,
 }
 
 /// Outcome of a native picker interaction, delivered off the UI thread.
@@ -23,6 +30,10 @@ pub enum ImportKind {
 pub enum ImportResult {
     Files(Vec<PathBuf>),
     Folder(PathBuf),
+    /// An M3U file to read and turn into a playlist.
+    Playlist(PathBuf),
+    /// A destination chosen for an M3U export.
+    SavePath(PathBuf),
     /// The picker was dismissed with no selection.
     Cancelled,
 }
@@ -34,6 +45,8 @@ pub enum ImportResult {
 pub struct ImportService {
     rx: Option<Receiver<ImportResult>>,
     active: Option<ImportKind>,
+    /// Stem suggested to the "save as" dialog (playlist name).
+    suggested_name: String,
 }
 
 impl ImportService {
@@ -60,15 +73,30 @@ impl ImportService {
         self.request(ImportKind::Folder);
     }
 
+    /// Open the native "choose an M3U playlist" dialog.
+    pub fn request_playlist(&mut self) {
+        self.request(ImportKind::Playlist);
+    }
+
+    /// Open the native "save playlist as" dialog, suggesting `suggested_name`.
+    pub fn request_save_m3u(&mut self, suggested_name: String) {
+        if self.active.is_some() {
+            return;
+        }
+        self.suggested_name = suggested_name;
+        self.request(ImportKind::SaveM3u);
+    }
+
     fn request(&mut self, kind: ImportKind) {
         if self.active.is_some() {
             return;
         }
         let (tx, rx) = unbounded();
+        let suggested = std::mem::take(&mut self.suggested_name);
         let spawned = std::thread::Builder::new()
             .name("shadow-import-dialog".into())
             .spawn(move || {
-                let result = run_picker(kind);
+                let result = run_picker(kind, suggested);
                 let _ = tx.send(result);
             });
 
@@ -100,7 +128,7 @@ impl ImportService {
     }
 }
 
-fn run_picker(kind: ImportKind) -> ImportResult {
+fn run_picker(kind: ImportKind, suggested_name: String) -> ImportResult {
     let mut dialog = rfd::FileDialog::new();
     if let Some(dir) = dirs::audio_dir() {
         if dir.exists() {
@@ -121,6 +149,30 @@ fn run_picker(kind: ImportKind) -> ImportResult {
             match dialog.pick_files() {
                 Some(paths) if !paths.is_empty() => ImportResult::Files(paths),
                 _ => ImportResult::Cancelled,
+            }
+        }
+        ImportKind::Playlist => {
+            let dialog = dialog
+                .set_title("Open M3U Playlist")
+                .add_filter("Playlists", PLAYLIST_EXTENSIONS);
+            match dialog.pick_file() {
+                Some(path) => ImportResult::Playlist(path),
+                None => ImportResult::Cancelled,
+            }
+        }
+        ImportKind::SaveM3u => {
+            let name = if suggested_name.trim().is_empty() {
+                "playlist.m3u8".to_string()
+            } else {
+                format!("{}.m3u8", suggested_name.trim())
+            };
+            let dialog = dialog
+                .set_title("Export Playlist")
+                .set_file_name(name)
+                .add_filter("Playlists", PLAYLIST_EXTENSIONS);
+            match dialog.save_file() {
+                Some(path) => ImportResult::SavePath(path),
+                None => ImportResult::Cancelled,
             }
         }
     }

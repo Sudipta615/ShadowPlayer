@@ -476,6 +476,8 @@ pub struct SettingsTabActions {
     pub import_files: bool,
     /// User pressed "Import Folder…" — open the native folder picker.
     pub import_folder: bool,
+    /// User pressed "Open M3U…" — open the native playlist picker.
+    pub import_playlist: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1831,6 +1833,9 @@ fn render_library_category(
                         }
                         if ui.add(pill_btn("Import Folder…", false, theme)).clicked() {
                             actions.import_folder = true;
+                        }
+                        if ui.add(pill_btn("Open M3U…", false, theme)).clicked() {
+                            actions.import_playlist = true;
                         }
                         if extra.import_active {
                             ui.label(
