@@ -16,7 +16,10 @@ use crate::modals::{
     show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_edit_track_modal,
     show_eq_panel, show_help_modal, show_playlist_editor, show_track_properties_modal,
 };
-use crate::services::{ArtworkService, ImportKind, ImportResult, ImportService, LyricsService, ScannerService};
+use crate::services::{
+    ArtworkService, ImportKind, ImportResult, ImportService, LyricsService, MprisCommand,
+    MprisService, MprisSnapshot, ScannerService,
+};
 use crate::state::{AppState, DspState, LibraryState, SleepTimerMode, TelemetryState};
 use crate::theme::Theme;
 use crate::views::{
@@ -44,6 +47,7 @@ pub struct ShadowPlayerApp {
     lyrics_service: LyricsService,
     scanner_service: ScannerService,
     import_service: ImportService,
+    mpris_service: MprisService,
 
     app_state: AppState,
     library_state: LibraryState,
@@ -84,6 +88,7 @@ impl ShadowPlayerApp {
         let lyrics_service = LyricsService::new();
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
+        let mpris_service = MprisService::start();
 
         let mut app = Self {
             session,
@@ -104,6 +109,7 @@ impl ShadowPlayerApp {
             lyrics_service,
             scanner_service,
             import_service,
+            mpris_service,
 
             app_state: AppState::default(),
             library_state: LibraryState::default(),
@@ -347,6 +353,77 @@ impl ShadowPlayerApp {
         self.scanner_service.start_scan(path);
     }
 
+    /// Bridge for the MPRIS2 desktop service: drain transport requests coming
+    /// from media keys / the shell and publish the current player state.
+    fn handle_mpris(&mut self, ctx: &egui::Context) {
+        if !self.mpris_service.is_active() {
+            return;
+        }
+        self.mpris_service.attach_context(ctx);
+
+        while let Some(cmd) = self.mpris_service.try_recv() {
+            match cmd {
+                MprisCommand::Play => self.session.play(),
+                MprisCommand::Pause => self.session.pause(),
+                MprisCommand::PlayPause => self.coordinator.toggle_play_pause(),
+                MprisCommand::Stop => {
+                    self.session.pause();
+                    self.session.seek(0.0);
+                }
+                MprisCommand::Next => self.coordinator.next(),
+                MprisCommand::Previous => self.coordinator.previous(),
+                MprisCommand::SeekRelative(delta) => {
+                    let cur = self.session.position_secs_compensated();
+                    let dur = self
+                        .coordinator
+                        .current_track()
+                        .map(|t| t.duration_secs)
+                        .unwrap_or(f32::MAX);
+                    self.session.seek((cur + delta as f32).clamp(0.0, dur));
+                }
+                MprisCommand::SetPosition(pos) => {
+                    self.session.seek(pos.max(0.0) as f32);
+                }
+                MprisCommand::SetVolume(v) => {
+                    self.app_state.volume = v.clamp(0.0, 1.0);
+                    self.app_state.is_muted = false;
+                    self.session.set_volume(self.app_state.volume);
+                    self.settings_dirty = true;
+                }
+                MprisCommand::Raise => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                MprisCommand::Quit => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+
+        let track = self.coordinator.current_track().cloned();
+        let art_url = track.as_ref().and_then(|t| {
+            let p = self
+                .artwork_service
+                .manager()
+                .get_cached_thumbnail_path(&t.id);
+            if p.exists() {
+                Some(format!("file://{}", p.display()))
+            } else {
+                None
+            }
+        });
+        self.mpris_service.publish(MprisSnapshot {
+            loaded: track.is_some(),
+            playing: self.session.is_playing(),
+            title: track.as_ref().map(|t| t.title.clone()).unwrap_or_default(),
+            artist: track.as_ref().map(|t| t.artist.clone()).unwrap_or_default(),
+            album: track.as_ref().map(|t| t.album.clone()).unwrap_or_default(),
+            length_secs: track.as_ref().map(|t| t.duration_secs as f64).unwrap_or(0.0),
+            position_secs: self.session.position_secs_compensated() as f64,
+            volume: self.app_state.volume,
+            art_url,
+        });
+    }
+
     /// Advance the sleep timer. In `Duration` mode this counts down and pauses
     /// playback when it reaches zero; in `EndOfTrack` mode it pauses when the
     /// current track changes (or playback stops on its own).
@@ -422,6 +499,9 @@ impl eframe::App for ShadowPlayerApp {
 
         // 2c. Sleep timer (countdown or end-of-track).
         self.update_sleep_timer(&ctx);
+
+        // 2d. Desktop integration: apply media-key transport, publish state.
+        self.handle_mpris(&ctx);
 
         // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
         let is_playing = self.session.is_playing();

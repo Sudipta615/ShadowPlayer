@@ -25,3 +25,5 @@ serde_json = "1.0"
 # Native OS file/folder picker. Default features use the XDG Desktop Portal
 # backend (no GTK3 dev libraries required on Linux).
 rfd = "0.15"
+# MPRIS2 desktop integration (Linux). zbus is already in the tree via `ashpd`.
+zbus = "5"
