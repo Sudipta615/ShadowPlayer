@@ -453,6 +453,10 @@ pub struct SettingsTabActions {
     pub stereo_enhancer_changed: Option<bool>,
     pub write_loudness_tags: Option<String>,
     pub recover_stream: bool,
+    /// User pressed "Scan Library" — analyse every track lacking loudness data.
+    pub scan_loudness_library: bool,
+    /// User pressed "Cancel" during a loudness scan.
+    pub cancel_loudness_scan: bool,
 
     // Library & Appearance
     pub trigger_scan: Option<PathBuf>,
@@ -478,6 +482,16 @@ pub struct SettingsExtraContext<'a> {
     pub import_active: bool,
     /// Directories that individual songs were imported from, newest first.
     pub imported_dirs: &'a [PathBuf],
+    /// Library-wide loudness scan is in progress.
+    pub loudness_running: bool,
+    /// Tracks analysed so far in the current/last loudness scan.
+    pub loudness_done: usize,
+    /// Total tracks queued in the current loudness scan.
+    pub loudness_total: usize,
+    /// Current/last loudness scan status line.
+    pub loudness_current: &'a str,
+    /// Whether any loudness scan has finished (successfully or not).
+    pub loudness_has_run: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -527,7 +541,7 @@ pub fn show_settings_tab_extended(
                         render_mixbus_category(ui, state, theme, &mut actions);
                     }
                     SettingsCategory::Tools => {
-                        render_tools_category(ui, state, theme, &mut actions);
+                        render_tools_category(ui, state, theme, extra, &mut actions);
                     }
                     SettingsCategory::Library => {
                         render_library_category(ui, state, theme, extra, &mut actions);
@@ -1515,6 +1529,7 @@ fn render_tools_category(
     ui: &mut egui::Ui,
     state: &mut SettingsTabState,
     theme: &Theme,
+    extra: &SettingsExtraContext<'_>,
     actions: &mut SettingsTabActions,
 ) {
     // Card 1: Direct System Audio Capture
@@ -1619,6 +1634,44 @@ fn render_tools_category(
                 }
             },
         );
+
+        setting_item(
+            ui,
+            "Library ReplayGain Scan",
+            "Analyse every track that has no loudness data (EBU R128 + ReplayGain 2.0). Results are cached for playback; your files are never modified.",
+            theme,
+            |ui| {
+                if extra.loudness_running {
+                    let total = extra.loudness_total.max(1);
+                    let frac = extra.loudness_done as f32 / total as f32;
+                    ui.add(
+                        egui::ProgressBar::new(frac)
+                            .desired_width(150.0)
+                            .text(format!("{}/{}", extra.loudness_done, extra.loudness_total)),
+                    );
+                    if ui.add(pill_btn("Cancel", true, theme)).clicked() {
+                        actions.cancel_loudness_scan = true;
+                    }
+                } else {
+                    let label = if extra.loudness_has_run {
+                        "Rescan Library"
+                    } else {
+                        "Scan Library"
+                    };
+                    if ui.add(pill_btn(label, false, theme)).clicked() {
+                        actions.scan_loudness_library = true;
+                    }
+                }
+            },
+        );
+
+        if !extra.loudness_current.is_empty() {
+            ui.label(
+                egui::RichText::new(extra.loudness_current)
+                    .font(FontId::proportional(11.0))
+                    .color(theme.text_muted),
+            );
+        }
     });
 
     // Card 3: Stream Recovery & Diagnostics

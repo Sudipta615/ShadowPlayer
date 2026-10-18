@@ -18,8 +18,8 @@ use crate::modals::{
     show_track_properties_modal, SmartPlaylistEditorState,
 };
 use crate::services::{
-    ArtworkService, ImportKind, ImportResult, ImportService, LyricsService, MprisCommand,
-    MprisService, MprisSnapshot, ScannerService,
+    ArtworkService, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
+    MprisCommand, MprisService, MprisSnapshot, ScannerService,
 };
 use crate::state::{AppState, DspState, LibraryState, SleepTimerMode, TelemetryState};
 use crate::theme::Theme;
@@ -50,6 +50,7 @@ pub struct ShadowPlayerApp {
     scanner_service: ScannerService,
     import_service: ImportService,
     mpris_service: MprisService,
+    loudness_service: LoudnessService,
 
     app_state: AppState,
     library_state: LibraryState,
@@ -90,6 +91,7 @@ impl ShadowPlayerApp {
 
         let artwork_service = ArtworkService::new();
         let lyrics_service = LyricsService::new();
+        let loudness_service = LoudnessService::new(db.clone());
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
         let mpris_service = MprisService::start();
@@ -115,6 +117,7 @@ impl ShadowPlayerApp {
             scanner_service,
             import_service,
             mpris_service,
+            loudness_service,
 
             app_state: AppState::default(),
             library_state: LibraryState::default(),
@@ -511,10 +514,18 @@ impl eframe::App for ShadowPlayerApp {
         // 2d. Desktop integration: apply media-key transport, publish state.
         self.handle_mpris(&ctx);
 
+        // 2e. Library-wide loudness scan progress.
+        if self.loudness_service.poll() {
+            self.reload_library();
+        }
+
         // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
         let is_playing = self.session.is_playing();
         if is_playing || self.scanner_service.is_scanning() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        } else if self.loudness_service.is_running() {
+            // Progress bar only needs a couple of updates per second.
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         } else if self.import_service.is_active() {
             // Keep polling briskly while the OS picker is open, cheaply when idle.
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
@@ -919,7 +930,7 @@ impl eframe::App for ShadowPlayerApp {
                                     let mut import_req = None;
                                     let is_scanning = self.scanner_service.is_scanning();
                                     let import_active = self.import_service.is_active();
-                                    render_settings_view(
+                                    let sv_actions = render_settings_view(
                                         ui,
                                         &mut self.dsp_state,
                                         &self.session,
@@ -929,6 +940,7 @@ impl eframe::App for ShadowPlayerApp {
                                         is_scanning,
                                         import_active,
                                         &self.app_state.imported_dirs,
+                                        self.loudness_service.progress(),
                                         |path| scan_to_start = Some(path),
                                         |kind| import_req = Some(kind),
                                     );
@@ -942,6 +954,12 @@ impl eframe::App for ShadowPlayerApp {
                                     }
                                     if let Some(kind) = import_req {
                                         self.request_import(kind);
+                                    }
+                                    if sv_actions.start_loudness_scan {
+                                        self.loudness_service.start();
+                                    }
+                                    if sv_actions.cancel_loudness_scan {
+                                        self.loudness_service.cancel();
                                     }
                                 }
                                 NavItem::Help => {

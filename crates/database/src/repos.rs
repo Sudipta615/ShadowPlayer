@@ -182,6 +182,53 @@ impl TrackRepo {
         })
     }
 
+    /// Store measured loudness values for a track (ReplayGain scan results).
+    pub fn set_loudness(
+        &self,
+        id: &TrackId,
+        replaygain_track_db: Option<f32>,
+        replaygain_track_peak: Option<f32>,
+        r128_loudness_lufs: Option<f32>,
+    ) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE tracks
+                    SET replaygain_track_db = ?1,
+                        replaygain_track_peak = ?2,
+                        r128_loudness_lufs = ?3
+                  WHERE id = ?4;",
+                params![
+                    replaygain_track_db,
+                    replaygain_track_peak,
+                    r128_loudness_lufs,
+                    id.to_string()
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Tracks that have no measured loudness yet, for a library-wide scan.
+    pub fn list_missing_replaygain(&self) -> Result<Vec<(TrackId, PathBuf)>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, path FROM tracks
+                  WHERE replaygain_track_db IS NULL
+                  ORDER BY artist COLLATE NOCASE ASC, album COLLATE NOCASE ASC;",
+            )?;
+            let iter = stmt.query_map([], |row| {
+                let id: String = row.get(0)?;
+                let path: String = row.get(1)?;
+                Ok((TrackId::from_str(&id).unwrap_or_default(), PathBuf::from(path)))
+            })?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
     pub fn increment_play_count(&self, id: &TrackId) -> Result<()> {
         self.db.with_conn(|conn| {
             conn.execute(

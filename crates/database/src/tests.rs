@@ -200,6 +200,35 @@ mod tests {
     }
 
     #[test]
+    fn test_loudness_scan_bookkeeping() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let mut t1 = sample_track(TrackId::new(), "/m/a.flac", "A", "Artist", "Album");
+        t1.replaygain_track_db = None;
+        t1.replaygain_track_peak = None;
+        t1.r128_loudness_lufs = None;
+        let mut t2 = sample_track(TrackId::new(), "/m/b.flac", "B", "Artist", "Album");
+        t2.replaygain_track_db = Some(-3.0);
+        repo.upsert(&t1).unwrap();
+        repo.upsert(&t2).unwrap();
+
+        // Only the track without loudness data is queued for scanning.
+        let missing = repo.list_missing_replaygain().unwrap();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].1, PathBuf::from("/m/a.flac"));
+
+        repo.set_loudness(&missing[0].0, Some(-7.5), Some(0.91), Some(-14.2))
+            .unwrap();
+        let got = repo.get_by_id(&missing[0].0).unwrap().unwrap();
+        assert_eq!(got.replaygain_track_db, Some(-7.5));
+        assert_eq!(got.replaygain_track_peak, Some(0.91));
+        assert_eq!(got.r128_loudness_lufs, Some(-14.2));
+
+        assert_eq!(repo.list_missing_replaygain().unwrap().len(), 0);
+    }
+
+    #[test]
     fn test_smart_playlists() {
         use domain::ids::PlaylistId;
         use domain::smart::{SmartField, SmartOp, SmartPlaylist, SmartRule};

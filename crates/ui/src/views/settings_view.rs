@@ -4,9 +4,17 @@ use audio_session::AudioSession;
 use database::{ScanRootsRepo, TrackRepo};
 
 use crate::components::settings_tab::{show_settings_tab_extended, SettingsExtraContext};
-use crate::services::ImportKind;
+use crate::services::{ImportKind, LoudnessProgress};
 use crate::state::DspState;
 use crate::theme::Theme;
+
+/// Actions from the settings view that the app must handle (they need services
+/// the view does not own, such as the loudness scan worker).
+#[derive(Default)]
+pub struct SettingsViewActions {
+    pub start_loudness_scan: bool,
+    pub cancel_loudness_scan: bool,
+}
 
 pub fn render_settings_view(
     ui: &mut egui::Ui,
@@ -18,9 +26,11 @@ pub fn render_settings_view(
     is_scanning: bool,
     import_active: bool,
     imported_dirs: &[PathBuf],
+    loudness: &LoudnessProgress,
     mut on_start_scan: impl FnMut(PathBuf),
     mut on_import: impl FnMut(ImportKind),
-) {
+) -> SettingsViewActions {
+    let mut view_actions = SettingsViewActions::default();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, 14.0);
 
@@ -105,6 +115,11 @@ pub fn render_settings_view(
             is_dark_theme: !theme.is_light,
             import_active,
             imported_dirs,
+            loudness_running: loudness.running,
+            loudness_done: loudness.done,
+            loudness_total: loudness.total,
+            loudness_current: &loudness.current,
+            loudness_has_run: loudness.has_run,
         };
 
         let s_actions = show_settings_tab_extended(ui, &mut dsp_state.settings_tab, theme, &extra);
@@ -126,7 +141,15 @@ pub fn render_settings_view(
         if s_actions.import_folder {
             on_import(ImportKind::Folder);
         }
+        if s_actions.scan_loudness_library {
+            view_actions.start_loudness_scan = true;
+        }
+        if s_actions.cancel_loudness_scan {
+            view_actions.cancel_loudness_scan = true;
+        }
 
         dsp_state.handle_settings_actions(session, &s_actions);
     });
+
+    view_actions
 }
