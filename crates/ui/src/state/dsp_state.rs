@@ -74,6 +74,11 @@ impl DspState {
         session.set_dither_enabled(st.dither_enabled);
         session.set_resampler_quality(st.resampler_quality);
         session.set_fallback_policy(st.fallback_policy);
+        // Only push precision mode once the user has actually chosen one, so the
+        // engine's own persisted value survives an upgrade untouched.
+        if let Some(mode) = st.precision_mode {
+            session.set_precision_mode(mode);
+        }
         session.set_spatial_quality(st.spatial_quality);
         if !st.hrtf_profile.is_empty() {
             session.set_hrtf_profile(st.hrtf_profile.clone());
@@ -124,6 +129,7 @@ impl DspState {
         if let Some(b) = s.dither_changed { session.set_dither_enabled(b); }
         if let Some(q) = s.resampler_quality_changed { session.set_resampler_quality(q); }
         if let Some(p) = s.fallback_policy_changed { session.set_fallback_policy(p); }
+        if let Some(m) = s.precision_mode_changed { session.set_precision_mode(m); }
         if s.open_asio_panel { session.open_asio_control_panel(); }
         if s.clear_output_profile { session.clear_output_profile(); }
         if let Some(q) = s.spatial_quality_changed { session.set_spatial_quality(q); }

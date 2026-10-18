@@ -367,6 +367,19 @@ impl AudioSession {
         let _ = self.handle.send_command(EngineCommand::SetPrecisionMode(mode));
     }
 
+    /// Round-trip output latency reported by the backend, in milliseconds.
+    pub fn latency_ms(&self) -> f32 {
+        self.handle.latency_ms()
+    }
+
+    /// Mean DSP graph-rebuild cost (ms) and the number of rebuilds since startup.
+    ///
+    /// Each rebuild also allocates and re-arms buffers, so this is the figure to
+    /// watch when a settings change causes audible gaps.
+    pub fn graph_build_stats(&self) -> (f64, u64) {
+        self.handle.graph_build_stats()
+    }
+
     pub fn set_eq_enabled(&self, enabled: bool) {
         self.handle.set_eq_enabled(enabled);
     }

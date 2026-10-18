@@ -120,6 +120,9 @@ pub fn render_settings_view(
             loudness_total: loudness.total,
             loudness_current: &loudness.current,
             loudness_has_run: loudness.has_run,
+            latency_ms: session.latency_ms(),
+            graph_build_ms: session.graph_build_stats().0,
+            graph_builds: session.graph_build_stats().1,
         };
 
         let s_actions = show_settings_tab_extended(ui, &mut dsp_state.settings_tab, theme, &extra);

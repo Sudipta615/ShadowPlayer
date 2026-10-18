@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use config::{
-    AudioBackend, CrossfadeCurve, FallbackPolicy, LoudnessMode, ResamplerQuality,
+    AudioBackend, CrossfadeCurve, FallbackPolicy, LoudnessMode, PrecisionMode, ResamplerQuality,
     SampleRatePolicy, SpatialQuality, SpeedMode, TransitionMode, VolumeMode,
 };
 use domain::ids::ScanRootId;
@@ -84,6 +84,10 @@ pub struct SettingsTabState {
     pub resampler_quality: ResamplerQuality,
     pub fallback_policy: FallbackPolicy,
 
+    // Internal DSP precision (f32 vs f64 core). `None` until the user chooses,
+    // so the engine's own persisted setting is never clobbered at startup.
+    pub precision_mode: Option<PrecisionMode>,
+
     // Spatial
     pub spatial_quality: SpatialQuality,
     pub hrtf_profile: String,
@@ -165,6 +169,7 @@ impl Default for SettingsTabState {
             dither_enabled: true,
             resampler_quality: ResamplerQuality::HighQuality,
             fallback_policy: FallbackPolicy::Allow,
+            precision_mode: None,
 
             spatial_quality: SpatialQuality::High,
             hrtf_profile: String::new(),
@@ -241,6 +246,9 @@ pub struct PersistentSettingsTabState {
     pub resampler_quality: ResamplerQuality,
     pub fallback_policy: FallbackPolicy,
 
+    #[serde(default)]
+    pub precision_mode: Option<PrecisionMode>,
+
     pub spatial_quality: SpatialQuality,
     pub hrtf_profile: String,
     pub listener_smoothing_ms: f32,
@@ -280,6 +288,7 @@ impl From<&SettingsTabState> for PersistentSettingsTabState {
             dither_enabled: s.dither_enabled,
             resampler_quality: s.resampler_quality,
             fallback_policy: s.fallback_policy,
+            precision_mode: s.precision_mode,
             spatial_quality: s.spatial_quality,
             hrtf_profile: s.hrtf_profile.clone(),
             listener_smoothing_ms: s.listener_smoothing_ms,
@@ -318,6 +327,7 @@ impl PersistentSettingsTabState {
         s.dither_enabled = self.dither_enabled;
         s.resampler_quality = self.resampler_quality;
         s.fallback_policy = self.fallback_policy;
+        s.precision_mode = self.precision_mode;
         s.spatial_quality = self.spatial_quality;
         s.hrtf_profile = self.hrtf_profile.clone();
         s.listener_smoothing_ms = self.listener_smoothing_ms;
@@ -434,6 +444,7 @@ pub struct SettingsTabActions {
     pub dither_changed: Option<bool>,
     pub resampler_quality_changed: Option<ResamplerQuality>,
     pub fallback_policy_changed: Option<FallbackPolicy>,
+    pub precision_mode_changed: Option<PrecisionMode>,
     pub open_asio_panel: bool,
     pub clear_output_profile: bool,
 
@@ -504,6 +515,12 @@ pub struct SettingsExtraContext<'a> {
     pub loudness_current: &'a str,
     /// Whether any loudness scan has finished (successfully or not).
     pub loudness_has_run: bool,
+    /// Round-trip output latency reported by the backend, in milliseconds.
+    pub latency_ms: f32,
+    /// Mean DSP graph-rebuild cost in milliseconds.
+    pub graph_build_ms: f64,
+    /// Number of DSP graph rebuilds since startup.
+    pub graph_builds: u64,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1050,6 +1067,24 @@ fn render_output_category(
                 ];
                 if segment_picker(ui, &mut state.resampler_quality, &options, theme) {
                     actions.resampler_quality_changed = Some(state.resampler_quality);
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            "DSP Precision Mode",
+            "Internal processing precision. Quality routes the mix chain through the f64 core for extra headroom at a small CPU cost.",
+            theme,
+            |ui| {
+                let mut mode = state.precision_mode.unwrap_or_default();
+                let options = [
+                    (PrecisionMode::Performance, "Performance (f32)"),
+                    (PrecisionMode::Quality, "Quality (f64 core)"),
+                ];
+                if segment_picker(ui, &mut mode, &options, theme) {
+                    state.precision_mode = Some(mode);
+                    actions.precision_mode_changed = Some(mode);
                 }
             },
         );
@@ -1725,6 +1760,42 @@ fn render_tools_category(
                 ).clicked() {
                     actions.recover_stream = true;
                 }
+            },
+        );
+    });
+
+    // Card 4: Runtime Diagnostics
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_gear(ui, r, c),
+            "Runtime Diagnostics",
+            "Live figures measured by the audio engine's output path",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Output Latency",
+            "Round-trip buffering between the DSP graph and the hardware device",
+            theme,
+            |ui| {
+                badge_label(ui, format!("{:.1} ms", extra.latency_ms), theme);
+            },
+        );
+
+        setting_item(
+            ui,
+            "DSP Graph Rebuilds",
+            "Mean cost of rebuilding the processing graph (codec, sample-rate or routing change)",
+            theme,
+            |ui| {
+                badge_label(
+                    ui,
+                    format!("{:.2} ms mean · {} total", extra.graph_build_ms, extra.graph_builds),
+                    theme,
+                );
             },
         );
     });
