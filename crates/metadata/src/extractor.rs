@@ -20,7 +20,6 @@ pub enum MetadataError {
 pub struct ExtractedMetadata {
     pub track: Track,
     pub embedded_artwork: Option<(Vec<u8>, String)>,
-    pub embedded_lyrics: Option<String>,
 }
 
 pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError> {
@@ -59,7 +58,6 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
     let mut channels = 2usize;
     let mut bitrate_kbps: Option<u32> = None;
     let mut embedded_artwork: Option<(Vec<u8>, String)> = None;
-    let mut embedded_lyrics: Option<String> = None;
 
     // 2. Extra tag and artwork pass using Symphonia probe
     if let Ok(file) = File::open(path) {
@@ -104,9 +102,6 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
                             StandardTag::Genre(v) if !v.is_empty() => genre = Some(v.to_string()),
                             StandardTag::TrackNumber(v) => track_number = Some(*v as u32),
                             StandardTag::DiscNumber(v) => disc_number = Some(*v as u32),
-                            StandardTag::Lyrics(v) if !v.is_empty() => {
-                                embedded_lyrics = Some(v.to_string())
-                            }
                             _ => {}
                         }
                     } else {
@@ -121,10 +116,6 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
                                 {
                                     year = Some(y);
                                 }
-                            } else if (key.contains("lyrics") || key == "uslt")
-                                && embedded_lyrics.is_none()
-                            {
-                                embedded_lyrics = Some(val);
                             }
                         }
                     }
@@ -176,10 +167,12 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         added_at: now,
     };
 
+    // NOTE: lyrics are *not* read here. Scanning touches every changed file, and
+    // nothing consumes them at index time; `crate::extract_lyrics` reads them on
+    // demand for the track being played.
     Ok(ExtractedMetadata {
         track,
         embedded_artwork,
-        embedded_lyrics,
     })
 }
 
@@ -281,7 +274,6 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
         results.push(ExtractedMetadata {
             track,
             embedded_artwork: audio_meta.embedded_artwork.clone(),
-            embedded_lyrics: None,
         });
     }
 

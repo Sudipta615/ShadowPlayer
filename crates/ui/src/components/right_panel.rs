@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use domain::models::{SyncedLyricLine, Track};
-use crate::services::ArtworkService;
+use crate::services::{ArtworkService, LyricsSource};
 use crate::theme::Theme;
 use crate::components::settings_tab::{show_settings_tab, SettingsTabActions, SettingsTabState};
 
@@ -27,6 +27,8 @@ pub struct RightPanel<'a> {
     pub current_queue_idx: usize,
     pub lyrics_lines: &'a [SyncedLyricLine],
     pub plain_lyrics: Option<&'a str>,
+    /// Where the current track's lyrics came from; drives the caption.
+    pub lyrics_source: Option<LyricsSource>,
     pub active_lyric_idx: Option<usize>,
     pub volume: f32,
     pub is_muted: bool,
@@ -270,7 +272,23 @@ impl<'a> RightPanel<'a> {
                     }
 
                     RightTab::Lyrics => {
-                        // Lyrics Tab Content
+                        // Lyrics Tab Content. A missing source means the lookup
+                        // has not finished yet: tag lyrics are read off-thread,
+                        // sidecars resolve synchronously.
+                        let lyrics_resolved = self.lyrics_source.is_some();
+                        let caption = match self.lyrics_source {
+                            Some(s) if s.has_lyrics() => s.caption(),
+                            _ => None,
+                        };
+                        if let Some(caption) = caption {
+                            ui.label(
+                                egui::RichText::new(caption)
+                                    .font(FontId::proportional(11.0))
+                                    .color(self.theme.text_dim),
+                            );
+                            ui.add_space(6.0);
+                        }
+
                         if self.lyrics_lines.is_empty() {
                             if let Some(plain) = self.plain_lyrics {
                                 egui::ScrollArea::vertical()
@@ -286,6 +304,15 @@ impl<'a> RightPanel<'a> {
                                             );
                                         }
                                     });
+                            } else if !lyrics_resolved {
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(40.0);
+                                    ui.label(
+                                        egui::RichText::new("Looking for lyrics...")
+                                            .font(FontId::proportional(13.5))
+                                            .color(self.theme.text_muted),
+                                    );
+                                });
                             } else {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(40.0);
@@ -294,9 +321,14 @@ impl<'a> RightPanel<'a> {
                                             .font(FontId::proportional(13.5))
                                             .color(self.theme.text_muted),
                                     );
-                                    ui.add_space(4.0);
+                                    ui.add_space(6.0);
                                     ui.label(
-                                        egui::RichText::new("Place a .lrc or .txt sidecar file beside the audio track")
+                                        egui::RichText::new("Place a .lrc or .txt file beside the track,")
+                                            .font(FontId::proportional(11.5))
+                                            .color(self.theme.text_dim),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("or embed lyrics in the file's tags.")
                                             .font(FontId::proportional(11.5))
                                             .color(self.theme.text_dim),
                                     );

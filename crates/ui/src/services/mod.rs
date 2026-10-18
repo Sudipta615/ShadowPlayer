@@ -8,6 +8,6 @@ pub mod scanner_service;
 pub use artwork_service::ArtworkService;
 pub use import_service::{ImportKind, ImportResult, ImportService};
 pub use loudness_service::{LoudnessProgress, LoudnessService};
-pub use lyrics_service::LyricsService;
+pub use lyrics_service::{LyricsService, LyricsSource};
 pub use mpris_service::{MprisCommand, MprisService, MprisSnapshot};
 pub use scanner_service::ScannerService;

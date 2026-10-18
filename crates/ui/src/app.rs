@@ -830,6 +830,12 @@ impl eframe::App for ShadowPlayerApp {
             }
         }
 
+        // 2f. Embedded lyric tags are read on a worker thread; pick up the
+        // result as soon as it lands so the lyrics panel fills in.
+        if self.lyrics_service.poll() {
+            ctx.request_repaint();
+        }
+
         // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
         let is_playing = self.session.is_playing();
         if is_playing || self.scanner_service.is_scanning() {
@@ -849,6 +855,10 @@ impl eframe::App for ShadowPlayerApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
         } else if !self.toasts.is_empty() {
             // Keep the fade-out animating while a notification is on screen.
+            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        } else if self.lyrics_service.is_loading() {
+            // Waiting on an embedded-lyrics read: tick until it lands, even
+            // while paused.
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }
 
@@ -935,6 +945,13 @@ impl eframe::App for ShadowPlayerApp {
                         self.app_state.playlist_editor.open(first);
                     }
                     _ => {}
+                }
+                if let Ok(idx) = std::env::var("SHADOWPLAYER_EVAL_LYRICS") {
+                    let n: usize = idx.parse().unwrap_or(0);
+                    if let Some(track) = self.library_state.displayed_tracks.get(n).cloned() {
+                        self.coordinator.play_track(track, None);
+                    }
+                    self.app_state.right_tab = crate::components::right_panel::RightTab::Lyrics;
                 }
                 if std::env::var("SHADOWPLAYER_EVAL_TOAST").is_ok() {
                     self.toasts
@@ -1199,6 +1216,9 @@ impl eframe::App for ShadowPlayerApp {
             .map(|t| self.lyrics_service.get_lyrics(&t.id))
             .unwrap_or_default();
         let active_lyric_idx = LyricsService::active_index(&active_lyrics, telemetry.position_secs as f32);
+        let lyrics_source = current_track
+            .as_ref()
+            .and_then(|t| self.lyrics_service.source(&t.id));
 
         // 8. Render Left Sidebar
         let mut nav_to_select = None;
@@ -1448,6 +1468,7 @@ impl eframe::App for ShadowPlayerApp {
                             &mut self.artwork_service,
                             &active_lyrics,
                             plain_lyrics.as_deref(),
+                            lyrics_source,
                             active_lyric_idx,
                             &mut self.theme,
                         );

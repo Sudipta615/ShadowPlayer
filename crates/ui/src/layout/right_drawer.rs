@@ -21,6 +21,7 @@ pub fn render_right_drawer(
     artwork_service: &mut ArtworkService,
     active_lyrics: &[SyncedLyricLine],
     plain_lyrics: Option<&str>,
+    lyrics_source: Option<crate::services::LyricsSource>,
     active_lyric_idx: Option<usize>,
     theme: &mut Theme,
 ) {
@@ -56,6 +57,7 @@ pub fn render_right_drawer(
                 current_queue_idx: cur_queue_idx,
                 lyrics_lines: active_lyrics,
                 plain_lyrics,
+                lyrics_source,
                 active_lyric_idx,
                 volume: app_state.volume,
                 is_muted: app_state.is_muted,

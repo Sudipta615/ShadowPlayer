@@ -1,6 +1,6 @@
 use domain::models::SyncedLyricLine;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Parse an LRC-formatted string into sorted SyncedLyricLine items.
 pub fn parse_lrc(content: &str) -> Vec<SyncedLyricLine> {
@@ -81,33 +81,71 @@ pub fn find_active_line(lines: &[SyncedLyricLine], position_secs: f32) -> Option
     }
 }
 
-/// Find sidecar .lrc or .txt lyrics for a song path.
+/// Interpret arbitrary lyric text (a tag value or a plain file).
+///
+/// Returns `(is_synced, lines)`. Text carrying LRC timestamps is synced;
+/// anything else is plain prose the caller should render line by line.
+pub fn interpret_lyrics_text(content: &str) -> (bool, Vec<SyncedLyricLine>) {
+    let lines = parse_lrc(content);
+    if lines.is_empty() {
+        (false, Vec::new())
+    } else {
+        (true, lines)
+    }
+}
+
+/// Find sidecar `.lrc` or `.txt` lyrics for a song path.
+///
+/// `.lrc` wins over `.txt`, and both the extension and the file stem are
+/// matched case-insensitively: a `song.flac` is satisfied by `song.LRC`,
+/// `Song.lrc` or `song.lrc`. Lyric text without timestamps is still returned,
+/// as plain (unsynced) lyrics.
 pub fn find_sidecar_lyrics(
     song_path: &Path,
 ) -> Option<(bool, Vec<SyncedLyricLine>, Option<String>)> {
-    // 1. Check .lrc sidecar first
-    let lrc_path = song_path.with_extension("lrc");
-    if lrc_path.exists() {
-        if let Ok(content) = fs::read_to_string(&lrc_path) {
-            let lines = parse_lrc(&content);
-            if !lines.is_empty() {
-                return Some((true, lines, Some(content)));
-            }
+    let content = read_sidecar(song_path)?;
+    let (is_synced, lines) = interpret_lyrics_text(&content);
+    if is_synced {
+        Some((true, lines, Some(content)))
+    } else {
+        Some((false, Vec::new(), Some(content)))
+    }
+}
+
+/// Locate and read the best sidecar lyric file beside `song_path`.
+fn read_sidecar(song_path: &Path) -> Option<String> {
+    // Fast path: the conventional lower-case name needs no directory walk.
+    let exact = song_path.with_extension("lrc");
+    if let Ok(content) = fs::read_to_string(&exact) {
+        return Some(content);
+    }
+
+    let stem = song_path.file_stem()?.to_str()?;
+    let dir = song_path.parent()?;
+
+    let mut lrc: Option<PathBuf> = None;
+    let mut txt: Option<PathBuf> = None;
+
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        let Some(entry_stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !entry_stem.eq_ignore_ascii_case(stem) {
+            continue;
+        }
+        if ext.eq_ignore_ascii_case("lrc") {
+            lrc = lrc.or(Some(path));
+        } else if ext.eq_ignore_ascii_case("txt") {
+            txt = txt.or(Some(path));
         }
     }
 
-    // 2. Check .txt sidecar
-    let txt_path = song_path.with_extension("txt");
-    if txt_path.exists() {
-        if let Ok(content) = fs::read_to_string(&txt_path) {
-            let lines = parse_lrc(&content);
-            if !lines.is_empty() {
-                return Some((true, lines, Some(content)));
-            } else {
-                return Some((false, Vec::new(), Some(content)));
-            }
-        }
-    }
-
-    None
+    fs::read_to_string(lrc.or(txt)?).ok()
 }
