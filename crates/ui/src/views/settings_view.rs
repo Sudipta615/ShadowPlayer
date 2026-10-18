@@ -14,6 +14,8 @@ use crate::theme::Theme;
 pub struct SettingsViewActions {
     pub start_loudness_scan: bool,
     pub cancel_loudness_scan: bool,
+    /// Open the duplicate-track finder.
+    pub find_duplicates: bool,
 }
 
 pub fn render_settings_view(
@@ -146,6 +148,9 @@ pub fn render_settings_view(
         }
         if s_actions.import_playlist {
             on_import(ImportKind::Playlist);
+        }
+        if s_actions.find_duplicates {
+            view_actions.find_duplicates = true;
         }
         if s_actions.scan_loudness_library {
             view_actions.start_loudness_scan = true;

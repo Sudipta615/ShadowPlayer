@@ -182,6 +182,37 @@ impl TrackRepo {
         })
     }
 
+    /// Groups of tracks whose contents are byte-identical (same fingerprint).
+    ///
+    /// Only fingerprinted tracks participate, so nothing is guessed from tags or
+    /// file names. Groups are ordered by size (largest first).
+    pub fn find_duplicates(&self) -> Result<Vec<Vec<Track>>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT content_hash FROM tracks
+                 WHERE content_hash IS NOT NULL AND content_hash <> ''
+                 GROUP BY content_hash HAVING COUNT(*) > 1
+                 ORDER BY COUNT(*) DESC, content_hash;",
+            )?;
+            let hashes: Vec<String> = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<Result<_, _>>()?;
+            drop(stmt);
+
+            let mut groups = Vec::new();
+            for hash in hashes {
+                let mut s =
+                    conn.prepare("SELECT * FROM tracks WHERE content_hash = ?1 ORDER BY id;")?;
+                let tracks: Vec<Track> =
+                    s.query_map(params![hash], map_track)?.collect::<Result<_, _>>()?;
+                if tracks.len() > 1 {
+                    groups.push(tracks);
+                }
+            }
+            Ok(groups)
+        })
+    }
+
     pub fn count(&self) -> Result<usize> {
         self.db.with_conn(|conn| {
             conn.query_row("SELECT COUNT(*) FROM tracks;", [], |r| r.get(0))

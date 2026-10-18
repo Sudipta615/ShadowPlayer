@@ -489,6 +489,8 @@ pub struct SettingsTabActions {
     pub import_folder: bool,
     /// User pressed "Open M3U…" — open the native playlist picker.
     pub import_playlist: bool,
+    /// User pressed "Find Duplicates" — open the duplicate finder.
+    pub find_duplicates: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1917,6 +1919,18 @@ fn render_library_category(
                         }
                     });
                 });
+            },
+        );
+
+        setting_item(
+            ui,
+            "Find Duplicate Tracks",
+            "Group tracks with identical audio content (matched by fingerprint, not tags) and remove the extra copies",
+            theme,
+            |ui| {
+                if ui.add(pill_btn("Find Duplicates…", false, theme)).clicked() {
+                    actions.find_duplicates = true;
+                }
             },
         );
 

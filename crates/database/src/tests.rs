@@ -407,5 +407,36 @@ mod tests {
         sp_repo.delete(&sp2.id).unwrap();
         assert_eq!(sp_repo.list().unwrap().len(), 5);
     }
+
+    #[test]
+    fn test_find_duplicates_groups_by_content_hash() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        // Two copies of the same audio (identical fingerprint, different tags).
+        let a = TrackId::new();
+        let b = TrackId::new();
+        let mut ta = sample_track(a, "/music/a/01.flac", "Song", "Artist", "Album");
+        ta.content_hash = Some("deadbeef".to_string());
+        let mut tb = sample_track(b, "/music/backup/01 copy.flac", "Song (copy)", "Artist", "");
+        tb.content_hash = Some("deadbeef".to_string());
+
+        // A unique track, and one with no fingerprint at all.
+        let c = TrackId::new();
+        let mut tc = sample_track(c, "/music/unique.flac", "Unique", "Artist", "Album");
+        tc.content_hash = Some("cafef00d".to_string());
+        let d = TrackId::new();
+        let td = sample_track(d, "/music/unhashed.flac", "Unhashed", "Artist", "Album");
+
+        for t in [&ta, &tb, &tc, &td] {
+            repo.upsert(t).unwrap();
+        }
+
+        let groups = repo.find_duplicates().unwrap();
+        assert_eq!(groups.len(), 1, "only the two identical copies group");
+        assert_eq!(groups[0].len(), 2);
+        let ids: Vec<TrackId> = groups[0].iter().map(|t| t.id).collect();
+        assert!(ids.contains(&a) && ids.contains(&b));
+    }
 }
 

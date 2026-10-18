@@ -13,9 +13,10 @@ use search::SearchEngine;
 use crate::components::sidebar::NavItem;
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
-    show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_edit_track_modal,
-    show_eq_panel, show_help_modal, show_playlist_editor, show_smart_playlist_editor,
-    show_track_properties_modal, SmartPlaylistEditorState,
+    show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_duplicates_modal,
+    show_edit_track_modal, show_eq_panel, show_help_modal, show_playlist_editor,
+    show_smart_playlist_editor, show_track_properties_modal, DuplicateGroup, DuplicatesState,
+    SmartPlaylistEditorState,
 };
 use crate::services::{
     ArtworkService, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
@@ -82,6 +83,8 @@ pub struct ShadowPlayerApp {
     wake_ctx: Option<egui::Context>,
     /// Playlist staged for M3U export, written once the save dialog returns.
     pending_m3u_export: Option<(String, Vec<library::M3uEntry>)>,
+    /// Duplicate-track finder state.
+    duplicates: DuplicatesState,
 }
 
 impl ShadowPlayerApp {
@@ -155,6 +158,7 @@ impl ShadowPlayerApp {
             scan_queue: std::collections::VecDeque::new(),
             wake_ctx: Some(_cc.egui_ctx.clone()),
             pending_m3u_export: None,
+            duplicates: DuplicatesState::default(),
         };
 
         // Load all persistent settings (normal, theme, EQ, DSP)
@@ -565,6 +569,28 @@ impl ShadowPlayerApp {
         );
     }
 
+    /// Scan the library for byte-identical duplicates and load the finder.
+    fn scan_duplicates(&mut self) {
+        let groups = match self.track_repo.find_duplicates() {
+            Ok(groups) => groups,
+            Err(e) => {
+                log::warn!("Could not scan for duplicates: {e}");
+                return;
+            }
+        };
+        let groups: Vec<DuplicateGroup> = groups
+            .into_iter()
+            .map(|tracks| DuplicateGroup {
+                // The library has known the lowest-id copy longest, so keep it.
+                keep: tracks.first().map(|t| t.id),
+                tracks,
+            })
+            .collect();
+        log::info!("Duplicate scan: {} group(s)", groups.len());
+        self.duplicates.set_groups(groups);
+        self.duplicates.is_open = true;
+    }
+
     /// Stage an M3U export and ask the user where to save it.
     pub fn export_playlist_as_m3u(&mut self, name: String, tracks: Vec<domain::models::Track>) {
         let entries: Vec<library::M3uEntry> = tracks
@@ -804,6 +830,11 @@ impl eframe::App for ShadowPlayerApp {
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_SMART").is_ok() {
                 self.smart_playlist_editor.open_new();
+            }
+            if self.app_state.frame_count == 1
+                && std::env::var("SHADOWPLAYER_EVAL_DUPLICATES").is_ok()
+            {
+                self.scan_duplicates();
             }
             // Generic navigation / modal selectors used to capture screenshots
             // of individual views.
@@ -1245,6 +1276,9 @@ impl eframe::App for ShadowPlayerApp {
                                     if sv_actions.cancel_loudness_scan {
                                         self.loudness_service.cancel();
                                     }
+                                    if sv_actions.find_duplicates {
+                                        self.scan_duplicates();
+                                    }
                                 }
                                 NavItem::Help => {
                                     render_help_view(
@@ -1493,6 +1527,40 @@ impl eframe::App for ShadowPlayerApp {
         }
         if pl_changed {
             self.reload_library();
+        }
+
+        // Duplicate-track finder.
+        let dupe_actions = show_duplicates_modal(&ctx, &mut self.duplicates, &self.theme);
+        if dupe_actions.rescan {
+            self.scan_duplicates();
+        }
+        if dupe_actions.remove_selected {
+            let delete_from_disk = self.duplicates.delete_from_disk;
+            let ids: Vec<domain::ids::TrackId> =
+                self.duplicates.selected.iter().copied().collect();
+            let mut removed = 0usize;
+            for id in ids {
+                // Deleting the file first means a failed unlink leaves the
+                // library row intact (rather than orphaning a file on disk).
+                if delete_from_disk {
+                    match self.track_repo.get_by_id(&id) {
+                        Ok(Some(t)) if t.path.exists() => {
+                            if let Err(e) = std::fs::remove_file(&t.path) {
+                                log::warn!("Could not delete {}: {e}", t.path.display());
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if self.track_repo.delete(&id).is_ok() {
+                    removed += 1;
+                }
+            }
+            log::info!("Removed {removed} duplicate track(s)");
+            self.reload_library();
+            // Refresh so the list reflects what is left.
+            self.scan_duplicates();
         }
 
         // Edit Song Info dialog.
