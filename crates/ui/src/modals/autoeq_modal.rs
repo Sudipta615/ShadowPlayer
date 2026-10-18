@@ -206,7 +206,7 @@ pub fn show_autoeq_modal(
         .default_size(Vec2::new(580.0, 520.0))
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
-                .fill(Color32::from_rgba_premultiplied(14, 16, 28, 250))
+                .fill(theme.bg_card)
                 .stroke(Stroke::new(1.5_f32, theme.accent_magenta))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(egui::Margin::same(18)),

@@ -35,6 +35,11 @@ pub struct LibraryState {
     pub selected_folder: Option<PathBuf>,
     pub folder_tracks: Vec<Track>,
     pub new_folder_input: String,
+
+    /// Identity of the currently materialised `displayed_tracks`. Used to skip
+    /// needless rebuilds (and the associated 10k-track clones) when the user
+    /// bounces between tabs.
+    displayed_key: Option<(NavItem, String, SortField)>,
 }
 
 impl Default for LibraryState {
@@ -61,6 +66,8 @@ impl Default for LibraryState {
             selected_folder: None,
             folder_tracks: Vec::new(),
             new_folder_input: String::new(),
+
+            displayed_key: None,
         }
     }
 }
@@ -112,6 +119,9 @@ impl LibraryState {
             self.scan_roots = roots;
         }
 
+        // Force a rebuild: underlying data changed.
+        self.displayed_key = None;
+
         self.update_displayed_tracks(
             search_engine,
             history_repo,
@@ -139,6 +149,14 @@ impl LibraryState {
         search_query: &str,
         current_sort: SortField,
     ) {
+        // Skip the rebuild (and the clone of up to 10k tracks) if nothing that
+        // affects the visible list has changed.
+        let key = (active_nav, search_query.to_string(), current_sort);
+        if self.displayed_key.as_ref() == Some(&key) {
+            return;
+        }
+        self.displayed_key = Some(key);
+
         let mut tracks = if !search_query.trim().is_empty() {
             search_engine.search(search_query, 100).tracks
         } else {
@@ -210,5 +228,7 @@ impl LibraryState {
             let _ = favorites_repo.add(&track_id);
             self.favorite_ids.insert(track_id);
         }
+        // Favorites membership changed; force the visible list to rebuild.
+        self.displayed_key = None;
     }
 }

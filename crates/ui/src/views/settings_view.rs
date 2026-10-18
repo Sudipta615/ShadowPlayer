@@ -4,6 +4,7 @@ use audio_session::AudioSession;
 use database::{ScanRootsRepo, TrackRepo};
 
 use crate::components::settings_tab::{show_settings_tab_extended, SettingsExtraContext};
+use crate::services::ImportKind;
 use crate::state::DspState;
 use crate::theme::Theme;
 
@@ -15,7 +16,10 @@ pub fn render_settings_view(
     scan_roots_repo: &ScanRootsRepo,
     track_repo: &TrackRepo,
     is_scanning: bool,
+    import_active: bool,
+    imported_dirs: &[PathBuf],
     mut on_start_scan: impl FnMut(PathBuf),
+    mut on_import: impl FnMut(ImportKind),
 ) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, 14.0);
@@ -99,6 +103,8 @@ pub fn render_settings_view(
             track_count,
             is_scanning,
             is_dark_theme: !theme.is_light,
+            import_active,
+            imported_dirs,
         };
 
         let s_actions = show_settings_tab_extended(ui, &mut dsp_state.settings_tab, theme, &extra);
@@ -113,6 +119,12 @@ pub fn render_settings_view(
         }
         if let Some(id) = s_actions.remove_scan_root {
             let _ = scan_roots_repo.remove(&id);
+        }
+        if s_actions.import_files {
+            on_import(ImportKind::Files);
+        }
+        if s_actions.import_folder {
+            on_import(ImportKind::Folder);
         }
 
         dsp_state.handle_settings_actions(session, &s_actions);

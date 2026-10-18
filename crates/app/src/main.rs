@@ -2,12 +2,40 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use audio_session::AudioSession;
-use database::Database;
+use database::{Database, QueueRepo, SettingsRepo, TrackRepo};
 use eframe::egui::Vec2;
 use log::info;
 use ui::ShadowPlayerApp;
 
-mod demo_seed;
+/// One-time removal of the development demo library that older builds seeded
+/// into the database and data directory. Only tracks living under the demo
+/// folder are touched, so real imported music is never affected.
+fn purge_legacy_demo_data(db: &Database, data_dir: &std::path::Path) {
+    const KEY: &str = "legacy_demo_data_purged_v1";
+
+    let settings = SettingsRepo::new(db.clone());
+    if matches!(settings.get_value(KEY), Ok(Some(_))) {
+        return;
+    }
+
+    let demo_dir = data_dir.join("demo_sample_music");
+
+    match TrackRepo::new(db.clone()).delete_by_path_prefix(&demo_dir) {
+        Ok(n) if n > 0 => info!("Removed {} legacy demo track(s)", n),
+        Err(e) => log::warn!("Could not purge legacy demo tracks: {}", e),
+        _ => {}
+    }
+    let _ = QueueRepo::new(db.clone()).purge_path_prefix(&demo_dir);
+
+    if demo_dir.exists() {
+        match std::fs::remove_dir_all(&demo_dir) {
+            Ok(()) => info!("Removed legacy demo media directory"),
+            Err(e) => log::warn!("Could not remove demo media directory: {}", e),
+        }
+    }
+
+    let _ = settings.set_value(KEY, "1");
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
@@ -25,10 +53,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Opening database at {:?}", db_path);
     let db = Database::open(&db_path)?;
 
-    // Seed development demo data if database is empty
-    if let Err(e) = demo_seed::seed_demo_data_if_empty(&db, &data_dir) {
-        log::warn!("Demo seeding encountered notice: {}", e);
-    }
+    // Strip any demo data left behind by earlier development builds.
+    purge_legacy_demo_data(&db, &data_dir);
 
     // Initialize authoritative Audio Engine session
     info!("Initializing Audio Engine v1.2.1 session...");

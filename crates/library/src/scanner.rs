@@ -16,6 +16,17 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "tta", "dsf", "dff", "cue",
 ];
 
+/// True if `path` carries a supported audio (or CUE) extension.
+pub fn is_supported_audio_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let e = e.to_ascii_lowercase();
+            SUPPORTED_EXTENSIONS.iter().any(|s| *s == e)
+        })
+        .unwrap_or(false)
+}
+
 pub struct LibraryScanner {
     db: Database,
     artwork_mgr: Arc<ArtworkManager>,

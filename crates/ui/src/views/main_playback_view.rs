@@ -1,14 +1,14 @@
 use eframe::egui::{self, Color32, FontId, Stroke, Vec2};
 use audio_session::AudioSession;
-use database::{PlaylistRepo, TrackRepo};
+use database::{FavoritesRepo, PlaylistRepo, TrackRepo};
 use domain::models::{RepeatModeChoice, Track};
 use playback::PlaybackCoordinator;
 
-use crate::components::now_playing::NowPlayingCard;
+use crate::components::now_playing::{NowPlayingCard, SleepTimerRequest};
 use crate::components::sidebar::NavItem;
 use crate::components::songs_table::{SongsTable, SongsTableAction};
 use crate::services::ArtworkService;
-use crate::state::{AppState, LibraryState, TelemetryState, VisualizerMode};
+use crate::state::{AppState, LibraryState, SleepTimer, TelemetryState, VisualizerMode};
 use crate::theme::Theme;
 
 #[derive(Default, Debug, Clone)]
@@ -16,6 +16,11 @@ pub struct MainViewAction {
     pub switch_nav: Option<NavItem>,
     pub create_playlist: bool,
     pub open_eq_panel: bool,
+    /// Some table action changed the visible dataset (sort/favourite/playlist);
+    /// rebuild the displayed list for the current tab.
+    pub needs_reload: bool,
+    /// A track was removed from the library; a full reload is required.
+    pub removed_track: bool,
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
@@ -25,19 +30,25 @@ pub fn render_main_playback_view(
     library_state: &mut LibraryState,
     coordinator: &mut PlaybackCoordinator,
     session: &AudioSession,
-    artwork_service: &ArtworkService,
+    artwork_service: &mut ArtworkService,
     telemetry: &TelemetryState,
     current_track: Option<&Track>,
     theme: &Theme,
     track_repo: &TrackRepo,
     playlist_repo: &PlaylistRepo,
+    favorites_repo: &FavoritesRepo,
     is_eq_open: bool,
 ) -> MainViewAction {
     let mut view_action = MainViewAction::default();
     let title = current_track.map(|t| t.title.as_str()).unwrap_or("No Track Selected");
     let artist = current_track.map(|t| t.artist.as_str()).unwrap_or("ShadowPlayer");
     let album = current_track.map(|t| t.album.as_str()).unwrap_or("Ready");
-    let art_tex = current_track.and_then(|t| artwork_service.get_texture(&t.id));
+    if let Some(t) = current_track {
+        artwork_service.ensure_loaded(ui.ctx(), t);
+    }
+    let art_tex = current_track
+        .and_then(|t| artwork_service.get_texture(&t.id))
+        .cloned();
 
     let format_str = current_track.map(|t| {
         let sr_khz = t.sample_rate as f32 / 1000.0;
@@ -54,6 +65,8 @@ pub fn render_main_playback_view(
         .map(|t| library_state.favorite_ids.contains(&t.id))
         .unwrap_or(false);
 
+    let sleep_label = app_state.sleep_timer.as_ref().map(|t| t.label());
+
     let np_events = NowPlayingCard {
         title,
         artist,
@@ -65,10 +78,11 @@ pub fn render_main_playback_view(
         position_secs: telemetry.position_secs,
         duration_secs: telemetry.duration_secs,
         spectrum_db: &telemetry.spectrum.spectrum_db,
-        artwork: art_tex,
+        artwork: art_tex.as_ref(),
         format_str: format_str.as_deref(),
         bit_perfect: telemetry.bit_perfect,
         is_eq_open,
+        sleep_timer_label: sleep_label.as_deref(),
         theme,
     }
     .show(ui);
@@ -100,8 +114,16 @@ pub fn render_main_playback_view(
     }
     if np_events.toggle_favorite {
         if let Some(t) = current_track {
-            app_state.track_properties_track = Some(t.clone());
+            library_state.toggle_favorite(favorites_repo, t.id);
+            view_action.needs_reload = true;
         }
+    }
+    if let Some(req) = np_events.sleep_timer_request {
+        app_state.sleep_timer = match req {
+            SleepTimerRequest::Off => None,
+            SleepTimerRequest::AfterSeconds(secs) => Some(SleepTimer::after_seconds(secs)),
+            SleepTimerRequest::EndOfTrack => Some(SleepTimer::end_of_track()),
+        };
     }
     if np_events.open_advanced_audio {
         app_state.help_modal_open = false;
@@ -392,10 +414,21 @@ pub fn render_main_playback_view(
         playlists: &library_state.playlists,
         current_sort: app_state.current_sort,
         is_grid_view: app_state.is_grid_view,
-        artwork_map: artwork_service.texture_cache(),
+        artwork: artwork_service,
         theme,
     }
     .show(ui);
+
+    if table_action.sort_field_changed.is_some()
+        || table_action.remove_track.is_some()
+        || table_action.toggle_favorite.is_some()
+        || table_action.add_to_playlist.is_some()
+    {
+        view_action.needs_reload = true;
+    }
+    if table_action.remove_track.is_some() {
+        view_action.removed_track = true;
+    }
 
     handle_songs_table_action(
         table_action,
@@ -457,5 +490,16 @@ fn handle_songs_table_action(
     }
     if let Some(rem_id) = action.remove_track {
         let _ = track_repo.delete(&rem_id);
+    }
+    if let Some(edit_id) = action.edit_track {
+        let track = library_state
+            .displayed_tracks
+            .iter()
+            .find(|t| t.id == edit_id)
+            .cloned()
+            .or_else(|| track_repo.get_by_id(&edit_id).ok().flatten());
+        if let Some(t) = track {
+            app_state.edit_track.open_with(&t);
+        }
     }
 }

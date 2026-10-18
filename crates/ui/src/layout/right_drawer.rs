@@ -1,6 +1,6 @@
 use eframe::egui::{self, Vec2};
 use audio_session::AudioSession;
-use domain::models::{SyncedLyricLine, Track};
+use domain::models::SyncedLyricLine;
 use playback::PlaybackCoordinator;
 
 use crate::components::right_panel::RightPanel;
@@ -18,7 +18,7 @@ pub fn render_right_drawer(
     dsp_state: &mut DspState,
     coordinator: &mut PlaybackCoordinator,
     session: &AudioSession,
-    artwork_service: &ArtworkService,
+    artwork_service: &mut ArtworkService,
     active_lyrics: &[SyncedLyricLine],
     plain_lyrics: Option<&str>,
     active_lyric_idx: Option<usize>,
@@ -47,19 +47,19 @@ pub fn render_right_drawer(
             }
 
             // 2. Right Panel (Queue / Lyrics / Volume)
-            let queue_tracks: Vec<Track> = coordinator.queue().to_vec();
+            // Borrow the queue directly instead of cloning it every frame.
             let cur_queue_idx = coordinator.current_index().unwrap_or(0);
 
             let right_action = RightPanel {
                 active_tab: app_state.right_tab,
-                queue_tracks: &queue_tracks,
+                queue_tracks: coordinator.queue(),
                 current_queue_idx: cur_queue_idx,
                 lyrics_lines: active_lyrics,
                 plain_lyrics,
                 active_lyric_idx,
                 volume: app_state.volume,
                 is_muted: app_state.is_muted,
-                artwork_map: artwork_service.texture_cache(),
+                artwork: artwork_service,
                 settings_state: &mut dsp_state.settings_tab,
                 theme,
             }

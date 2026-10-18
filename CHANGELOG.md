@@ -6,6 +6,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-10-18
+
+### Added
+- **Real Music Import (native OS file picker)**:
+  - *Import Songs…* and *Import Folder…* buttons in **Settings → Library & App**, backed by the system file chooser (`rfd`, XDG portal) running off the UI thread so the app never freezes.
+  - Individual songs are tagged/inserted straight into the library; folders become monitored scan roots (also reachable from the **Folders** tab).
+  - Imported file locations are listed beneath the import buttons.
+- **Playlist Manager**:
+  - The `+` button now opens a floating manager to create, rename, delete playlists and add/remove songs with a built-in library search.
+- **Edit Song Info**:
+  - Right-click a track → *Edit Song Info* to edit title, artist, album, genre, year, track and disc numbers; changes persist to the library.
+- **Sleep Timer**:
+  - Clock button in the Now Playing transport bar with 5/15/30/60-minute presets, "end of current track", and off. Counts down while playing and pauses playback automatically.
+- **Recently / Most Played 7-day rules**:
+  - A track counts as played once **>20 s** of it has been heard (or it finishes naturally).
+  - *Recently Played* and *Most Played* use a sliding **7-day window**; *Most Played* requires **5+ plays**. History is pruned automatically.
+
+### Changed
+- **Playback semantics**:
+  - Autoplay/auto-advance restored; clicking any row in the Songs table (or the queue) starts playback immediately.
+  - **Shuffle now actually affects the queue** — enabling it permutes the upcoming tracks, and disabling it restores the original order.
+- **Theming**:
+  - Light/dark mode now covers every element (active rows, artwork placeholders, scan banners, modals, bit-perfect nodes, destructive actions) via new semantic theme tokens.
+- **Performance (large libraries; 10k tracks on dual-core + HDD)**:
+  - Songs table and queue are fully virtualized (`ScrollArea::show_rows`); only visible rows are built.
+  - Artwork uses a bounded in-memory LRU (256 textures) plus downscaling to 160 px before GPU upload and persistent disk thumbnails.
+  - Removed per-frame clones of the full track list and queue; navigation/search switches skip rebuilding when nothing changed; idle CPU is ~0%.
+
+### Removed
+- All bundled demo songs, thumbnails and their seeding/purge migration; the library starts empty until you import.
+- Startup auto-play demo behavior.
+
+---
+
 ## [0.2.0] - 2026-10-18
 
 ### Added

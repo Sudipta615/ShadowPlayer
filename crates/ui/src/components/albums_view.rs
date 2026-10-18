@@ -74,7 +74,7 @@ impl<'a> AlbumsView<'a> {
                             .fit_to_exact_size(art_size)
                             .paint_at(ui, art_rect);
                     } else {
-                        painter.rect_filled(art_rect, CornerRadius::same(10), Color32::from_rgb(25, 20, 45));
+                        painter.rect_filled(art_rect, CornerRadius::same(10), self.theme.artwork_placeholder);
                         crate::components::icons::draw_disc(ui, art_rect.shrink2(Vec2::new(24.0, 24.0)), self.theme.accent_pink);
                     }
 
@@ -157,8 +157,8 @@ impl<'a> AlbumsView<'a> {
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), Color32::from_rgb(38, 21, 70));
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, Color32::from_rgb(98, 41, 172)), egui::StrokeKind::Inside);
+                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
+                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
                         } else if row_resp.hovered() {
                             painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
                         }
@@ -251,7 +251,7 @@ impl<'a> AlbumsView<'a> {
                                         Vec2::new(card_w - 16.0, card_w - 16.0),
                                     );
 
-                                    p.rect_filled(cover_rect, CornerRadius::same(8), Color32::from_rgb(22, 18, 38));
+                                    p.rect_filled(cover_rect, CornerRadius::same(8), self.theme.artwork_placeholder);
                                     crate::components::icons::draw_disc(ui, cover_rect.shrink2(Vec2::new(32.0, 32.0)), self.theme.accent_pink);
 
                                     // Title & Artist

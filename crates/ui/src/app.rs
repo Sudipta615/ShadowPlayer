@@ -13,11 +13,11 @@ use search::SearchEngine;
 use crate::components::sidebar::NavItem;
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
-    show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_eq_panel,
-    show_help_modal, show_new_playlist_modal, show_track_properties_modal,
+    show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_edit_track_modal,
+    show_eq_panel, show_help_modal, show_playlist_editor, show_track_properties_modal,
 };
-use crate::services::{ArtworkService, LyricsService, ScannerService};
-use crate::state::{AppState, DspState, LibraryState, TelemetryState};
+use crate::services::{ArtworkService, ImportKind, ImportResult, ImportService, LyricsService, ScannerService};
+use crate::state::{AppState, DspState, LibraryState, SleepTimerMode, TelemetryState};
 use crate::theme::Theme;
 use crate::views::{
     render_albums_view, render_artists_view, render_folders_view, render_genres_view,
@@ -43,6 +43,7 @@ pub struct ShadowPlayerApp {
     artwork_service: ArtworkService,
     lyrics_service: LyricsService,
     scanner_service: ScannerService,
+    import_service: ImportService,
 
     app_state: AppState,
     library_state: LibraryState,
@@ -50,6 +51,13 @@ pub struct ShadowPlayerApp {
     help_state: HelpState,
     theme: Theme,
     settings_dirty: bool,
+
+    /// Tracks belonging to the playlist currently selected in the manager.
+    playlist_editor_tracks: Vec<domain::models::Track>,
+    /// Previous frame's current-track id, used by the end-of-track sleep timer.
+    prev_track_id: Option<domain::ids::TrackId>,
+    /// Whether playback was running on the previous frame (sleep-timer edge detection).
+    prev_playing: bool,
 }
 
 impl ShadowPlayerApp {
@@ -75,6 +83,7 @@ impl ShadowPlayerApp {
         let artwork_service = ArtworkService::new();
         let lyrics_service = LyricsService::new();
         let scanner_service = ScannerService::new(db, artwork_service.manager());
+        let import_service = ImportService::new();
 
         let mut app = Self {
             session,
@@ -94,6 +103,7 @@ impl ShadowPlayerApp {
             artwork_service,
             lyrics_service,
             scanner_service,
+            import_service,
 
             app_state: AppState::default(),
             library_state: LibraryState::default(),
@@ -101,18 +111,16 @@ impl ShadowPlayerApp {
             help_state: HelpState::default(),
             theme: Theme::default(),
             settings_dirty: false,
+
+            playlist_editor_tracks: Vec::new(),
+            prev_track_id: None,
+            prev_playing: false,
         };
 
         // Load all persistent settings (normal, theme, EQ, DSP)
         app.load_persisted_settings();
 
         app.reload_library();
-
-        // Start playback of first track at 1:24 matching mock_ui state
-        if let Some(first_track) = app.library_state.displayed_tracks.first().cloned() {
-            app.coordinator.play_track(first_track, Some(app.library_state.displayed_tracks.clone()));
-            let _ = app.session.seek(84.0);
-        }
 
         app
     }
@@ -155,6 +163,13 @@ impl ShadowPlayerApp {
         if let Ok(Some(json)) = self.settings_repo.get_value("dsp_settings") {
             if let Ok(saved_dsp) = serde_json::from_str::<crate::components::settings_tab::PersistentSettingsTabState>(&json) {
                 saved_dsp.apply_to(&mut self.dsp_state.settings_tab);
+            }
+        }
+
+        // 4. Directories of individually imported song files (shown in Settings)
+        if let Ok(Some(json)) = self.settings_repo.get_value("imported_file_dirs") {
+            if let Ok(dirs) = serde_json::from_str::<Vec<PathBuf>>(&json) {
+                self.app_state.imported_dirs = dirs;
             }
         }
 
@@ -209,6 +224,82 @@ impl ShadowPlayerApp {
         if let Ok(json) = serde_json::to_string(&dsp_persisted) {
             let _ = self.settings_repo.set_value("dsp_settings", &json);
         }
+
+        // 4. Save imported-file directory list
+        if let Ok(json) = serde_json::to_string(&self.app_state.imported_dirs) {
+            let _ = self.settings_repo.set_value("imported_file_dirs", &json);
+        }
+    }
+
+    /// Runs on the UI thread when the native picker returns.
+    fn handle_import_result(&mut self, result: ImportResult) {
+        match result {
+            ImportResult::Cancelled => {}
+            ImportResult::Folder(path) => {
+                // Folder imports become monitored roots (visible in Settings and
+                // the Folders tab) and trigger a background scan.
+                self.start_scan(path);
+            }
+            ImportResult::Files(paths) => {
+                let mut imported = 0usize;
+                let mut dirs: Vec<PathBuf> = Vec::new();
+
+                for path in paths {
+                    let is_cue = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("cue"))
+                        .unwrap_or(false);
+
+                    if is_cue {
+                        if let Ok(cue_tracks) = metadata::extract_cue_metadata(&path) {
+                            for meta in &cue_tracks {
+                                if self.track_repo.upsert(&meta.track).is_ok() {
+                                    imported += 1;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Skip anything that is not a supported audio file.
+                    if !library::scanner::is_supported_audio_path(&path) {
+                        log::debug!("Skipping unsupported import: {:?}", path);
+                        continue;
+                    }
+
+                    match metadata::extract_metadata(&path) {
+                        Ok(meta) => {
+                            if let Some((bytes, _mime)) = meta.embedded_artwork.as_ref() {
+                                let _ = self
+                                    .artwork_service
+                                    .manager()
+                                    .save_thumbnail(&meta.track.id, bytes);
+                            }
+                            if self.track_repo.upsert(&meta.track).is_ok() {
+                                imported += 1;
+                            }
+                            if let Some(parent) = path.parent() {
+                                dirs.push(parent.to_path_buf());
+                            }
+                        }
+                        Err(e) => log::warn!("Could not read metadata for {:?}: {}", path, e),
+                    }
+                }
+
+                if imported > 0 {
+                    for dir in dirs {
+                        if !self.app_state.imported_dirs.contains(&dir) {
+                            self.app_state.imported_dirs.insert(0, dir);
+                        }
+                    }
+                    self.app_state.imported_dirs.truncate(24);
+                    self.settings_dirty = true;
+                    self.reload_library();
+                    log::info!("Imported {} track(s) into the library", imported);
+                }
+            }
+        }
     }
 
     pub fn reload_library(&mut self) {
@@ -228,10 +319,86 @@ impl ShadowPlayerApp {
         );
     }
 
+    /// Rebuild only the visible track list for the current tab/search/sort.
+    /// Much cheaper than [`reload_library`] because it does not re-query the
+    /// whole 10k-track table or the collection metadata.
+    pub fn refresh_view(&mut self) {
+        // Settings/Help have no track table; skip the pointless 10k clone.
+        if matches!(self.app_state.active_nav, NavItem::Settings | NavItem::Help) {
+            return;
+        }
+        self.library_state.update_displayed_tracks(
+            &self.search_engine,
+            &self.history_repo,
+            &self.playlist_repo,
+            &self.album_repo,
+            &self.artist_repo,
+            &self.genre_repo,
+            &self.track_repo,
+            self.app_state.active_nav,
+            &self.app_state.search_query,
+            self.app_state.current_sort,
+        );
+    }
+
     pub fn start_scan(&mut self, path: PathBuf) {
         let _ = self.scan_roots_repo.add(&path);
         self.library_state.scan_roots = self.scan_roots_repo.list().unwrap_or_default();
         self.scanner_service.start_scan(path);
+    }
+
+    /// Advance the sleep timer. In `Duration` mode this counts down and pauses
+    /// playback when it reaches zero; in `EndOfTrack` mode it pauses when the
+    /// current track changes (or playback stops on its own).
+    fn update_sleep_timer(&mut self, ctx: &egui::Context) {
+        let current_id = self.coordinator.current_track().map(|t| t.id);
+
+        let Some(mut timer) = self.app_state.sleep_timer.clone() else {
+            self.prev_track_id = current_id;
+            self.prev_playing = self.session.is_playing();
+            return;
+        };
+
+        match timer.mode {
+            SleepTimerMode::Duration => {
+                let dt = ctx.input(|i| i.stable_dt).min(0.5) as f64;
+                // Only count down while something is actually playing.
+                if self.session.is_playing() {
+                    timer.remaining -= dt;
+                }
+                if timer.remaining <= 0.0 {
+                    self.session.pause();
+                    self.app_state.sleep_timer = None;
+                    log::info!("Sleep timer elapsed — playback paused");
+                } else {
+                    self.app_state.sleep_timer = Some(timer);
+                }
+            }
+            SleepTimerMode::EndOfTrack => {
+                // We deliberately initialise on the first frame after enabling.
+                let track_changed =
+                    self.prev_track_id.is_some() && current_id != self.prev_track_id;
+                if track_changed {
+                    self.session.pause();
+                    self.app_state.sleep_timer = None;
+                    log::info!("Sleep timer reached end of track — playback paused");
+                } else if self.prev_playing && !self.session.is_playing() {
+                    // Playback ended by itself; timer has done its job.
+                    self.app_state.sleep_timer = None;
+                }
+            }
+        }
+
+        self.prev_track_id = current_id;
+        self.prev_playing = self.session.is_playing();
+    }
+
+    /// Opens the native OS picker on a worker thread for files or a folder.
+    pub fn request_import(&mut self, kind: ImportKind) {
+        match kind {
+            ImportKind::Files => self.import_service.request_files(),
+            ImportKind::Folder => self.import_service.request_folder(),
+        }
     }
 }
 
@@ -248,10 +415,24 @@ impl eframe::App for ShadowPlayerApp {
             self.reload_library();
         }
 
+        // 2b. Poll the native import picker (runs on a worker thread)
+        if let Some(result) = self.import_service.poll() {
+            self.handle_import_result(result);
+        }
+
+        // 2c. Sleep timer (countdown or end-of-track).
+        self.update_sleep_timer(&ctx);
+
         // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
         let is_playing = self.session.is_playing();
         if is_playing || self.scanner_service.is_scanning() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        } else if self.import_service.is_active() {
+            // Keep polling briskly while the OS picker is open, cheaply when idle.
+            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        } else if self.app_state.sleep_timer.is_some() {
+            // Tick the timer display roughly once per second while idle.
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
 
         // 4. Automated Evaluation Screenshot Hook (SHADOWPLAYER_EVAL only)
@@ -466,11 +647,9 @@ impl eframe::App for ShadowPlayerApp {
             }
             if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::P) {
                 self.app_state.active_nav = NavItem::Settings;
-                self.reload_library();
             }
             if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::O) {
                 self.app_state.active_nav = NavItem::Folders;
-                self.reload_library();
             }
             if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::E) {
                 self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
@@ -478,7 +657,7 @@ impl eframe::App for ShadowPlayerApp {
             if i.key_pressed(egui::Key::Escape) {
                 if !self.app_state.search_query.is_empty() {
                     self.app_state.search_query.clear();
-                    self.reload_library();
+                    self.refresh_view();
                 }
                 self.app_state.new_playlist_modal_open = false;
                 self.app_state.help_modal_open = false;
@@ -507,12 +686,10 @@ impl eframe::App for ShadowPlayerApp {
             meters: Some(self.session.meters_snapshot()),
         };
 
-        // Cache artwork and lyrics for current and visible items
+        // Cache lyrics for the current track. Artwork for visible rows is loaded
+        // lazily by the views themselves, so no bulk preloading happens here.
         if let Some(ref t) = current_track {
             self.lyrics_service.ensure_loaded(t);
-            self.artwork_service.ensure_loaded(&ctx, t);
-        }
-        for t in self.library_state.displayed_tracks.iter().take(30) {
             self.artwork_service.ensure_loaded(&ctx, t);
         }
 
@@ -541,7 +718,7 @@ impl eframe::App for ShadowPlayerApp {
             self.library_state.selected_genre = None;
             self.library_state.selected_folder = None;
             if nav != NavItem::Settings && nav != NavItem::Help {
-                self.reload_library();
+                self.refresh_view();
             }
         }
         if create_playlist_req {
@@ -574,7 +751,7 @@ impl eframe::App for ShadowPlayerApp {
                                 let mut search_buf = self.app_state.search_query.clone();
                                 if crate::components::topbar::render_search_input(ui, &mut search_buf, &self.theme) {
                                     self.app_state.search_query = search_buf;
-                                    self.reload_library();
+                                    self.refresh_view();
                                 }
                             }
 
@@ -619,6 +796,8 @@ impl eframe::App for ShadowPlayerApp {
                                 }
                                 NavItem::Folders => {
                                     let mut scan_to_start = None;
+                                    let mut import_req = None;
+                                    let import_active = self.import_service.is_active();
                                     render_folders_view(
                                         ui,
                                         &mut self.library_state,
@@ -629,16 +808,23 @@ impl eframe::App for ShadowPlayerApp {
                                         &self.scan_roots_repo,
                                         &self.track_repo,
                                         &self.favorites_repo,
+                                        import_active,
                                         |path| scan_to_start = Some(path),
+                                        |kind| import_req = Some(kind),
                                     );
                                     if let Some(path) = scan_to_start {
                                         self.start_scan(path);
+                                    }
+                                    if let Some(kind) = import_req {
+                                        self.request_import(kind);
                                     }
                                 }
                                 NavItem::Settings => {
                                     let prev_light = self.theme.is_light;
                                     let mut scan_to_start = None;
+                                    let mut import_req = None;
                                     let is_scanning = self.scanner_service.is_scanning();
+                                    let import_active = self.import_service.is_active();
                                     render_settings_view(
                                         ui,
                                         &mut self.dsp_state,
@@ -647,7 +833,10 @@ impl eframe::App for ShadowPlayerApp {
                                         &self.scan_roots_repo,
                                         &self.track_repo,
                                         is_scanning,
+                                        import_active,
+                                        &self.app_state.imported_dirs,
                                         |path| scan_to_start = Some(path),
+                                        |kind| import_req = Some(kind),
                                     );
                                     if self.theme.is_light != prev_light {
                                         self.settings_dirty = true;
@@ -656,6 +845,9 @@ impl eframe::App for ShadowPlayerApp {
                                     self.settings_dirty = true;
                                     if let Some(path) = scan_to_start {
                                         self.start_scan(path);
+                                    }
+                                    if let Some(kind) = import_req {
+                                        self.request_import(kind);
                                     }
                                 }
                                 NavItem::Help => {
@@ -674,12 +866,13 @@ impl eframe::App for ShadowPlayerApp {
                                         &mut self.library_state,
                                         &mut self.coordinator,
                                         &self.session,
-                                        &self.artwork_service,
+                                        &mut self.artwork_service,
                                         &telemetry,
                                         current_track.as_ref(),
                                         &self.theme,
                                         &self.track_repo,
                                         &self.playlist_repo,
+                                        &self.favorites_repo,
                                         self.dsp_state.eq_panel.is_open,
                                     );
                                     if let Some(nav) = view_action.switch_nav {
@@ -688,7 +881,7 @@ impl eframe::App for ShadowPlayerApp {
                                         self.library_state.selected_artist = None;
                                         self.library_state.selected_genre = None;
                                         self.library_state.selected_folder = None;
-                                        self.reload_library();
+                                        self.refresh_view();
                                     }
                                     if view_action.create_playlist {
                                         self.app_state.new_playlist_modal_open = true;
@@ -696,6 +889,12 @@ impl eframe::App for ShadowPlayerApp {
                                     if view_action.open_eq_panel {
                                         self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
                                         self.settings_dirty = true;
+                                    }
+                                    if view_action.needs_reload {
+                                        self.refresh_view();
+                                    }
+                                    if view_action.removed_track {
+                                        self.reload_library();
                                     }
                                 }
                             }
@@ -716,7 +915,7 @@ impl eframe::App for ShadowPlayerApp {
                             &mut self.dsp_state,
                             &mut self.coordinator,
                             &self.session,
-                            &self.artwork_service,
+                            &mut self.artwork_service,
                             &active_lyrics,
                             plain_lyrics.as_deref(),
                             active_lyric_idx,
@@ -774,14 +973,61 @@ impl eframe::App for ShadowPlayerApp {
             &self.theme,
         );
 
-        if let Some(new_name) = show_new_playlist_modal(
+        // Playlist manager: create / rename / delete / add songs.
+        if self.app_state.new_playlist_modal_open {
+            self.app_state.new_playlist_modal_open = false;
+            self.app_state.playlist_editor.open(None);
+        }
+        let pl_actions = show_playlist_editor(
             &ctx,
-            &mut self.app_state.new_playlist_modal_open,
-            &mut self.app_state.new_playlist_name,
+            &mut self.app_state.playlist_editor,
+            &self.library_state.playlists,
+            &self.library_state.all_tracks,
+            &self.playlist_editor_tracks,
             &self.theme,
-        ) {
-            let _ = self.playlist_repo.create(&new_name, None);
-            self.app_state.new_playlist_name.clear();
+        );
+        let mut pl_changed = false;
+        if let Some(name) = pl_actions.create {
+            match self.playlist_repo.create(&name, None) {
+                Ok(_) => pl_changed = true,
+                Err(e) => log::warn!("Could not create playlist: {}", e),
+            }
+        }
+        if let Some((id, name)) = pl_actions.rename {
+            let _ = self.playlist_repo.rename(&id, &name);
+            pl_changed = true;
+        }
+        if let Some(id) = pl_actions.delete {
+            let _ = self.playlist_repo.delete(&id);
+            if self.app_state.playlist_editor.selected == Some(id) {
+                self.app_state.playlist_editor.selected = None;
+            }
+            self.playlist_editor_tracks.clear();
+            pl_changed = true;
+        }
+        if let Some((pl, tr)) = pl_actions.add_track {
+            let _ = self.playlist_repo.add_track(&pl, &tr);
+            self.playlist_editor_tracks = self.playlist_repo.get_tracks(&pl).unwrap_or_default();
+            pl_changed = true;
+        }
+        if let Some((pl, tr)) = pl_actions.remove_track {
+            let _ = self.playlist_repo.remove_track(&pl, &tr);
+            self.playlist_editor_tracks = self.playlist_repo.get_tracks(&pl).unwrap_or_default();
+            pl_changed = true;
+        }
+        if let Some(id) = pl_actions.select_changed {
+            self.playlist_editor_tracks = self.playlist_repo.get_tracks(&id).unwrap_or_default();
+        }
+        if pl_changed {
+            self.reload_library();
+        }
+
+        // Edit Song Info dialog.
+        let edit_actions = show_edit_track_modal(&ctx, &mut self.app_state.edit_track, &self.theme);
+        if let Some(track) = edit_actions.save {
+            if let Err(e) = self.track_repo.update_metadata(&track) {
+                log::warn!("Could not save track metadata: {}", e);
+            }
             self.reload_library();
         }
 

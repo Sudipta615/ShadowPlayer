@@ -1,10 +1,16 @@
 pub mod autoeq_modal;
 pub mod bit_perfect_modal;
+pub mod edit_track_modal;
 pub mod new_playlist_modal;
+pub mod playlist_editor_modal;
 
 pub use autoeq_modal::{show_autoeq_modal, AutoEqModalState};
 pub use bit_perfect_modal::show_bit_perfect_modal;
+pub use edit_track_modal::{show_edit_track_modal, EditTrackActions, EditTrackState};
 pub use new_playlist_modal::show_new_playlist_modal;
+pub use playlist_editor_modal::{
+    show_playlist_editor, PlaylistEditorActions, PlaylistEditorState,
+};
 pub use crate::components::advanced_audio::show_advanced_audio_modal;
 pub use crate::components::eq_panel::show_eq_panel;
 pub use crate::components::help_modal::show_help_modal;

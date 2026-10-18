@@ -64,7 +64,7 @@ impl<'a> ArtistsView<'a> {
                     let avatar_size = Vec2::new(88.0, 88.0);
                     let (avatar_rect, _) = ui.allocate_exact_size(avatar_size, Sense::hover());
                     let p = ui.painter_at(avatar_rect);
-                    p.circle_filled(avatar_rect.center(), 44.0, Color32::from_rgb(45, 25, 75));
+                    p.circle_filled(avatar_rect.center(), 44.0, self.theme.artwork_placeholder);
                     p.circle_stroke(avatar_rect.center(), 44.0, Stroke::new(1.5_f32, self.theme.accent_violet));
                     crate::components::icons::draw_artist(ui, avatar_rect.shrink2(Vec2::new(26.0, 26.0)), self.theme.accent_pink);
 
@@ -139,8 +139,8 @@ impl<'a> ArtistsView<'a> {
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), Color32::from_rgb(38, 21, 70));
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, Color32::from_rgb(98, 41, 172)), egui::StrokeKind::Inside);
+                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
+                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
                         } else if row_resp.hovered() {
                             painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
                         }
@@ -236,7 +236,7 @@ impl<'a> ArtistsView<'a> {
 
                                     // Circular avatar
                                     let avatar_c = Pos2::new(rect.center().x, rect.min.y + 46.0);
-                                    p.circle_filled(avatar_c, 34.0, Color32::from_rgb(38, 22, 60));
+                                    p.circle_filled(avatar_c, 34.0, self.theme.artwork_placeholder);
                                     p.circle_stroke(avatar_c, 34.0, Stroke::new(1.2_f32, self.theme.accent_violet));
                                     let icon_rect = Rect::from_center_size(avatar_c, Vec2::new(26.0, 26.0));
                                     crate::components::icons::draw_artist(ui, icon_rect, self.theme.accent_pink);

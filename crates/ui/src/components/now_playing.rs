@@ -14,6 +14,16 @@ pub struct NowPlayingEvents {
     pub open_eq_panel: bool,
     pub open_properties: bool,
     pub open_bit_perfect: bool,
+    /// A sleep-timer choice was made.
+    pub sleep_timer_request: Option<SleepTimerRequest>,
+}
+
+/// Sleep-timer selection made from the Now Playing transport bar.
+#[derive(Debug, Clone, Copy)]
+pub enum SleepTimerRequest {
+    Off,
+    AfterSeconds(f64),
+    EndOfTrack,
 }
 
 pub struct NowPlayingCard<'a> {
@@ -31,6 +41,8 @@ pub struct NowPlayingCard<'a> {
     pub format_str: Option<&'a str>,
     pub bit_perfect: bool,
     pub is_eq_open: bool,
+    /// Label of the active sleep timer, if any (shown on the timer button).
+    pub sleep_timer_label: Option<&'a str>,
     pub theme: &'a Theme,
 }
 
@@ -48,6 +60,7 @@ impl<'a> NowPlayingCard<'a> {
             open_eq_panel: false,
             open_properties: false,
             open_bit_perfect: false,
+            sleep_timer_request: None,
         };
 
         let card_frame = egui::Frame::NONE
@@ -74,7 +87,7 @@ impl<'a> NowPlayingCard<'a> {
                         .paint_at(ui, art_rect);
                     painter.rect_stroke(art_rect, CornerRadius::same(14), Stroke::new(1.0_f32, self.theme.border_card), egui::StrokeKind::Inside);
                 } else {
-                    painter.rect_filled(art_rect, CornerRadius::same(14), Color32::from_rgb(32, 28, 54));
+                    painter.rect_filled(art_rect, CornerRadius::same(14), self.theme.artwork_placeholder);
                     let moon_center = Pos2::new(art_rect.center().x, art_rect.center().y - 12.0);
                     painter.circle_filled(moon_center, 34.0, self.theme.accent_pink);
                     painter.text(
@@ -354,6 +367,80 @@ impl<'a> NowPlayingCard<'a> {
                                 if eq_resp.on_hover_text("Equalizer & Audio DSP Studio (Ctrl+E)").clicked() {
                                     events.open_eq_panel = true;
                                 }
+
+                                // Sleep Timer Button (with a small preset popup)
+                                let (tm_slot, tm_resp) = ui.allocate_exact_size(Vec2::new(30.0, row_h), Sense::click());
+                                let tm_rect = Rect::from_center_size(tm_slot.center(), Vec2::new(22.0, 22.0));
+                                let timer_active = self.sleep_timer_label.is_some();
+                                let tm_icon_col = if timer_active {
+                                    self.theme.accent_pink
+                                } else {
+                                    self.theme.text_secondary
+                                };
+                                crate::components::icons::draw_clock(ui, tm_rect, tm_icon_col);
+
+                                let menu_id = ui.make_persistent_id("sleep_timer_menu");
+                                let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false));
+                                if tm_resp.clicked() {
+                                    menu_open = !menu_open;
+                                }
+                                let hover_text = match self.sleep_timer_label {
+                                    Some(l) => format!("Sleep timer: {}", l),
+                                    None => "Sleep timer".to_string(),
+                                };
+                                let _ = tm_resp.clone().on_hover_text(hover_text);
+
+                                if menu_open {
+                                    let popup_pos = tm_rect.left_bottom() + Vec2::new(0.0, 6.0);
+                                    let mut close = false;
+                                    let mut popup_rect: Option<Rect> = None;
+                                    egui::Area::new(menu_id.with("popup"))
+                                        .order(egui::Order::Foreground)
+                                        .fixed_pos(popup_pos)
+                                        .show(ui.ctx(), |ui| {
+                                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                                ui.set_min_width(170.0);
+                                                ui.label(
+                                                    egui::RichText::new("Sleep Timer")
+                                                        .strong()
+                                                        .color(self.theme.text_primary),
+                                                );
+                                                for (label, secs) in [
+                                                    ("5 minutes", 300.0),
+                                                    ("15 minutes", 900.0),
+                                                    ("30 minutes", 1800.0),
+                                                    ("1 hour", 3600.0),
+                                                ] {
+                                                    if ui.button(label).clicked() {
+                                                        events.sleep_timer_request =
+                                                            Some(SleepTimerRequest::AfterSeconds(secs));
+                                                        close = true;
+                                                    }
+                                                }
+                                                if ui.button("End of current track").clicked() {
+                                                    events.sleep_timer_request =
+                                                        Some(SleepTimerRequest::EndOfTrack);
+                                                    close = true;
+                                                }
+                                                if timer_active && ui.button("Turn off timer").clicked() {
+                                                    events.sleep_timer_request =
+                                                        Some(SleepTimerRequest::Off);
+                                                    close = true;
+                                                }
+                                            });
+                                            popup_rect = Some(ui.min_rect());
+                                        });
+
+                                    let clicked_elsewhere = ui.input(|i| i.pointer.any_click())
+                                        && !tm_resp.hovered()
+                                        && !popup_rect
+                                            .map(|r| ui.rect_contains_pointer(r))
+                                            .unwrap_or(false);
+                                    if close || clicked_elsewhere {
+                                        menu_open = false;
+                                    }
+                                }
+                                ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
                             });
                         },
                     );

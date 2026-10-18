@@ -458,6 +458,10 @@ pub struct SettingsTabActions {
     pub trigger_scan: Option<PathBuf>,
     pub remove_scan_root: Option<ScanRootId>,
     pub toggle_theme: bool,
+    /// User pressed "Import Songs…" — open the native file picker.
+    pub import_files: bool,
+    /// User pressed "Import Folder…" — open the native folder picker.
+    pub import_folder: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -470,6 +474,10 @@ pub struct SettingsExtraContext<'a> {
     pub track_count: usize,
     pub is_scanning: bool,
     pub is_dark_theme: bool,
+    /// A native import picker is currently open (disables the import buttons).
+    pub import_active: bool,
+    /// Directories that individual songs were imported from, newest first.
+    pub imported_dirs: &'a [PathBuf],
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1737,8 +1745,36 @@ fn render_library_category(
 
         setting_item(
             ui,
-            "Add Music Directory",
-            "Enter path to local audio collection to index",
+            "Import Music",
+            "Use the system file picker to add songs or whole folders to the library",
+            theme,
+            |ui| {
+                ui.add_enabled_ui(!extra.import_active, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+
+                        if ui.add(pill_btn("Import Songs…", true, theme)).clicked() {
+                            actions.import_files = true;
+                        }
+                        if ui.add(pill_btn("Import Folder…", false, theme)).clicked() {
+                            actions.import_folder = true;
+                        }
+                        if extra.import_active {
+                            ui.label(
+                                egui::RichText::new("waiting for file picker…")
+                                    .font(FontId::proportional(11.5))
+                                    .color(theme.text_muted),
+                            );
+                        }
+                    });
+                });
+            },
+        );
+
+        setting_item(
+            ui,
+            "Or Type a Directory",
+            "Advanced: index a folder by typing its absolute path",
             theme,
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.new_scan_path)
@@ -1755,6 +1791,28 @@ fn render_library_category(
                 }
             },
         );
+
+        if !extra.imported_dirs.is_empty() {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("Imported File Locations:")
+                    .font(FontId::proportional(12.0))
+                    .strong()
+                    .color(theme.text_secondary),
+            );
+            for dir in extra.imported_dirs {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                    let (folder_rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
+                    crate::components::icons::draw_folder(ui, folder_rect, theme.accent_pink);
+                    ui.label(
+                        egui::RichText::new(dir.to_string_lossy())
+                            .font(FontId::proportional(12.0))
+                            .color(theme.text_primary),
+                    );
+                });
+            }
+        }
 
         if !extra.scan_roots.is_empty() {
             ui.add_space(4.0);
@@ -1796,7 +1854,7 @@ fn render_library_category(
             |ui, r, c| crate::components::icons::draw_logo(ui, r, c),
             "About ShadowPlayer",
             "Audiophile Local Desktop Music Player",
-            Some(("v0.2.0", theme.bg_pill, theme.accent_violet)),
+            Some((concat!("v", env!("CARGO_PKG_VERSION")), theme.bg_pill, theme.accent_violet)),
             theme,
         );
 

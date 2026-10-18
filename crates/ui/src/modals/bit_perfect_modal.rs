@@ -34,7 +34,7 @@ pub fn show_bit_perfect_modal(
         .default_size(Vec2::new(620.0, 520.0))
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
-                .fill(Color32::from_rgba_premultiplied(12, 14, 24, 252))
+                .fill(theme.bg_card)
                 .stroke(Stroke::new(
                     1.5_f32,
                     if is_bit_perfect { theme.bit_perfect_green } else { theme.accent_violet },
@@ -47,9 +47,9 @@ pub fn show_bit_perfect_modal(
 
             // 1. Status Banner
             let banner_color = if is_bit_perfect {
-                Color32::from_rgb(14, 42, 26)
+                theme.bit_perfect_green.linear_multiply(0.18)
             } else {
-                Color32::from_rgb(38, 22, 54)
+                theme.accent_violet.linear_multiply(0.18)
             };
             let banner_stroke = if is_bit_perfect {
                 theme.bit_perfect_green
@@ -187,9 +187,9 @@ pub fn show_bit_perfect_modal(
                 let node_rect = Rect::from_min_size(Pos2::new(x_pos, y_pos), Vec2::new(stage_w, node_h));
 
                 let (bg_col, stroke_col) = if *bit_clean {
-                    (Color32::from_rgb(12, 32, 20), theme.bit_perfect_green)
+                    (theme.bit_perfect_green.linear_multiply(0.18), theme.bit_perfect_green)
                 } else {
-                    (Color32::from_rgb(34, 18, 48), theme.accent_purple)
+                    (theme.accent_purple.linear_multiply(0.18), theme.accent_purple)
                 };
 
                 painter.rect_filled(node_rect, CornerRadius::same(6), bg_col);

@@ -104,20 +104,10 @@ impl TrackRepo {
                 ],
             )?;
 
-            // Also maintain artists and albums counts
-            conn.execute(
-                "INSERT INTO artists (id, name, track_count)
-                 VALUES (?1, ?2, 1)
-                 ON CONFLICT(name) DO UPDATE SET track_count = track_count + 1",
-                params![ArtistId::new().to_string(), track.artist],
-            )?;
-
-            conn.execute(
-                "INSERT INTO albums (id, title, artist, year, track_count)
-                 VALUES (?1, ?2, ?3, ?4, 1)
-                 ON CONFLICT(title, artist) DO UPDATE SET track_count = track_count + 1",
-                params![AlbumId::new().to_string(), track.album, track.artist, track.year],
-            )?;
+            // NOTE: the `artists` / `albums` tables are vestigial — albums and
+            // artists are derived from `tracks` on demand (see AlbumRepo /
+            // ArtistRepo). Maintaining counters here doubled the write cost of
+            // every import and inflated on every re-upsert, so it is removed.
 
             Ok(())
         })
@@ -204,6 +194,41 @@ impl TrackRepo {
         self.db.with_conn(|conn| {
             conn.execute("DELETE FROM tracks WHERE id = ?1;", params![id.to_string()])?;
             Ok(())
+        })
+    }
+
+    /// Update the user-editable metadata tags of a track. Content that is
+    /// derived from the file itself (path, duration, format, ...) is untouched.
+    pub fn update_metadata(&self, track: &Track) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE tracks SET
+                    title = ?1, artist = ?2, album = ?3, genre = ?4, year = ?5,
+                    track_number = ?6, disc_number = ?7
+                 WHERE id = ?8;",
+                params![
+                    track.title,
+                    track.artist,
+                    track.album,
+                    track.genre,
+                    track.year,
+                    track.track_number,
+                    track.disc_number,
+                    track.id.to_string(),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Deletes every track whose path starts with `prefix`. Returns the number
+    /// of rows removed. Foreign-key cascades clean up favorites, playlist
+    /// entries, play history and lyrics; the FTS delete trigger fires too.
+    pub fn delete_by_path_prefix(&self, prefix: &Path) -> Result<usize> {
+        let like = format!("{}%", prefix.to_string_lossy());
+        self.db.with_conn(|conn| {
+            let n = conn.execute("DELETE FROM tracks WHERE path LIKE ?1;", params![like])?;
+            Ok(n)
         })
     }
 
@@ -368,6 +393,56 @@ impl PlaylistRepo {
             Ok(())
         })
     }
+
+    /// Rename a playlist (and bump its `updated_at`). Returns an error if the
+    /// new name collides with an existing playlist.
+    pub fn rename(&self, id: &PlaylistId, new_name: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE playlists SET name = ?1, updated_at = ?2 WHERE id = ?3;",
+                params![new_name, now, id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Remove a single track from a playlist and compact the remaining
+    /// positions so ordering stays contiguous.
+    pub fn remove_track(&self, playlist_id: &PlaylistId, track_id: &TrackId) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            tx.execute(
+                "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2;",
+                params![playlist_id.to_string(), track_id.to_string()],
+            )?;
+            // Re-number positions to keep them contiguous.
+            tx.execute(
+                "UPDATE playlist_tracks
+                 SET position = (
+                     SELECT COUNT(*) FROM playlist_tracks AS p2
+                     WHERE p2.playlist_id = playlist_tracks.playlist_id
+                       AND (p2.position < playlist_tracks.position
+                            OR (p2.position = playlist_tracks.position AND p2.id <= playlist_tracks.id))
+                 ) - 1
+                 WHERE playlist_id = ?1;",
+                params![playlist_id.to_string()],
+            )?;
+            tx.execute(
+                "UPDATE playlists SET updated_at = ?1 WHERE id = ?2;",
+                params![now, playlist_id.to_string()],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
 }
 
 pub struct FavoritesRepo {
@@ -429,8 +504,20 @@ pub struct HistoryRepo {
 }
 
 impl HistoryRepo {
+    /// Rolling window for "Recently Played" and "Most Played" (7 days).
+    pub const WINDOW_SECS: i64 = 7 * 24 * 60 * 60;
+    /// Minimum plays inside the window for a track to appear in "Most Played".
+    pub const MOST_PLAYED_MIN: i64 = 5;
+
     pub fn new(db: Database) -> Self {
         Self { db }
+    }
+
+    fn now_secs() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
     }
 
     pub fn record_play(
@@ -439,10 +526,7 @@ impl HistoryRepo {
         duration_listened_secs: f32,
         completed: bool,
     ) -> Result<()> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
+        let now = Self::now_secs();
         self.db.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO play_history (id, track_id, played_at, duration_listened_secs, completed)
@@ -455,19 +539,35 @@ impl HistoryRepo {
                     if completed { 1 } else { 0 },
                 ],
             )?;
+            // Keep play_history bounded: drop anything older than the window.
+            conn.execute(
+                "DELETE FROM play_history WHERE played_at < ?1;",
+                params![now - Self::WINDOW_SECS],
+            )?;
             Ok(())
         })
     }
 
+    /// Delete play-history rows older than the rolling window.
+    pub fn prune_older_than_window(&self) -> Result<usize> {
+        let cutoff = Self::now_secs() - Self::WINDOW_SECS;
+        self.db.with_conn(|conn| {
+            let n = conn.execute("DELETE FROM play_history WHERE played_at < ?1;", params![cutoff])?;
+            Ok(n)
+        })
+    }
+
+    /// Tracks played within the last 7 days, most recent first.
     pub fn list_recently_played(&self, limit: usize) -> Result<Vec<Track>> {
+        let cutoff = Self::now_secs() - Self::WINDOW_SECS;
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT t.* FROM tracks t
-                 WHERE t.last_played_at IS NOT NULL
+                 WHERE t.last_played_at IS NOT NULL AND t.last_played_at >= ?1
                  ORDER BY t.last_played_at DESC
-                 LIMIT ?1;",
+                 LIMIT ?2;",
             )?;
-            let iter = stmt.query_map(params![limit as i64], map_track)?;
+            let iter = stmt.query_map(params![cutoff, limit as i64], map_track)?;
             let mut tracks = Vec::new();
             for t in iter {
                 tracks.push(t?);
@@ -476,15 +576,27 @@ impl HistoryRepo {
         })
     }
 
+    /// Tracks with at least [`Self::MOST_PLAYED_MIN`] plays inside the last 7
+    /// days, ordered by play count.
     pub fn list_most_played(&self, limit: usize) -> Result<Vec<Track>> {
+        let cutoff = Self::now_secs() - Self::WINDOW_SECS;
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT t.* FROM tracks t
-                 WHERE t.play_count > 0
-                 ORDER BY t.play_count DESC, t.last_played_at DESC
-                 LIMIT ?1;",
+                 JOIN (
+                     SELECT track_id, COUNT(*) AS plays
+                     FROM play_history
+                     WHERE played_at >= ?1
+                     GROUP BY track_id
+                     HAVING plays >= ?2
+                 ) h ON h.track_id = t.id
+                 ORDER BY h.plays DESC, t.last_played_at DESC
+                 LIMIT ?3;",
             )?;
-            let iter = stmt.query_map(params![limit as i64], map_track)?;
+            let iter = stmt.query_map(
+                params![cutoff, Self::MOST_PLAYED_MIN, limit as i64],
+                map_track,
+            )?;
             let mut tracks = Vec::new();
             for t in iter {
                 tracks.push(t?);
@@ -538,6 +650,15 @@ impl QueueRepo {
         self.db.with_conn(|conn| {
             conn.execute("DELETE FROM saved_queue;", [])?;
             Ok(())
+        })
+    }
+
+    /// Drops persisted queue entries whose path starts with `prefix`.
+    pub fn purge_path_prefix(&self, prefix: &Path) -> Result<usize> {
+        let like = format!("{}%", prefix.to_string_lossy());
+        self.db.with_conn(|conn| {
+            let n = conn.execute("DELETE FROM saved_queue WHERE path LIKE ?1;", params![like])?;
+            Ok(n)
         })
     }
 }
@@ -698,7 +819,7 @@ impl AlbumRepo {
                 let year: Option<u32> = row.get(2)?;
                 let track_count: u32 = row.get(3)?;
                 Ok(Album {
-                    id: AlbumId::new(),
+                    id: AlbumId::from_identity(&title, &artist),
                     title,
                     artist,
                     year,
@@ -754,7 +875,7 @@ impl ArtistRepo {
                 let album_count: u32 = row.get(1)?;
                 let track_count: u32 = row.get(2)?;
                 Ok(Artist {
-                    id: ArtistId::new(),
+                    id: ArtistId::from_name(&name),
                     name,
                     track_count,
                     album_count,

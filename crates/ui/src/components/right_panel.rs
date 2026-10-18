@@ -1,6 +1,6 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2};
-use domain::ids::TrackId;
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use domain::models::{SyncedLyricLine, Track};
+use crate::services::ArtworkService;
 use crate::theme::Theme;
 use crate::components::settings_tab::{show_settings_tab, SettingsTabActions, SettingsTabState};
 
@@ -30,7 +30,7 @@ pub struct RightPanel<'a> {
     pub active_lyric_idx: Option<usize>,
     pub volume: f32,
     pub is_muted: bool,
-    pub artwork_map: &'a std::collections::HashMap<TrackId, TextureHandle>,
+    pub artwork: &'a mut ArtworkService,
     pub settings_state: &'a mut SettingsTabState,
     pub theme: &'a Theme,
 }
@@ -101,16 +101,14 @@ impl<'a> RightPanel<'a> {
 
                 match self.active_tab {
                     RightTab::Queue => {
-                        // Queue Tab Content
-                        let (display_items, _total_queue_dur): (Vec<(usize, &Track)>, f32) = if self.queue_tracks.len() > 1 && self.current_queue_idx < self.queue_tracks.len() {
-                            let items: Vec<(usize, &Track)> = self.queue_tracks.iter().enumerate().skip(self.current_queue_idx + 1).collect();
-                            let dur = items.iter().map(|(_, t)| t.duration_secs).sum();
-                            (items, dur)
+                        // Queue Tab Content. "Up Next" starts after the current track.
+                        let qlen = self.queue_tracks.len();
+                        let start = if qlen > 1 && self.current_queue_idx < qlen {
+                            self.current_queue_idx + 1
                         } else {
-                            let items: Vec<(usize, &Track)> = self.queue_tracks.iter().enumerate().collect();
-                            let dur = items.iter().map(|(_, t)| t.duration_secs).sum();
-                            (items, dur)
+                            0
                         };
+                        let display_len = qlen.saturating_sub(start);
 
                         // Header: "Up Next" and "X songs • MM:SS"
                         ui.horizontal(|ui| {
@@ -121,8 +119,9 @@ impl<'a> RightPanel<'a> {
                                     .color(self.theme.text_primary),
                             );
 
-                            let dur_str = format_duration(_total_queue_dur as f64);
-                            let summary_str = format!("{} songs • {}", display_items.len(), dur_str);
+                            let total_dur: f32 = self.queue_tracks[start..].iter().map(|t| t.duration_secs).sum();
+                            let dur_str = format_duration(total_dur as f64);
+                            let summary_str = format!("{} songs • {}", display_len, dur_str);
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(
@@ -135,93 +134,111 @@ impl<'a> RightPanel<'a> {
 
                         ui.add_space(6.0);
 
-                        // List of Queue items (fits 8 items cleanly)
+                        // List of Queue items — virtualized, only visible rows are
+                        // built, and covers are fetched lazily for those rows.
+                        let item_height = 46.0;
+                        let queue_tracks = self.queue_tracks;
+                        let theme = self.theme;
+                        let artwork = &mut *self.artwork;
                         egui::ScrollArea::vertical()
                             .id_salt("queue_items_scroll")
                             .max_height(370.0)
                             .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                            .show_rows(ui, item_height, display_len, |ui, row_range| {
+                                ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
+                                let ctx = ui.ctx().clone();
+                                let mut art_budget = 4usize;
 
-                                for (disp_idx, &(orig_idx, track)) in display_items.iter().enumerate() {
-                                    let item_height = 44.0;
+                                for disp_idx in row_range {
+                                    let orig_idx = start + disp_idx;
+                                    let track = &queue_tracks[orig_idx];
                                     let item_width = ui.available_width();
 
                                     let (item_rect, item_resp) = ui.allocate_exact_size(
                                         Vec2::new(item_width, item_height),
                                         Sense::click(),
                                     );
+                                    let rect = Rect::from_min_max(
+                                        Pos2::new(item_rect.min.x, item_rect.min.y + 1.0),
+                                        Pos2::new(item_rect.max.x, item_rect.max.y - 1.0),
+                                    );
 
-                                    if item_resp.double_clicked() || item_resp.clicked() {
+                                    if item_resp.clicked() {
                                         action.play_queue_index = Some(orig_idx);
                                     }
 
-                                    let painter = ui.painter_at(item_rect);
+                                    let painter = ui.painter_at(rect);
                                     if item_resp.hovered() {
-                                        painter.rect_filled(item_rect, CornerRadius::same(6), self.theme.bg_card_hover);
+                                        painter.rect_filled(rect, CornerRadius::same(6), theme.bg_card_hover);
                                     }
 
-                                    let cy = item_rect.center().y;
+                                    let cy = rect.center().y;
 
-                                    // Display 1-based index (1 to 8)
                                     painter.text(
-                                        Pos2::new(item_rect.min.x + 4.0, cy),
+                                        Pos2::new(rect.min.x + 4.0, cy),
                                         egui::Align2::LEFT_CENTER,
                                         &format!("{}", disp_idx + 1),
                                         FontId::proportional(12.0),
-                                        self.theme.text_muted,
+                                        theme.text_muted,
                                     );
 
-                                    // Thumbnail
+                                    // Thumbnail (lazy)
                                     let thumb_rect = Rect::from_min_size(
-                                        Pos2::new(item_rect.min.x + 22.0, cy - 18.0),
+                                        Pos2::new(rect.min.x + 22.0, cy - 18.0),
                                         Vec2::new(36.0, 36.0),
                                     );
+                                    if artwork.get_texture(&track.id).is_none()
+                                        && art_budget > 0
+                                        && !artwork.is_missing(&track.id)
+                                    {
+                                        art_budget -= 1;
+                                        artwork.ensure_loaded(&ctx, track);
+                                    }
+                                    let tex = artwork.get_texture(&track.id).cloned();
 
-                                    if let Some(tex) = self.artwork_map.get(&track.id) {
+                                    if let Some(tex) = &tex {
                                         egui::Image::new(tex)
                                             .corner_radius(CornerRadius::same(6))
                                             .fit_to_exact_size(Vec2::new(36.0, 36.0))
                                             .paint_at(ui, thumb_rect);
                                     } else {
-                                        painter.rect_filled(thumb_rect, CornerRadius::same(6), Color32::from_rgb(25, 22, 40));
-                                        crate::components::icons::draw_disc(ui, thumb_rect.shrink2(Vec2::new(8.0, 8.0)), self.theme.accent_pink);
+                                        painter.rect_filled(thumb_rect, CornerRadius::same(6), theme.bg_pill);
+                                        crate::components::icons::draw_disc(ui, thumb_rect.shrink2(Vec2::new(8.0, 8.0)), theme.accent_pink);
                                     }
 
                                     // Stacked Title + Artist
-                                    let text_left = item_rect.min.x + 64.0;
+                                    let text_left = rect.min.x + 64.0;
                                     painter.text(
                                         Pos2::new(text_left, cy - 7.0),
                                         egui::Align2::LEFT_CENTER,
                                         &track.title,
                                         FontId::proportional(12.8),
-                                        self.theme.text_primary,
+                                        theme.text_primary,
                                     );
-
                                     painter.text(
                                         Pos2::new(text_left, cy + 8.0),
                                         egui::Align2::LEFT_CENTER,
                                         &track.artist,
                                         FontId::proportional(11.2),
-                                        self.theme.text_muted,
+                                        theme.text_muted,
                                     );
 
                                     // Duration or delete button on hover
                                     if item_resp.hovered() {
-                                        let del_rect = Rect::from_center_size(Pos2::new(item_rect.max.x - 12.0, cy), Vec2::new(14.0, 14.0));
+                                        let del_rect = Rect::from_center_size(Pos2::new(rect.max.x - 12.0, cy), Vec2::new(14.0, 14.0));
                                         let del_hov = ui.rect_contains_pointer(del_rect);
-                                        let del_col = if del_hov { self.theme.accent_magenta } else { self.theme.text_muted };
+                                        let del_col = if del_hov { theme.accent_magenta } else { theme.text_muted };
                                         crate::components::icons::draw_window_close(ui, del_rect.shrink2(Vec2::new(2.0, 2.0)), del_col);
                                         if del_hov && ui.input(|i| i.pointer.primary_clicked()) {
                                             action.remove_queue_index = Some(orig_idx);
                                         }
                                     } else {
                                         painter.text(
-                                            Pos2::new(item_rect.max.x - 4.0, cy),
+                                            Pos2::new(rect.max.x - 4.0, cy),
                                             egui::Align2::RIGHT_CENTER,
                                             &format_duration(track.duration_secs as f64),
                                             FontId::proportional(11.8),
-                                            self.theme.text_muted,
+                                            theme.text_muted,
                                         );
                                     }
                                 }

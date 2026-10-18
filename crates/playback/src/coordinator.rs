@@ -1,9 +1,14 @@
 use audio_session::{AudioSession, EngineEvent, PlaybackState};
 use database::{Database, HistoryRepo, QueueRepo, TrackRepo};
+use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
 use log::info;
 use rand::seq::SliceRandom;
 use std::sync::Arc;
+
+/// A track counts as "played" once this many seconds have been listened to (or
+/// the whole track, whichever is shorter). Skips before this do not register.
+const PLAY_THRESHOLD_SECS: f32 = 20.0;
 
 pub struct PlaybackCoordinator {
     session: Arc<AudioSession>,
@@ -12,10 +17,18 @@ pub struct PlaybackCoordinator {
     history_repo: HistoryRepo,
     queue_repo: QueueRepo,
     queue: Vec<Track>,
+    /// Original insertion order, kept while shuffle is active so we can restore
+    /// it when shuffle is turned off.
+    unshuffled_queue: Option<Vec<Track>>,
     current_index: Option<usize>,
     current_track: Option<Track>,
     shuffle: bool,
     repeat_mode: RepeatModeChoice,
+
+    // Listening-accounting for the recently/most played rules.
+    listen_secs: f32,
+    last_position: f32,
+    play_registered: bool,
 }
 
 impl PlaybackCoordinator {
@@ -24,6 +37,9 @@ impl PlaybackCoordinator {
         let history_repo = HistoryRepo::new(db.clone());
         let queue_repo = QueueRepo::new(db.clone());
 
+        // Drop play-history rows that have aged out of the rolling window.
+        let _ = history_repo.prune_older_than_window();
+
         let mut coordinator = Self {
             session,
             _db: db,
@@ -31,10 +47,14 @@ impl PlaybackCoordinator {
             history_repo,
             queue_repo,
             queue: Vec::new(),
+            unshuffled_queue: None,
             current_index: None,
             current_track: None,
             shuffle: false,
             repeat_mode: RepeatModeChoice::Off,
+            listen_secs: 0.0,
+            last_position: 0.0,
+            play_registered: false,
         };
 
         coordinator.restore_saved_queue();
@@ -90,9 +110,20 @@ impl PlaybackCoordinator {
             self.persist_queue();
         }
 
+        // If shuffle is on, permute everything after the chosen track and keep
+        // the original order for when shuffle is turned back off.
+        if self.shuffle {
+            self.unshuffled_queue = Some(self.queue.clone());
+            self.shuffle_upcoming();
+            self.persist_queue();
+        } else {
+            self.unshuffled_queue = None;
+        }
+
         self.current_track = Some(track.clone());
         info!("Playing track: {} - {}", track.title, track.artist);
 
+        self.begin_tracking();
         self.open_and_play_track(&track);
 
         // Gapless preload of next track
@@ -104,6 +135,7 @@ impl PlaybackCoordinator {
             let track = self.queue[index].clone();
             self.current_index = Some(index);
             self.current_track = Some(track.clone());
+            self.begin_tracking();
             self.open_and_play_track(&track);
             self.preload_next();
         }
@@ -157,13 +189,16 @@ impl PlaybackCoordinator {
             return;
         }
 
-        let next_idx = if self.shuffle {
-            let mut rng = rand::thread_rng();
-            (0..self.queue.len()).collect::<Vec<_>>().choose(&mut rng).copied().unwrap_or(0)
-        } else if let Some(curr) = self.current_index {
+        // The queue is already permuted when shuffle is on, so advancing is
+        // simply "next in the list" in both modes.
+        let next_idx = if let Some(curr) = self.current_index {
             if curr + 1 < self.queue.len() {
                 curr + 1
             } else if self.repeat_mode == RepeatModeChoice::All {
+                if self.shuffle {
+                    // Start a fresh shuffled pass.
+                    self.shuffle_upcoming_from(0);
+                }
                 0
             } else {
                 return;
@@ -204,12 +239,18 @@ impl PlaybackCoordinator {
     pub fn clear_queue(&mut self) {
         self.queue.clear();
         self.current_index = None;
+        self.unshuffled_queue = None;
         let _ = self.queue_repo.clear();
         self.session.clear_playlist();
     }
 
     pub fn add_to_queue(&mut self, track: Track) {
         self.queue.push(track);
+        if self.shuffle {
+            // Structural change: drop the saved order so disabling shuffle
+            // can't resurrect a stale queue.
+            self.unshuffled_queue = None;
+        }
         self.persist_queue();
     }
 
@@ -219,6 +260,9 @@ impl PlaybackCoordinator {
         } else {
             self.queue.push(track);
         }
+        if self.shuffle {
+            self.unshuffled_queue = None;
+        }
         self.persist_queue();
         self.preload_next();
     }
@@ -226,6 +270,9 @@ impl PlaybackCoordinator {
     pub fn remove_from_queue(&mut self, index: usize) {
         if index < self.queue.len() {
             self.queue.remove(index);
+            if self.shuffle {
+                self.unshuffled_queue = None;
+            }
             if let Some(curr) = self.current_index {
                 if index < curr {
                     self.current_index = Some(curr.saturating_sub(1));
@@ -246,8 +293,42 @@ impl PlaybackCoordinator {
     }
 
     pub fn set_shuffle(&mut self, enabled: bool) {
+        if enabled == self.shuffle {
+            self.session.set_shuffle(enabled);
+            return;
+        }
+
+        if enabled {
+            // Remember the original order, then shuffle everything from the
+            // current track onwards (played items stay put).
+            self.unshuffled_queue = Some(self.queue.clone());
+            self.shuffle_upcoming();
+        } else if let Some(original) = self.unshuffled_queue.take() {
+            // Restore the original order and re-locate the current track.
+            let current_id = self.current_track.as_ref().map(|t| t.id);
+            self.queue = original;
+            self.current_index =
+                current_id.and_then(|id| self.queue.iter().position(|t| t.id == id));
+        }
+
         self.shuffle = enabled;
         self.session.set_shuffle(enabled);
+        self.persist_queue();
+        self.preload_next();
+    }
+
+    /// Shuffle the queue from just after the current track to the end.
+    fn shuffle_upcoming(&mut self) {
+        let from = self.current_index.map(|i| i + 1).unwrap_or(0).min(self.queue.len());
+        self.shuffle_upcoming_from(from);
+    }
+
+    fn shuffle_upcoming_from(&mut self, from: usize) {
+        let from = from.min(self.queue.len());
+        if self.queue.len() > from + 1 {
+            let mut rng = rand::thread_rng();
+            self.queue[from..].shuffle(&mut rng);
+        }
     }
 
     pub fn set_repeat_mode(&mut self, mode: RepeatModeChoice) {
@@ -261,16 +342,28 @@ impl PlaybackCoordinator {
     }
 
     pub fn poll_events(&mut self) {
+        // Accumulate listening time for the current track (drives the
+        // recently/most played rules).
+        self.sample_listening();
+
         while let Some(event) = self.session.try_recv_event() {
             match event {
                 EngineEvent::SourceFinished { .. } => {
-                    if let Some(ref track) = self.current_track {
-                        let _ = self.track_repo.increment_play_count(&track.id);
-                        let _ = self.history_repo.record_play(&track.id, track.duration_secs, true);
+                    // A track that reaches its natural end always counts.
+                    if !self.play_registered {
+                        if let Some(id) = self.current_track.as_ref().map(|t| t.id) {
+                            let threshold = self
+                                .current_track
+                                .as_ref()
+                                .map(|t| PLAY_THRESHOLD_SECS.min(t.duration_secs))
+                                .unwrap_or(PLAY_THRESHOLD_SECS);
+                            self.register_play(id, threshold, true);
+                        }
                     }
 
                     if self.repeat_mode == RepeatModeChoice::One {
-                        if let Some(ref track) = self.current_track {
+                        if let Some(track) = self.current_track.clone() {
+                            self.begin_tracking();
                             self.session.open_file(&track.path);
                             self.session.play();
                             return;
@@ -282,6 +375,54 @@ impl PlaybackCoordinator {
                 _ => {}
             }
         }
+    }
+
+    /// Reset per-track listening accounting.
+    fn begin_tracking(&mut self) {
+        self.listen_secs = 0.0;
+        self.last_position = 0.0;
+        self.play_registered = false;
+    }
+
+    /// Add the delta in playback position to the listened total, and register
+    /// the play once the threshold is crossed.
+    fn sample_listening(&mut self) {
+        if self.play_registered {
+            return;
+        }
+        let Some(track_id) = self.current_track.as_ref().map(|t| t.id) else {
+            return;
+        };
+        if !self.session.is_playing() {
+            self.last_position = self.session.position_secs_compensated();
+            return;
+        }
+
+        let pos = self.session.position_secs_compensated();
+        if pos >= self.last_position {
+            self.listen_secs += pos - self.last_position;
+        }
+        // On a seek backwards (or track restart) we simply carry on from the new
+        // position without crediting the jump.
+        self.last_position = pos;
+
+        let duration = self
+            .current_track
+            .as_ref()
+            .map(|t| t.duration_secs)
+            .unwrap_or(0.0);
+        let threshold = PLAY_THRESHOLD_SECS.min(duration);
+        if self.listen_secs >= threshold {
+            self.register_play(track_id, threshold, false);
+        }
+    }
+
+    fn register_play(&mut self, track_id: TrackId, threshold: f32, completed: bool) {
+        let _ = self.track_repo.increment_play_count(&track_id);
+        let _ = self
+            .history_repo
+            .record_play(&track_id, self.listen_secs.max(threshold), completed);
+        self.play_registered = true;
     }
 
     fn preload_next(&self) {

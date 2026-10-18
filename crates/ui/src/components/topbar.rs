@@ -78,7 +78,7 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
 
             // Window close, maximize, minimize
             let (close_rect, close_resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
-            let close_col = if close_resp.hovered() { Color32::from_rgb(244, 63, 94) } else { theme.text_secondary };
+            let close_col = if close_resp.hovered() { theme.destructive } else { theme.text_secondary };
             crate::components::icons::draw_window_close(ui, close_rect, close_col);
             if close_resp.clicked() {
                 resp.close_requested = true;
@@ -124,7 +124,7 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
 
             if theme.is_light {
                 // Active light mode: glowing sun circle on left
-                painter.circle_filled(sun_center, 11.0, Color32::from_rgb(245, 158, 11));
+                painter.circle_filled(sun_center, 11.0, theme.sun_accent);
                 crate::components::icons::draw_sun(ui, sun_rect, Color32::WHITE);
                 crate::components::icons::draw_moon(ui, moon_rect, theme.text_muted);
             } else {

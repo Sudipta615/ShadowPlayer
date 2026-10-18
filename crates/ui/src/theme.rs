@@ -34,6 +34,22 @@ pub struct Theme {
     // Status colors
     pub bit_perfect_green: Color32,
     pub warning_yellow: Color32,
+
+    // Derived / semantic tokens so views don't hardcode colours.
+    /// Fill for the currently playing row/card in track lists.
+    pub bg_active_row: Color32,
+    /// Border of the currently playing row/card.
+    pub border_active_row: Color32,
+    /// Background behind a missing artwork placeholder.
+    pub artwork_placeholder: Color32,
+    /// Destructive-action colour (remove from library, etc.).
+    pub destructive: Color32,
+    /// Translucent scrim drawn over artwork on hover.
+    pub overlay_scrim: Color32,
+    /// Background of the \"scanning…\" information banner.
+    pub scan_banner_bg: Color32,
+    /// Sun / light-mode accent.
+    pub sun_accent: Color32,
 }
 
 impl Default for Theme {
@@ -65,6 +81,14 @@ impl Default for Theme {
 
             bit_perfect_green: Color32::from_rgb(52, 211, 153),
             warning_yellow: Color32::from_rgb(251, 191, 36),
+
+            bg_active_row: Color32::from_rgb(19, 23, 57),
+            border_active_row: Color32::from_rgb(54, 42, 207),
+            artwork_placeholder: Color32::from_rgb(30, 24, 48),
+            destructive: Color32::from_rgb(244, 63, 94),
+            overlay_scrim: Color32::from_rgba_unmultiplied(0, 0, 0, 150),
+            scan_banner_bg: Color32::from_rgb(38, 20, 64),
+            sun_accent: Color32::from_rgb(245, 158, 11),
         }
     }
 }
@@ -102,6 +126,14 @@ impl Theme {
 
             bit_perfect_green: Color32::from_rgb(22, 163, 74),
             warning_yellow: Color32::from_rgb(202, 138, 4),
+
+            bg_active_row: Color32::from_rgb(233, 226, 250),
+            border_active_row: Color32::from_rgb(147, 51, 234),
+            artwork_placeholder: Color32::from_rgb(228, 231, 240),
+            destructive: Color32::from_rgb(220, 38, 38),
+            overlay_scrim: Color32::from_rgba_unmultiplied(255, 255, 255, 170),
+            scan_banner_bg: Color32::from_rgb(240, 236, 252),
+            sun_accent: Color32::from_rgb(217, 119, 6),
         }
     }
 

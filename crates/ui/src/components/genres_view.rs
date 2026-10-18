@@ -64,7 +64,7 @@ impl<'a> GenresView<'a> {
                     let box_size = Vec2::new(80.0, 80.0);
                     let (box_rect, _) = ui.allocate_exact_size(box_size, Sense::hover());
                     let p = ui.painter_at(box_rect);
-                    p.rect_filled(box_rect, CornerRadius::same(12), Color32::from_rgb(36, 18, 56));
+                    p.rect_filled(box_rect, CornerRadius::same(12), self.theme.artwork_placeholder);
                     p.rect_stroke(box_rect, CornerRadius::same(12), Stroke::new(1.2_f32, self.theme.accent_pink), egui::StrokeKind::Inside);
                     crate::components::icons::draw_genres(ui, box_rect.shrink2(Vec2::new(20.0, 20.0)), self.theme.accent_pink);
 
@@ -139,8 +139,8 @@ impl<'a> GenresView<'a> {
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), Color32::from_rgb(38, 21, 70));
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, Color32::from_rgb(98, 41, 172)), egui::StrokeKind::Inside);
+                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
+                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
                         } else if row_resp.hovered() {
                             painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
                         }

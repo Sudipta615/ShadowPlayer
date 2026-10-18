@@ -12,6 +12,10 @@ pub struct FoldersViewAction {
     pub queue_folder: Option<PathBuf>,
     pub play_track: Option<TrackId>,
     pub toggle_favorite: Option<TrackId>,
+    /// User pressed "Browse Folder…" to open the native folder picker.
+    pub browse_folder: bool,
+    /// User pressed "Import Songs…" to open the native file picker.
+    pub import_files: bool,
 }
 
 pub struct FoldersView<'a> {
@@ -23,6 +27,8 @@ pub struct FoldersView<'a> {
     pub scan_progress_text: &'a str,
     pub active_track_id: Option<TrackId>,
     pub favorite_track_ids: &'a std::collections::HashSet<TrackId>,
+    /// A native import picker is currently open.
+    pub import_active: bool,
     pub theme: &'a Theme,
 }
 
@@ -36,6 +42,8 @@ impl<'a> FoldersView<'a> {
             queue_folder: None,
             play_track: None,
             toggle_favorite: None,
+            browse_folder: false,
+            import_files: false,
         };
 
         if let Some(sel_path) = self.selected_folder.clone() {
@@ -72,7 +80,7 @@ impl<'a> FoldersView<'a> {
                     let box_size = Vec2::new(80.0, 80.0);
                     let (box_rect, _) = ui.allocate_exact_size(box_size, Sense::hover());
                     let p = ui.painter_at(box_rect);
-                    p.rect_filled(box_rect, CornerRadius::same(12), Color32::from_rgb(30, 24, 48));
+                    p.rect_filled(box_rect, CornerRadius::same(12), self.theme.artwork_placeholder);
                     p.rect_stroke(box_rect, CornerRadius::same(12), Stroke::new(1.2_f32, self.theme.accent_violet), egui::StrokeKind::Inside);
                     crate::components::icons::draw_folder(ui, box_rect.shrink2(Vec2::new(20.0, 20.0)), self.theme.accent_pink);
 
@@ -168,8 +176,8 @@ impl<'a> FoldersView<'a> {
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), Color32::from_rgb(38, 21, 70));
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, Color32::from_rgb(98, 41, 172)), egui::StrokeKind::Inside);
+                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
+                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
                         } else if row_resp.hovered() {
                             painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
                         }
@@ -257,6 +265,25 @@ impl<'a> FoldersView<'a> {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
+                        // Native pickers: the primary way to add music.
+                        if ui.add_enabled(!self.import_active, browse_btn("Browse Folder…", self.theme)).clicked() {
+                            action.browse_folder = true;
+                        }
+                        if ui.add_enabled(!self.import_active, browse_btn("Import Songs…", self.theme)).clicked() {
+                            action.import_files = true;
+                        }
+                        if self.import_active {
+                            ui.label(
+                                egui::RichText::new("waiting for file picker…")
+                                    .font(FontId::proportional(11.5))
+                                    .color(self.theme.text_muted),
+                            );
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+
                         let hint = dirs::audio_dir()
                             .map(|d| d.to_string_lossy().to_string())
                             .unwrap_or_else(|| "/path/to/music".to_string());
@@ -320,7 +347,7 @@ impl<'a> FoldersView<'a> {
             // Scanning progress banner if active
             if self.is_scanning {
                 let scan_frame = egui::Frame::NONE
-                    .fill(Color32::from_rgb(38, 20, 64))
+                    .fill(self.theme.scan_banner_bg)
                     .stroke(Stroke::new(1.0_f32, self.theme.accent_magenta))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(egui::Margin::symmetric(14, 8));
@@ -446,4 +473,17 @@ fn format_time(seconds: f64) -> String {
     let mins = s / 60;
     let secs = s % 60;
     format!("{}:{:02}", mins, secs)
+}
+
+/// Pill button used for the native import pickers.
+fn browse_btn(label: &str, theme: &Theme) -> egui::Button<'static> {
+    egui::Button::new(
+        egui::RichText::new(label.to_owned())
+            .font(FontId::proportional(12.5))
+            .strong()
+            .color(Color32::WHITE),
+    )
+    .fill(theme.accent_violet)
+    .corner_radius(CornerRadius::same(8))
+    .min_size(Vec2::new(0.0, 28.0))
 }

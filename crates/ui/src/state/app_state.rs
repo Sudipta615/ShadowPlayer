@@ -2,6 +2,9 @@ use domain::models::Track;
 use crate::components::right_panel::RightTab;
 use crate::components::sidebar::NavItem;
 use crate::components::songs_table::SortField;
+use crate::modals::edit_track_modal::EditTrackState;
+use crate::modals::playlist_editor_modal::PlaylistEditorState;
+use crate::state::sleep_timer::SleepTimer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VisualizerMode {
@@ -33,6 +36,17 @@ pub struct AppState {
     pub track_properties_open: bool,
     pub help_modal_open: bool,
     pub bit_perfect_modal_open: bool,
+
+    /// Directories that individual songs were imported from (newest first),
+    /// surfaced under the import buttons in Settings.
+    pub imported_dirs: Vec<std::path::PathBuf>,
+
+    /// Playlist manager floating window state.
+    pub playlist_editor: PlaylistEditorState,
+    /// Edit Song Info dialog state.
+    pub edit_track: EditTrackState,
+    /// Active sleep timer, if any.
+    pub sleep_timer: Option<SleepTimer>,
 }
 
 impl Default for AppState {
@@ -56,6 +70,12 @@ impl Default for AppState {
             track_properties_open: false,
             help_modal_open: false,
             bit_perfect_modal_open: false,
+
+            imported_dirs: Vec::new(),
+
+            playlist_editor: PlaylistEditorState::default(),
+            edit_track: EditTrackState::default(),
+            sleep_timer: None,
         }
     }
 }

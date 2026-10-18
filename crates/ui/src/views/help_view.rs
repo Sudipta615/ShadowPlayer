@@ -156,7 +156,7 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                             .strong()
                             .color(theme.text_primary),
                     );
-                    badge(ui, "v0.2.0 • CORE v1.2.1", theme.accent_violet, Color32::WHITE);
+                    badge(ui, concat!("v", env!("CARGO_PKG_VERSION"), " • CORE v1.2.1"), theme.accent_violet, Color32::WHITE);
                 });
                 ui.label(
                     egui::RichText::new(

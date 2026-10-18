@@ -1,5 +1,4 @@
 use domain::ids::TrackId;
-use image::imageops::FilterType;
 use image::ImageReader;
 use std::fs;
 use std::io::Cursor;
@@ -27,8 +26,11 @@ impl ArtworkManager {
             .ok()?;
         let img = reader.decode().ok()?;
 
-        // Resize down to 300x300 maintaining aspect ratio
-        let thumb = img.resize(300, 300, FilterType::Lanczos3);
+        // Resize down to 160x160 preserving aspect ratio. 160px is plenty for
+        // the 36px list rows and 140px grid cards, and keeps both the on-disk
+        // cache and the GPU texture memory small. `thumbnail` is a fast box
+        // filter; Lanczos3 would cost far more CPU for no visible gain here.
+        let thumb = img.thumbnail(160, 160);
         let out_path = self.get_cached_thumbnail_path(track_id);
 
         if let Ok(mut file) = fs::File::create(&out_path) {

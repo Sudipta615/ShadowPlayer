@@ -6,7 +6,7 @@ use domain::models::Track;
 use playback::PlaybackCoordinator;
 
 use crate::components::folders_view::FoldersView;
-use crate::services::ScannerService;
+use crate::services::{ImportKind, ScannerService};
 use crate::state::LibraryState;
 use crate::theme::Theme;
 
@@ -20,7 +20,9 @@ pub fn render_folders_view(
     scan_roots_repo: &ScanRootsRepo,
     track_repo: &TrackRepo,
     favorites_repo: &FavoritesRepo,
+    import_active: bool,
     on_start_scan: impl FnOnce(PathBuf),
+    mut on_import: impl FnMut(ImportKind),
 ) {
     let fld_action = FoldersView {
         scan_roots: &library_state.scan_roots,
@@ -31,10 +33,17 @@ pub fn render_folders_view(
         scan_progress_text: scanner_service.progress_text(),
         active_track_id: current_track.map(|t| t.id),
         favorite_track_ids: &library_state.favorite_ids,
+        import_active,
         theme,
     }
     .show(ui);
 
+    if fld_action.browse_folder {
+        on_import(ImportKind::Folder);
+    }
+    if fld_action.import_files {
+        on_import(ImportKind::Files);
+    }
     if let Some(folder) = fld_action.add_folder {
         on_start_scan(folder);
     }
