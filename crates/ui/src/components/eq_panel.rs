@@ -131,7 +131,7 @@ pub enum EqTab {
     Filters,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ParametricBand {
     pub freq: f32,
     pub gain_db: f32,
@@ -284,7 +284,12 @@ impl Default for EqPanelState {
 }
 
 /// Serde-serializable snapshot of EQ panel settings for persistent storage across sessions
+///
+/// `#[serde(default)]` at the struct level means a field added in a later build
+/// reads back as the fresh panel's value rather than failing the whole parse —
+/// which would silently discard every EQ setting the user had.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PersistentEqState {
     pub is_open: bool,
     pub window_pos: Option<[f32; 2]>,
@@ -300,6 +305,9 @@ pub struct PersistentEqState {
     pub extended_range: bool,
     pub preamp_db: f32,
     pub auto_headroom: bool,
+    /// Parametric bands — the shape AutoEQ targets write into, so they must
+    /// survive a restart.
+    pub bands: [ParametricBand; 10],
     pub bass_shelf_db: f32,
     pub treble_shelf_db: f32,
     pub midside_eq: bool,
@@ -307,9 +315,29 @@ pub struct PersistentEqState {
     pub balance: f32,
     pub dither_enabled: bool,
     pub limiter_enabled: bool,
+    pub limiter_mode: LimiterMode,
+    pub limiter_true_peak: bool,
+    pub limiter_lookahead_ms: f32,
+    pub limiter_attack_ms: f32,
+    pub limiter_release_ms: f32,
+    pub limiter_ceiling_db: f32,
+    pub limiter_soft_clip: bool,
     pub compressor_enabled: bool,
+    pub comp_threshold: [f32; 3],
+    pub comp_ratio: [f32; 3],
+    pub comp_attack_ms: [f32; 3],
+    pub comp_release_ms: [f32; 3],
+    pub comp_makeup_db: [f32; 3],
+    pub comp_knee_db: [f32; 3],
+    pub comp_stereo_link: [bool; 3],
     pub crossfeed_enabled: bool,
     pub crossfeed_profile: CrossfeedProfile,
+    pub crossfeed_freq: f32,
+    pub crossfeed_q: f32,
+    pub crossfeed_delay_ms: f32,
+    pub correction_enabled: bool,
+    pub correction_depth: f32,
+    pub correction_ir_path: String,
 }
 
 impl From<&EqPanelState> for PersistentEqState {
@@ -329,6 +357,7 @@ impl From<&EqPanelState> for PersistentEqState {
             extended_range: s.extended_range,
             preamp_db: s.preamp_db,
             auto_headroom: s.auto_headroom,
+            bands: s.bands.clone(),
             bass_shelf_db: s.bass_shelf_db,
             treble_shelf_db: s.treble_shelf_db,
             midside_eq: s.midside_eq,
@@ -336,9 +365,29 @@ impl From<&EqPanelState> for PersistentEqState {
             balance: s.balance,
             dither_enabled: s.dither_enabled,
             limiter_enabled: s.limiter_enabled,
+            limiter_mode: s.limiter_mode,
+            limiter_true_peak: s.limiter_true_peak,
+            limiter_lookahead_ms: s.limiter_lookahead_ms,
+            limiter_attack_ms: s.limiter_attack_ms,
+            limiter_release_ms: s.limiter_release_ms,
+            limiter_ceiling_db: s.limiter_ceiling_db,
+            limiter_soft_clip: s.limiter_soft_clip,
             compressor_enabled: s.compressor_enabled,
+            comp_threshold: s.comp_threshold,
+            comp_ratio: s.comp_ratio,
+            comp_attack_ms: s.comp_attack_ms,
+            comp_release_ms: s.comp_release_ms,
+            comp_makeup_db: s.comp_makeup_db,
+            comp_knee_db: s.comp_knee_db,
+            comp_stereo_link: s.comp_stereo_link,
             crossfeed_enabled: s.crossfeed_enabled,
             crossfeed_profile: s.crossfeed_profile,
+            crossfeed_freq: s.crossfeed_freq,
+            crossfeed_q: s.crossfeed_q,
+            crossfeed_delay_ms: s.crossfeed_delay_ms,
+            correction_enabled: s.correction_enabled,
+            correction_depth: s.correction_depth,
+            correction_ir_path: s.correction_ir_path.clone(),
         }
     }
 }
@@ -367,6 +416,9 @@ impl PersistentEqState {
         state.extended_range = self.extended_range;
         state.preamp_db = self.preamp_db;
         state.auto_headroom = self.auto_headroom;
+        for (i, band) in self.bands.iter().take(10).enumerate() {
+            state.bands[i] = band.clone();
+        }
         state.bass_shelf_db = self.bass_shelf_db;
         state.treble_shelf_db = self.treble_shelf_db;
         state.midside_eq = self.midside_eq;
@@ -374,9 +426,29 @@ impl PersistentEqState {
         state.balance = self.balance;
         state.dither_enabled = self.dither_enabled;
         state.limiter_enabled = self.limiter_enabled;
+        state.limiter_mode = self.limiter_mode;
+        state.limiter_true_peak = self.limiter_true_peak;
+        state.limiter_lookahead_ms = self.limiter_lookahead_ms;
+        state.limiter_attack_ms = self.limiter_attack_ms;
+        state.limiter_release_ms = self.limiter_release_ms;
+        state.limiter_ceiling_db = self.limiter_ceiling_db;
+        state.limiter_soft_clip = self.limiter_soft_clip;
         state.compressor_enabled = self.compressor_enabled;
+        state.comp_threshold = self.comp_threshold;
+        state.comp_ratio = self.comp_ratio;
+        state.comp_attack_ms = self.comp_attack_ms;
+        state.comp_release_ms = self.comp_release_ms;
+        state.comp_makeup_db = self.comp_makeup_db;
+        state.comp_knee_db = self.comp_knee_db;
+        state.comp_stereo_link = self.comp_stereo_link;
         state.crossfeed_enabled = self.crossfeed_enabled;
         state.crossfeed_profile = self.crossfeed_profile;
+        state.crossfeed_freq = self.crossfeed_freq;
+        state.crossfeed_q = self.crossfeed_q;
+        state.crossfeed_delay_ms = self.crossfeed_delay_ms;
+        state.correction_enabled = self.correction_enabled;
+        state.correction_depth = self.correction_depth;
+        state.correction_ir_path = self.correction_ir_path.clone();
     }
 }
 

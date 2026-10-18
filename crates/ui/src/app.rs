@@ -305,6 +305,15 @@ impl ShadowPlayerApp {
             }
         }
 
+        // 5. Whole-chain DSP presets. Stored separately from the live EQ/DSP
+        // state: a preset outlives the settings it was captured from.
+        if let Ok(Some(json)) = self.settings_repo.get_value("chain_presets") {
+            match serde_json::from_str::<Vec<crate::state::ChainPreset>>(&json) {
+                Ok(presets) => self.dsp_state.settings_tab.chain_presets = presets,
+                Err(e) => log::warn!("Ignoring unreadable chain presets: {}", e),
+            }
+        }
+
         // Sync restored state to audio session
         self.dsp_state.sync_all_to_session(&self.session);
     }
@@ -360,6 +369,11 @@ impl ShadowPlayerApp {
         // 4. Save imported-file directory list
         if let Ok(json) = serde_json::to_string(&self.app_state.imported_dirs) {
             let _ = self.settings_repo.set_value("imported_file_dirs", &json);
+        }
+
+        // 5. Save whole-chain DSP presets
+        if let Ok(json) = serde_json::to_string(&self.dsp_state.settings_tab.chain_presets) {
+            let _ = self.settings_repo.set_value("chain_presets", &json);
         }
     }
 
@@ -836,6 +850,14 @@ impl eframe::App for ShadowPlayerApp {
             ctx.request_repaint();
         }
 
+        // 2g. Chain-preset feedback. Saving or applying a profile also marks
+        // the settings dirty so it persists now rather than at the next
+        // periodic save.
+        if let Some(msg) = self.dsp_state.settings_tab.chain_preset_notice.take() {
+            self.toasts.success(msg);
+            self.settings_dirty = true;
+        }
+
         // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
         let is_playing = self.session.is_playing();
         if is_playing || self.scanner_service.is_scanning() {
@@ -899,6 +921,91 @@ impl eframe::App for ShadowPlayerApp {
                     self.dsp_state.handle_settings_actions(&self.session, &a);
                 }
             }
+
+            // Chain presets: drive the real save/apply path and verify the whole
+            // chain survives the round trip. `SHADOWPLAYER_EVAL_CHAIN=seed`
+            // saves profiles and leaves them on screen; `=roundtrip` also wipes
+            // the chain, recalls a profile and asserts every field came back.
+            if self.app_state.frame_count == 1 {
+                if let Ok(mode) = std::env::var("SHADOWPLAYER_EVAL_CHAIN") {
+                    {
+                        let eq = &mut self.dsp_state.eq_panel;
+                        eq.eq_enabled = true;
+                        eq.graphic_enabled = true;
+                        eq.preamp_db = -7.5;
+                        eq.bass_shelf_db = 4.0;
+                        eq.limiter_enabled = true;
+                        eq.crossfeed_enabled = true;
+                        eq.crossfeed_profile = config::CrossfeedProfile::Jmeier;
+                        eq.bands[2].freq = 315.0;
+                        eq.bands[2].gain_db = -5.5;
+                        eq.comp_threshold[0] = -28.0;
+                        let st = &mut self.dsp_state.settings_tab;
+                        st.bass_management.enabled = true;
+                        st.bass_management.crossover_hz = 85.0;
+                        st.lfe.enabled = true;
+                        st.lfe.gain_db = -3.0;
+                        st.channel_mix.enabled = true;
+                    }
+
+                    for (name, note) in [
+                        ("Headphones", "HD650 + crossfeed"),
+                        ("Speakers", "2.1 living room"),
+                    ] {
+                        self.dsp_state.settings_tab.chain_preset_draft_note = note.to_string();
+                        let a = crate::components::settings_tab::SettingsTabActions {
+                            chain_preset_save: Some(name.to_string()),
+                            ..Default::default()
+                        };
+                        self.dsp_state.handle_settings_actions(&self.session, &a);
+                    }
+
+                    if mode == "roundtrip" {
+                        // Flatten the chain, then recall the first profile.
+                        {
+                            let eq = &mut self.dsp_state.eq_panel;
+                            eq.eq_enabled = false;
+                            eq.graphic_enabled = false;
+                            eq.preamp_db = 0.0;
+                            eq.bass_shelf_db = 0.0;
+                            eq.limiter_enabled = false;
+                            eq.crossfeed_enabled = false;
+                            eq.bands[2].gain_db = 0.0;
+                            eq.comp_threshold[0] = 0.0;
+                            let st = &mut self.dsp_state.settings_tab;
+                            st.bass_management.enabled = false;
+                            st.lfe.enabled = false;
+                            st.channel_mix.enabled = false;
+                        }
+                        let a = crate::components::settings_tab::SettingsTabActions {
+                            chain_preset_apply: Some(0),
+                            ..Default::default()
+                        };
+                        self.dsp_state.handle_settings_actions(&self.session, &a);
+
+                        let eq = &self.dsp_state.eq_panel;
+                        let st = &self.dsp_state.settings_tab;
+                        assert!(eq.eq_enabled, "eq_enabled lost");
+                        assert!((eq.preamp_db + 7.5).abs() < 1e-6, "preamp lost");
+                        assert!((eq.bass_shelf_db - 4.0).abs() < 1e-6, "bass shelf lost");
+                        assert!(eq.limiter_enabled, "limiter lost");
+                        assert!(eq.crossfeed_enabled, "crossfeed lost");
+                        assert_eq!(eq.crossfeed_profile, config::CrossfeedProfile::Jmeier);
+                        assert!((eq.bands[2].gain_db + 5.5).abs() < 1e-6, "EQ band lost");
+                        assert!((eq.comp_threshold[0] + 28.0).abs() < 1e-6, "compressor lost");
+                        assert!(st.bass_management.enabled, "bass management lost");
+                        assert!((st.bass_management.crossover_hz - 85.0).abs() < 1e-6);
+                        assert!(st.lfe.enabled, "LFE lost");
+                        assert!(st.channel_mix.enabled, "channel mix lost");
+                        log::info!(
+                            "CHAIN PRESET ROUND TRIP OK ({} saved): {}",
+                            st.chain_presets.len(),
+                            st.chain_presets[0].summary()
+                        );
+                    }
+                }
+            }
+
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_SELECT").is_ok() {
                 let n: usize = std::env::var("SHADOWPLAYER_EVAL_SELECT")
                     .ok()

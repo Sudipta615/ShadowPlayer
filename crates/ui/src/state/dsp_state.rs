@@ -3,6 +3,7 @@ use config::{CrossfadeConfig, EnginePreset};
 use crate::components::advanced_audio::{AdvancedAudioActions, AdvancedAudioState};
 use crate::components::eq_panel::{EqPanelActions, EqPanelState};
 use crate::components::settings_tab::{SettingsTabActions, SettingsTabState};
+use crate::state::chain_preset::{self, ChainPreset};
 
 /// Central DSP state container and command dispatcher
 pub struct DspState {
@@ -26,30 +27,11 @@ impl Default for DspState {
 impl DspState {
     /// Sync all restored persistent DSP and EQ parameters to the active audio engine session
     pub fn sync_all_to_session(&self, session: &AudioSession) {
-        // 1. Equalizer Studio & Tone Controls
-        session.set_eq_enabled(self.eq_panel.eq_enabled);
-        session.set_graphic_eq_enabled(self.eq_panel.graphic_enabled);
-        session.set_graphic_eq_layout(self.eq_panel.graphic_layout.clone());
-        let num = self.eq_panel.graphic_layout.num_bands();
-        for b in 0..num {
-            session.set_graphic_eq_slider(b, self.eq_panel.graphic_gains[b]);
-        }
-        session.set_graphic_eq_preamp(self.eq_panel.graphic_preamp_db);
-        session.set_preamp(self.eq_panel.preamp_db);
-        session.set_eq_auto_headroom(self.eq_panel.auto_headroom);
-
-        session.set_bass_shelf(self.eq_panel.bass_shelf_db);
-        session.set_treble_shelf(self.eq_panel.treble_shelf_db);
-        session.set_stereo_width(self.eq_panel.stereo_width);
-        session.set_balance(self.eq_panel.balance);
-        session.set_midside_eq(self.eq_panel.midside_eq);
-        session.set_dither_enabled(self.eq_panel.dither_enabled);
-
-        session.set_limiter_enabled(self.eq_panel.limiter_enabled);
-        session.set_limiter_mode(self.eq_panel.limiter_mode);
-        session.set_compressor_enabled(self.eq_panel.compressor_enabled);
-        session.set_crossfeed_enabled(self.eq_panel.crossfeed_enabled);
-        session.set_crossfeed_profile(self.eq_panel.crossfeed_profile);
+        // 1. The signal chain itself (EQ, tone, dynamics, filters, mix bus) is
+        // pushed by `sync_chain_to_session` at the end of this function, so
+        // startup and "apply a chain preset" restore exactly the same fields.
+        // (Before this, the parametric bands, limiter/compressor parameters and
+        // correction settings were persisted but never restored.)
 
         // 2. Settings Tab & Audio Engine parameters
         let st = &self.settings_tab;
@@ -79,9 +61,6 @@ impl DspState {
         if let Some(mode) = st.precision_mode {
             session.set_precision_mode(mode);
         }
-        session.set_bass_management(st.bass_management.clone());
-        session.set_lfe_config(st.lfe.clone());
-        session.set_channel_mix(st.channel_mix.clone());
         session.set_spatial_quality(st.spatial_quality);
         if !st.hrtf_profile.is_empty() {
             session.set_hrtf_profile(st.hrtf_profile.clone());
@@ -107,6 +86,97 @@ impl DspState {
             config::VoicePriority::DistanceWeighted,
         );
         session.set_stereo_enhancer_enabled(st.stereo_enhancer_enabled);
+
+        // 3. The signal chain, last so this is the single place that defines
+        // what "restore the chain" means.
+        self.sync_chain_to_session(session);
+    }
+
+    /// Push only the signal-chain parameters (EQ, tone, dynamics, filters and
+    /// the mix bus) to the session.
+    ///
+    /// This is deliberately narrower than [`Self::sync_all_to_session`], which
+    /// also re-asserts output device, backend and resampler policy: those
+    /// describe the hardware and re-opening the device mid-track would glitch
+    /// playback. Used when applying a chain preset.
+    pub fn sync_chain_to_session(&self, session: &AudioSession) {
+        let eq = &self.eq_panel;
+
+        // Equalizer: parametric bands first, then the graphic layer that
+        // takes precedence when enabled.
+        session.set_eq_enabled(eq.eq_enabled);
+        for (i, band) in eq.bands.iter().enumerate() {
+            session.set_eq_band_params(
+                i,
+                band.freq,
+                band.gain_db,
+                band.q,
+                band.filter_type,
+                band.enabled,
+            );
+        }
+        session.set_preamp(eq.preamp_db);
+        session.set_eq_auto_headroom(eq.auto_headroom);
+
+        session.set_graphic_eq_enabled(eq.graphic_enabled);
+        session.set_graphic_eq_layout(eq.graphic_layout.clone());
+        for b in 0..eq.graphic_layout.num_bands() {
+            session.set_graphic_eq_slider(b, eq.graphic_gains[b]);
+        }
+        session.set_graphic_eq_preamp(eq.graphic_preamp_db);
+
+        // Tone.
+        session.set_bass_shelf(eq.bass_shelf_db);
+        session.set_treble_shelf(eq.treble_shelf_db);
+        session.set_stereo_width(eq.stereo_width);
+        session.set_balance(eq.balance);
+        session.set_midside_eq(eq.midside_eq);
+        session.set_dither_enabled(eq.dither_enabled);
+
+        // Dynamics.
+        session.set_limiter_enabled(eq.limiter_enabled);
+        session.set_limiter_mode(eq.limiter_mode);
+        session.set_limiter_true_peak(eq.limiter_true_peak);
+        session.set_limiter_params(
+            eq.limiter_lookahead_ms,
+            eq.limiter_attack_ms,
+            eq.limiter_release_ms,
+            eq.limiter_ceiling_db,
+            eq.limiter_soft_clip,
+        );
+        session.set_compressor_enabled(eq.compressor_enabled);
+        for band in 0..3 {
+            session.set_compressor_band_params(
+                band,
+                eq.comp_threshold[band],
+                eq.comp_ratio[band],
+                eq.comp_attack_ms[band],
+                eq.comp_release_ms[band],
+                eq.comp_makeup_db[band],
+            );
+            session.set_compressor_band_features(
+                band,
+                eq.comp_knee_db[band],
+                config::CompressorDetector::Rms,
+                eq.comp_stereo_link[band],
+            );
+        }
+
+        // Filters & correction.
+        session.set_crossfeed_enabled(eq.crossfeed_enabled);
+        session.set_crossfeed_profile(eq.crossfeed_profile);
+        session.set_crossfeed_custom_params(eq.crossfeed_freq, eq.crossfeed_q, eq.crossfeed_delay_ms);
+        session.set_correction_enabled(eq.correction_enabled);
+        session.set_correction_depth(eq.correction_depth);
+        if !eq.correction_ir_path.is_empty() {
+            session.load_correction_ir(std::path::PathBuf::from(&eq.correction_ir_path));
+        }
+
+        // Mix bus.
+        let st = &self.settings_tab;
+        session.set_bass_management(st.bass_management.clone());
+        session.set_lfe_config(st.lfe.clone());
+        session.set_channel_mix(st.channel_mix.clone());
     }
 
     /// Dispatch settings actions to the audio session
@@ -168,6 +238,39 @@ impl DspState {
         if s.duck_tracks {
             let st = &self.settings_tab;
             session.duck_tracks(st.duck_source_slot, vec![], st.duck_threshold_db, st.duck_depth_db, st.duck_attack_ms, st.duck_release_ms);
+        }
+
+        // Chain presets. Saving captures the *current* chain; applying writes a
+        // whole chain back and pushes it in one pass, since the individual
+        // "changed" actions above are per-control.
+        if let Some(name) = s.chain_preset_save.clone() {
+            let note = self.settings_tab.chain_preset_draft_note.clone();
+            let preset = ChainPreset::capture(name.clone(), note, &self.eq_panel, &self.settings_tab);
+            chain_preset::upsert(&mut self.settings_tab.chain_presets, preset);
+            self.settings_tab.chain_preset_notice =
+                Some(format!("Saved chain preset \"{}\"", name.trim()));
+        }
+        if let Some(idx) = s.chain_preset_apply {
+            if let Some(preset) = self.settings_tab.chain_presets.get(idx).cloned() {
+                preset.apply(&mut self.eq_panel, &mut self.settings_tab);
+                self.sync_chain_to_session(session);
+                self.settings_tab.chain_preset_notice =
+                    Some(format!("Applied chain preset \"{}\"", preset.name));
+            }
+        }
+        if let Some((idx, name)) = s.chain_preset_rename.clone() {
+            let name = name.trim().to_string();
+            if !name.is_empty() {
+                if let Some(preset) = self.settings_tab.chain_presets.get_mut(idx) {
+                    preset.name = name;
+                }
+            }
+        }
+        if let Some(idx) = s.chain_preset_delete {
+            if idx < self.settings_tab.chain_presets.len() {
+                self.settings_tab.chain_presets.remove(idx);
+                self.settings_tab.chain_preset_renaming = None;
+            }
         }
         if s.start_capture {
             let st = &self.settings_tab;

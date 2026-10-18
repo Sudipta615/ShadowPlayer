@@ -84,7 +84,7 @@ pub enum TruePeakMode {
 }
 
 /// Post-gain mode: controls what happens after the gain-reduction multiplier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LimiterMode {
     /// Pure dynamics protection — gain reduction only.
     /// The output signal is multiplied by the smoothed gain.
