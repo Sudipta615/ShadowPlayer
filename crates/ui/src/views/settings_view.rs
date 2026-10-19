@@ -1,7 +1,7 @@
-use std::path::PathBuf;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Sense, Stroke, Vec2};
 use audio_session::AudioSession;
 use database::{ScanRootsRepo, TrackRepo};
+use eframe::egui::{self, Color32, CornerRadius, FontId, Sense, Stroke, Vec2};
+use std::path::PathBuf;
 
 use crate::components::settings_tab::{show_settings_tab_extended, SettingsExtraContext};
 use crate::services::{ImportKind, LoudnessProgress};
@@ -18,6 +18,7 @@ pub struct SettingsViewActions {
     pub find_duplicates: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_settings_view(
     ui: &mut egui::Ui,
     dsp_state: &mut DspState,
@@ -46,69 +47,83 @@ pub fn render_settings_view(
             );
 
             // Right-aligned status pills
-            ui.with_layout(
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
-                    // Bit-Perfect Indicator Pill
-                    let (bp_text, bp_bg, bp_fg, bp_border) = if dsp_state.settings_tab.bit_perfect {
-                        ("Bit-Perfect Direct Stream", Color32::from_rgba_premultiplied(16, 185, 129, 35), theme.bit_perfect_green, theme.bit_perfect_green)
-                    } else {
-                        ("DSP Processing Active", theme.bg_pill, theme.accent_magenta, theme.border_card)
-                    };
+                // Bit-Perfect Indicator Pill
+                let (bp_text, bp_bg, bp_fg, bp_border) = if dsp_state.settings_tab.bit_perfect {
+                    (
+                        "Bit-Perfect Direct Stream",
+                        Color32::from_rgba_premultiplied(16, 185, 129, 35),
+                        theme.bit_perfect_green,
+                        theme.bit_perfect_green,
+                    )
+                } else {
+                    (
+                        "DSP Processing Active",
+                        theme.bg_pill,
+                        theme.accent_magenta,
+                        theme.border_card,
+                    )
+                };
 
-                    egui::Frame::NONE
-                        .fill(bp_bg)
-                        .stroke(Stroke::new(1.0, bp_border))
-                        .corner_radius(CornerRadius::same(7))
-                        .inner_margin(egui::Margin::symmetric(10, 5))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
-                                let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                                ui.painter_at(dot_rect).circle_filled(dot_rect.center(), 3.5, bp_fg);
-                                ui.label(
-                                    egui::RichText::new(bp_text)
-                                        .font(FontId::proportional(11.5))
-                                        .strong()
-                                        .color(bp_fg),
-                                );
-                            });
+                egui::Frame::NONE
+                    .fill(bp_bg)
+                    .stroke(Stroke::new(1.0, bp_border))
+                    .corner_radius(CornerRadius::same(7))
+                    .inner_margin(egui::Margin::symmetric(10, 5))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            let (dot_rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                            ui.painter_at(dot_rect)
+                                .circle_filled(dot_rect.center(), 3.5, bp_fg);
+                            ui.label(
+                                egui::RichText::new(bp_text)
+                                    .font(FontId::proportional(11.5))
+                                    .strong()
+                                    .color(bp_fg),
+                            );
                         });
+                    });
 
-                    // Engine Status Pill
-                    egui::Frame::NONE
-                        .fill(theme.bg_pill)
-                        .stroke(Stroke::new(1.0, theme.border_card))
-                        .corner_radius(CornerRadius::same(7))
-                        .inner_margin(egui::Margin::symmetric(10, 5))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
-                                let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                                ui.painter_at(dot_rect).circle_filled(dot_rect.center(), 3.5, theme.accent_pink);
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "Engine {} Active (44.1 - 192kHz)",
-                                        engine::VERSION
-                                    ))
-                                        .font(FontId::proportional(11.5))
-                                        .strong()
-                                        .color(theme.accent_pink),
-                                );
-                            });
+                // Engine Status Pill
+                egui::Frame::NONE
+                    .fill(theme.bg_pill)
+                    .stroke(Stroke::new(1.0, theme.border_card))
+                    .corner_radius(CornerRadius::same(7))
+                    .inner_margin(egui::Margin::symmetric(10, 5))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            let (dot_rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                            ui.painter_at(dot_rect).circle_filled(
+                                dot_rect.center(),
+                                3.5,
+                                theme.accent_pink,
+                            );
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Engine {} Active (44.1 - 192kHz)",
+                                    engine::VERSION
+                                ))
+                                .font(FontId::proportional(11.5))
+                                .strong()
+                                .color(theme.accent_pink),
+                            );
                         });
-                },
-            );
+                    });
+            });
         });
         ui.label(
             egui::RichText::new(format!(
                 "Configure Audio Engine v{}, bit-perfect streaming, 3D acoustics, and library",
                 engine::VERSION
             ))
-                .font(FontId::proportional(12.5))
-                .color(theme.text_muted),
+            .font(FontId::proportional(12.5))
+            .color(theme.text_muted),
         );
         ui.add_space(2.0);
 

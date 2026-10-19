@@ -129,10 +129,17 @@ impl ClapRackPreset {
         Self {
             name: name.into(),
             note: note.into(),
-            plugin_id: view.rack.plugin.as_ref().map(|p| p.id.clone()).unwrap_or_default(),
+            plugin_id: view
+                .rack
+                .plugin
+                .as_ref()
+                .map(|p| p.id.clone())
+                .unwrap_or_default(),
             plugin_name: view.rack.display_name(),
             params,
-            state: state.filter(|bytes| !bytes.is_empty()).map(|bytes| base64_encode(&bytes)),
+            state: state
+                .filter(|bytes| !bytes.is_empty())
+                .map(|bytes| base64_encode(&bytes)),
         }
     }
 
@@ -271,6 +278,7 @@ impl ClapCardSummary {
 // ── Window state ────────────────────────────────────────────────────────────
 
 /// The rack window's state and the preset library.
+#[derive(Default)]
 pub struct ClapRackState {
     pub is_open: bool,
     pub window_pos: Option<[f32; 2]>,
@@ -294,25 +302,6 @@ pub struct ClapRackState {
     pub pending_toast: Option<String>,
     /// The last library loaded, offered the next time the picker opens.
     pub last_library: String,
-}
-
-impl Default for ClapRackState {
-    fn default() -> Self {
-        Self {
-            is_open: false,
-            window_pos: None,
-            presets: Vec::new(),
-            preset_name: String::new(),
-            preset_note: String::new(),
-            selected_preset: None,
-            probe_path: None,
-            pending_autoload_done: false,
-            pending_save: None,
-            notice: None,
-            pending_toast: None,
-            last_library: String::new(),
-        }
-    }
 }
 
 impl ClapRackState {
@@ -515,7 +504,10 @@ mod tests {
     fn an_empty_blob_is_treated_as_no_blob() {
         let view = view_with(Some("Verb"), vec![]);
         let preset = ClapRackPreset::capture("Empty", "", &view, vec![], Some(Vec::new()));
-        assert!(!preset.has_state(), "an empty blob is not state worth keeping");
+        assert!(
+            !preset.has_state(),
+            "an empty blob is not state worth keeping"
+        );
     }
 
     #[test]
@@ -541,9 +533,15 @@ mod tests {
         let mut state = ClapRackState::default();
         let verb = view_with(Some("Verb"), vec![]);
         let delay = view_with(Some("Delay"), vec![]);
-        state.presets.push(ClapRackPreset::capture("v1", "", &verb, vec![], None));
-        state.presets.push(ClapRackPreset::capture("d1", "", &delay, vec![], None));
-        state.presets.push(ClapRackPreset::capture("v2", "", &verb, vec![], None));
+        state
+            .presets
+            .push(ClapRackPreset::capture("v1", "", &verb, vec![], None));
+        state
+            .presets
+            .push(ClapRackPreset::capture("d1", "", &delay, vec![], None));
+        state
+            .presets
+            .push(ClapRackPreset::capture("v2", "", &verb, vec![], None));
 
         assert_eq!(state.presets_for("com.test.Verb"), vec![0, 2]);
         assert_eq!(state.presets_for("com.test.Delay"), vec![1]);
@@ -576,8 +574,10 @@ mod tests {
     #[test]
     fn finishing_a_save_stores_the_parameters_and_the_blob() {
         let view = view_with(Some("Verb"), vec![param(0, 4.0)]);
-        let mut state = ClapRackState::default();
-        state.preset_name = "Hall".to_string();
+        let mut state = ClapRackState {
+            preset_name: "Hall".to_string(),
+            ..ClapRackState::default()
+        };
         assert!(state.begin_save(&view));
 
         let index = state.finish_save(&view, Some(vec![1, 2, 3])).unwrap();
@@ -591,8 +591,10 @@ mod tests {
     #[test]
     fn a_save_that_never_gets_its_blob_still_stores_the_values() {
         let view = view_with(Some("Verb"), vec![param(0, 4.0)]);
-        let mut state = ClapRackState::default();
-        state.preset_name = "Hall".to_string();
+        let mut state = ClapRackState {
+            preset_name: "Hall".to_string(),
+            ..ClapRackState::default()
+        };
         assert!(state.begin_save(&view));
 
         // Simulate the deadline passing.
@@ -621,7 +623,9 @@ mod tests {
 
         let mut bypassed = view_with(Some("Verb"), vec![]);
         bypassed.rack.bypassed = true;
-        assert!(ClapCardSummary::from_view(&bypassed).status_line().contains("bypassed"));
+        assert!(ClapCardSummary::from_view(&bypassed)
+            .status_line()
+            .contains("bypassed"));
 
         let empty = ClapCardSummary::from_view(&ClapRackView::default());
         assert!(!empty.loaded);
@@ -649,8 +653,10 @@ mod tests {
         // one is not the user's to restore.
         let view = view_with(Some("Verb"), vec![param(0, 4.0), hidden, readonly]);
 
-        let mut state = ClapRackState::default();
-        state.preset_name = "Hall".to_string();
+        let mut state = ClapRackState {
+            preset_name: "Hall".to_string(),
+            ..ClapRackState::default()
+        };
         assert!(state.begin_save(&view));
         let pending = state.pending_save.clone().unwrap();
         assert_eq!(pending.params, vec![(0, 4.0)]);

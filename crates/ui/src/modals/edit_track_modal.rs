@@ -1,5 +1,5 @@
-use eframe::egui::{self, Color32, FontId, Vec2};
 use domain::models::Track;
+use eframe::egui::{self, Color32, FontId, Vec2};
 
 use crate::theme::Theme;
 
@@ -28,7 +28,10 @@ impl EditTrackState {
         self.album = track.album.clone();
         self.genre = track.genre.clone().unwrap_or_default();
         self.year = track.year.map(|y| y.to_string()).unwrap_or_default();
-        self.track_number = track.track_number.map(|n| n.to_string()).unwrap_or_default();
+        self.track_number = track
+            .track_number
+            .map(|n| n.to_string())
+            .unwrap_or_default();
         self.disc_number = track.disc_number.map(|n| n.to_string()).unwrap_or_default();
     }
 }
@@ -85,10 +88,7 @@ pub fn show_edit_track_modal(
                             );
                         },
                     );
-                    ui.add(
-                        egui::TextEdit::singleline(buf)
-                            .desired_width(ui.available_width()),
-                    );
+                    ui.add(egui::TextEdit::singleline(buf).desired_width(ui.available_width()));
                 });
             };
 
@@ -102,10 +102,8 @@ pub fn show_edit_track_modal(
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let save_btn = egui::Button::new(
-                    egui::RichText::new("Save").color(Color32::WHITE),
-                )
-                .fill(theme.accent_violet);
+                let save_btn = egui::Button::new(egui::RichText::new("Save").color(Color32::WHITE))
+                    .fill(theme.accent_violet);
                 if ui.add(save_btn).clicked() {
                     save = true;
                 }

@@ -1,9 +1,9 @@
-use domain::models::{SortField, SortOrder, Track};
 use crate::components::right_panel::RightTab;
 use crate::components::sidebar::NavItem;
 use crate::modals::edit_track_modal::EditTrackState;
 use crate::modals::playlist_editor_modal::PlaylistEditorState;
 use crate::state::sleep_timer::SleepTimer;
+use domain::models::{SortField, SortOrder, Track};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VisualizerMode {

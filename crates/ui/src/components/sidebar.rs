@@ -1,8 +1,8 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Ui, Vec2};
+use crate::theme::Theme;
 use domain::ids::PlaylistId;
 use domain::models::Playlist;
 use domain::smart::SmartPlaylist;
-use crate::theme::Theme;
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Ui, Vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavItem {
@@ -114,8 +114,13 @@ impl<'a> SideBar<'a> {
                         .color(self.theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (plus_rect, plus_resp) = ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::click());
-                    let plus_color = if plus_resp.hovered() { self.theme.text_primary } else { self.theme.text_muted };
+                    let (plus_rect, plus_resp) =
+                        ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::click());
+                    let plus_color = if plus_resp.hovered() {
+                        self.theme.text_primary
+                    } else {
+                        self.theme.text_muted
+                    };
                     crate::components::icons::draw_plus_circle(ui, plus_rect, plus_color);
                     if plus_resp.clicked() {
                         (self.on_create_playlist)();
@@ -231,8 +236,15 @@ impl<'a> SideBar<'a> {
         // A filter glyph marks rule-based playlists.
         crate::components::icons::draw_filter(
             ui,
-            Rect::from_center_size(Pos2::new(rect.min.x + 16.0, rect.center().y), Vec2::new(13.0, 13.0)),
-            if is_active { Color32::WHITE } else { self.theme.accent_blue },
+            Rect::from_center_size(
+                Pos2::new(rect.min.x + 16.0, rect.center().y),
+                Vec2::new(13.0, 13.0),
+            ),
+            if is_active {
+                Color32::WHITE
+            } else {
+                self.theme.accent_blue
+            },
         );
 
         let label_pos = Pos2::new(rect.min.x + 30.0, rect.center().y);
@@ -274,8 +286,19 @@ impl<'a> SideBar<'a> {
         };
 
         // Icon
-        let pl_icon_rect = Rect::from_center_size(Pos2::new(rect.min.x + 16.0, rect.center().y), Vec2::new(14.0, 14.0));
-        crate::components::icons::draw_list_icon(ui, pl_icon_rect, if is_active { Color32::WHITE } else { self.theme.accent_pink });
+        let pl_icon_rect = Rect::from_center_size(
+            Pos2::new(rect.min.x + 16.0, rect.center().y),
+            Vec2::new(14.0, 14.0),
+        );
+        crate::components::icons::draw_list_icon(
+            ui,
+            pl_icon_rect,
+            if is_active {
+                Color32::WHITE
+            } else {
+                self.theme.accent_pink
+            },
+        );
 
         // Playlist name
         let label_pos = Pos2::new(rect.min.x + 30.0, rect.center().y);
@@ -284,15 +307,23 @@ impl<'a> SideBar<'a> {
             FontId::proportional(12.8),
             text_color,
         );
-        painter.galley(Pos2::new(label_pos.x, rect.center().y - galley.size().y * 0.5), galley, text_color);
+        painter.galley(
+            Pos2::new(label_pos.x, rect.center().y - galley.size().y * 0.5),
+            galley,
+            text_color,
+        );
 
         // Count badge
         painter.text(
             Pos2::new(rect.max.x - 8.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
-            &format!("{}", playlist.track_count),
+            format!("{}", playlist.track_count),
             FontId::proportional(11.0),
-            if is_active { Color32::WHITE } else { self.theme.text_muted },
+            if is_active {
+                Color32::WHITE
+            } else {
+                self.theme.text_muted
+            },
         );
     }
 
@@ -315,16 +346,17 @@ impl<'a> SideBar<'a> {
             painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
         }
 
-        let text_color = if is_active {
-            self.theme.text_primary
-        } else if is_hovered {
+        let text_color = if is_active || is_hovered {
             self.theme.text_primary
         } else {
             self.theme.text_secondary
         };
 
         // Render Icon
-        let icon_rect = Rect::from_center_size(Pos2::new(rect.min.x + 22.0, rect.center().y), Vec2::new(20.0, 20.0));
+        let icon_rect = Rect::from_center_size(
+            Pos2::new(rect.min.x + 22.0, rect.center().y),
+            Vec2::new(20.0, 20.0),
+        );
         match item {
             NavItem::Home => crate::components::icons::draw_home(ui, icon_rect, text_color),
             NavItem::Albums => crate::components::icons::draw_disc(ui, icon_rect, text_color),

@@ -1,5 +1,5 @@
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 use crate::theme::Theme;
+use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 
 /// Dual Analog Ballistic Needle VU Meter Widget
 pub struct VuMeterWidget<'a> {
@@ -35,11 +35,7 @@ impl<'a> VuMeterWidget<'a> {
         let painter = ui.painter_at(rect);
 
         // Dark chassis frame
-        painter.rect_filled(
-            rect,
-            8.0,
-            Color32::from_rgba_premultiplied(12, 14, 22, 240),
-        );
+        painter.rect_filled(rect, 8.0, Color32::from_rgba_premultiplied(12, 14, 22, 240));
         painter.rect_stroke(
             rect,
             8.0,
@@ -52,12 +48,32 @@ impl<'a> VuMeterWidget<'a> {
         let meter_h = rect.height() - 16.0;
 
         // Render Left Meter
-        let l_rect = Rect::from_min_size(Pos2::new(rect.left() + 12.0, rect.top() + 8.0), Vec2::new(meter_w, meter_h));
-        Self::draw_analog_dial(&painter, l_rect, "LEFT", self.peak_db_l, self.true_peak_dbtp > 0.0, self.theme);
+        let l_rect = Rect::from_min_size(
+            Pos2::new(rect.left() + 12.0, rect.top() + 8.0),
+            Vec2::new(meter_w, meter_h),
+        );
+        Self::draw_analog_dial(
+            &painter,
+            l_rect,
+            "LEFT",
+            self.peak_db_l,
+            self.true_peak_dbtp > 0.0,
+            self.theme,
+        );
 
         // Render Right Meter
-        let r_rect = Rect::from_min_size(Pos2::new(l_rect.right() + gap, rect.top() + 8.0), Vec2::new(meter_w, meter_h));
-        Self::draw_analog_dial(&painter, r_rect, "RIGHT", self.peak_db_r, self.true_peak_dbtp > 0.0, self.theme);
+        let r_rect = Rect::from_min_size(
+            Pos2::new(l_rect.right() + gap, rect.top() + 8.0),
+            Vec2::new(meter_w, meter_h),
+        );
+        Self::draw_analog_dial(
+            &painter,
+            r_rect,
+            "RIGHT",
+            self.peak_db_r,
+            self.true_peak_dbtp > 0.0,
+            self.theme,
+        );
     }
 
     fn draw_analog_dial(
@@ -69,11 +85,7 @@ impl<'a> VuMeterWidget<'a> {
         theme: &Theme,
     ) {
         // Dial Face (Warm retro incandescent glass or deep dark cyber)
-        painter.rect_filled(
-            rect,
-            6.0,
-            Color32::from_rgb(18, 20, 32),
-        );
+        painter.rect_filled(rect, 6.0, Color32::from_rgb(18, 20, 32));
         painter.rect_stroke(
             rect,
             6.0,
@@ -137,7 +149,10 @@ impl<'a> VuMeterWidget<'a> {
 
             // Numbers on major ticks
             if db == -20.0 || db == -10.0 || db == -5.0 || db == 0.0 || db == 3.0 {
-                let p_txt = Pos2::new(pivot.x + (dial_radius - 20.0) * rad.cos(), pivot.y + (dial_radius - 20.0) * rad.sin());
+                let p_txt = Pos2::new(
+                    pivot.x + (dial_radius - 20.0) * rad.cos(),
+                    pivot.y + (dial_radius - 20.0) * rad.sin(),
+                );
                 painter.text(
                     p_txt,
                     egui::Align2::CENTER_CENTER,
@@ -159,7 +174,10 @@ impl<'a> VuMeterWidget<'a> {
 
         // Needle shadow
         let shadow_tip = Pos2::new(needle_tip.x + 1.5, needle_tip.y + 1.5);
-        painter.line_segment([pivot, shadow_tip], Stroke::new(1.5_f32, Color32::from_rgba_premultiplied(0, 0, 0, 80)));
+        painter.line_segment(
+            [pivot, shadow_tip],
+            Stroke::new(1.5_f32, Color32::from_rgba_premultiplied(0, 0, 0, 80)),
+        );
 
         // Needle line
         let needle_color = if needle_db >= 0.0 {
@@ -184,7 +202,10 @@ impl<'a> VuMeterWidget<'a> {
         // Peak Overload LED
         let led_pos = Pos2::new(rect.right() - 10.0, rect.top() + 10.0);
         let (led_fill, led_glow) = if peak_overload || needle_db >= 0.0 {
-            (Color32::from_rgb(255, 30, 30), Color32::from_rgba_premultiplied(255, 0, 0, 90))
+            (
+                Color32::from_rgb(255, 30, 30),
+                Color32::from_rgba_premultiplied(255, 0, 0, 90),
+            )
         } else {
             (Color32::from_rgb(40, 20, 25), Color32::TRANSPARENT)
         };

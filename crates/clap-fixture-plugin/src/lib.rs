@@ -254,8 +254,8 @@ static GAIN_DESC: clap_plugin_descriptor = clap_plugin_descriptor {
     manual_url: std::ptr::null(),
     support_url: std::ptr::null(),
     version: FIXTURE_VERSION.as_ptr() as *const c_char,
-    description: cstr!("A test fixture: stereo gain with a dry/wet blend.")
-        .as_ptr() as *const c_char,
+    description: cstr!("A test fixture: stereo gain with a dry/wet blend.").as_ptr()
+        as *const c_char,
     features: FEATURES.0.as_ptr(),
 };
 
@@ -268,8 +268,7 @@ static TRIM_DESC: clap_plugin_descriptor = clap_plugin_descriptor {
     manual_url: std::ptr::null(),
     support_url: std::ptr::null(),
     version: FIXTURE_VERSION.as_ptr() as *const c_char,
-    description: cstr!("A test fixture: input and output trim.")
-        .as_ptr() as *const c_char,
+    description: cstr!("A test fixture: input and output trim.").as_ptr() as *const c_char,
     features: FEATURES.0.as_ptr(),
 };
 
@@ -679,11 +678,7 @@ unsafe extern "C" fn params_get_info(
     true
 }
 
-unsafe extern "C" fn params_get_value(
-    plugin: *const clap_plugin,
-    id: u32,
-    out: *mut f64,
-) -> bool {
+unsafe extern "C" fn params_get_value(plugin: *const clap_plugin, id: u32, out: *mut f64) -> bool {
     if plugin.is_null() || out.is_null() {
         return false;
     }

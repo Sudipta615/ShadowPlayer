@@ -1,7 +1,7 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use crate::theme::Theme;
 use domain::ids::TrackId;
 use domain::models::{Genre, Track};
-use crate::theme::Theme;
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 pub struct GenresViewAction {
     pub play_genre: Option<String>,
@@ -64,9 +64,22 @@ impl<'a> GenresView<'a> {
                     let box_size = Vec2::new(80.0, 80.0);
                     let (box_rect, _) = ui.allocate_exact_size(box_size, Sense::hover());
                     let p = ui.painter_at(box_rect);
-                    p.rect_filled(box_rect, CornerRadius::same(12), self.theme.artwork_placeholder);
-                    p.rect_stroke(box_rect, CornerRadius::same(12), Stroke::new(1.2_f32, self.theme.accent_pink), egui::StrokeKind::Inside);
-                    crate::components::icons::draw_genres(ui, box_rect.shrink2(Vec2::new(20.0, 20.0)), self.theme.accent_pink);
+                    p.rect_filled(
+                        box_rect,
+                        CornerRadius::same(12),
+                        self.theme.artwork_placeholder,
+                    );
+                    p.rect_stroke(
+                        box_rect,
+                        CornerRadius::same(12),
+                        Stroke::new(1.2_f32, self.theme.accent_pink),
+                        egui::StrokeKind::Inside,
+                    );
+                    crate::components::icons::draw_genres(
+                        ui,
+                        box_rect.shrink2(Vec2::new(20.0, 20.0)),
+                        self.theme.accent_pink,
+                    );
 
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
@@ -132,24 +145,38 @@ impl<'a> GenresView<'a> {
                         let is_fav = self.favorite_track_ids.contains(&track.id);
                         let row_h = 38.0;
 
-                        let (row_rect, row_resp) = ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
+                        let (row_rect, row_resp) =
+                            ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
                         if row_resp.double_clicked() {
                             action.play_track = Some(track.id);
                         }
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_active_row,
+                            );
+                            painter.rect_stroke(
+                                row_rect,
+                                CornerRadius::same(6),
+                                Stroke::new(1.0_f32, self.theme.border_active_row),
+                                egui::StrokeKind::Inside,
+                            );
                         } else if row_resp.hovered() {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_card_hover,
+                            );
                         }
 
                         let cy = row_rect.center().y;
                         painter.text(
                             Pos2::new(row_rect.min.x + 10.0, cy),
                             egui::Align2::LEFT_CENTER,
-                            &format!("{:02}", idx + 1),
+                            format!("{:02}", idx + 1),
                             FontId::proportional(12.0),
                             self.theme.text_muted,
                         );
@@ -159,7 +186,11 @@ impl<'a> GenresView<'a> {
                             egui::Align2::LEFT_CENTER,
                             &track.title,
                             FontId::proportional(13.2),
-                            if is_cur { Color32::WHITE } else { self.theme.text_primary },
+                            if is_cur {
+                                Color32::WHITE
+                            } else {
+                                self.theme.text_primary
+                            },
                         );
 
                         painter.text(
@@ -179,9 +210,18 @@ impl<'a> GenresView<'a> {
                             self.theme.text_muted,
                         );
 
-                        let fav_rect = Rect::from_center_size(Pos2::new(row_rect.max.x - 16.0, cy), Vec2::new(18.0, 18.0));
+                        let fav_rect = Rect::from_center_size(
+                            Pos2::new(row_rect.max.x - 16.0, cy),
+                            Vec2::new(18.0, 18.0),
+                        );
                         let fav_hover = ui.rect_contains_pointer(fav_rect);
-                        let heart_col = if is_fav { self.theme.accent_pink } else if fav_hover { self.theme.text_primary } else { self.theme.text_muted };
+                        let heart_col = if is_fav {
+                            self.theme.accent_pink
+                        } else if fav_hover {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_muted
+                        };
                         crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_fav);
 
                         if fav_hover && ui.input(|i| i.pointer.primary_clicked()) {
@@ -211,7 +251,11 @@ impl<'a> GenresView<'a> {
             if self.genres.is_empty() {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
-                    ui.label(egui::RichText::new("No genres found in library").font(FontId::proportional(15.0)).color(self.theme.text_muted));
+                    ui.label(
+                        egui::RichText::new("No genres found in library")
+                            .font(FontId::proportional(15.0))
+                            .color(self.theme.text_muted),
+                    );
                 });
             } else {
                 egui::ScrollArea::vertical()
@@ -226,16 +270,35 @@ impl<'a> GenresView<'a> {
                             .spacing(Vec2::new(14.0, 14.0))
                             .show(ui, |ui| {
                                 for (idx, genre) in self.genres.iter().enumerate() {
-                                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::click());
+                                    let (rect, resp) = ui.allocate_exact_size(
+                                        Vec2::new(card_w, card_h),
+                                        Sense::click(),
+                                    );
                                     let p = ui.painter_at(rect);
 
-                                    let bg = if resp.hovered() { self.theme.bg_card_hover } else { self.theme.bg_card };
+                                    let bg = if resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else {
+                                        self.theme.bg_card
+                                    };
                                     p.rect_filled(rect, CornerRadius::same(10), bg);
-                                    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0_f32, self.theme.border_card), egui::StrokeKind::Inside);
+                                    p.rect_stroke(
+                                        rect,
+                                        CornerRadius::same(10),
+                                        Stroke::new(1.0_f32, self.theme.border_card),
+                                        egui::StrokeKind::Inside,
+                                    );
 
                                     let cy = rect.center().y;
-                                    let icon_rect = Rect::from_center_size(Pos2::new(rect.min.x + 28.0, cy), Vec2::new(28.0, 28.0));
-                                    crate::components::icons::draw_genres(ui, icon_rect, self.theme.accent_pink);
+                                    let icon_rect = Rect::from_center_size(
+                                        Pos2::new(rect.min.x + 28.0, cy),
+                                        Vec2::new(28.0, 28.0),
+                                    );
+                                    crate::components::icons::draw_genres(
+                                        ui,
+                                        icon_rect,
+                                        self.theme.accent_pink,
+                                    );
 
                                     p.text(
                                         Pos2::new(rect.min.x + 52.0, cy - 8.0),
@@ -248,7 +311,7 @@ impl<'a> GenresView<'a> {
                                     p.text(
                                         Pos2::new(rect.min.x + 52.0, cy + 10.0),
                                         egui::Align2::LEFT_CENTER,
-                                        &format!("{} songs", genre.track_count),
+                                        format!("{} songs", genre.track_count),
                                         FontId::proportional(11.5),
                                         self.theme.text_muted,
                                     );

@@ -126,12 +126,8 @@ impl ToastState {
                             theme.bg_card.b(),
                             a.saturating_sub(30),
                         );
-                        let border = Color32::from_rgba_unmultiplied(
-                            accent.r(),
-                            accent.g(),
-                            accent.b(),
-                            a,
-                        );
+                        let border =
+                            Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), a);
                         let text = Color32::from_rgba_unmultiplied(
                             theme.text_primary.r(),
                             theme.text_primary.g(),

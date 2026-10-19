@@ -1,5 +1,5 @@
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 use crate::theme::Theme;
+use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 
 /// Interactive 2D/3D Soundstage and Spatial Radar Canvas
 pub struct SpatialRadarWidget<'a> {
@@ -20,11 +20,7 @@ pub struct SpatialRadarResponse {
 }
 
 impl<'a> SpatialRadarWidget<'a> {
-    pub fn new(
-        center_azimuth_deg: &'a mut f32,
-        listener_yaw_deg: f32,
-        theme: &'a Theme,
-    ) -> Self {
+    pub fn new(center_azimuth_deg: &'a mut f32, listener_yaw_deg: f32, theme: &'a Theme) -> Self {
         Self {
             center_azimuth_deg,
             listener_yaw_deg,
@@ -83,7 +79,10 @@ impl<'a> SpatialRadarWidget<'a> {
         painter.text(
             Pos2::new(room_rect.left() + 6.0, room_rect.top() + 4.0),
             egui::Align2::LEFT_TOP,
-            format!("Virtual Room: {:.1}m × {:.1}m", self.room_width_m, self.room_depth_m),
+            format!(
+                "Virtual Room: {:.1}m × {:.1}m",
+                self.room_width_m, self.room_depth_m
+            ),
             FontId::proportional(9.5),
             self.theme.text_muted,
         );
@@ -106,11 +105,17 @@ impl<'a> SpatialRadarWidget<'a> {
 
         // 3. Draw Crosshair / Angle Lines (Ahead, Left, Right, Behind)
         painter.line_segment(
-            [Pos2::new(center.x, rect.top() + 15.0), Pos2::new(center.x, rect.bottom() - 15.0)],
+            [
+                Pos2::new(center.x, rect.top() + 15.0),
+                Pos2::new(center.x, rect.bottom() - 15.0),
+            ],
             grid_stroke,
         );
         painter.line_segment(
-            [Pos2::new(rect.left() + 15.0, center.y), Pos2::new(rect.right() - 15.0, center.y)],
+            [
+                Pos2::new(rect.left() + 15.0, center.y),
+                Pos2::new(rect.right() - 15.0, center.y),
+            ],
             grid_stroke,
         );
 
@@ -121,8 +126,14 @@ impl<'a> SpatialRadarWidget<'a> {
 
         // Listener nose / direction pointer
         let yaw_rad = (self.listener_yaw_deg - 90.0).to_radians();
-        let nose_tip = Pos2::new(center.x + 14.0 * yaw_rad.cos(), center.y + 14.0 * yaw_rad.sin());
-        painter.line_segment([center, nose_tip], Stroke::new(2.5_f32, self.theme.accent_violet));
+        let nose_tip = Pos2::new(
+            center.x + 14.0 * yaw_rad.cos(),
+            center.y + 14.0 * yaw_rad.sin(),
+        );
+        painter.line_segment(
+            [center, nose_tip],
+            Stroke::new(2.5_f32, self.theme.accent_violet),
+        );
 
         // 5. Handle Dragging of the Virtual Centre
         let mouse_pos = ui.input(|i| i.pointer.hover_pos());

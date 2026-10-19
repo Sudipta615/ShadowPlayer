@@ -1,9 +1,11 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
+use crate::theme::Theme;
 use config::{CrossfeedProfile, GraphicEqLayout};
+use eframe::egui::{
+    self, Color32, CornerRadius, FontId, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window,
+};
 use engine::dsp::equalizer::EqFilterType;
 use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
-use crate::theme::Theme;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Presets
@@ -75,7 +77,9 @@ impl EqPreset {
 
     /// Interpolate gains across any frequency ladder (e.g. 10, 15, 31, 64 bands)
     pub fn gains_for_frequencies(&self, freqs: &[f32]) -> Vec<f32> {
-        let base_freqs = [31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+        let base_freqs = [
+            31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+        ];
         match self.gains() {
             Some(base_gains) => freqs
                 .iter()
@@ -87,7 +91,11 @@ impl EqPreset {
 }
 
 /// Interpolates gain across an arbitrary frequency using log2 space
-fn interpolate_preset_gain(target_freq: f32, base_freqs: &[f32; 10], base_gains: &[f32; 10]) -> f32 {
+fn interpolate_preset_gain(
+    target_freq: f32,
+    base_freqs: &[f32; 10],
+    base_gains: &[f32; 10],
+) -> f32 {
     if target_freq <= base_freqs[0] {
         return base_gains[0];
     }
@@ -161,7 +169,7 @@ pub struct EqPanelState {
     pub selected_custom_preset_idx: Option<usize>,
     pub is_saving_preset: bool,
     pub new_preset_name: String,
-    pub extended_range: bool, // Extended ±24 dB range toggle
+    pub extended_range: bool,         // Extended ±24 dB range toggle
     pub window_pos: Option<[f32; 2]>, // Persisted center or user placed position
 
     // Parametric (legacy / AutoEQ targets)
@@ -217,7 +225,9 @@ pub struct EqPanelState {
 
 impl Default for EqPanelState {
     fn default() -> Self {
-        let default_freqs = [31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+        let default_freqs = [
+            31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+        ];
         let mut bands: [ParametricBand; 10] = std::array::from_fn(|_| ParametricBand::default());
         for (i, b) in bands.iter_mut().enumerate() {
             b.freq = default_freqs[i];
@@ -516,12 +526,17 @@ pub fn show_eq_panel(
         return actions;
     }
 
-    let screen = ctx.input(|i| i.raw.screen_rect).unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 830.0)));
+    let screen = ctx
+        .input(|i| i.raw.screen_rect)
+        .unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 830.0)));
     let default_w = 760.0_f32.min((screen.width() - 40.0).max(400.0));
     let default_h = 550.0_f32.min((screen.height() - 40.0).max(350.0));
     let default_x = ((screen.width() - default_w) / 2.0).max(10.0);
     let default_y = ((screen.height() - default_h) / 2.0).max(10.0);
-    let initial_pos = state.window_pos.map(|[x, y]| Pos2::new(x, y)).unwrap_or_else(|| Pos2::new(default_x, default_y));
+    let initial_pos = state
+        .window_pos
+        .map(|[x, y]| Pos2::new(x, y))
+        .unwrap_or_else(|| Pos2::new(default_x, default_y));
 
     // Floating studio panel styled directly with active design system tokens
     let win_response = Window::new("equalizer_floating_studio")
@@ -596,17 +611,29 @@ pub fn show_eq_panel(
                         let badge_pos = overlay_rect.center();
                         let badge_text = "Equalizer Bypassed (Toggle Switch in Header to Enable)";
                         let font = FontId::proportional(12.5);
-                        let galley = ui.painter().layout_no_wrap(badge_text.to_string(), font, theme.text_muted);
-                        let badge_rect = Rect::from_center_size(badge_pos, galley.size() + Vec2::new(26.0, 12.0));
+                        let galley = ui.painter().layout_no_wrap(
+                            badge_text.to_string(),
+                            font,
+                            theme.text_muted,
+                        );
+                        let badge_rect = Rect::from_center_size(
+                            badge_pos,
+                            galley.size() + Vec2::new(26.0, 12.0),
+                        );
 
-                        ui.painter().rect_filled(badge_rect, CornerRadius::same(12), theme.bg_pill);
+                        ui.painter()
+                            .rect_filled(badge_rect, CornerRadius::same(12), theme.bg_pill);
                         ui.painter().rect_stroke(
                             badge_rect,
                             CornerRadius::same(12),
                             Stroke::new(1.0, theme.border_card),
                             egui::StrokeKind::Inside,
                         );
-                        ui.painter().galley(badge_rect.min + Vec2::new(13.0, 6.0), galley, theme.text_secondary);
+                        ui.painter().galley(
+                            badge_rect.min + Vec2::new(13.0, 6.0),
+                            galley,
+                            theme.text_secondary,
+                        );
                     }
                 }
             }
@@ -668,7 +695,8 @@ fn render_header(
             ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
 
             // Close button (✕)
-            let (close_rect, close_resp) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
+            let (close_rect, close_resp) =
+                ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
             let cp = ui.painter_at(close_rect);
             let close_bg = if close_resp.hovered() {
                 Color32::from_rgba_premultiplied(239, 68, 68, 50)
@@ -681,13 +709,21 @@ fn render_header(
             } else {
                 theme.text_secondary
             };
-            crate::components::icons::draw_window_close(ui, close_rect.shrink2(Vec2::splat(6.0)), icon_col);
-            if close_resp.on_hover_text("Close Equalizer Panel (Esc)").clicked() {
+            crate::components::icons::draw_window_close(
+                ui,
+                close_rect.shrink2(Vec2::splat(6.0)),
+                icon_col,
+            );
+            if close_resp
+                .on_hover_text("Close Equalizer Panel (Esc)")
+                .clicked()
+            {
                 state.is_open = false;
             }
 
             // More Options (⋮) button
-            let (more_rect, more_resp) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
+            let (more_rect, more_resp) =
+                ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
             let mp = ui.painter_at(more_rect);
             let more_bg = if state.show_more_menu || more_resp.hovered() {
                 theme.bg_card_hover
@@ -695,8 +731,16 @@ fn render_header(
                 theme.bg_pill
             };
             mp.rect_filled(more_rect, CornerRadius::same(6), more_bg);
-            let more_col = if state.show_more_menu { theme.accent_pink } else { theme.text_secondary };
-            crate::components::icons::draw_more_menu(ui, more_rect.shrink2(Vec2::splat(5.0)), more_col);
+            let more_col = if state.show_more_menu {
+                theme.accent_pink
+            } else {
+                theme.text_secondary
+            };
+            crate::components::icons::draw_more_menu(
+                ui,
+                more_rect.shrink2(Vec2::splat(5.0)),
+                more_col,
+            );
             if more_resp.on_hover_text("More EQ & DSP Tools").clicked() {
                 state.show_more_menu = !state.show_more_menu;
             }
@@ -731,28 +775,56 @@ fn render_more_menu(
                 )
                 .fill(theme.accent_magenta)
                 .corner_radius(CornerRadius::same(6));
-                if ui.add(autoeq_btn).on_hover_text("Calibrate headphones via the AutoEQ curve database").clicked() {
+                if ui
+                    .add(autoeq_btn)
+                    .on_hover_text("Calibrate headphones via the AutoEQ curve database")
+                    .clicked()
+                {
                     actions.open_autoeq_dialog = true;
                     state.show_more_menu = false;
                 }
 
                 // Dither Toggle
                 let mut dither = state.dither_enabled;
-                if ui.checkbox(&mut dither, egui::RichText::new("TPDF Dither").font(FontId::proportional(12.0)).color(theme.text_secondary)).changed() {
+                if ui
+                    .checkbox(
+                        &mut dither,
+                        egui::RichText::new("TPDF Dither")
+                            .font(FontId::proportional(12.0))
+                            .color(theme.text_secondary),
+                    )
+                    .changed()
+                {
                     state.dither_enabled = dither;
                     actions.dither_enabled_changed = Some(dither);
                 }
 
                 // Mid/Side EQ Toggle
                 let mut midside = state.midside_eq;
-                if ui.checkbox(&mut midside, egui::RichText::new("Mid/Side Processing").font(FontId::proportional(12.0)).color(theme.text_secondary)).changed() {
+                if ui
+                    .checkbox(
+                        &mut midside,
+                        egui::RichText::new("Mid/Side Processing")
+                            .font(FontId::proportional(12.0))
+                            .color(theme.text_secondary),
+                    )
+                    .changed()
+                {
                     state.midside_eq = midside;
                     actions.midside_eq_changed = Some(midside);
                 }
 
                 // Auto Headroom
                 let mut ah = state.auto_headroom;
-                if ui.checkbox(&mut ah, egui::RichText::new("Auto Headroom").font(FontId::proportional(12.0)).color(theme.text_secondary)).changed() {
+                if ui
+                    .checkbox(
+                        &mut ah,
+                        egui::RichText::new("Auto Headroom")
+                            .font(FontId::proportional(12.0))
+                            .color(theme.text_secondary),
+                    )
+                    .changed()
+                {
                     state.auto_headroom = ah;
                     actions.eq_auto_headroom_changed = Some(ah);
                 }
@@ -764,11 +836,7 @@ fn render_more_menu(
 // 3. Tab Switcher Navigation
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn render_tab_navigation(
-    ui: &mut egui::Ui,
-    state: &mut EqPanelState,
-    theme: &Theme,
-) {
+fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Theme) {
     ui.vertical_centered(|ui| {
         let tab_items = [
             (EqTab::Graphic, "Graphic Equalizer"),
@@ -779,7 +847,8 @@ fn render_tab_navigation(
         let tab_w = 142.0;
         let tab_h = 32.0;
         let spacing = 6.0;
-        let total_w = (tab_items.len() as f32 * tab_w) + ((tab_items.len() - 1) as f32 * spacing) + 10.0;
+        let total_w =
+            (tab_items.len() as f32 * tab_w) + ((tab_items.len() - 1) as f32 * spacing) + 10.0;
 
         ui.allocate_ui_with_layout(
             Vec2::new(total_w, tab_h + 8.0),
@@ -856,20 +925,22 @@ fn render_graphic_eq_tab(
             ];
 
             for (lbl, layout) in band_options {
-                let is_active = match (&state.graphic_layout, &layout) {
-                    (GraphicEqLayout::TenBand, GraphicEqLayout::TenBand) => true,
-                    (GraphicEqLayout::FifteenBand, GraphicEqLayout::FifteenBand) => true,
-                    (GraphicEqLayout::ThirtyOneBand, GraphicEqLayout::ThirtyOneBand) => true,
-                    (GraphicEqLayout::SixtyFourBand, GraphicEqLayout::SixtyFourBand) => true,
-                    _ => false,
-                };
+                let is_active = matches!(
+                    (&state.graphic_layout, &layout),
+                    (GraphicEqLayout::TenBand, GraphicEqLayout::TenBand)
+                        | (GraphicEqLayout::FifteenBand, GraphicEqLayout::FifteenBand)
+                        | (
+                            GraphicEqLayout::ThirtyOneBand,
+                            GraphicEqLayout::ThirtyOneBand
+                        )
+                        | (
+                            GraphicEqLayout::SixtyFourBand,
+                            GraphicEqLayout::SixtyFourBand
+                        )
+                );
 
                 let (bg, text_col, stroke) = if is_active {
-                    (
-                        theme.accent_pink,
-                        Color32::WHITE,
-                        Stroke::NONE,
-                    )
+                    (theme.accent_pink, Color32::WHITE, Stroke::NONE)
                 } else {
                     (
                         theme.bg_pill,
@@ -920,7 +991,11 @@ fn render_graphic_eq_tab(
             .corner_radius(CornerRadius::same(6))
             .min_size(Vec2::new(44.0, 24.0));
 
-            if ui.add(save_btn).on_hover_text("Save current EQ curve as a custom preset").clicked() {
+            if ui
+                .add(save_btn)
+                .on_hover_text("Save current EQ curve as a custom preset")
+                .clicked()
+            {
                 state.is_saving_preset = !state.is_saving_preset;
                 if state.is_saving_preset && state.new_preset_name.is_empty() {
                     state.new_preset_name = format!("Preset {}", state.custom_presets.len() + 1);
@@ -939,19 +1014,26 @@ fn render_graphic_eq_tab(
                 .corner_radius(CornerRadius::same(6))
                 .min_size(Vec2::new(44.0, 24.0));
 
-                if ui.add(del_btn).on_hover_text("Delete selected custom preset").clicked() {
-                    if idx < state.custom_presets.len() {
-                        state.custom_presets.remove(idx);
-                        state.selected_custom_preset_idx = None;
-                        state.selected_preset = EqPreset::Flat;
-                        apply_active_preset(state, actions);
-                    }
+                if ui
+                    .add(del_btn)
+                    .on_hover_text("Delete selected custom preset")
+                    .clicked()
+                    && idx < state.custom_presets.len()
+                {
+                    state.custom_presets.remove(idx);
+                    state.selected_custom_preset_idx = None;
+                    state.selected_preset = EqPreset::Flat;
+                    apply_active_preset(state, actions);
                 }
             }
 
             // Preset Dropdown ComboBox (with UI colors applied via scope)
             let current_preset_name = if let Some(idx) = state.selected_custom_preset_idx {
-                state.custom_presets.get(idx).map(|p| p.name.clone()).unwrap_or_else(|| "Custom".to_string())
+                state
+                    .custom_presets
+                    .get(idx)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "Custom".to_string())
             } else {
                 state.selected_preset.name().to_string()
             };
@@ -985,10 +1067,17 @@ fn render_graphic_eq_tab(
                     )
                     .width(115.0)
                     .show_ui(ui, |ui| {
-                        ui.label(egui::RichText::new("Factory Presets").font(FontId::proportional(10.5)).color(theme.text_muted));
+                        ui.label(
+                            egui::RichText::new("Factory Presets")
+                                .font(FontId::proportional(10.5))
+                                .color(theme.text_muted),
+                        );
                         for preset in EqPreset::ALL {
-                            if preset == EqPreset::Custom { continue; }
-                            let is_sel = state.selected_preset == preset && state.selected_custom_preset_idx.is_none();
+                            if preset == EqPreset::Custom {
+                                continue;
+                            }
+                            let is_sel = state.selected_preset == preset
+                                && state.selected_custom_preset_idx.is_none();
                             if ui.selectable_label(is_sel, preset.name()).clicked() {
                                 state.selected_preset = preset;
                                 state.selected_custom_preset_idx = None;
@@ -998,7 +1087,11 @@ fn render_graphic_eq_tab(
 
                         if !state.custom_presets.is_empty() {
                             ui.separator();
-                            ui.label(egui::RichText::new("Saved Presets").font(FontId::proportional(10.5)).color(theme.text_muted));
+                            ui.label(
+                                egui::RichText::new("Saved Presets")
+                                    .font(FontId::proportional(10.5))
+                                    .color(theme.text_muted),
+                            );
                             for (idx, cp) in state.custom_presets.iter().enumerate() {
                                 let is_sel = state.selected_custom_preset_idx == Some(idx);
                                 if ui.selectable_label(is_sel, &cp.name).clicked() {
@@ -1040,9 +1133,14 @@ fn render_graphic_eq_tab(
                             .font(FontId::proportional(11.5))
                             .color(theme.text_secondary),
                     );
-                    ui.add(egui::TextEdit::singleline(&mut state.new_preset_name).desired_width(160.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut state.new_preset_name).desired_width(160.0),
+                    );
 
-                    if ui.button(egui::RichText::new("Confirm Save").color(Color32::WHITE)).clicked() {
+                    if ui
+                        .button(egui::RichText::new("Confirm Save").color(Color32::WHITE))
+                        .clicked()
+                    {
                         let trimmed = state.new_preset_name.trim();
                         if !trimmed.is_empty() {
                             let num = state.graphic_layout.num_bands();
@@ -1109,7 +1207,8 @@ fn render_spline_eq_canvas(
     // Dynamic height scaling with plenty of space in the dedicated tab
     let canvas_h = (avail_h - 90.0).clamp(190.0, 310.0);
 
-    let (canvas_rect, canvas_resp) = ui.allocate_exact_size(Vec2::new(avail_w, canvas_h), Sense::click_and_drag());
+    let (canvas_rect, canvas_resp) =
+        ui.allocate_exact_size(Vec2::new(avail_w, canvas_h), Sense::click_and_drag());
     let painter = ui.painter_at(canvas_rect);
 
     // Pill Background & Subtle Border
@@ -1128,11 +1227,18 @@ fn render_spline_eq_canvas(
 
     let plot_rect = Rect::from_min_max(
         Pos2::new(canvas_rect.left() + pad_left, canvas_rect.top() + pad_top),
-        Pos2::new(canvas_rect.right() - pad_right, canvas_rect.bottom() - pad_bottom),
+        Pos2::new(
+            canvas_rect.right() - pad_right,
+            canvas_rect.bottom() - pad_bottom,
+        ),
     );
 
     // Horizontal Reference dB Lines (+24, +12, 0, -12, -24 if extended; else +12, +6, 0, -6, -12)
-    let max_db = if state.extended_range { 24.0_f32 } else { 12.0_f32 };
+    let max_db = if state.extended_range {
+        24.0_f32
+    } else {
+        12.0_f32
+    };
     let grid_dbs: &[f32] = if state.extended_range {
         &[24.0, 12.0, 0.0, -12.0, -24.0]
     } else {
@@ -1148,13 +1254,21 @@ fn render_spline_eq_canvas(
         let is_zero = db.abs() < 0.01;
 
         // dB Label on the left
-        let lbl_text = if is_zero { "0dB".to_string() } else { format!("{:+0.0}dB", db) };
+        let lbl_text = if is_zero {
+            "0dB".to_string()
+        } else {
+            format!("{:+0.0}dB", db)
+        };
         painter.text(
             Pos2::new(canvas_rect.left() + 10.0, y),
             egui::Align2::LEFT_CENTER,
             lbl_text,
             FontId::proportional(10.5),
-            if is_zero { theme.text_secondary } else { theme.text_muted },
+            if is_zero {
+                theme.text_secondary
+            } else {
+                theme.text_muted
+            },
         );
 
         // Gridline across the plot
@@ -1164,7 +1278,12 @@ fn render_spline_eq_canvas(
             Color32::from_rgba_premultiplied(45, 52, 75, 80)
         };
         let stroke = Stroke::new(if is_zero { 1.2 } else { 1.0 }, stroke_color);
-        draw_dashed_line(&painter, Pos2::new(plot_rect.left(), y), Pos2::new(plot_rect.right(), y), stroke);
+        draw_dashed_line(
+            &painter,
+            Pos2::new(plot_rect.left(), y),
+            Pos2::new(plot_rect.right(), y),
+            stroke,
+        );
     }
 
     let freqs = state.graphic_layout.frequencies();
@@ -1219,7 +1338,10 @@ fn render_spline_eq_canvas(
 
         // Background vertical track line
         painter.line_segment(
-            [Pos2::new(center_x, plot_rect.top()), Pos2::new(center_x, plot_rect.bottom())],
+            [
+                Pos2::new(center_x, plot_rect.top()),
+                Pos2::new(center_x, plot_rect.bottom()),
+            ],
             Stroke::new(1.0, Color32::from_rgba_premultiplied(40, 48, 70, 70)),
         );
 
@@ -1227,7 +1349,13 @@ fn render_spline_eq_canvas(
         let stem_start = Pos2::new(center_x, node_y);
         let stem_end = Pos2::new(center_x, plot_rect.bottom());
         if stem_start.y < stem_end.y {
-            let stem_thickness = if num_bands <= 15 { 2.5 } else if num_bands <= 32 { 1.8 } else { 1.2 };
+            let stem_thickness = if num_bands <= 15 {
+                2.5
+            } else if num_bands <= 32 {
+                1.8
+            } else {
+                1.2
+            };
             draw_vertical_gradient_line(
                 &painter,
                 stem_start,
@@ -1271,7 +1399,13 @@ fn render_spline_eq_canvas(
     }
 
     // Continuous Catmull-Rom Spline Curve passing through all nodes
-    let segments_per_band = if num_bands <= 15 { 16 } else if num_bands <= 32 { 8 } else { 4 };
+    let segments_per_band = if num_bands <= 15 {
+        16
+    } else if num_bands <= 32 {
+        8
+    } else {
+        4
+    };
     let spline_pts = catmull_rom_spline(&node_positions, segments_per_band);
 
     for w in spline_pts.windows(2) {
@@ -1282,12 +1416,22 @@ fn render_spline_eq_canvas(
     }
 
     // Draw Node Thumbs (white circular nodes with glow and border)
-    let base_node_r = if num_bands <= 15 { 5.5 } else if num_bands <= 32 { 4.0 } else { 2.8 };
+    let base_node_r = if num_bands <= 15 {
+        5.5
+    } else if num_bands <= 32 {
+        4.0
+    } else {
+        2.8
+    };
     for (i, &pos) in node_positions.iter().enumerate() {
         let is_hovered = hovered_band.map(|(b, _, _, _)| b == i).unwrap_or(false);
 
         // Glow halo
-        let halo_r = if is_hovered { base_node_r + 4.5 } else { base_node_r + 2.5 };
+        let halo_r = if is_hovered {
+            base_node_r + 4.5
+        } else {
+            base_node_r + 2.5
+        };
         painter.circle_filled(
             pos,
             halo_r,
@@ -1295,7 +1439,11 @@ fn render_spline_eq_canvas(
         );
 
         // Center Node
-        let node_r = if is_hovered { base_node_r + 1.2 } else { base_node_r };
+        let node_r = if is_hovered {
+            base_node_r + 1.2
+        } else {
+            base_node_r
+        };
         painter.circle_filled(pos, node_r, Color32::WHITE);
         painter.circle_stroke(
             pos,
@@ -1306,7 +1454,11 @@ fn render_spline_eq_canvas(
 
     // Floating Gain Tooltip on hovered node
     if let Some((_, freq, gain, pos)) = hovered_band {
-        let tip_y = if pos.y > canvas_rect.top() + 35.0 { pos.y - 18.0 } else { pos.y + 18.0 };
+        let tip_y = if pos.y > canvas_rect.top() + 35.0 {
+            pos.y - 18.0
+        } else {
+            pos.y + 18.0
+        };
         let tip_pos = Pos2::new(pos.x, tip_y);
         let tip_str = format!("{}: {:+.1} dB", format_exact_frequency(freq), gain);
 
@@ -1359,12 +1511,24 @@ fn render_tone_acoustics_tab(
 ) {
     let avail_w = ui.available_width();
     let two_col = avail_w >= 540.0;
-    let card_w = if two_col { (avail_w - 12.0) * 0.5 } else { avail_w };
+    let card_w = if two_col {
+        (avail_w - 12.0) * 0.5
+    } else {
+        avail_w
+    };
 
     let tone_max = if state.extended_range { 24.0 } else { 12.0 };
     let tone_range = -tone_max..=tone_max;
-    let min_lbl = if state.extended_range { "-24dB" } else { "-12dB" };
-    let max_lbl = if state.extended_range { "+24dB" } else { "+12dB" };
+    let min_lbl = if state.extended_range {
+        "-24dB"
+    } else {
+        "-12dB"
+    };
+    let max_lbl = if state.extended_range {
+        "+24dB"
+    } else {
+        "+12dB"
+    };
 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
@@ -1462,7 +1626,15 @@ fn render_tone_acoustics_tab(
                     "Left",
                     "Center",
                     "Right",
-                    |v| if v.abs() < 0.01 { "Center (0.00)".to_string() } else if v < 0.0 { format!("L {:.2}", -v) } else { format!("R {:.2}", v) },
+                    |v| {
+                        if v.abs() < 0.01 {
+                            "Center (0.00)".to_string()
+                        } else if v < 0.0 {
+                            format!("L {:.2}", -v)
+                        } else {
+                            format!("R {:.2}", v)
+                        }
+                    },
                     |v| actions.balance_changed = Some(v),
                     theme,
                 );
@@ -1481,7 +1653,15 @@ fn render_tone_acoustics_tab(
                 "Left",
                 "Center",
                 "Right",
-                |v| if v.abs() < 0.01 { "Center (0.00)".to_string() } else if v < 0.0 { format!("L {:.2}", -v) } else { format!("R {:.2}", v) },
+                |v| {
+                    if v.abs() < 0.01 {
+                        "Center (0.00)".to_string()
+                    } else if v < 0.0 {
+                        format!("L {:.2}", -v)
+                    } else {
+                        format!("R {:.2}", v)
+                    }
+                },
                 |v| actions.balance_changed = Some(v),
                 theme,
             );
@@ -1504,7 +1684,11 @@ fn render_advanced_tab(
 ) {
     let avail_w = ui.available_width();
     let two_col = avail_w >= 540.0;
-    let card_w = if two_col { (avail_w - 12.0) * 0.5 } else { avail_w };
+    let card_w = if two_col {
+        (avail_w - 12.0) * 0.5
+    } else {
+        avail_w
+    };
 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
@@ -1691,6 +1875,7 @@ fn render_advanced_tab(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_advanced_toggle_card(
     ui: &mut egui::Ui,
     width: f32,
@@ -1705,7 +1890,14 @@ fn render_advanced_toggle_card(
 ) {
     egui::Frame::NONE
         .fill(theme.bg_card_hover)
-        .stroke(Stroke::new(1.0, if is_active { theme.accent_violet.linear_multiply(0.4) } else { theme.border_card }))
+        .stroke(Stroke::new(
+            1.0,
+            if is_active {
+                theme.accent_violet.linear_multiply(0.4)
+            } else {
+                theme.border_card
+            },
+        ))
         .corner_radius(CornerRadius::same(12))
         .inner_margin(Margin::symmetric(14, 12))
         .show(ui, |ui| {
@@ -1767,6 +1959,7 @@ fn render_advanced_toggle_card(
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_slider_card(
     ui: &mut egui::Ui,
     width: f32,
@@ -1806,17 +1999,29 @@ fn render_slider_card(
 
                 // Row 2: Range Labels (-12dB ... 0dB ... +12dB or -24dB ... 0dB ... +24dB)
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(left_lbl).font(FontId::proportional(10.5)).color(theme.text_muted));
+                    ui.label(
+                        egui::RichText::new(left_lbl)
+                            .font(FontId::proportional(10.5))
+                            .color(theme.text_muted),
+                    );
                     let avail_mid = (ui.available_width() - 48.0).max(40.0);
                     ui.allocate_ui_with_layout(
                         Vec2::new(avail_mid, 14.0),
                         egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                         |ui| {
-                            ui.label(egui::RichText::new(center_lbl).font(FontId::proportional(10.5)).color(theme.text_muted));
+                            ui.label(
+                                egui::RichText::new(center_lbl)
+                                    .font(FontId::proportional(10.5))
+                                    .color(theme.text_muted),
+                            );
                         },
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(right_lbl).font(FontId::proportional(10.5)).color(theme.text_muted));
+                        ui.label(
+                            egui::RichText::new(right_lbl)
+                                .font(FontId::proportional(10.5))
+                                .color(theme.text_muted),
+                        );
                     });
                 });
 
@@ -1855,8 +2060,16 @@ fn render_footer_controls(
     let preamp_card_w = (avail_w - reset_btn_w - 12.0).max(200.0);
 
     let preamp_max = if state.extended_range { 24.0 } else { 12.0 };
-    let min_lbl = if state.extended_range { "-24dB" } else { "-12dB" };
-    let max_lbl = if state.extended_range { "+24dB" } else { "+12dB" };
+    let min_lbl = if state.extended_range {
+        "-24dB"
+    } else {
+        "-12dB"
+    };
+    let max_lbl = if state.extended_range {
+        "+24dB"
+    } else {
+        "+12dB"
+    };
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
@@ -1892,7 +2105,11 @@ fn render_footer_controls(
                     // Row 2: Range Labels & Slider
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
-                        ui.label(egui::RichText::new(min_lbl).font(FontId::proportional(10.5)).color(theme.text_muted));
+                        ui.label(
+                            egui::RichText::new(min_lbl)
+                                .font(FontId::proportional(10.5))
+                                .color(theme.text_muted),
+                        );
 
                         let slider_w = (ui.available_width() - 50.0).max(80.0);
                         let mut p = state.graphic_preamp_db;
@@ -1900,7 +2117,13 @@ fn render_footer_controls(
                             Vec2::new(slider_w, 20.0),
                             egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                             |ui| {
-                                if gradient_horizontal_slider(ui, &mut p, -preamp_max..=preamp_max, 0.0, theme) {
+                                if gradient_horizontal_slider(
+                                    ui,
+                                    &mut p,
+                                    -preamp_max..=preamp_max,
+                                    0.0,
+                                    theme,
+                                ) {
                                     state.graphic_preamp_db = p;
                                     state.preamp_db = p;
                                     actions.graphic_preamp_changed = Some(p);
@@ -1909,7 +2132,11 @@ fn render_footer_controls(
                             },
                         );
 
-                        ui.label(egui::RichText::new(max_lbl).font(FontId::proportional(10.5)).color(theme.text_muted));
+                        ui.label(
+                            egui::RichText::new(max_lbl)
+                                .font(FontId::proportional(10.5))
+                                .color(theme.text_muted),
+                        );
                     });
 
                     // Row 3: Readout
@@ -1924,7 +2151,8 @@ fn render_footer_controls(
             });
 
         // Tab-Specific Reset Button
-        let (reset_rect, reset_resp) = ui.allocate_exact_size(Vec2::new(reset_btn_w, 58.0), Sense::click());
+        let (reset_rect, reset_resp) =
+            ui.allocate_exact_size(Vec2::new(reset_btn_w, 58.0), Sense::click());
         let rp = ui.painter_at(reset_rect);
         let bg = if reset_resp.hovered() {
             theme.accent_violet
@@ -1932,7 +2160,12 @@ fn render_footer_controls(
             theme.bg_card_hover
         };
         rp.rect_filled(reset_rect, CornerRadius::same(12), bg);
-        rp.rect_stroke(reset_rect, CornerRadius::same(12), Stroke::new(1.0, theme.border_card), egui::StrokeKind::Inside);
+        rp.rect_stroke(
+            reset_rect,
+            CornerRadius::same(12),
+            Stroke::new(1.0, theme.border_card),
+            egui::StrokeKind::Inside,
+        );
 
         // High quality SVG Reset icon and Reset text
         let icon_rect = Rect::from_center_size(
@@ -2040,7 +2273,8 @@ fn gradient_horizontal_slider(
 
     // Paint background track using theme token
     let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
-    ui.painter().rect_filled(track_rect, CornerRadius::same(2), theme.border_card);
+    ui.painter()
+        .rect_filled(track_rect, CornerRadius::same(2), theme.border_card);
 
     // Paint active gradient track up to thumb (dual-tone: rose pink -> luminous indigo)
     let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
@@ -2062,7 +2296,11 @@ fn gradient_horizontal_slider(
                 Pos2::new(x0, track_rect.min.y),
                 Pos2::new(x1, track_rect.max.y),
             );
-            ui.painter().rect_filled(slice_rect, CornerRadius::same(if i == 0 { 2 } else { 0 }), col);
+            ui.painter().rect_filled(
+                slice_rect,
+                CornerRadius::same(if i == 0 { 2 } else { 0 }),
+                col,
+            );
         }
     }
 
@@ -2089,12 +2327,7 @@ fn gradient_horizontal_slider(
     changed
 }
 
-fn custom_toggle_switch(
-    ui: &mut egui::Ui,
-    value: &mut bool,
-    tooltip: &str,
-    theme: &Theme,
-) -> bool {
+fn custom_toggle_switch(ui: &mut egui::Ui, value: &mut bool, tooltip: &str, theme: &Theme) -> bool {
     let desired_size = Vec2::new(38.0, 20.0);
     let (rect, resp) = ui.allocate_exact_size(desired_size, Sense::click());
     let mut changed = false;
@@ -2112,7 +2345,11 @@ fn custom_toggle_switch(
     };
     p.rect_filled(rect, CornerRadius::same(10), bg);
 
-    let thumb_x = if *value { rect.right() - 10.0 } else { rect.left() + 10.0 };
+    let thumb_x = if *value {
+        rect.right() - 10.0
+    } else {
+        rect.left() + 10.0
+    };
     let thumb_pos = Pos2::new(thumb_x, rect.center().y);
     p.circle_filled(thumb_pos, 7.5, Color32::WHITE);
 
@@ -2167,8 +2404,6 @@ fn draw_vertical_gradient_line(
     }
 }
 
-
-
 fn catmull_rom_spline(points: &[Pos2], segments: usize) -> Vec<Pos2> {
     if points.len() < 2 {
         return points.to_vec();
@@ -2180,22 +2415,28 @@ fn catmull_rom_spline(points: &[Pos2], segments: usize) -> Vec<Pos2> {
         let p0 = if i == 0 { points[0] } else { points[i - 1] };
         let p1 = points[i];
         let p2 = points[i + 1];
-        let p3 = if i + 2 < n { points[i + 2] } else { points[i + 1] };
+        let p3 = if i + 2 < n {
+            points[i + 2]
+        } else {
+            points[i + 1]
+        };
 
         for step in 0..segments {
             let t = step as f32 / segments as f32;
             let t2 = t * t;
             let t3 = t2 * t;
 
-            let x = 0.5 * ((2.0 * p1.x)
-                + (-p0.x + p2.x) * t
-                + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2
-                + (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3);
+            let x = 0.5
+                * ((2.0 * p1.x)
+                    + (-p0.x + p2.x) * t
+                    + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2
+                    + (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3);
 
-            let y = 0.5 * ((2.0 * p1.y)
-                + (-p0.y + p2.y) * t
-                + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2
-                + (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3);
+            let y = 0.5
+                * ((2.0 * p1.y)
+                    + (-p0.y + p2.y) * t
+                    + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2
+                    + (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3);
 
             result.push(Pos2::new(x, y));
         }

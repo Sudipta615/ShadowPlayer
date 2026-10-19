@@ -5,7 +5,7 @@
 //! far as the search box was concerned. These tests pin the direct queries.
 
 #[cfg(test)]
-mod tests {
+mod unit {
     use crate::SearchEngine;
     use database::{Database, PlaylistRepo, TrackRepo};
     use domain::ids::TrackId;

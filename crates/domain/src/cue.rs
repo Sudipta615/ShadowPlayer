@@ -82,10 +82,7 @@ mod tests {
             3,
             Path::new("/music/album/album.cue"),
         );
-        assert_eq!(
-            text,
-            "/music/album/image.flac#cue:3#/music/album/album.cue"
-        );
+        assert_eq!(text, "/music/album/image.flac#cue:3#/music/album/album.cue");
         let parsed = parse_cue_virtual_path(&text).expect("parses");
         assert_eq!(parsed.audio, "/music/album/image.flac");
         assert_eq!(parsed.track_number, 3);

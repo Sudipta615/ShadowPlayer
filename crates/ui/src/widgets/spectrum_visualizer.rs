@@ -1,5 +1,5 @@
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
 use crate::theme::Theme;
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
 
 /// High-Resolution 60fps FFT Spectrum Visualizer Widget
 pub struct SpectrumVisualizerWidget<'a> {
@@ -40,11 +40,7 @@ impl<'a> SpectrumVisualizerWidget<'a> {
         let painter = ui.painter_at(rect);
 
         // Dark background
-        painter.rect_filled(
-            rect,
-            8.0,
-            Color32::from_rgba_premultiplied(10, 11, 20, 220),
-        );
+        painter.rect_filled(rect, 8.0, Color32::from_rgba_premultiplied(10, 11, 20, 220));
         painter.rect_stroke(
             rect,
             8.0,
@@ -56,7 +52,10 @@ impl<'a> SpectrumVisualizerWidget<'a> {
             // Idle placeholder line
             let mid_y = rect.center().y;
             painter.line_segment(
-                [Pos2::new(rect.left() + 10.0, mid_y), Pos2::new(rect.right() - 10.0, mid_y)],
+                [
+                    Pos2::new(rect.left() + 10.0, mid_y),
+                    Pos2::new(rect.right() - 10.0, mid_y),
+                ],
                 Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 20)),
             );
             return;
@@ -74,7 +73,8 @@ impl<'a> SpectrumVisualizerWidget<'a> {
             let t = (i as f32) / (num_bars as f32);
             // Logarithmic mapping: lower bars get fewer FFT bins, higher bars group more bins
             let bin_start = ((t.powf(2.2) * (spec_len as f32 - 1.0)) as usize).min(spec_len - 1);
-            let bin_end = ((((i + 1) as f32 / num_bars as f32).powf(2.2) * (spec_len as f32 - 1.0)) as usize)
+            let bin_end = ((((i + 1) as f32 / num_bars as f32).powf(2.2) * (spec_len as f32 - 1.0))
+                as usize)
                 .clamp(bin_start + 1, spec_len);
 
             let mut max_db = -120.0_f32;

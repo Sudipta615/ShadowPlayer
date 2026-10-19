@@ -1,10 +1,10 @@
 //! Rule-based "smart playlist" manager: compose a saved query and watch it match
 //! the library live.
 
-use eframe::egui::{self, Color32, FontId, Vec2};
 use domain::ids::PlaylistId;
 use domain::models::Track;
 use domain::smart::{SmartField, SmartOp, SmartPlaylist, SmartRule};
+use eframe::egui::{self, Color32, FontId, Vec2};
 
 use crate::theme::Theme;
 
@@ -119,7 +119,8 @@ pub fn show_smart_playlist_editor(
                                         {
                                             actions.open = Some(sp.id);
                                         }
-                                        if ui.small_button("Del").on_hover_text("Delete").clicked() {
+                                        if ui.small_button("Del").on_hover_text("Delete").clicked()
+                                        {
                                             actions.delete = Some(sp.id);
                                         }
                                     });
@@ -154,8 +155,12 @@ pub fn show_smart_playlist_editor(
                             if ui
                                 .add(
                                     egui::Button::new(
-                                        egui::RichText::new(if state.is_new { "Create" } else { "Save" })
-                                            .color(Color32::WHITE),
+                                        egui::RichText::new(if state.is_new {
+                                            "Create"
+                                        } else {
+                                            "Save"
+                                        })
+                                        .color(Color32::WHITE),
                                     )
                                     .fill(theme.accent_violet),
                                 )
@@ -205,7 +210,11 @@ pub fn show_smart_playlist_editor(
                                             .show_ui(ui, |ui| {
                                                 for f in SmartField::ALL {
                                                     if ui
-                                                        .selectable_value(&mut rule.field, f, f.label())
+                                                        .selectable_value(
+                                                            &mut rule.field,
+                                                            f,
+                                                            f.label(),
+                                                        )
                                                         .clicked()
                                                     {
                                                         // Keep the operator valid for the new field.
@@ -226,13 +235,21 @@ pub fn show_smart_playlist_editor(
                                             .width(112.0)
                                             .show_ui(ui, |ui| {
                                                 for op in rule.field.operators() {
-                                                    ui.selectable_value(&mut rule.op, *op, op.label());
+                                                    ui.selectable_value(
+                                                        &mut rule.op,
+                                                        *op,
+                                                        op.label(),
+                                                    );
                                                 }
                                             });
 
                                         // Value
                                         if rule.op.needs_value() {
-                                            let hint = if rule.field.is_date() { "days" } else { "value" };
+                                            let hint = if rule.field.is_date() {
+                                                "days"
+                                            } else {
+                                                "value"
+                                            };
                                             ui.add(
                                                 egui::TextEdit::singleline(&mut rule.value)
                                                     .hint_text(hint)
@@ -240,7 +257,11 @@ pub fn show_smart_playlist_editor(
                                             );
                                         }
 
-                                        if ui.small_button("Del").on_hover_text("Remove rule").clicked() {
+                                        if ui
+                                            .small_button("Del")
+                                            .on_hover_text("Remove rule")
+                                            .clicked()
+                                        {
                                             remove = Some(i);
                                         }
                                     });
@@ -294,7 +315,10 @@ pub fn show_smart_playlist_editor(
                                 .width(130.0)
                                 .show_ui(ui, |ui| {
                                     if ui
-                                        .selectable_label(state.draft.sort_by.is_none(), "(default)")
+                                        .selectable_label(
+                                            state.draft.sort_by.is_none(),
+                                            "(default)",
+                                        )
                                         .clicked()
                                     {
                                         state.draft.sort_by = None;
@@ -302,7 +326,10 @@ pub fn show_smart_playlist_editor(
                                     }
                                     for f in SmartField::ALL {
                                         if ui
-                                            .selectable_label(state.draft.sort_by == Some(f), f.label())
+                                            .selectable_label(
+                                                state.draft.sort_by == Some(f),
+                                                f.label(),
+                                            )
                                             .clicked()
                                         {
                                             state.draft.sort_by = Some(f);

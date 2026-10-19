@@ -1,7 +1,7 @@
+use crate::theme::Theme;
 use eframe::egui::{
     self, Color32, CornerRadius, FontId, Key, Margin, Pos2, Rect, Sense, Stroke, Vec2,
 };
-use crate::theme::Theme;
 
 /// Rich structured information explaining an audiophile or player setting
 #[derive(Clone, Copy, Debug)]
@@ -28,7 +28,10 @@ pub fn render_info_icon_button(
 
     let current_open: Option<egui::Id> = ui.ctx().data(|d| d.get_temp(key_id));
     let eval_match = if let Ok(target) = std::env::var("SHADOWPLAYER_EVAL_INFO_NAME") {
-        content.title.to_lowercase().contains(&target.to_lowercase())
+        content
+            .title
+            .to_lowercase()
+            .contains(&target.to_lowercase())
     } else {
         false
     };
@@ -50,17 +53,9 @@ pub fn render_info_icon_button(
             theme.accent_pink,
         )
     } else if is_hovered {
-        (
-            theme.bg_card_hover,
-            theme.accent_violet,
-            theme.text_primary,
-        )
+        (theme.bg_card_hover, theme.accent_violet, theme.text_primary)
     } else {
-        (
-            Color32::TRANSPARENT,
-            theme.border_subtle,
-            theme.text_muted,
-        )
+        (Color32::TRANSPARENT, theme.border_subtle, theme.text_muted)
     };
 
     if bg_col != Color32::TRANSPARENT {
@@ -109,12 +104,16 @@ pub fn render_info_icon_button(
 
     // Dismiss with Escape key
     if is_open && ui.input(|i| i.key_pressed(Key::Escape)) {
-        ui.ctx().data_mut(|d| d.insert_temp(key_id, None::<egui::Id>));
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(key_id, None::<egui::Id>));
     }
 
     // If active, render the floating info card in the Foreground layer
     if is_open {
-        let screen_rect = ui.ctx().input(|i| i.raw.screen_rect).unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0)));
+        let screen_rect = ui
+            .ctx()
+            .input(|i| i.raw.screen_rect)
+            .unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0)));
         let box_width = 330.0_f32.min(screen_rect.width() - 40.0);
 
         // Position: prefer below-left of icon, clamped safely inside viewport
@@ -160,11 +159,24 @@ pub fn render_info_icon_button(
                         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
 
                         // Mini badge icon
-                        let (badge_r, _) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
+                        let (badge_r, _) =
+                            ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
                         let bp = ui.painter_at(badge_r);
-                        bp.circle_filled(badge_r.center(), 7.0, theme.accent_pink.linear_multiply(0.2));
-                        bp.circle_stroke(badge_r.center(), 7.0, Stroke::new(1.0, theme.accent_pink));
-                        bp.circle_filled(Pos2::new(badge_r.center().x, badge_r.center().y - 3.0), 0.9, theme.accent_pink);
+                        bp.circle_filled(
+                            badge_r.center(),
+                            7.0,
+                            theme.accent_pink.linear_multiply(0.2),
+                        );
+                        bp.circle_stroke(
+                            badge_r.center(),
+                            7.0,
+                            Stroke::new(1.0, theme.accent_pink),
+                        );
+                        bp.circle_filled(
+                            Pos2::new(badge_r.center().x, badge_r.center().y - 3.0),
+                            0.9,
+                            theme.accent_pink,
+                        );
                         bp.line_segment(
                             [
                                 Pos2::new(badge_r.center().x, badge_r.center().y - 1.0),
@@ -192,7 +204,8 @@ pub fn render_info_icon_button(
 
                         // Close button on right
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let (c_rect, c_resp) = ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
+                            let (c_rect, c_resp) =
+                                ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
                             let cp = ui.painter_at(c_rect);
                             let bg = if c_resp.hovered() {
                                 Color32::from_rgba_unmultiplied(239, 68, 68, 50)
@@ -205,7 +218,11 @@ pub fn render_info_icon_button(
                             } else {
                                 theme.text_muted
                             };
-                            crate::components::icons::draw_window_close(ui, c_rect.shrink2(Vec2::splat(5.0)), cross_col);
+                            crate::components::icons::draw_window_close(
+                                ui,
+                                c_rect.shrink2(Vec2::splat(5.0)),
+                                cross_col,
+                            );
                             if c_resp.on_hover_text("Close info box").clicked() {
                                 close_requested = true;
                             }
@@ -294,7 +311,8 @@ pub fn render_info_icon_button(
             });
 
         if close_requested {
-            ui.ctx().data_mut(|d| d.insert_temp(key_id, None::<egui::Id>));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(key_id, None::<egui::Id>));
         }
     }
 
@@ -504,4 +522,3 @@ pub const INFO_STREAM_CAPTURE: InfoBoxContent = InfoBoxContent {
     technical_note: "Streams PCM frames through a ringbuffer directly to a non-blocking background disk writer with zero audio thread latency.",
     recommendation: "Ideal for recording processed audio, EQ sessions, or live spatial mixes.",
 };
-

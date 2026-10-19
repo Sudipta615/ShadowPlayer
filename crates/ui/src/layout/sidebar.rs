@@ -1,11 +1,12 @@
-use eframe::egui::{self, Margin};
 use domain::models::Playlist;
 use domain::smart::SmartPlaylist;
+use eframe::egui::{self, Margin};
 
 use crate::components::sidebar::{NavItem, SideBar};
 use crate::theme::Theme;
 
 /// Render application left sidebar panel
+#[allow(clippy::too_many_arguments)]
 pub fn render_sidebar(
     ui: &mut egui::Ui,
     active_nav: NavItem,

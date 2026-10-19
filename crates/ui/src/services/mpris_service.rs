@@ -215,10 +215,7 @@ mod linux {
                 let mut first = true;
 
                 while !stop_worker.load(Ordering::Acquire) {
-                    let cur = snapshot
-                        .lock()
-                        .map(|s| s.clone())
-                        .unwrap_or_default();
+                    let cur = snapshot.lock().map(|s| s.clone()).unwrap_or_default();
 
                     let mut changed: HashMap<String, Value<'static>> = HashMap::new();
 
@@ -290,8 +287,8 @@ mod linux {
     fn metadata_map(s: &MprisSnapshot) -> HashMap<String, Value<'static>> {
         let mut m: HashMap<String, Value<'static>> = HashMap::new();
 
-        let track_id = ObjectPath::try_from("/org/mpris/MediaPlayer2/Track/0")
-            .unwrap_or_else(|_| {
+        let track_id =
+            ObjectPath::try_from("/org/mpris/MediaPlayer2/Track/0").unwrap_or_else(|_| {
                 ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/Track/0")
             });
         m.insert("mpris:trackid".to_string(), Value::from(track_id));
@@ -388,10 +385,7 @@ mod linux {
 
     impl Player {
         fn snap(&self) -> MprisSnapshot {
-            self.snapshot
-                .lock()
-                .map(|s| s.clone())
-                .unwrap_or_default()
+            self.snapshot.lock().map(|s| s.clone()).unwrap_or_default()
         }
 
         fn send(&self, cmd: MprisCommand) {

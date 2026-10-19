@@ -1,5 +1,5 @@
-use eframe::egui::{Color32, CornerRadius, Pos2, Rect, Response, Sense, Ui, Vec2};
 use crate::theme::Theme;
+use eframe::egui::{Color32, CornerRadius, Pos2, Rect, Response, Sense, Ui, Vec2};
 
 /// Live spectrum visualizer component drawing responsive gradient audio bars
 pub struct VisualizerWidget<'a> {
@@ -10,12 +10,10 @@ pub struct VisualizerWidget<'a> {
 }
 
 const MOCK_BARS: [f32; 60] = [
-    0.14, 0.22, 0.28, 0.22, 0.31, 0.44, 0.58, 0.58, 0.44, 0.33,
-    0.25, 0.22, 0.14, 0.19, 0.25, 0.33, 0.39, 0.31, 0.25, 0.14,
-    0.14, 0.25, 0.36, 0.25, 0.25, 0.44, 0.25, 0.36, 0.44, 0.58,
-    0.67, 0.83, 1.00, 0.72, 0.55, 0.33, 0.28, 0.31, 0.53, 0.25,
-    0.42, 0.36, 0.36, 0.28, 0.19, 0.17, 0.25, 0.25, 0.31, 0.47,
-    0.58, 0.53, 0.42, 0.31, 0.28, 0.17, 0.22, 0.28, 0.42, 0.53,
+    0.14, 0.22, 0.28, 0.22, 0.31, 0.44, 0.58, 0.58, 0.44, 0.33, 0.25, 0.22, 0.14, 0.19, 0.25, 0.33,
+    0.39, 0.31, 0.25, 0.14, 0.14, 0.25, 0.36, 0.25, 0.25, 0.44, 0.25, 0.36, 0.44, 0.58, 0.67, 0.83,
+    1.00, 0.72, 0.55, 0.33, 0.28, 0.31, 0.53, 0.25, 0.42, 0.36, 0.36, 0.28, 0.19, 0.17, 0.25, 0.25,
+    0.31, 0.47, 0.58, 0.53, 0.42, 0.31, 0.28, 0.17, 0.22, 0.28, 0.42, 0.53,
 ];
 
 impl<'a> VisualizerWidget<'a> {
@@ -40,26 +38,24 @@ impl<'a> VisualizerWidget<'a> {
         let total_bars = 60;
         let spacing = 2.0_f32;
         let total_spacing = spacing * (total_bars - 1) as f32;
-        let bar_width = ((rect.width() - total_spacing) / total_bars as f32).clamp(2.4_f32, 4.0_f32);
+        let bar_width =
+            ((rect.width() - total_spacing) / total_bars as f32).clamp(2.4_f32, 4.0_f32);
 
-        let color_indigo_left  = Color32::from_rgb(54, 42, 207);   // #362acf Electric royal indigo
+        let color_indigo_left = Color32::from_rgb(54, 42, 207); // #362acf Electric royal indigo
         let color_lavender_peak = Color32::from_rgb(165, 180, 252); // #a5b4fc Bright lavender peak
-        let color_indigo_mid   = Color32::from_rgb(99, 102, 241);  // #6366f1 Vivid indigo
-        let color_indigo_right = Color32::from_rgb(67, 56, 202);   // #4338ca Deep indigo
+        let color_indigo_mid = Color32::from_rgb(99, 102, 241); // #6366f1 Vivid indigo
+        let color_indigo_right = Color32::from_rgb(67, 56, 202); // #4338ca Deep indigo
 
-        for i in 0..total_bars {
+        for (i, &mock_h) in MOCK_BARS.iter().enumerate() {
             let t = i as f32 / (total_bars - 1) as f32;
-            let mock_h = MOCK_BARS[i];
 
             let bar_height = (mock_h * rect.height()).max(3.5_f32);
             let x = rect.min.x + i as f32 * (bar_width + spacing);
             let y_bottom = rect.max.y;
             let y_top = y_bottom - bar_height;
 
-            let bar_rect = Rect::from_min_max(
-                Pos2::new(x, y_top),
-                Pos2::new(x + bar_width, y_bottom),
-            );
+            let bar_rect =
+                Rect::from_min_max(Pos2::new(x, y_top), Pos2::new(x + bar_width, y_bottom));
 
             // Left (electric indigo) -> Center Peak (bright lavender) -> Right (deep indigo)
             let bar_color = if t < 0.52_f32 {

@@ -182,7 +182,9 @@ mod tests {
         assert_eq!(resolved, Some(old_id), "the move is recognised");
         assert_eq!(content_hash.as_deref(), Some(hash.as_str()));
         // And the scanner stores the row under the old id at the new path.
-        assert!(repo.relink_path(&old_id, &new_path, content_hash.as_deref()).unwrap());
+        assert!(repo
+            .relink_path(&old_id, &new_path, content_hash.as_deref())
+            .unwrap());
         let stored = repo.get_by_path(&new_path).unwrap().unwrap();
         assert_eq!(stored.id, old_id);
         assert_eq!(stored.play_count, 7, "play counts survive the move");
@@ -205,7 +207,12 @@ mod tests {
         let repo = TrackRepo::new(db);
         let original_id = TrackId::new();
         let mut track = sample_track(original_id, &original);
-        track.content_hash = Some(Fingerprint::compute(&original).unwrap().as_str().to_string());
+        track.content_hash = Some(
+            Fingerprint::compute(&original)
+                .unwrap()
+                .as_str()
+                .to_string(),
+        );
         repo.upsert(&track).unwrap();
 
         let derived = TrackId::from_canonical_path(&copy);
@@ -213,7 +220,10 @@ mod tests {
         let resolved = resolve_identity(&repo, &copy, derived, false, &mut content_hash);
 
         assert_eq!(resolved, None, "a copy keeps its own id");
-        assert_eq!(content_hash.as_deref(), Some(track.content_hash.as_deref().unwrap()));
+        assert_eq!(
+            content_hash.as_deref(),
+            Some(track.content_hash.as_deref().unwrap())
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -236,7 +246,11 @@ mod tests {
 
         let expected = Fingerprint::compute(&path).unwrap();
         assert_eq!(
-            repo.get_by_id(&id).unwrap().unwrap().content_hash.as_deref(),
+            repo.get_by_id(&id)
+                .unwrap()
+                .unwrap()
+                .content_hash
+                .as_deref(),
             Some(expected.as_str())
         );
 

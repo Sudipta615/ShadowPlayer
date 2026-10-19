@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use eframe::egui::{self, TextureHandle};
 use domain::ids::TrackId;
 use domain::models::Track;
+use eframe::egui::{self, TextureHandle};
 use library::ArtworkManager;
 
 /// Maximum edge length (px) of a texture uploaded to the GPU. Covers are
@@ -32,6 +32,12 @@ pub struct ArtworkService {
     order: VecDeque<TrackId>,
     /// Tracks whose art could not be resolved (avoids per-frame retries).
     missing: HashSet<TrackId>,
+}
+
+impl Default for ArtworkService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ArtworkService {
@@ -103,8 +109,16 @@ impl ArtworkService {
         let cached_thumb = self.manager.get_cached_thumbnail_path(&track.id);
         let png_path = track.path.with_extension("png");
         let jpg_path = track.path.with_extension("jpg");
-        let cover_path = track.path.parent().map(|p| p.join("cover.png")).unwrap_or_default();
-        let cover_jpg = track.path.parent().map(|p| p.join("cover.jpg")).unwrap_or_default();
+        let cover_path = track
+            .path
+            .parent()
+            .map(|p| p.join("cover.png"))
+            .unwrap_or_default();
+        let cover_jpg = track
+            .path
+            .parent()
+            .map(|p| p.join("cover.jpg"))
+            .unwrap_or_default();
 
         let candidate = if cached_thumb.exists() {
             Some(cached_thumb)

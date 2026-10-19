@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod unit {
     use crate::session::AudioSession;
     use domain::models::AudioProfileChoice;
     use engine::sink::NoopSink;
@@ -15,7 +15,7 @@ mod tests {
             .expect("Failed to initialize AudioSession with NoopSink");
 
         // Verify initial state
-        assert_eq!(session.is_playing(), false);
+        assert!(!session.is_playing());
         let info = session.playback_info();
         assert_eq!(info.state, engine::PlaybackState::Stopped);
 

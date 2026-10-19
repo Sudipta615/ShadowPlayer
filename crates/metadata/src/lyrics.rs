@@ -16,9 +16,7 @@
 
 use std::path::Path;
 
-use lofty::id3::v2::{
-    FrameFlags, SyncTextContentType, SynchronizedTextFrame, TimestampFormat,
-};
+use lofty::id3::v2::{FrameFlags, SyncTextContentType, SynchronizedTextFrame, TimestampFormat};
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
 
@@ -141,7 +139,8 @@ fn read_sylt_frame(path: &Path) -> Option<Vec<u8>> {
         let frame_size = if major == 4 {
             synchsafe_u32(&body[pos + 4..pos + 8])? as usize
         } else {
-            u32::from_be_bytes([body[pos + 4], body[pos + 5], body[pos + 6], body[pos + 7]]) as usize
+            u32::from_be_bytes([body[pos + 4], body[pos + 5], body[pos + 6], body[pos + 7]])
+                as usize
         };
         let start = pos + 10;
         let end = start.checked_add(frame_size)?;

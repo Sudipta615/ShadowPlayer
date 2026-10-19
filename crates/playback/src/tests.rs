@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod unit {
     use crate::coordinator::PlaybackCoordinator;
     use audio_session::AudioSession;
     use database::{Database, QueueRepo, TrackRepo};

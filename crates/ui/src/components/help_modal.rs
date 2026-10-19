@@ -1,5 +1,5 @@
-use eframe::egui::{self, CornerRadius, FontId, Stroke, Vec2, Window};
 use crate::theme::Theme;
+use eframe::egui::{self, CornerRadius, FontId, Stroke, Vec2, Window};
 
 pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
     if !*is_open {

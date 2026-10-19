@@ -1,6 +1,6 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Vec2};
 use domain::ids::{PlaylistId, TrackId};
 use domain::models::{Playlist, Track};
+use eframe::egui::{self, Color32, CornerRadius, FontId, Vec2};
 
 use crate::theme::Theme;
 
@@ -80,10 +80,8 @@ pub fn show_playlist_editor(
                     .hint_text("New playlist name…")
                     .desired_width(ui.available_width() - 90.0);
                 ui.add(edit);
-                let btn = egui::Button::new(
-                    egui::RichText::new("Create").color(Color32::WHITE),
-                )
-                .fill(theme.accent_violet);
+                let btn = egui::Button::new(egui::RichText::new("Create").color(Color32::WHITE))
+                    .fill(theme.accent_violet);
                 if ui.add(btn).clicked() && !state.new_name.trim().is_empty() {
                     actions.create = Some(state.new_name.trim().to_string());
                     state.new_name.clear();
@@ -121,7 +119,9 @@ pub fn show_playlist_editor(
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let can_export = state.selected.is_some() && !playlist_tracks.is_empty();
-                    let btn = egui::Button::new(egui::RichText::new("Export M3U").font(FontId::proportional(12.0)));
+                    let btn = egui::Button::new(
+                        egui::RichText::new("Export M3U").font(FontId::proportional(12.0)),
+                    );
                     if ui
                         .add_enabled(can_export, btn)
                         .on_hover_text("Save this playlist as an .m3u8 file")
@@ -167,8 +167,9 @@ pub fn show_playlist_editor(
                                     if state.rename_id == Some(pl.id) {
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
-                                            let edit = egui::TextEdit::singleline(&mut state.rename_buf)
-                                                .desired_width(ui.available_width() - 56.0);
+                                            let edit =
+                                                egui::TextEdit::singleline(&mut state.rename_buf)
+                                                    .desired_width(ui.available_width() - 56.0);
                                             ui.add(edit);
                                             if ui.small_button("OK").clicked() {
                                                 let name = state.rename_buf.trim().to_string();
@@ -219,7 +220,7 @@ pub fn show_playlist_editor(
                                     p.text(
                                         egui::Pos2::new(row_rect.max.x - 72.0, row_rect.center().y),
                                         egui::Align2::RIGHT_CENTER,
-                                        &format!("{}", pl.track_count),
+                                        format!("{}", pl.track_count),
                                         FontId::proportional(11.5),
                                         theme.text_muted,
                                     );
@@ -233,8 +234,16 @@ pub fn show_playlist_editor(
 
                                     // Rename / delete affordances on hover.
                                     if resp.hovered() {
-                                        crate::components::icons::draw_more_menu(ui, rename_rect, theme.text_secondary);
-                                        crate::components::icons::draw_window_close(ui, del_rect, theme.text_muted);
+                                        crate::components::icons::draw_more_menu(
+                                            ui,
+                                            rename_rect,
+                                            theme.text_secondary,
+                                        );
+                                        crate::components::icons::draw_window_close(
+                                            ui,
+                                            del_rect,
+                                            theme.text_muted,
+                                        );
                                         if ui.rect_contains_pointer(rename_rect)
                                             && ui.input(|i| i.pointer.primary_clicked())
                                         {
@@ -292,11 +301,18 @@ pub fn show_playlist_editor(
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                                         ui.label(
-                                            egui::RichText::new(format!("{} — {}", t.title, t.artist))
-                                                .font(FontId::proportional(12.0))
-                                                .color(theme.text_secondary),
+                                            egui::RichText::new(format!(
+                                                "{} — {}",
+                                                t.title, t.artist
+                                            ))
+                                            .font(FontId::proportional(12.0))
+                                            .color(theme.text_secondary),
                                         );
-                                        if ui.small_button("Del").on_hover_text("Remove from playlist").clicked() {
+                                        if ui
+                                            .small_button("Del")
+                                            .on_hover_text("Remove from playlist")
+                                            .clicked()
+                                        {
                                             actions.remove_track = Some((selected_id, t.id));
                                         }
                                     });
@@ -347,16 +363,25 @@ pub fn show_playlist_editor(
                             .max_height(ui.available_height() - 8.0)
                             .show(ui, |ui| {
                                 for &i in &state.results {
-                                    let Some(t) = library_tracks.get(i) else { continue };
+                                    let Some(t) = library_tracks.get(i) else {
+                                        continue;
+                                    };
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
-                                        if ui.small_button("+").on_hover_text("Add to playlist").clicked() {
+                                        if ui
+                                            .small_button("+")
+                                            .on_hover_text("Add to playlist")
+                                            .clicked()
+                                        {
                                             actions.add_track = Some((selected_id, t.id));
                                         }
                                         ui.label(
-                                            egui::RichText::new(format!("{} — {}", t.title, t.artist))
-                                                .font(FontId::proportional(12.0))
-                                                .color(theme.text_secondary),
+                                            egui::RichText::new(format!(
+                                                "{} — {}",
+                                                t.title, t.artist
+                                            ))
+                                            .font(FontId::proportional(12.0))
+                                            .color(theme.text_secondary),
                                         );
                                     });
                                 }

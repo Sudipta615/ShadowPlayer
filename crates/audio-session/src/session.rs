@@ -1,9 +1,9 @@
 use crossbeam::channel::{bounded, Receiver};
 use domain::models::AudioProfileChoice;
+pub use engine::engine::cue_split::PregapPolicy;
 pub use engine::events::{EngineEvent, OutputEvent};
 pub use engine::playback_info::{BitPerfectCause, PlaybackInfo, PlaybackState};
 pub use engine::playlist::RepeatMode;
-pub use engine::engine::cue_split::PregapPolicy;
 pub use engine::{AudioEngine, AudioSource, EngineCommand, EngineConfig, EngineHandle};
 use log::{info, warn};
 use std::path::Path;
@@ -231,11 +231,17 @@ impl AudioSession {
     }
 
     pub fn enqueue_cue_sheet(&self, path: impl AsRef<Path>, pregap: PregapPolicy) {
-        self.handle.enqueue_cue_sheet(path.as_ref().to_path_buf(), pregap);
+        self.handle
+            .enqueue_cue_sheet(path.as_ref().to_path_buf(), pregap);
     }
 
     /// Open an audio file and seek directly to the CUE track's start offset
-    pub fn open_cue_track(&self, audio_path: impl AsRef<Path>, cue_file: impl AsRef<Path>, track_number: u32) -> bool {
+    pub fn open_cue_track(
+        &self,
+        audio_path: impl AsRef<Path>,
+        cue_file: impl AsRef<Path>,
+        track_number: u32,
+    ) -> bool {
         if let Ok(sheet) = engine::decode::cue::CueSheet::parse_file(cue_file.as_ref()) {
             if let Some(ct) = sheet.tracks.iter().find(|t| t.number == track_number) {
                 self.open_file(audio_path.as_ref());
@@ -365,7 +371,9 @@ impl AudioSession {
         self.handle.set_eq_enabled(cfg.eq.enabled);
         self.handle.set_crossfeed_enabled(cfg.crossfeed.enabled);
         self.send(EngineCommand::SetLimiterEnabled(cfg.limiter.enabled));
-        self.send(EngineCommand::SetCompressorEnabled(cfg.multiband_compressor.enabled));
+        self.send(EngineCommand::SetCompressorEnabled(
+            cfg.multiband_compressor.enabled,
+        ));
         self.handle.set_spatial_enabled(cfg.spatial.enabled);
     }
 
@@ -505,7 +513,8 @@ impl AudioSession {
     }
 
     pub fn set_spatial_listener(&self, yaw_deg: f32, pitch_deg: f32, roll_deg: f32) {
-        self.handle.set_spatial_listener(yaw_deg, pitch_deg, roll_deg);
+        self.handle
+            .set_spatial_listener(yaw_deg, pitch_deg, roll_deg);
     }
 
     pub fn set_hrtf_profile(&self, profile_id: impl Into<String>) {
@@ -548,7 +557,8 @@ impl AudioSession {
 
     /// Set custom crossfeed filter parameters (frequency, Q, ITD delay in ms).
     pub fn set_crossfeed_custom_params(&self, frequency_hz: f32, q: f32, delay_ms: f32) {
-        self.handle.set_crossfeed_custom_params(frequency_hz, q, delay_ms);
+        self.handle
+            .set_crossfeed_custom_params(frequency_hz, q, delay_ms);
     }
 
     // ── Loudness ─────────────────────────────────────────────────────────
@@ -585,7 +595,8 @@ impl AudioSession {
         ceiling_db: f32,
         soft_clip: bool,
     ) {
-        self.handle.set_limiter_params(lookahead_ms, attack_ms, release_ms, ceiling_db, soft_clip);
+        self.handle
+            .set_limiter_params(lookahead_ms, attack_ms, release_ms, ceiling_db, soft_clip);
     }
 
     // ── Multiband Compressor ──────────────────────────────────────────────
@@ -620,7 +631,8 @@ impl AudioSession {
         detector: config::CompressorDetector,
         stereo_link: bool,
     ) {
-        self.handle.set_compressor_band_features(band, knee_db, detector, stereo_link);
+        self.handle
+            .set_compressor_band_features(band, knee_db, detector, stereo_link);
     }
 
     // ── Room Correction ───────────────────────────────────────────────────
@@ -756,7 +768,8 @@ impl AudioSession {
 
     /// Set per-channel trim gain and polarity for a mix slot.
     pub fn set_slot_trim(&self, slot: u8, channel: usize, gain_db: f32, invert_polarity: bool) {
-        self.handle.set_slot_trim(slot, channel, gain_db, invert_polarity);
+        self.handle
+            .set_slot_trim(slot, channel, gain_db, invert_polarity);
     }
 
     /// Configure the aux bus return (enable/disable and return gain).
@@ -782,7 +795,8 @@ impl AudioSession {
         curve: Option<std::sync::Arc<engine::spatial::CurveScalar>>,
         time_secs: f32,
     ) {
-        self.handle.set_slot_automation(slot, kind, curve, time_secs);
+        self.handle
+            .set_slot_automation(slot, kind, curve, time_secs);
     }
 
     // ── Output & Device (Advanced) ────────────────────────────────────────
@@ -839,7 +853,8 @@ impl AudioSession {
         full_quality_capacity: usize,
         policy: config::VoicePriority,
     ) {
-        self.handle.set_spatial_voice(enabled, capacity, full_quality_capacity, policy);
+        self.handle
+            .set_spatial_voice(enabled, capacity, full_quality_capacity, policy);
     }
 
     /// Attach a scalar automation curve (gain or spread) to a spatial program object.
@@ -851,7 +866,8 @@ impl AudioSession {
         curve: Option<std::sync::Arc<engine::spatial::CurveScalar>>,
         time_secs: f32,
     ) {
-        self.handle.set_spatial_automation(object, kind, curve, time_secs);
+        self.handle
+            .set_spatial_automation(object, kind, curve, time_secs);
     }
 
     /// Drive the spatial automation clock to `seconds`.
@@ -872,7 +888,8 @@ impl AudioSession {
     /// Configure listener glide smoothing (one-pole time constant ms; angular rate limit deg/s).
     /// `smoothing_ms = 0` snaps; `max_angular_rate_deg_s = 0` is unlimited.
     pub fn set_spatial_listener_tracking(&self, smoothing_ms: f32, max_angular_rate_deg_s: f32) {
-        self.handle.set_spatial_listener_tracking(smoothing_ms, max_angular_rate_deg_s);
+        self.handle
+            .set_spatial_listener_tracking(smoothing_ms, max_angular_rate_deg_s);
     }
 
     /// Configure the virtual screen geometry and gain.
@@ -883,7 +900,8 @@ impl AudioSession {
         elevation_deg: f32,
         gain: f32,
     ) {
-        self.handle.set_spatial_screen(center_azimuth_deg, half_width_deg, elevation_deg, gain);
+        self.handle
+            .set_spatial_screen(center_azimuth_deg, half_width_deg, elevation_deg, gain);
     }
 
     /// Configure acoustic room reflections and reverberation.
@@ -902,8 +920,16 @@ impl AudioSession {
         wet: f32,
     ) {
         self.handle.set_spatial_room(
-            enabled, width, depth, height, absorption,
-            reflection_order, rt60_ms, late_mix, late_distance, wet,
+            enabled,
+            width,
+            depth,
+            height,
+            absorption,
+            reflection_order,
+            rt60_ms,
+            late_mix,
+            late_distance,
+            wet,
         );
     }
 

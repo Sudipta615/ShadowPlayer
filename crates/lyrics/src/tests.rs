@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod unit {
     use crate::parser::*;
     use std::fs;
 

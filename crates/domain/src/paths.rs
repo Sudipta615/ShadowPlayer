@@ -199,7 +199,7 @@ mod tests {
         assert_ne!(encode_path_key(&a), encode_path_key(&b));
         assert_ne!(
             encode_path_key(&a),
-            encode_path_key(&Path::new("/music/song-\u{fffd}.flac")),
+            encode_path_key(Path::new("/music/song-\u{fffd}.flac")),
             "and neither collides with the lossy text"
         );
     }
@@ -220,7 +220,10 @@ mod tests {
 
     #[test]
     fn stray_percent_signs_are_literal() {
-        assert_eq!(decode_path_key("/music/100% sure.flac"), PathBuf::from("/music/100% sure.flac"));
+        assert_eq!(
+            decode_path_key("/music/100% sure.flac"),
+            PathBuf::from("/music/100% sure.flac")
+        );
         assert_eq!(decode_path_key("/a%2"), PathBuf::from("/a%2"));
         assert_eq!(decode_path_key("%"), PathBuf::from("%"));
     }

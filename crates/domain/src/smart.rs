@@ -206,7 +206,11 @@ pub struct SmartRule {
 
 impl SmartRule {
     pub fn new(field: SmartField) -> Self {
-        let op = field.operators().first().copied().unwrap_or(SmartOp::Contains);
+        let op = field
+            .operators()
+            .first()
+            .copied()
+            .unwrap_or(SmartOp::Contains);
         Self {
             field,
             op,
@@ -257,16 +261,12 @@ impl SmartRule {
         } else if self.field.is_numeric() {
             fixed.op = match self.op {
                 SmartOp::NotEquals | SmartOp::NotContains => SmartOp::NotEquals,
-                SmartOp::InLastDays | SmartOp::NotInLastDays | SmartOp::Contains => {
-                    SmartOp::Equals
-                }
+                SmartOp::InLastDays | SmartOp::NotInLastDays | SmartOp::Contains => SmartOp::Equals,
                 _ => SmartOp::Equals,
             };
         } else {
             fixed.op = match self.op {
-                SmartOp::GreaterThan | SmartOp::LessThan | SmartOp::InLastDays => {
-                    SmartOp::Contains
-                }
+                SmartOp::GreaterThan | SmartOp::LessThan | SmartOp::InLastDays => SmartOp::Contains,
                 SmartOp::NotInLastDays => SmartOp::NotContains,
                 SmartOp::IsTrue => SmartOp::IsNotEmpty,
                 SmartOp::IsFalse => SmartOp::IsEmpty,

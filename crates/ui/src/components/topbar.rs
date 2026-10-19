@@ -1,5 +1,7 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use crate::theme::Theme;
+use eframe::egui::{
+    self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
+};
 
 #[derive(Default)]
 pub struct WindowControlsResponse {
@@ -30,7 +32,8 @@ pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bo
                     ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
 
                     // Vector Search Icon
-                    let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(18.0, 18.0), Sense::hover());
+                    let (icon_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(18.0, 18.0), Sense::hover());
                     crate::components::icons::draw_search(ui, icon_rect, theme.text_muted);
 
                     let hint = "Search for songs, artists, albums, or playlists...";
@@ -70,22 +73,37 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
             ui.spacing_mut().item_spacing = Vec2::new(14.0, 0.0);
 
             // Window close, maximize, minimize
-            let (close_rect, close_resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
-            let close_col = if close_resp.hovered() { theme.destructive } else { theme.text_secondary };
+            let (close_rect, close_resp) =
+                ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
+            let close_col = if close_resp.hovered() {
+                theme.destructive
+            } else {
+                theme.text_secondary
+            };
             crate::components::icons::draw_window_close(ui, close_rect, close_col);
             if close_resp.clicked() {
                 resp.close_requested = true;
             }
 
-            let (max_rect, max_resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
-            let max_col = if max_resp.hovered() { theme.text_primary } else { theme.text_secondary };
+            let (max_rect, max_resp) =
+                ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
+            let max_col = if max_resp.hovered() {
+                theme.text_primary
+            } else {
+                theme.text_secondary
+            };
             crate::components::icons::draw_window_max(ui, max_rect, max_col);
             if max_resp.clicked() {
                 resp.maximize_requested = true;
             }
 
-            let (min_rect, min_resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
-            let min_col = if min_resp.hovered() { theme.text_primary } else { theme.text_secondary };
+            let (min_rect, min_resp) =
+                ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
+            let min_col = if min_resp.hovered() {
+                theme.text_primary
+            } else {
+                theme.text_secondary
+            };
             crate::components::icons::draw_window_min(ui, min_rect, min_col);
             if min_resp.clicked() {
                 resp.minimize_requested = true;
@@ -94,7 +112,8 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
             ui.add_space(8.0);
 
             // Theme Toggle Capsule (Sun / Moon)
-            let (toggle_rect, toggle_resp) = ui.allocate_exact_size(Vec2::new(56.0, 28.0), Sense::click());
+            let (toggle_rect, toggle_resp) =
+                ui.allocate_exact_size(Vec2::new(56.0, 28.0), Sense::click());
             let painter = ui.painter_at(toggle_rect);
 
             if toggle_resp.clicked() {

@@ -127,7 +127,9 @@ mod tests {
         let manager = ArtworkManager::new(&dir);
         let id = TrackId::new();
 
-        assert!(manager.save_thumbnail(&id, b"this is not a picture").is_none());
+        assert!(manager
+            .save_thumbnail(&id, b"this is not a picture")
+            .is_none());
         assert!(!manager.get_cached_thumbnail_path(&id).exists());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -143,7 +145,10 @@ mod tests {
 
         assert!(manager.find_folder_artwork(&song).is_none());
         std::fs::write(album.join("cover.jpg"), b"jpeg-ish").unwrap();
-        assert_eq!(manager.find_folder_artwork(&song), Some(album.join("cover.jpg")));
+        assert_eq!(
+            manager.find_folder_artwork(&song),
+            Some(album.join("cover.jpg"))
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

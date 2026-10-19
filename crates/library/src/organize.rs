@@ -112,10 +112,7 @@ impl OrganizePlan {
 
     /// How many distinct folders the plan will create or move into.
     pub fn destination_folders(&self) -> usize {
-        let mut dirs: Vec<&Path> = self
-            .actionable()
-            .filter_map(|e| e.to.parent())
-            .collect();
+        let mut dirs: Vec<&Path> = self.actionable().filter_map(|e| e.to.parent()).collect();
         dirs.sort_unstable();
         dirs.dedup();
         dirs.len()
@@ -192,7 +189,11 @@ pub fn build_plan(tracks: &[Track], pattern: &str, destination: Option<&Path>) -
 }
 
 /// Resolve one track's destination path.
-fn target_path(track: &Track, pattern: &str, destination: Option<&Path>) -> Result<PathBuf, String> {
+fn target_path(
+    track: &Track,
+    pattern: &str,
+    destination: Option<&Path>,
+) -> Result<PathBuf, String> {
     let rendered = render(pattern, track)?;
     let ext = track
         .path
@@ -216,7 +217,10 @@ fn target_path(track: &Track, pattern: &str, destination: Option<&Path>) -> Resu
     // Carry the original extension unless the pattern asked for it explicitly.
     if !pattern.contains("{ext}") && !ext.is_empty() {
         let last = components.last_mut().expect("non-empty");
-        if !last.to_ascii_lowercase().ends_with(&format!(".{}", ext.to_ascii_lowercase())) {
+        if !last
+            .to_ascii_lowercase()
+            .ends_with(&format!(".{}", ext.to_ascii_lowercase()))
+        {
             last.push('.');
             last.push_str(&ext);
         }
@@ -357,19 +361,20 @@ pub fn apply_plan(plan: &OrganizePlan) -> OrganizeOutcome {
     for entry in plan.actionable() {
         if let Some(parent) = entry.to.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                outcome
-                    .failures
-                    .push((entry.from.clone(), format!("cannot create {}: {e}", parent.display())));
+                outcome.failures.push((
+                    entry.from.clone(),
+                    format!("cannot create {}: {e}", parent.display()),
+                ));
                 continue;
             }
         }
 
         match move_file(&entry.from, &entry.to) {
-            Ok(()) => outcome.moved.push((
-                entry.track_id,
-                entry.to.clone(),
-                entry.content_hash.clone(),
-            )),
+            Ok(()) => {
+                outcome
+                    .moved
+                    .push((entry.track_id, entry.to.clone(), entry.content_hash.clone()))
+            }
             Err(e) => outcome
                 .failures
                 .push((entry.from.clone(), describe_move_error(&e))),
@@ -432,8 +437,7 @@ fn copy_then_delete(from: &Path, to: &Path) -> std::io::Result<()> {
 
 fn describe_move_error(e: &std::io::Error) -> String {
     if e.kind() == ErrorKind::CrossesDevices {
-        return "destination is on another filesystem; pick a folder on the same drive"
-            .to_string();
+        return "destination is on another filesystem; pick a folder on the same drive".to_string();
     }
     if e.kind() == ErrorKind::AlreadyExists {
         return "a file already exists there (not overwritten)".to_string();
@@ -496,10 +500,25 @@ mod tests {
 
     #[test]
     fn renders_tokens_and_leaves_other_text_alone() {
-        let t = track(3, "/music/a.flac", "Copper Wires", "Horizon Lines", "Slow Static");
-        assert_eq!(render("{track} - {title}", &t).unwrap(), "03 - Copper Wires");
-        assert_eq!(render("{artist} - {album}", &t).unwrap(), "Horizon Lines - Slow Static");
-        assert_eq!(render("literal {title} text", &t).unwrap(), "literal Copper Wires text");
+        let t = track(
+            3,
+            "/music/a.flac",
+            "Copper Wires",
+            "Horizon Lines",
+            "Slow Static",
+        );
+        assert_eq!(
+            render("{track} - {title}", &t).unwrap(),
+            "03 - Copper Wires"
+        );
+        assert_eq!(
+            render("{artist} - {album}", &t).unwrap(),
+            "Horizon Lines - Slow Static"
+        );
+        assert_eq!(
+            render("literal {title} text", &t).unwrap(),
+            "literal Copper Wires text"
+        );
     }
 
     #[test]
@@ -546,12 +565,14 @@ mod tests {
     #[test]
     fn folder_pattern_builds_a_tree_under_the_destination() {
         let root = scratch("tree");
-        let t = track(2, "/incoming/x.flac", "Gravity Well", "Low Orbit", "Deep Field");
-        let plan = build_plan(
-            &[t],
-            "{artist}/{album}/{track} - {title}",
-            Some(&root),
+        let t = track(
+            2,
+            "/incoming/x.flac",
+            "Gravity Well",
+            "Low Orbit",
+            "Deep Field",
         );
+        let plan = build_plan(&[t], "{artist}/{album}/{track} - {title}", Some(&root));
         assert_eq!(
             plan.entries[0].to,
             root.join("Low Orbit/Deep Field/02 - Gravity Well.flac")
@@ -560,7 +581,13 @@ mod tests {
 
     #[test]
     fn folder_pattern_without_a_destination_is_rejected() {
-        let t = track(2, "/incoming/x.flac", "Gravity Well", "Low Orbit", "Deep Field");
+        let t = track(
+            2,
+            "/incoming/x.flac",
+            "Gravity Well",
+            "Low Orbit",
+            "Deep Field",
+        );
         let plan = build_plan(&[t], "{artist}/{album}/{title}", None);
         let issue = plan.entries[0].issue.as_ref().expect("should be rejected");
         assert!(matches!(issue, OrganizeIssue::BadPattern(_)));
@@ -597,7 +624,10 @@ mod tests {
         t.path = src.clone();
 
         let plan = build_plan(&[t], "{track} - {title}", None);
-        assert_eq!(plan.entries[0].issue, Some(OrganizeIssue::DestinationExists));
+        assert_eq!(
+            plan.entries[0].issue,
+            Some(OrganizeIssue::DestinationExists)
+        );
         assert_eq!(plan.pending_count(), 0);
 
         // Applying a plan with nothing actionable must leave the disk alone.
@@ -625,7 +655,10 @@ mod tests {
 
         let plan = build_plan(&[a, b], "{title}", Some(&root));
         assert!(plan.entries[0].issue.is_none(), "first claim wins");
-        assert_eq!(plan.entries[1].issue, Some(OrganizeIssue::DuplicateDestination));
+        assert_eq!(
+            plan.entries[1].issue,
+            Some(OrganizeIssue::DuplicateDestination)
+        );
         assert_eq!(plan.pending_count(), 1);
     }
 
@@ -648,15 +681,29 @@ mod tests {
         let src = dir.join("incoming.flac");
         fs::write(&src, b"audio").unwrap();
 
-        let mut t = track(9, &src.to_string_lossy(), "Deep Field", "Low Orbit", "Gravity");
+        let mut t = track(
+            9,
+            &src.to_string_lossy(),
+            "Deep Field",
+            "Low Orbit",
+            "Gravity",
+        );
         t.path = src.clone();
 
-        let plan = build_plan(&[t.clone()], "{artist}/{album}/{track} - {title}", Some(&dir));
+        let plan = build_plan(
+            &[t.clone()],
+            "{artist}/{album}/{track} - {title}",
+            Some(&dir),
+        );
         assert_eq!(plan.pending_count(), 1);
         assert_eq!(plan.destination_folders(), 1);
 
         let outcome = apply_plan(&plan);
-        assert!(outcome.failures.is_empty(), "failures: {:?}", outcome.failures);
+        assert!(
+            outcome.failures.is_empty(),
+            "failures: {:?}",
+            outcome.failures
+        );
         assert_eq!(outcome.moved.len(), 1);
 
         let (id, new_path, hash) = &outcome.moved[0];
@@ -748,7 +795,10 @@ mod tests {
         copy_then_delete(&src, &dest).unwrap();
 
         assert_eq!(fs::read(&dest).unwrap(), b"audio bytes");
-        assert!(!src.exists(), "the source is unlinked once the copy is durable");
+        assert!(
+            !src.exists(),
+            "the source is unlinked once the copy is durable"
+        );
 
         // An occupied destination is an error, not a replacement.
         let occupied = dir.join("taken.flac");
@@ -769,6 +819,9 @@ mod tests {
         fs::create_dir_all(&src).unwrap(); // opening a directory as a file fails
         let dest = dir.join("dest.flac");
         assert!(copy_then_delete(&src, &dest).is_err());
-        assert!(!dest.exists(), "no partial copy may be left at the destination");
+        assert!(
+            !dest.exists(),
+            "no partial copy may be left at the destination"
+        );
     }
 }

@@ -6,9 +6,9 @@
 //! trustworthy. Removing a track only unlinks it from the library; deleting the
 //! file from disk is a separate, off-by-default opt-in.
 
-use eframe::egui::{self, Color32, FontId, Vec2};
 use domain::ids::TrackId;
 use domain::models::Track;
+use eframe::egui::{self, Color32, FontId, Vec2};
 
 use crate::theme::Theme;
 
@@ -149,7 +149,10 @@ pub fn show_duplicates_modal(
                                         );
                                         if is_keeper {
                                             // The keeper is not removable.
-                                            ui.add_enabled(false, egui::Checkbox::new(&mut checked, label));
+                                            ui.add_enabled(
+                                                false,
+                                                egui::Checkbox::new(&mut checked, label),
+                                            );
                                             ui.label(
                                                 egui::RichText::new("keep")
                                                     .font(FontId::proportional(11.0))
@@ -192,8 +195,8 @@ pub fn show_duplicates_modal(
                 } else {
                     theme.accent_violet
                 };
-                let btn = egui::Button::new(egui::RichText::new(label).color(Color32::WHITE))
-                    .fill(fill);
+                let btn =
+                    egui::Button::new(egui::RichText::new(label).color(Color32::WHITE)).fill(fill);
                 if ui.add_enabled(can_remove, btn).clicked() {
                     actions.remove_selected = true;
                 }

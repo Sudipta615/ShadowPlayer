@@ -15,6 +15,7 @@ use crate::components::songs_table::QuickFilter;
 use domain::models::{SortField, SortOrder};
 
 /// State store managing music tracks, collections, playlists, and drilldown views
+#[derive(Default)]
 pub struct LibraryState {
     pub all_tracks: Vec<Track>,
     pub displayed_tracks: Vec<Track>,
@@ -53,42 +54,8 @@ pub struct LibraryState {
     displayed_key: Option<(NavItem, String, SortField, SortOrder, QuickFilter)>,
 }
 
-impl Default for LibraryState {
-    fn default() -> Self {
-        Self {
-            all_tracks: Vec::new(),
-            displayed_tracks: Vec::new(),
-            favorite_ids: HashSet::new(),
-
-            playlists: Vec::new(),
-            smart_playlists: Vec::new(),
-            smart_playlist_tracks: Vec::new(),
-            selected_track_ids: HashSet::new(),
-            last_clicked_index: None,
-            quick_filter: QuickFilter::default(),
-            albums: Vec::new(),
-            selected_album: None,
-            album_tracks: Vec::new(),
-
-            artists: Vec::new(),
-            selected_artist: None,
-            artist_tracks: Vec::new(),
-
-            genres: Vec::new(),
-            selected_genre: None,
-            genre_tracks: Vec::new(),
-
-            scan_roots: Vec::new(),
-            selected_folder: None,
-            folder_tracks: Vec::new(),
-            new_folder_input: String::new(),
-
-            displayed_key: None,
-        }
-    }
-}
-
 impl LibraryState {
+    #[allow(clippy::too_many_arguments)]
     pub fn reload(
         &mut self,
         track_repo: &TrackRepo,
@@ -162,6 +129,7 @@ impl LibraryState {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_displayed_tracks(
         &mut self,
         search_engine: &SearchEngine,
@@ -284,7 +252,9 @@ impl LibraryState {
 
         // Update drilldown collections
         if let Some((ref title, ref artist)) = self.selected_album {
-            self.album_tracks = album_repo.get_tracks_by_album(title, artist).unwrap_or_default();
+            self.album_tracks = album_repo
+                .get_tracks_by_album(title, artist)
+                .unwrap_or_default();
         }
         if let Some(ref artist) = self.selected_artist {
             self.artist_tracks = artist_repo.get_tracks_by_artist(artist).unwrap_or_default();

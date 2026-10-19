@@ -326,28 +326,30 @@ mod tests {
     use engine::dsp::equalizer::EqFilterType;
 
     fn engaged_panel() -> EqPanelState {
-        let mut panel = EqPanelState::default();
-        panel.eq_enabled = true;
-        panel.graphic_enabled = true;
-        panel.preamp_db = -6.5;
-        panel.auto_headroom = false;
-        panel.bass_shelf_db = 3.0;
-        panel.treble_shelf_db = -2.0;
-        panel.stereo_width = 1.4;
-        panel.balance = -0.2;
-        panel.limiter_enabled = true;
-        panel.limiter_mode = LimiterMode::Saturate;
-        panel.limiter_ceiling_db = -0.3;
-        panel.compressor_enabled = true;
+        let mut panel = EqPanelState {
+            eq_enabled: true,
+            graphic_enabled: true,
+            preamp_db: -6.5,
+            auto_headroom: false,
+            bass_shelf_db: 3.0,
+            treble_shelf_db: -2.0,
+            stereo_width: 1.4,
+            balance: -0.2,
+            limiter_enabled: true,
+            limiter_mode: LimiterMode::Saturate,
+            limiter_ceiling_db: -0.3,
+            compressor_enabled: true,
+            crossfeed_enabled: true,
+            crossfeed_profile: CrossfeedProfile::Jmeier,
+            crossfeed_freq: 620.0,
+            correction_enabled: true,
+            correction_depth: 0.75,
+            correction_ir_path: "/irs/room.wav".to_string(),
+            ..EqPanelState::default()
+        };
         panel.comp_threshold[0] = -30.0;
         panel.comp_ratio[2] = 6.0;
         panel.comp_stereo_link[1] = false;
-        panel.crossfeed_enabled = true;
-        panel.crossfeed_profile = CrossfeedProfile::Jmeier;
-        panel.crossfeed_freq = 620.0;
-        panel.correction_enabled = true;
-        panel.correction_depth = 0.75;
-        panel.correction_ir_path = "/irs/room.wav".to_string();
         panel.bands[3] = ParametricBand {
             freq: 250.0,
             gain_db: -4.5,
@@ -419,12 +421,14 @@ mod tests {
             &EqPanelState::default(),
             &SettingsTabState::default(),
         );
-        let mut panel = EqPanelState::default();
-        panel.is_open = true;
-        panel.window_pos = Some([10.0, 20.0]);
-        panel.active_tab = crate::components::eq_panel::EqTab::Dynamics;
-        panel.selected_custom_preset_idx = Some(2);
-        panel.extended_range = true;
+        let mut panel = EqPanelState {
+            is_open: true,
+            window_pos: Some([10.0, 20.0]),
+            active_tab: crate::components::eq_panel::EqTab::Dynamics,
+            selected_custom_preset_idx: Some(2),
+            extended_range: true,
+            ..EqPanelState::default()
+        };
 
         preset.apply(&mut panel, &mut SettingsTabState::default());
 
@@ -465,7 +469,12 @@ mod tests {
     #[test]
     fn upsert_replaces_case_insensitively() {
         let mut presets = Vec::new();
-        let mut p = ChainPreset::capture("Speakers", "", &EqPanelState::default(), &SettingsTabState::default());
+        let mut p = ChainPreset::capture(
+            "Speakers",
+            "",
+            &EqPanelState::default(),
+            &SettingsTabState::default(),
+        );
         let idx = upsert(&mut presets, p.clone());
         assert_eq!(idx, 0);
 
@@ -542,14 +551,16 @@ mod tests {
 
     #[test]
     fn summary_names_the_engaged_blocks() {
-        let preset = ChainPreset::capture(
-            "x",
-            "",
-            &engaged_panel(),
-            &engaged_settings(),
-        );
+        let preset = ChainPreset::capture("x", "", &engaged_panel(), &engaged_settings());
         let s = preset.summary();
-        for needle in ["graphic", "parametric EQ", "limiter", "compressor", "crossfeed", "sub"] {
+        for needle in [
+            "graphic",
+            "parametric EQ",
+            "limiter",
+            "compressor",
+            "crossfeed",
+            "sub",
+        ] {
             assert!(s.contains(needle), "summary {s:?} missing {needle:?}");
         }
 

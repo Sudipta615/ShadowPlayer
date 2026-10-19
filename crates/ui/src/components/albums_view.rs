@@ -1,8 +1,10 @@
-use std::collections::HashMap;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2};
+use crate::theme::Theme;
 use domain::ids::TrackId;
 use domain::models::{Album, Track};
-use crate::theme::Theme;
+use eframe::egui::{
+    self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
+};
+use std::collections::HashMap;
 
 pub struct AlbumsViewAction {
     pub play_album: Option<(String, String)>,
@@ -67,15 +69,26 @@ impl<'a> AlbumsView<'a> {
                     let (art_rect, _) = ui.allocate_exact_size(art_size, Sense::hover());
                     let painter = ui.painter_at(art_rect);
 
-                    let first_track_art = self.album_tracks.first().and_then(|t| self.artwork_map.get(&t.id));
+                    let first_track_art = self
+                        .album_tracks
+                        .first()
+                        .and_then(|t| self.artwork_map.get(&t.id));
                     if let Some(tex) = first_track_art {
                         egui::Image::new(tex)
                             .corner_radius(CornerRadius::same(10))
                             .fit_to_exact_size(art_size)
                             .paint_at(ui, art_rect);
                     } else {
-                        painter.rect_filled(art_rect, CornerRadius::same(10), self.theme.artwork_placeholder);
-                        crate::components::icons::draw_disc(ui, art_rect.shrink2(Vec2::new(24.0, 24.0)), self.theme.accent_pink);
+                        painter.rect_filled(
+                            art_rect,
+                            CornerRadius::same(10),
+                            self.theme.artwork_placeholder,
+                        );
+                        crate::components::icons::draw_disc(
+                            ui,
+                            art_rect.shrink2(Vec2::new(24.0, 24.0)),
+                            self.theme.accent_pink,
+                        );
                     }
 
                     ui.vertical(|ui| {
@@ -98,12 +111,17 @@ impl<'a> AlbumsView<'a> {
                                 .color(self.theme.text_secondary),
                         );
 
-                        let dur_total: f32 = self.album_tracks.iter().map(|t| t.duration_secs).sum();
+                        let dur_total: f32 =
+                            self.album_tracks.iter().map(|t| t.duration_secs).sum();
                         let dur_m = dur_total as u64 / 60;
                         ui.label(
-                            egui::RichText::new(format!("{} songs • {} mins", self.album_tracks.len(), dur_m))
-                                .font(FontId::proportional(12.0))
-                                .color(self.theme.text_muted),
+                            egui::RichText::new(format!(
+                                "{} songs • {} mins",
+                                self.album_tracks.len(),
+                                dur_m
+                            ))
+                            .font(FontId::proportional(12.0))
+                            .color(self.theme.text_muted),
                         );
 
                         ui.add_space(4.0);
@@ -150,17 +168,31 @@ impl<'a> AlbumsView<'a> {
                         let is_fav = self.favorite_track_ids.contains(&track.id);
                         let row_h = 38.0;
 
-                        let (row_rect, row_resp) = ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
+                        let (row_rect, row_resp) =
+                            ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
                         if row_resp.double_clicked() {
                             action.play_track = Some(track.id);
                         }
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_active_row,
+                            );
+                            painter.rect_stroke(
+                                row_rect,
+                                CornerRadius::same(6),
+                                Stroke::new(1.0_f32, self.theme.border_active_row),
+                                egui::StrokeKind::Inside,
+                            );
                         } else if row_resp.hovered() {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_card_hover,
+                            );
                         }
 
                         let cy = row_rect.center().y;
@@ -168,7 +200,7 @@ impl<'a> AlbumsView<'a> {
                         painter.text(
                             Pos2::new(row_rect.min.x + 10.0, cy),
                             egui::Align2::LEFT_CENTER,
-                            &format!("{:02}", trk_num),
+                            format!("{:02}", trk_num),
                             FontId::proportional(12.0),
                             self.theme.text_muted,
                         );
@@ -178,7 +210,11 @@ impl<'a> AlbumsView<'a> {
                             egui::Align2::LEFT_CENTER,
                             &track.title,
                             FontId::proportional(13.2),
-                            if is_cur { Color32::WHITE } else { self.theme.text_primary },
+                            if is_cur {
+                                Color32::WHITE
+                            } else {
+                                self.theme.text_primary
+                            },
                         );
 
                         let dur_s = format_time(track.duration_secs as f64);
@@ -190,9 +226,18 @@ impl<'a> AlbumsView<'a> {
                             self.theme.text_muted,
                         );
 
-                        let fav_rect = Rect::from_center_size(Pos2::new(row_rect.max.x - 16.0, cy), Vec2::new(18.0, 18.0));
+                        let fav_rect = Rect::from_center_size(
+                            Pos2::new(row_rect.max.x - 16.0, cy),
+                            Vec2::new(18.0, 18.0),
+                        );
                         let fav_hover = ui.rect_contains_pointer(fav_rect);
-                        let heart_col = if is_fav { self.theme.accent_pink } else if fav_hover { self.theme.text_primary } else { self.theme.text_muted };
+                        let heart_col = if is_fav {
+                            self.theme.accent_pink
+                        } else if fav_hover {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_muted
+                        };
                         crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_fav);
 
                         if fav_hover && ui.input(|i| i.pointer.primary_clicked()) {
@@ -222,8 +267,18 @@ impl<'a> AlbumsView<'a> {
             if self.albums.is_empty() {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
-                    ui.label(egui::RichText::new("No albums found in library").font(FontId::proportional(15.0)).color(self.theme.text_muted));
-                    ui.label(egui::RichText::new("Add a music folder from 'Folders' to scan your music collection").font(FontId::proportional(12.5)).color(self.theme.text_dim));
+                    ui.label(
+                        egui::RichText::new("No albums found in library")
+                            .font(FontId::proportional(15.0))
+                            .color(self.theme.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "Add a music folder from 'Folders' to scan your music collection",
+                        )
+                        .font(FontId::proportional(12.5))
+                        .color(self.theme.text_dim),
+                    );
                 });
             } else {
                 egui::ScrollArea::vertical()
@@ -238,12 +293,24 @@ impl<'a> AlbumsView<'a> {
                             .spacing(Vec2::new(14.0, 14.0))
                             .show(ui, |ui| {
                                 for (idx, album) in self.albums.iter().enumerate() {
-                                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::click());
+                                    let (rect, resp) = ui.allocate_exact_size(
+                                        Vec2::new(card_w, card_h),
+                                        Sense::click(),
+                                    );
                                     let p = ui.painter_at(rect);
 
-                                    let bg = if resp.hovered() { self.theme.bg_card_hover } else { self.theme.bg_card };
+                                    let bg = if resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else {
+                                        self.theme.bg_card
+                                    };
                                     p.rect_filled(rect, CornerRadius::same(10), bg);
-                                    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0_f32, self.theme.border_card), egui::StrokeKind::Inside);
+                                    p.rect_stroke(
+                                        rect,
+                                        CornerRadius::same(10),
+                                        Stroke::new(1.0_f32, self.theme.border_card),
+                                        egui::StrokeKind::Inside,
+                                    );
 
                                     // Cover Art Area (132x132)
                                     let cover_rect = Rect::from_min_size(
@@ -251,8 +318,16 @@ impl<'a> AlbumsView<'a> {
                                         Vec2::new(card_w - 16.0, card_w - 16.0),
                                     );
 
-                                    p.rect_filled(cover_rect, CornerRadius::same(8), self.theme.artwork_placeholder);
-                                    crate::components::icons::draw_disc(ui, cover_rect.shrink2(Vec2::new(32.0, 32.0)), self.theme.accent_pink);
+                                    p.rect_filled(
+                                        cover_rect,
+                                        CornerRadius::same(8),
+                                        self.theme.artwork_placeholder,
+                                    );
+                                    crate::components::icons::draw_disc(
+                                        ui,
+                                        cover_rect.shrink2(Vec2::new(32.0, 32.0)),
+                                        self.theme.accent_pink,
+                                    );
 
                                     // Title & Artist
                                     let title_galley = p.layout_no_wrap(
@@ -260,14 +335,22 @@ impl<'a> AlbumsView<'a> {
                                         FontId::proportional(13.0),
                                         self.theme.text_primary,
                                     );
-                                    p.galley(Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 6.0), title_galley, self.theme.text_primary);
+                                    p.galley(
+                                        Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 6.0),
+                                        title_galley,
+                                        self.theme.text_primary,
+                                    );
 
                                     let artist_galley = p.layout_no_wrap(
                                         album.artist.clone(),
                                         FontId::proportional(11.5),
                                         self.theme.text_muted,
                                     );
-                                    p.galley(Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 22.0), artist_galley, self.theme.text_muted);
+                                    p.galley(
+                                        Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 22.0),
+                                        artist_galley,
+                                        self.theme.text_muted,
+                                    );
 
                                     let sub_str = format!("{} songs", album.track_count);
                                     p.text(
@@ -279,7 +362,8 @@ impl<'a> AlbumsView<'a> {
                                     );
 
                                     if resp.clicked() {
-                                        *self.selected_album = Some((album.title.clone(), album.artist.clone()));
+                                        *self.selected_album =
+                                            Some((album.title.clone(), album.artist.clone()));
                                     }
 
                                     if (idx + 1) % cols == 0 {

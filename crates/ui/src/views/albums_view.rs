@@ -1,6 +1,6 @@
-use eframe::egui;
 use database::{AlbumRepo, FavoritesRepo};
 use domain::models::Track;
+use eframe::egui;
 use playback::PlaybackCoordinator;
 
 use crate::components::albums_view::AlbumsView;
@@ -8,6 +8,7 @@ use crate::services::ArtworkService;
 use crate::state::LibraryState;
 use crate::theme::Theme;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_albums_view(
     ui: &mut egui::Ui,
     library_state: &mut LibraryState,
@@ -32,19 +33,28 @@ pub fn render_albums_view(
     .show(ui);
 
     if let Some((title, artist)) = alb_action.play_album {
-        let tracks = album_repo.get_tracks_by_album(&title, &artist).unwrap_or_default();
+        let tracks = album_repo
+            .get_tracks_by_album(&title, &artist)
+            .unwrap_or_default();
         if let Some(first) = tracks.first().cloned() {
             coordinator.play_track(first, Some(tracks));
         }
     }
     if let Some((title, artist)) = alb_action.queue_album {
-        let tracks = album_repo.get_tracks_by_album(&title, &artist).unwrap_or_default();
+        let tracks = album_repo
+            .get_tracks_by_album(&title, &artist)
+            .unwrap_or_default();
         for t in tracks {
             coordinator.add_to_queue(t);
         }
     }
     if let Some(t_id) = alb_action.play_track {
-        if let Some(t) = library_state.album_tracks.iter().find(|x| x.id == t_id).cloned() {
+        if let Some(t) = library_state
+            .album_tracks
+            .iter()
+            .find(|x| x.id == t_id)
+            .cloned()
+        {
             coordinator.play_track(t, Some(library_state.album_tracks.clone()));
         }
     }

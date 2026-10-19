@@ -1,6 +1,8 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2};
 use crate::components::visualizer::VisualizerWidget;
 use crate::theme::Theme;
+use eframe::egui::{
+    self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
+};
 
 pub struct NowPlayingEvents {
     pub toggle_play: bool,
@@ -83,9 +85,18 @@ impl<'a> NowPlayingCard<'a> {
                         .corner_radius(CornerRadius::same(14))
                         .fit_to_exact_size(art_size)
                         .paint_at(ui, art_rect);
-                    painter.rect_stroke(art_rect, CornerRadius::same(14), Stroke::new(1.0_f32, self.theme.border_card), egui::StrokeKind::Inside);
+                    painter.rect_stroke(
+                        art_rect,
+                        CornerRadius::same(14),
+                        Stroke::new(1.0_f32, self.theme.border_card),
+                        egui::StrokeKind::Inside,
+                    );
                 } else {
-                    painter.rect_filled(art_rect, CornerRadius::same(14), self.theme.artwork_placeholder);
+                    painter.rect_filled(
+                        art_rect,
+                        CornerRadius::same(14),
+                        self.theme.artwork_placeholder,
+                    );
                     let moon_center = Pos2::new(art_rect.center().x, art_rect.center().y - 12.0);
                     painter.circle_filled(moon_center, 34.0, self.theme.accent_pink);
                     // The bundled fonts have no "♫" glyph, so the note is
@@ -114,21 +125,35 @@ impl<'a> NowPlayingCard<'a> {
                             ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
 
                             // Menu button - opens Track Properties
-                            let (menu_rect, menu_resp) = ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
-                            let menu_col = if menu_resp.hovered() { Color32::WHITE } else { self.theme.text_secondary };
+                            let (menu_rect, menu_resp) =
+                                ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
+                            let menu_col = if menu_resp.hovered() {
+                                Color32::WHITE
+                            } else {
+                                self.theme.text_secondary
+                            };
                             crate::components::icons::draw_more_menu(ui, menu_rect, menu_col);
-                            if menu_resp.on_hover_text("Track Details & Properties").clicked() {
+                            if menu_resp
+                                .on_hover_text("Track Details & Properties")
+                                .clicked()
+                            {
                                 events.open_properties = true;
                             }
 
                             // Heart favorite toggle
-                            let (heart_rect, heart_resp) = ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
+                            let (heart_rect, heart_resp) =
+                                ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
                             let heart_color = if self.is_favorite {
                                 self.theme.accent_pink
                             } else {
                                 self.theme.text_muted
                             };
-                            crate::components::icons::draw_heart(ui, heart_rect, heart_color, self.is_favorite);
+                            crate::components::icons::draw_heart(
+                                ui,
+                                heart_rect,
+                                heart_color,
+                                self.is_favorite,
+                            );
 
                             if heart_resp.clicked() {
                                 events.toggle_favorite = true;
@@ -159,7 +184,8 @@ impl<'a> NowPlayingCard<'a> {
                     // 3. Live Spectrum Visualizer (precisely aligned with the progress bar track below!)
                     let time_label_w = 32.0;
                     let time_gap = 8.0;
-                    let bar_width = (ui.available_width() - (time_label_w * 2.0 + time_gap * 2.0)).max(60.0);
+                    let bar_width =
+                        (ui.available_width() - (time_label_w * 2.0 + time_gap * 2.0)).max(60.0);
 
                     ui.horizontal(|ui| {
                         ui.add_space(time_label_w + time_gap);
@@ -176,7 +202,8 @@ impl<'a> NowPlayingCard<'a> {
                         let elapsed_str = format_time(self.position_secs);
                         let duration_str = format_time(self.duration_secs);
 
-                        let (lbl1, _) = ui.allocate_exact_size(Vec2::new(time_label_w, 16.0), Sense::hover());
+                        let (lbl1, _) =
+                            ui.allocate_exact_size(Vec2::new(time_label_w, 16.0), Sense::hover());
                         ui.painter_at(lbl1).text(
                             lbl1.center(),
                             egui::Align2::CENTER_CENTER,
@@ -186,7 +213,10 @@ impl<'a> NowPlayingCard<'a> {
                         );
 
                         // Scrubber Slider
-                        let (bar_rect, bar_resp) = ui.allocate_exact_size(Vec2::new(bar_width, 16.0), Sense::click_and_drag());
+                        let (bar_rect, bar_resp) = ui.allocate_exact_size(
+                            Vec2::new(bar_width, 16.0),
+                            Sense::click_and_drag(),
+                        );
                         let painter = ui.painter_at(bar_rect);
 
                         let track_y = bar_rect.center().y;
@@ -217,8 +247,15 @@ impl<'a> NowPlayingCard<'a> {
                                 let g = (72.0 * (1.0 - t0) + 140.0 * t0) as u8;
                                 let b = (153.0 * (1.0 - t0) + 248.0 * t0) as u8;
                                 let col = Color32::from_rgb(r, g, b);
-                                let slice_rect = Rect::from_min_max(Pos2::new(x0, track_y - 2.0), Pos2::new(x1, track_y + 2.0));
-                                painter.rect_filled(slice_rect, CornerRadius::same(if i == 0 { 2 } else { 0 }), col);
+                                let slice_rect = Rect::from_min_max(
+                                    Pos2::new(x0, track_y - 2.0),
+                                    Pos2::new(x1, track_y + 2.0),
+                                );
+                                painter.rect_filled(
+                                    slice_rect,
+                                    CornerRadius::same(if i == 0 { 2 } else { 0 }),
+                                    col,
+                                );
                             }
                         }
 
@@ -229,12 +266,14 @@ impl<'a> NowPlayingCard<'a> {
                         // Dragging or clicking progress bar to seek
                         if bar_resp.dragged() || bar_resp.clicked() {
                             if let Some(mouse_pos) = bar_resp.interact_pointer_pos() {
-                                let norm = ((mouse_pos.x - bar_rect.min.x) / bar_width).clamp(0.0, 1.0);
+                                let norm =
+                                    ((mouse_pos.x - bar_rect.min.x) / bar_width).clamp(0.0, 1.0);
                                 events.seek_secs = Some(norm as f64 * self.duration_secs);
                             }
                         }
 
-                        let (lbl2, _) = ui.allocate_exact_size(Vec2::new(time_label_w, 16.0), Sense::hover());
+                        let (lbl2, _) =
+                            ui.allocate_exact_size(Vec2::new(time_label_w, 16.0), Sense::hover());
                         ui.painter_at(lbl2).text(
                             lbl2.center(),
                             egui::Align2::CENTER_CENTER,
@@ -259,8 +298,10 @@ impl<'a> NowPlayingCard<'a> {
                             ui.spacing_mut().item_spacing = Vec2::new(20.0, 0.0);
 
                             // Shuffle Button
-                            let (shuf_slot, shuf_resp) = ui.allocate_exact_size(Vec2::new(22.0, row_h), Sense::click());
-                            let shuf_rect = Rect::from_center_size(shuf_slot.center(), Vec2::new(20.0, 20.0));
+                            let (shuf_slot, shuf_resp) =
+                                ui.allocate_exact_size(Vec2::new(22.0, row_h), Sense::click());
+                            let shuf_rect =
+                                Rect::from_center_size(shuf_slot.center(), Vec2::new(20.0, 20.0));
                             let shuffle_color = if self.is_shuffle {
                                 self.theme.accent_magenta
                             } else {
@@ -272,16 +313,23 @@ impl<'a> NowPlayingCard<'a> {
                             }
 
                             // Previous Track Button
-                            let (prev_slot, prev_resp) = ui.allocate_exact_size(Vec2::new(24.0, row_h), Sense::click());
-                            let prev_rect = Rect::from_center_size(prev_slot.center(), Vec2::new(22.0, 22.0));
-                            crate::components::icons::draw_skip_prev(ui, prev_rect, self.theme.text_primary);
+                            let (prev_slot, prev_resp) =
+                                ui.allocate_exact_size(Vec2::new(24.0, row_h), Sense::click());
+                            let prev_rect =
+                                Rect::from_center_size(prev_slot.center(), Vec2::new(22.0, 22.0));
+                            crate::components::icons::draw_skip_prev(
+                                ui,
+                                prev_rect,
+                                self.theme.text_primary,
+                            );
                             if prev_resp.clicked() {
                                 events.prev_track = true;
                             }
 
                             // Play/Pause Big Circular Button (48x48)
                             let play_size = Vec2::new(48.0, 48.0);
-                            let (play_rect, play_resp) = ui.allocate_exact_size(play_size, Sense::click());
+                            let (play_rect, play_resp) =
+                                ui.allocate_exact_size(play_size, Sense::click());
                             let painter = ui.painter_at(play_rect);
                             let pc = play_rect.center();
                             let pr = 24.0_f32;
@@ -299,32 +347,62 @@ impl<'a> NowPlayingCard<'a> {
                                     let g = (72.0 * (1.0 - t) + 58.0 * t) as u8;
                                     let b = (153.0 * (1.0 - t) + 237.0 * t) as u8;
                                     let col = Color32::from_rgb(r, g, b);
-                                    painter.line_segment([Pos2::new(pc.x - dx, pc.y + dy), Pos2::new(pc.x + dx, pc.y + dy)], Stroke::new(1.2_f32, col));
+                                    painter.line_segment(
+                                        [
+                                            Pos2::new(pc.x - dx, pc.y + dy),
+                                            Pos2::new(pc.x + dx, pc.y + dy),
+                                        ],
+                                        Stroke::new(1.2_f32, col),
+                                    );
                                 }
                             }
-                            painter.circle_stroke(pc, pr, Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(236, 72, 153, 90)));
+                            painter.circle_stroke(
+                                pc,
+                                pr,
+                                Stroke::new(
+                                    1.0_f32,
+                                    Color32::from_rgba_premultiplied(236, 72, 153, 90),
+                                ),
+                            );
 
                             let inner_icon_rect = Rect::from_center_size(pc, Vec2::new(18.0, 18.0));
                             if self.is_playing {
-                                crate::components::icons::draw_pause(ui, inner_icon_rect, Color32::WHITE);
+                                crate::components::icons::draw_pause(
+                                    ui,
+                                    inner_icon_rect,
+                                    Color32::WHITE,
+                                );
                             } else {
-                                crate::components::icons::draw_play(ui, inner_icon_rect, Color32::WHITE, true);
+                                crate::components::icons::draw_play(
+                                    ui,
+                                    inner_icon_rect,
+                                    Color32::WHITE,
+                                    true,
+                                );
                             }
                             if play_resp.clicked() {
                                 events.toggle_play = true;
                             }
 
                             // Next Track Button
-                            let (next_slot, next_resp) = ui.allocate_exact_size(Vec2::new(24.0, row_h), Sense::click());
-                            let next_rect = Rect::from_center_size(next_slot.center(), Vec2::new(22.0, 22.0));
-                            crate::components::icons::draw_skip_next(ui, next_rect, self.theme.text_primary);
+                            let (next_slot, next_resp) =
+                                ui.allocate_exact_size(Vec2::new(24.0, row_h), Sense::click());
+                            let next_rect =
+                                Rect::from_center_size(next_slot.center(), Vec2::new(22.0, 22.0));
+                            crate::components::icons::draw_skip_next(
+                                ui,
+                                next_rect,
+                                self.theme.text_primary,
+                            );
                             if next_resp.clicked() {
                                 events.next_track = true;
                             }
 
                             // Repeat Button
-                            let (rep_slot, rep_resp) = ui.allocate_exact_size(Vec2::new(22.0, row_h), Sense::click());
-                            let rep_rect = Rect::from_center_size(rep_slot.center(), Vec2::new(20.0, 20.0));
+                            let (rep_slot, rep_resp) =
+                                ui.allocate_exact_size(Vec2::new(22.0, row_h), Sense::click());
+                            let rep_rect =
+                                Rect::from_center_size(rep_slot.center(), Vec2::new(20.0, 20.0));
                             let repeat_color = if self.is_repeat {
                                 self.theme.accent_pink
                             } else {
@@ -336,110 +414,141 @@ impl<'a> NowPlayingCard<'a> {
                             }
 
                             // EQ Panel Button - RIGHT ALIGNED
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let (eq_slot, eq_resp) = ui.allocate_exact_size(Vec2::new(28.0, row_h), Sense::click());
-                                let eq_rect = Rect::from_center_size(eq_slot.center(), Vec2::new(28.0, 28.0));
-                                let ep = ui.painter_at(eq_rect);
-                                let is_active = self.is_eq_open;
-                                let bg = if is_active {
-                                    self.theme.accent_magenta.linear_multiply(0.25)
-                                } else if eq_resp.hovered() {
-                                    self.theme.bg_card_hover
-                                } else {
-                                    self.theme.bg_pill
-                                };
-                                let border_color = if is_active {
-                                    self.theme.accent_magenta
-                                } else {
-                                    self.theme.border_subtle
-                                };
-                                let icon_color = if is_active {
-                                    self.theme.accent_pink
-                                } else {
-                                    self.theme.text_secondary
-                                };
-                                ep.rect_filled(eq_rect, CornerRadius::same(7), bg);
-                                ep.rect_stroke(eq_rect, CornerRadius::same(7), Stroke::new(1.0_f32, border_color), egui::StrokeKind::Inside);
-                                let icon_rect = eq_rect.shrink2(Vec2::new(4.0, 4.0));
-                                crate::components::icons::draw_equalizer_sliders(ui, icon_rect, icon_color);
-                                if eq_resp.on_hover_text("Equalizer & Audio DSP Studio (Ctrl+E)").clicked() {
-                                    events.open_eq_panel = true;
-                                }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let (eq_slot, eq_resp) = ui.allocate_exact_size(
+                                        Vec2::new(28.0, row_h),
+                                        Sense::click(),
+                                    );
+                                    let eq_rect = Rect::from_center_size(
+                                        eq_slot.center(),
+                                        Vec2::new(28.0, 28.0),
+                                    );
+                                    let ep = ui.painter_at(eq_rect);
+                                    let is_active = self.is_eq_open;
+                                    let bg = if is_active {
+                                        self.theme.accent_magenta.linear_multiply(0.25)
+                                    } else if eq_resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else {
+                                        self.theme.bg_pill
+                                    };
+                                    let border_color = if is_active {
+                                        self.theme.accent_magenta
+                                    } else {
+                                        self.theme.border_subtle
+                                    };
+                                    let icon_color = if is_active {
+                                        self.theme.accent_pink
+                                    } else {
+                                        self.theme.text_secondary
+                                    };
+                                    ep.rect_filled(eq_rect, CornerRadius::same(7), bg);
+                                    ep.rect_stroke(
+                                        eq_rect,
+                                        CornerRadius::same(7),
+                                        Stroke::new(1.0_f32, border_color),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                    let icon_rect = eq_rect.shrink2(Vec2::new(4.0, 4.0));
+                                    crate::components::icons::draw_equalizer_sliders(
+                                        ui, icon_rect, icon_color,
+                                    );
+                                    if eq_resp
+                                        .on_hover_text("Equalizer & Audio DSP Studio (Ctrl+E)")
+                                        .clicked()
+                                    {
+                                        events.open_eq_panel = true;
+                                    }
 
-                                // Sleep Timer Button (with a small preset popup)
-                                let (tm_slot, tm_resp) = ui.allocate_exact_size(Vec2::new(30.0, row_h), Sense::click());
-                                let tm_rect = Rect::from_center_size(tm_slot.center(), Vec2::new(22.0, 22.0));
-                                let timer_active = self.sleep_timer_label.is_some();
-                                let tm_icon_col = if timer_active {
-                                    self.theme.accent_pink
-                                } else {
-                                    self.theme.text_secondary
-                                };
-                                crate::components::icons::draw_clock(ui, tm_rect, tm_icon_col);
+                                    // Sleep Timer Button (with a small preset popup)
+                                    let (tm_slot, tm_resp) = ui.allocate_exact_size(
+                                        Vec2::new(30.0, row_h),
+                                        Sense::click(),
+                                    );
+                                    let tm_rect = Rect::from_center_size(
+                                        tm_slot.center(),
+                                        Vec2::new(22.0, 22.0),
+                                    );
+                                    let timer_active = self.sleep_timer_label.is_some();
+                                    let tm_icon_col = if timer_active {
+                                        self.theme.accent_pink
+                                    } else {
+                                        self.theme.text_secondary
+                                    };
+                                    crate::components::icons::draw_clock(ui, tm_rect, tm_icon_col);
 
-                                let menu_id = ui.make_persistent_id("sleep_timer_menu");
-                                let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false));
-                                if tm_resp.clicked() {
-                                    menu_open = !menu_open;
-                                }
-                                let hover_text = match self.sleep_timer_label {
-                                    Some(l) => format!("Sleep timer: {}", l),
-                                    None => "Sleep timer".to_string(),
-                                };
-                                let _ = tm_resp.clone().on_hover_text(hover_text);
+                                    let menu_id = ui.make_persistent_id("sleep_timer_menu");
+                                    let mut menu_open =
+                                        ui.data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false));
+                                    if tm_resp.clicked() {
+                                        menu_open = !menu_open;
+                                    }
+                                    let hover_text = match self.sleep_timer_label {
+                                        Some(l) => format!("Sleep timer: {}", l),
+                                        None => "Sleep timer".to_string(),
+                                    };
+                                    let _ = tm_resp.clone().on_hover_text(hover_text);
 
-                                if menu_open {
-                                    let popup_pos = tm_rect.left_bottom() + Vec2::new(0.0, 6.0);
-                                    let mut close = false;
-                                    let mut popup_rect: Option<Rect> = None;
-                                    egui::Area::new(menu_id.with("popup"))
-                                        .order(egui::Order::Foreground)
-                                        .fixed_pos(popup_pos)
-                                        .show(ui.ctx(), |ui| {
-                                            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                                ui.set_min_width(170.0);
-                                                ui.label(
-                                                    egui::RichText::new("Sleep Timer")
-                                                        .strong()
-                                                        .color(self.theme.text_primary),
-                                                );
-                                                for (label, secs) in [
-                                                    ("5 minutes", 300.0),
-                                                    ("15 minutes", 900.0),
-                                                    ("30 minutes", 1800.0),
-                                                    ("1 hour", 3600.0),
-                                                ] {
-                                                    if ui.button(label).clicked() {
+                                    if menu_open {
+                                        let popup_pos = tm_rect.left_bottom() + Vec2::new(0.0, 6.0);
+                                        let mut close = false;
+                                        let mut popup_rect: Option<Rect> = None;
+                                        egui::Area::new(menu_id.with("popup"))
+                                            .order(egui::Order::Foreground)
+                                            .fixed_pos(popup_pos)
+                                            .show(ui.ctx(), |ui| {
+                                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                                    ui.set_min_width(170.0);
+                                                    ui.label(
+                                                        egui::RichText::new("Sleep Timer")
+                                                            .strong()
+                                                            .color(self.theme.text_primary),
+                                                    );
+                                                    for (label, secs) in [
+                                                        ("5 minutes", 300.0),
+                                                        ("15 minutes", 900.0),
+                                                        ("30 minutes", 1800.0),
+                                                        ("1 hour", 3600.0),
+                                                    ] {
+                                                        if ui.button(label).clicked() {
+                                                            events.sleep_timer_request = Some(
+                                                                SleepTimerRequest::AfterSeconds(
+                                                                    secs,
+                                                                ),
+                                                            );
+                                                            close = true;
+                                                        }
+                                                    }
+                                                    if ui.button("End of current track").clicked() {
                                                         events.sleep_timer_request =
-                                                            Some(SleepTimerRequest::AfterSeconds(secs));
+                                                            Some(SleepTimerRequest::EndOfTrack);
                                                         close = true;
                                                     }
-                                                }
-                                                if ui.button("End of current track").clicked() {
-                                                    events.sleep_timer_request =
-                                                        Some(SleepTimerRequest::EndOfTrack);
-                                                    close = true;
-                                                }
-                                                if timer_active && ui.button("Turn off timer").clicked() {
-                                                    events.sleep_timer_request =
-                                                        Some(SleepTimerRequest::Off);
-                                                    close = true;
-                                                }
+                                                    if timer_active
+                                                        && ui.button("Turn off timer").clicked()
+                                                    {
+                                                        events.sleep_timer_request =
+                                                            Some(SleepTimerRequest::Off);
+                                                        close = true;
+                                                    }
+                                                });
+                                                popup_rect = Some(ui.min_rect());
                                             });
-                                            popup_rect = Some(ui.min_rect());
-                                        });
 
-                                    let clicked_elsewhere = ui.input(|i| i.pointer.any_click())
-                                        && !tm_resp.hovered()
-                                        && !popup_rect
-                                            .map(|r| ui.rect_contains_pointer(r))
-                                            .unwrap_or(false);
-                                    if close || clicked_elsewhere {
-                                        menu_open = false;
+                                        let clicked_elsewhere = ui.input(|i| i.pointer.any_click())
+                                            && !tm_resp.hovered()
+                                            && !popup_rect
+                                                .map(|r| ui.rect_contains_pointer(r))
+                                                .unwrap_or(false);
+                                        if close || clicked_elsewhere {
+                                            menu_open = false;
+                                        }
                                     }
-                                }
-                                ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
-                            });
+                                    ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
+                                },
+                            );
                         },
                     );
                 });

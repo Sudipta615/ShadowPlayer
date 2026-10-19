@@ -1,7 +1,7 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2, Window};
 use audio_session::AudioSession;
-use engine::diagnostics::BitPerfectCause;
 use domain::models::Track;
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2, Window};
+use engine::diagnostics::BitPerfectCause;
 
 use crate::state::DspState;
 use crate::theme::Theme;

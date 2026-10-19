@@ -9,12 +9,11 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use domain::models::Track;
 use eframe::egui::{self, Color32, FontId, Vec2};
 use library::organize::{
-    build_plan, OrganizeEntry, OrganizePlan, DEFAULT_IN_PLACE_PATTERN, DEFAULT_TREE_PATTERN,
-    TOKENS,
+    build_plan, OrganizeEntry, OrganizePlan, DEFAULT_IN_PLACE_PATTERN, DEFAULT_TREE_PATTERN, TOKENS,
 };
-use domain::models::Track;
 use serde::{Deserialize, Serialize};
 
 use crate::theme::Theme;
@@ -358,7 +357,8 @@ pub fn show_organize_modal(
     actions
 }
 
-fn render_preview_row(ui: &mut egui::Ui, index: usize, entry: &OrganizeEntry, theme: &Theme) {    let (marker, marker_color) = match (&entry.issue, entry.unchanged) {
+fn render_preview_row(ui: &mut egui::Ui, index: usize, entry: &OrganizeEntry, theme: &Theme) {
+    let (marker, marker_color) = match (&entry.issue, entry.unchanged) {
         (Some(_), _) => ("!", theme.accent_magenta),
         (None, true) => ("=", theme.text_muted),
         (None, false) => ("->", theme.bit_perfect_green),
@@ -378,10 +378,9 @@ fn render_preview_row(ui: &mut egui::Ui, index: usize, entry: &OrganizeEntry, th
                     .font(FontId::proportional(11.0))
                     .color(theme.text_muted),
             );
-            let target = if entry.issue.is_none() {
-                entry.to.display().to_string()
-            } else {
-                format!("{}  ({})", entry.to.display(), entry.issue.as_ref().unwrap().label())
+            let target = match &entry.issue {
+                None => entry.to.display().to_string(),
+                Some(issue) => format!("{}  ({})", entry.to.display(), issue.label()),
             };
             ui.label(
                 egui::RichText::new(target)
@@ -435,8 +434,10 @@ mod tests {
 
     #[test]
     fn choosing_a_destination_switches_between_name_and_tree_patterns() {
-        let mut state = OrganizeState::default();
-        state.pattern = DEFAULT_IN_PLACE_PATTERN.to_string();
+        let mut state = OrganizeState {
+            pattern: DEFAULT_IN_PLACE_PATTERN.to_string(),
+            ..Default::default()
+        };
         state.set_destination(Some(PathBuf::from("/music/library")));
         assert_eq!(state.pattern, DEFAULT_TREE_PATTERN);
 
@@ -446,8 +447,10 @@ mod tests {
 
     #[test]
     fn an_explicit_pattern_is_not_clobbered_by_a_destination_change() {
-        let mut state = OrganizeState::default();
-        state.pattern = "{album}/{title}".to_string();
+        let mut state = OrganizeState {
+            pattern: "{album}/{title}".to_string(),
+            ..Default::default()
+        };
         state.set_destination(Some(PathBuf::from("/music/library")));
         assert_eq!(state.pattern, "{album}/{title}", "user text wins");
     }

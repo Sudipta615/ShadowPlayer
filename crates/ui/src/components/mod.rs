@@ -13,7 +13,7 @@ pub mod right_panel;
 pub mod settings_tab;
 pub mod sidebar;
 pub mod songs_table;
-pub mod topbar;
 pub mod toasts;
+pub mod topbar;
 pub mod track_properties_modal;
 pub mod visualizer;

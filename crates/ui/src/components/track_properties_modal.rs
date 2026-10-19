@@ -1,6 +1,6 @@
-use eframe::egui::{self, CornerRadius, FontId, Stroke, Vec2, Window};
-use domain::models::Track;
 use crate::theme::Theme;
+use domain::models::Track;
+use eframe::egui::{self, CornerRadius, FontId, Stroke, Vec2, Window};
 
 pub fn show_track_properties_modal(
     ctx: &egui::Context,
@@ -34,32 +34,104 @@ pub fn show_track_properties_modal(
 
                     render_property_row(ui, "Title", &track.title, theme);
                     render_property_row(ui, "Artist", &track.artist, theme);
-                    render_property_row(ui, "Album", if track.album.is_empty() { "—" } else { &track.album }, theme);
+                    render_property_row(
+                        ui,
+                        "Album",
+                        if track.album.is_empty() {
+                            "—"
+                        } else {
+                            &track.album
+                        },
+                        theme,
+                    );
                     render_property_row(ui, "Genre", track.genre.as_deref().unwrap_or("—"), theme);
-                    render_property_row(ui, "Year", &track.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into()), theme);
+                    render_property_row(
+                        ui,
+                        "Year",
+                        &track
+                            .year
+                            .map(|y| y.to_string())
+                            .unwrap_or_else(|| "—".into()),
+                        theme,
+                    );
                     render_property_row(
                         ui,
                         "Track / Disc",
-                        &format!("{}/{}", track.track_number.unwrap_or(0), track.disc_number.unwrap_or(1)),
+                        &format!(
+                            "{}/{}",
+                            track.track_number.unwrap_or(0),
+                            track.disc_number.unwrap_or(1)
+                        ),
                         theme,
                     );
-                    render_property_row(ui, "Duration", &format_duration(track.duration_secs as f64), theme);
+                    render_property_row(
+                        ui,
+                        "Duration",
+                        &format_duration(track.duration_secs as f64),
+                        theme,
+                    );
 
                     ui.separator();
 
-                    render_property_row(ui, "Format", &format!("{} ({})", track.format, if track.is_lossless { "Lossless" } else { "Lossy" }), theme);
-                    render_property_row(ui, "Sample Rate", &format!("{} Hz", track.sample_rate), theme);
-                    render_property_row(ui, "Channels", &format!("{} ({})", track.channels, if track.channels == 2 { "Stereo" } else { "Mono / Multi" }), theme);
+                    render_property_row(
+                        ui,
+                        "Format",
+                        &format!(
+                            "{} ({})",
+                            track.format,
+                            if track.is_lossless {
+                                "Lossless"
+                            } else {
+                                "Lossy"
+                            }
+                        ),
+                        theme,
+                    );
+                    render_property_row(
+                        ui,
+                        "Sample Rate",
+                        &format!("{} Hz", track.sample_rate),
+                        theme,
+                    );
+                    render_property_row(
+                        ui,
+                        "Channels",
+                        &format!(
+                            "{} ({})",
+                            track.channels,
+                            if track.channels == 2 {
+                                "Stereo"
+                            } else {
+                                "Mono / Multi"
+                            }
+                        ),
+                        theme,
+                    );
                     if let Some(br) = track.bitrate_kbps {
                         render_property_row(ui, "Bitrate", &format!("{} kbps", br), theme);
                     }
                     if let Some(lufs) = track.r128_loudness_lufs {
-                        render_property_row(ui, "R128 Loudness", &format!("{:.1} LUFS", lufs), theme);
+                        render_property_row(
+                            ui,
+                            "R128 Loudness",
+                            &format!("{:.1} LUFS", lufs),
+                            theme,
+                        );
                     }
 
                     let size_mb = track.file_size_bytes as f64 / (1024.0 * 1024.0);
-                    render_property_row(ui, "File Size", &format!("{:.2} MB ({} bytes)", size_mb, track.file_size_bytes), theme);
-                    render_property_row(ui, "Play Count", &format!("{} times", track.play_count), theme);
+                    render_property_row(
+                        ui,
+                        "File Size",
+                        &format!("{:.2} MB ({} bytes)", size_mb, track.file_size_bytes),
+                        theme,
+                    );
+                    render_property_row(
+                        ui,
+                        "Play Count",
+                        &format!("{} times", track.play_count),
+                        theme,
+                    );
 
                     ui.separator();
 
@@ -82,9 +154,17 @@ fn render_property_row(ui: &mut egui::Ui, label: &str, value: &str, theme: &Them
     ui.horizontal(|ui| {
         ui.add_sized(
             [110.0, 18.0],
-            egui::Label::new(egui::RichText::new(label).font(FontId::proportional(12.0)).color(theme.text_muted)),
+            egui::Label::new(
+                egui::RichText::new(label)
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
+            ),
         );
-        ui.label(egui::RichText::new(value).font(FontId::proportional(12.5)).color(theme.text_primary));
+        ui.label(
+            egui::RichText::new(value)
+                .font(FontId::proportional(12.5))
+                .color(theme.text_primary),
+        );
     });
 }
 

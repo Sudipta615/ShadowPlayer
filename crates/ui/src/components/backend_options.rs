@@ -45,10 +45,8 @@ pub fn backend_picker(
         *changed = Some(*selected);
     }
 
-    let options: Vec<(AudioBackend, String)> = available
-        .iter()
-        .map(|b| (*b, backend_label(*b)))
-        .collect();
+    let options: Vec<(AudioBackend, String)> =
+        available.iter().map(|b| (*b, backend_label(*b))).collect();
     let options: Vec<(AudioBackend, &str)> = options
         .iter()
         .map(|(b, label)| (*b, label.as_str()))

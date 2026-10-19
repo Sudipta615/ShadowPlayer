@@ -1,10 +1,12 @@
-use std::collections::HashSet;
-use std::path::PathBuf;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2};
-use domain::ids::{PlaylistId, TrackId};
-use domain::models::{Playlist, SortField, SortOrder, Track};
 use crate::services::ArtworkService;
 use crate::theme::Theme;
+use domain::ids::{PlaylistId, TrackId};
+use domain::models::{Playlist, SortField, SortOrder, Track};
+use eframe::egui::{
+    self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
+};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 /// Maximum number of new cover textures decoded per frame. Caps the work done in
 /// a single frame so fast scrolling on a slow CPU can't cause a stutter.
@@ -174,22 +176,55 @@ impl<'a> SongsTable<'a> {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
                 // View Mode Toggles (Grid vs List)
-                let grid_bg = if is_grid_view { theme.accent_violet } else { theme.bg_pill };
-                let list_bg = if !is_grid_view { theme.accent_violet } else { theme.bg_pill };
+                let grid_bg = if is_grid_view {
+                    theme.accent_violet
+                } else {
+                    theme.bg_pill
+                };
+                let list_bg = if !is_grid_view {
+                    theme.accent_violet
+                } else {
+                    theme.bg_pill
+                };
 
-                let (grid_rect, grid_resp) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
-                ui.painter().rect_filled(grid_rect, CornerRadius::same(8), grid_bg);
+                let (grid_rect, grid_resp) =
+                    ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
+                ui.painter()
+                    .rect_filled(grid_rect, CornerRadius::same(8), grid_bg);
                 if !is_grid_view {
-                    ui.painter().rect_stroke(grid_rect, CornerRadius::same(8), Stroke::new(1.0_f32, theme.border_subtle), egui::StrokeKind::Inside);
+                    ui.painter().rect_stroke(
+                        grid_rect,
+                        CornerRadius::same(8),
+                        Stroke::new(1.0_f32, theme.border_subtle),
+                        egui::StrokeKind::Inside,
+                    );
                 }
-                crate::components::icons::draw_grid_icon(ui, grid_rect.shrink2(Vec2::new(7.0, 7.0)), if is_grid_view { Color32::WHITE } else { theme.text_muted });
+                crate::components::icons::draw_grid_icon(
+                    ui,
+                    grid_rect.shrink2(Vec2::new(7.0, 7.0)),
+                    if is_grid_view {
+                        Color32::WHITE
+                    } else {
+                        theme.text_muted
+                    },
+                );
                 if grid_resp.clicked() && !is_grid_view {
                     action.toggle_view_mode = true;
                 }
 
-                let (list_rect, list_resp) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
-                ui.painter().rect_filled(list_rect, CornerRadius::same(8), list_bg);
-                crate::components::icons::draw_list_icon(ui, list_rect.shrink2(Vec2::new(7.0, 7.0)), if !is_grid_view { Color32::WHITE } else { theme.text_muted });
+                let (list_rect, list_resp) =
+                    ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
+                ui.painter()
+                    .rect_filled(list_rect, CornerRadius::same(8), list_bg);
+                crate::components::icons::draw_list_icon(
+                    ui,
+                    list_rect.shrink2(Vec2::new(7.0, 7.0)),
+                    if !is_grid_view {
+                        Color32::WHITE
+                    } else {
+                        theme.text_muted
+                    },
+                );
                 if list_resp.clicked() && is_grid_view {
                     action.toggle_view_mode = true;
                 }
@@ -208,11 +243,21 @@ impl<'a> SongsTable<'a> {
                 };
                 let sort_label = format!("Sort by: {}", sort_name);
 
-                let (sort_rect, sort_resp) = ui.allocate_exact_size(Vec2::new(124.0, 30.0), Sense::click());
+                let (sort_rect, sort_resp) =
+                    ui.allocate_exact_size(Vec2::new(124.0, 30.0), Sense::click());
                 let sp = ui.painter_at(sort_rect);
-                let sort_bg = if sort_resp.hovered() { theme.bg_card_hover } else { theme.bg_pill };
+                let sort_bg = if sort_resp.hovered() {
+                    theme.bg_card_hover
+                } else {
+                    theme.bg_pill
+                };
                 sp.rect_filled(sort_rect, CornerRadius::same(15), sort_bg);
-                sp.rect_stroke(sort_rect, CornerRadius::same(15), Stroke::new(1.0_f32, theme.border_subtle), egui::StrokeKind::Inside);
+                sp.rect_stroke(
+                    sort_rect,
+                    CornerRadius::same(15),
+                    Stroke::new(1.0_f32, theme.border_subtle),
+                    egui::StrokeKind::Inside,
+                );
                 sp.text(
                     Pos2::new(sort_rect.min.x + 14.0, sort_rect.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -220,7 +265,10 @@ impl<'a> SongsTable<'a> {
                     FontId::proportional(12.5),
                     theme.text_primary,
                 );
-                let chev_rect = Rect::from_center_size(Pos2::new(sort_rect.max.x - 14.0, sort_rect.center().y), Vec2::new(12.0, 12.0));
+                let chev_rect = Rect::from_center_size(
+                    Pos2::new(sort_rect.max.x - 14.0, sort_rect.center().y),
+                    Vec2::new(12.0, 12.0),
+                );
                 crate::components::icons::draw_chevron_down(ui, chev_rect, theme.text_muted);
 
                 if sort_resp.on_hover_text("Change the sort field").clicked() {
@@ -240,22 +288,33 @@ impl<'a> SongsTable<'a> {
                 }
 
                 // Sort direction toggle
-                let (dir_rect, dir_resp) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
+                let (dir_rect, dir_resp) =
+                    ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
                 let dp = ui.painter_at(dir_rect);
-                let dir_bg = if dir_resp.hovered() { theme.bg_card_hover } else { theme.bg_pill };
+                let dir_bg = if dir_resp.hovered() {
+                    theme.bg_card_hover
+                } else {
+                    theme.bg_pill
+                };
                 dp.rect_filled(dir_rect, CornerRadius::same(8), dir_bg);
-                dp.rect_stroke(dir_rect, CornerRadius::same(8), Stroke::new(1.0_f32, theme.border_subtle), egui::StrokeKind::Inside);
+                dp.rect_stroke(
+                    dir_rect,
+                    CornerRadius::same(8),
+                    Stroke::new(1.0_f32, theme.border_subtle),
+                    egui::StrokeKind::Inside,
+                );
                 let ascending = sort_order == SortOrder::Ascending;
-                let arrow_col = if dir_resp.hovered() { theme.accent_pink } else { theme.text_secondary };
+                let arrow_col = if dir_resp.hovered() {
+                    theme.accent_pink
+                } else {
+                    theme.text_secondary
+                };
                 let cy = dir_rect.center().y;
                 let cx = dir_rect.center().x;
                 if ascending {
                     // ↑ : tip at the top, barbs below it
                     dp.add(egui::Shape::line(
-                        vec![
-                            Pos2::new(cx, cy - 6.0),
-                            Pos2::new(cx, cy + 6.0),
-                        ],
+                        vec![Pos2::new(cx, cy - 6.0), Pos2::new(cx, cy + 6.0)],
                         Stroke::new(1.8_f32, arrow_col),
                     ));
                     dp.add(egui::Shape::line(
@@ -268,10 +327,7 @@ impl<'a> SongsTable<'a> {
                     ));
                 } else {
                     dp.add(egui::Shape::line(
-                        vec![
-                            Pos2::new(cx, cy - 6.0),
-                            Pos2::new(cx, cy + 6.0),
-                        ],
+                        vec![Pos2::new(cx, cy - 6.0), Pos2::new(cx, cy + 6.0)],
                         Stroke::new(1.8_f32, arrow_col),
                     ));
                     dp.add(egui::Shape::line(
@@ -413,16 +469,24 @@ impl<'a> SongsTable<'a> {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
-                let (num_h_rect, num_h_resp) = ui.allocate_exact_size(Vec2::new(col_num_w, 20.0), Sense::click());
+                let (num_h_rect, num_h_resp) =
+                    ui.allocate_exact_size(Vec2::new(col_num_w, 20.0), Sense::click());
                 // Select-all checkbox, independent of the column sort target.
-                let all_selected = !tracks.is_empty() && tracks.iter().all(|t| selected_track_ids.contains(&t.id));
+                let all_selected =
+                    !tracks.is_empty() && tracks.iter().all(|t| selected_track_ids.contains(&t.id));
                 let any_selected = tracks.iter().any(|t| selected_track_ids.contains(&t.id));
                 let h_painter = ui.painter_at(num_h_rect);
                 let cb = Rect::from_center_size(
                     Pos2::new(num_h_rect.min.x + 16.0, num_h_rect.center().y),
                     Vec2::new(15.0, 15.0),
                 );
-                paint_checkbox(&h_painter, cb, all_selected, any_selected && !all_selected, theme);
+                paint_checkbox(
+                    &h_painter,
+                    cb,
+                    all_selected,
+                    any_selected && !all_selected,
+                    theme,
+                );
                 h_painter.text(
                     Pos2::new(num_h_rect.min.x + 42.0, num_h_rect.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -430,7 +494,10 @@ impl<'a> SongsTable<'a> {
                     FontId::proportional(11.8),
                     theme.text_muted,
                 );
-                if num_h_resp.on_hover_text("Click the box to select all · click # to sort").clicked() {
+                if num_h_resp
+                    .on_hover_text("Click the box to select all · click # to sort")
+                    .clicked()
+                {
                     let pointer = ui.input(|i| i.pointer.interact_pos());
                     let over_box = pointer
                         .map(|p| p.x < num_h_rect.min.x + 30.0)
@@ -449,37 +516,78 @@ impl<'a> SongsTable<'a> {
                     }
                 }
 
-                let (title_h_rect, title_h_resp) = ui.allocate_exact_size(Vec2::new(title_w, 20.0), Sense::click());
-                let title_col = if current_sort == SortField::Title { theme.accent_pink } else { theme.text_muted };
-                ui.painter_at(title_h_rect).text(Pos2::new(title_h_rect.min.x + 40.0, title_h_rect.center().y), egui::Align2::LEFT_CENTER, "TITLE", FontId::proportional(11.8), title_col);
+                let (title_h_rect, title_h_resp) =
+                    ui.allocate_exact_size(Vec2::new(title_w, 20.0), Sense::click());
+                let title_col = if current_sort == SortField::Title {
+                    theme.accent_pink
+                } else {
+                    theme.text_muted
+                };
+                ui.painter_at(title_h_rect).text(
+                    Pos2::new(title_h_rect.min.x + 40.0, title_h_rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    "TITLE",
+                    FontId::proportional(11.8),
+                    title_col,
+                );
                 if title_h_resp.on_hover_text("Sort by Title").clicked() {
                     action.sort_field_changed = Some(SortField::Title);
                 }
 
-                let (artist_h_rect, artist_h_resp) = ui.allocate_exact_size(Vec2::new(artist_w, 20.0), Sense::click());
-                let artist_col = if current_sort == SortField::Artist { theme.accent_pink } else { theme.text_muted };
-                ui.painter_at(artist_h_rect).text(artist_h_rect.left_center(), egui::Align2::LEFT_CENTER, "ARTIST", FontId::proportional(11.8), artist_col);
+                let (artist_h_rect, artist_h_resp) =
+                    ui.allocate_exact_size(Vec2::new(artist_w, 20.0), Sense::click());
+                let artist_col = if current_sort == SortField::Artist {
+                    theme.accent_pink
+                } else {
+                    theme.text_muted
+                };
+                ui.painter_at(artist_h_rect).text(
+                    artist_h_rect.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    "ARTIST",
+                    FontId::proportional(11.8),
+                    artist_col,
+                );
                 if artist_h_resp.on_hover_text("Sort by Artist").clicked() {
                     action.sort_field_changed = Some(SortField::Artist);
                 }
 
-                let (album_h_rect, album_h_resp) = ui.allocate_exact_size(Vec2::new(album_w, 20.0), Sense::click());
-                let album_col = if current_sort == SortField::Album { theme.accent_pink } else { theme.text_muted };
-                ui.painter_at(album_h_rect).text(album_h_rect.left_center(), egui::Align2::LEFT_CENTER, "ALBUM", FontId::proportional(11.8), album_col);
+                let (album_h_rect, album_h_resp) =
+                    ui.allocate_exact_size(Vec2::new(album_w, 20.0), Sense::click());
+                let album_col = if current_sort == SortField::Album {
+                    theme.accent_pink
+                } else {
+                    theme.text_muted
+                };
+                ui.painter_at(album_h_rect).text(
+                    album_h_rect.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    "ALBUM",
+                    FontId::proportional(11.8),
+                    album_col,
+                );
                 if album_h_resp.on_hover_text("Sort by Album").clicked() {
                     action.sort_field_changed = Some(SortField::Album);
                 }
 
-                let (clock_rect, clock_resp) = ui.allocate_exact_size(Vec2::new(col_time_w, 20.0), Sense::click());
-                let clock_col = if current_sort == SortField::Duration { theme.accent_pink } else { theme.text_muted };
-                let clock_icon_rect = Rect::from_center_size(clock_rect.center(), Vec2::new(14.0, 14.0));
+                let (clock_rect, clock_resp) =
+                    ui.allocate_exact_size(Vec2::new(col_time_w, 20.0), Sense::click());
+                let clock_col = if current_sort == SortField::Duration {
+                    theme.accent_pink
+                } else {
+                    theme.text_muted
+                };
+                let clock_icon_rect =
+                    Rect::from_center_size(clock_rect.center(), Vec2::new(14.0, 14.0));
                 crate::components::icons::draw_clock(ui, clock_icon_rect, clock_col);
                 if clock_resp.on_hover_text("Sort by Duration").clicked() {
                     action.sort_field_changed = Some(SortField::Duration);
                 }
 
-                let (heart_rect, heart_resp) = ui.allocate_exact_size(Vec2::new(col_fav_w, 20.0), Sense::click());
-                let heart_icon_rect = Rect::from_center_size(heart_rect.center(), Vec2::new(14.0, 14.0));
+                let (heart_rect, heart_resp) =
+                    ui.allocate_exact_size(Vec2::new(col_fav_w, 20.0), Sense::click());
+                let heart_icon_rect =
+                    Rect::from_center_size(heart_rect.center(), Vec2::new(14.0, 14.0));
                 crate::components::icons::draw_heart(ui, heart_icon_rect, theme.text_muted, false);
                 if heart_resp.on_hover_text("Sort by Favourites").clicked() {
                     action.sort_field_changed = Some(SortField::Favorite);
@@ -503,10 +611,8 @@ impl<'a> SongsTable<'a> {
                         let is_selected = selected_track_ids.contains(&track.id);
                         let full_width = ui.available_width();
 
-                        let (row_rect, row_resp) = ui.allocate_exact_size(
-                            Vec2::new(full_width, row_h),
-                            Sense::click(),
-                        );
+                        let (row_rect, row_resp) =
+                            ui.allocate_exact_size(Vec2::new(full_width, row_h), Sense::click());
                         // Visual row is 46px tall inside the 48px slot (2px gap).
                         let vis_rect = Rect::from_min_max(
                             Pos2::new(row_rect.min.x, row_rect.min.y + 1.0),
@@ -515,16 +621,39 @@ impl<'a> SongsTable<'a> {
                         let cy = vis_rect.center().y;
 
                         let painter = ui.painter_at(vis_rect);
-                        let is_hovered = row_resp.hovered() && std::env::var("SHADOWPLAYER_EVAL").is_err();
+                        let is_hovered =
+                            row_resp.hovered() && std::env::var("SHADOWPLAYER_EVAL").is_err();
 
                         if is_active {
-                            painter.rect_filled(vis_rect, CornerRadius::same(8), theme.bg_card_active);
-                            painter.rect_stroke(vis_rect, CornerRadius::same(8), Stroke::new(1.0_f32, theme.accent_violet), egui::StrokeKind::Inside);
+                            painter.rect_filled(
+                                vis_rect,
+                                CornerRadius::same(8),
+                                theme.bg_card_active,
+                            );
+                            painter.rect_stroke(
+                                vis_rect,
+                                CornerRadius::same(8),
+                                Stroke::new(1.0_f32, theme.accent_violet),
+                                egui::StrokeKind::Inside,
+                            );
                         } else if is_selected {
-                            painter.rect_filled(vis_rect, CornerRadius::same(8), theme.bg_card_hover);
-                            painter.rect_stroke(vis_rect, CornerRadius::same(8), Stroke::new(1.0_f32, theme.accent_blue), egui::StrokeKind::Inside);
+                            painter.rect_filled(
+                                vis_rect,
+                                CornerRadius::same(8),
+                                theme.bg_card_hover,
+                            );
+                            painter.rect_stroke(
+                                vis_rect,
+                                CornerRadius::same(8),
+                                Stroke::new(1.0_f32, theme.accent_blue),
+                                egui::StrokeKind::Inside,
+                            );
                         } else if is_hovered {
-                            painter.rect_filled(vis_rect, CornerRadius::same(8), theme.bg_card_hover);
+                            painter.rect_filled(
+                                vis_rect,
+                                CornerRadius::same(8),
+                                theme.bg_card_hover,
+                            );
                         }
 
                         // Interaction zones that must NOT trigger playback.
@@ -553,7 +682,11 @@ impl<'a> SongsTable<'a> {
                             let modifiers = ui.input(|i| i.modifiers);
                             if modifiers.shift && last_clicked_index.is_some() {
                                 let anchor = last_clicked_index.unwrap_or(idx);
-                                let (lo, hi) = if anchor <= idx { (anchor, idx) } else { (idx, anchor) };
+                                let (lo, hi) = if anchor <= idx {
+                                    (anchor, idx)
+                                } else {
+                                    (idx, anchor)
+                                };
                                 for i in lo..=hi {
                                     if let Some(t) = tracks.get(i) {
                                         selected_track_ids.insert(t.id);
@@ -576,14 +709,32 @@ impl<'a> SongsTable<'a> {
                             paint_checkbox(&painter, check_rect.shrink(3.0), true, false, theme);
                         } else if is_hovered {
                             paint_checkbox(&painter, check_rect.shrink(3.0), false, false, theme);
-                            let play_icon_rect = Rect::from_center_size(Pos2::new(vis_rect.min.x + 40.0, cy), Vec2::new(14.0, 14.0));
-                            let t1 = Pos2::new(play_icon_rect.min.x + 11.0, play_icon_rect.center().y);
-                            let t2 = Pos2::new(play_icon_rect.min.x + 3.0, play_icon_rect.center().y - 5.5);
-                            let t3 = Pos2::new(play_icon_rect.min.x + 3.0, play_icon_rect.center().y + 5.5);
-                            painter.add(egui::Shape::convex_polygon(vec![t1, t2, t3], Color32::WHITE, Stroke::NONE));
+                            let play_icon_rect = Rect::from_center_size(
+                                Pos2::new(vis_rect.min.x + 40.0, cy),
+                                Vec2::new(14.0, 14.0),
+                            );
+                            let t1 =
+                                Pos2::new(play_icon_rect.min.x + 11.0, play_icon_rect.center().y);
+                            let t2 = Pos2::new(
+                                play_icon_rect.min.x + 3.0,
+                                play_icon_rect.center().y - 5.5,
+                            );
+                            let t3 = Pos2::new(
+                                play_icon_rect.min.x + 3.0,
+                                play_icon_rect.center().y + 5.5,
+                            );
+                            painter.add(egui::Shape::convex_polygon(
+                                vec![t1, t2, t3],
+                                Color32::WHITE,
+                                Stroke::NONE,
+                            ));
                         } else {
                             let num_text = format!("{}", idx + 1);
-                            let num_col = if is_active { theme.accent_magenta } else { theme.text_muted };
+                            let num_col = if is_active {
+                                theme.accent_magenta
+                            } else {
+                                theme.text_muted
+                            };
                             painter.text(
                                 Pos2::new(vis_rect.min.x + 34.0, cy),
                                 egui::Align2::LEFT_CENTER,
@@ -622,22 +773,33 @@ impl<'a> SongsTable<'a> {
                             theme.text_primary
                         };
                         let title_x = vis_rect.min.x + col_num_w + 44.0;
-                        let title_galley = painter.layout_no_wrap(track.title.clone(), FontId::proportional(13.8), active_text);
+                        let title_galley = painter.layout_no_wrap(
+                            track.title.clone(),
+                            FontId::proportional(13.8),
+                            active_text,
+                        );
                         let title_w_actual = title_galley.size().x;
-                        painter.galley(Pos2::new(title_x, cy - title_galley.size().y * 0.5), title_galley, active_text);
+                        painter.galley(
+                            Pos2::new(title_x, cy - title_galley.size().y * 0.5),
+                            title_galley,
+                            active_text,
+                        );
 
                         // Equalizer Indicator if currently playing
                         if is_active && is_playing {
                             let eq_x = title_x + title_w_actual + 10.0;
                             let bar_heights = [6.0, 14.0, 11.0, 7.0];
-                            for b in 0..4 {
-                                let bh = bar_heights[b];
+                            for (b, &bh) in bar_heights.iter().enumerate() {
                                 let bx = eq_x + b as f32 * 3.5;
                                 let bar_r = Rect::from_min_max(
                                     Pos2::new(bx, cy + 6.0 - bh),
                                     Pos2::new(bx + 2.2, cy + 6.0),
                                 );
-                                painter.rect_filled(bar_r, CornerRadius::same(1), theme.accent_magenta);
+                                painter.rect_filled(
+                                    bar_r,
+                                    CornerRadius::same(1),
+                                    theme.accent_magenta,
+                                );
                             }
                         }
 
@@ -648,7 +810,11 @@ impl<'a> SongsTable<'a> {
                             egui::Align2::LEFT_CENTER,
                             &track.artist,
                             FontId::proportional(12.8),
-                            if is_active { theme.text_primary } else { theme.text_secondary },
+                            if is_active {
+                                theme.text_primary
+                            } else {
+                                theme.text_secondary
+                            },
                         );
 
                         // Column 4: Album
@@ -656,9 +822,17 @@ impl<'a> SongsTable<'a> {
                         painter.text(
                             Pos2::new(album_x, cy),
                             egui::Align2::LEFT_CENTER,
-                            if track.album.is_empty() { "—" } else { &track.album },
+                            if track.album.is_empty() {
+                                "—"
+                            } else {
+                                &track.album
+                            },
                             FontId::proportional(12.5),
-                            if is_active { theme.text_secondary } else { theme.text_muted },
+                            if is_active {
+                                theme.text_secondary
+                            } else {
+                                theme.text_muted
+                            },
                         );
 
                         // Column 5: Duration
@@ -669,7 +843,11 @@ impl<'a> SongsTable<'a> {
                             egui::Align2::LEFT_CENTER,
                             &dur_str,
                             FontId::proportional(12.5),
-                            if is_active { theme.text_secondary } else { theme.text_muted },
+                            if is_active {
+                                theme.text_secondary
+                            } else {
+                                theme.text_muted
+                            },
                         );
 
                         // Column 6: Heart Favorite Toggle
@@ -693,19 +871,41 @@ impl<'a> SongsTable<'a> {
                             ui.scope_id().with(("row_menu", idx)),
                             Sense::click(),
                         );
-                        crate::components::icons::draw_more_menu(ui, menu_rect, if menu_hover || is_active { theme.text_primary } else { theme.text_secondary });
+                        crate::components::icons::draw_more_menu(
+                            ui,
+                            menu_rect,
+                            if menu_hover || is_active {
+                                theme.text_primary
+                            } else {
+                                theme.text_secondary
+                            },
+                        );
                         // The ⋮ used to be painted with no handler at all, so
                         // it looked clickable and did nothing. It now opens the
                         // same menu as a right-click on the row.
                         egui::Popup::menu(&menu_resp)
                             .id(menu_resp.id.with("popup"))
                             .show(|ui| {
-                                render_track_context_menu(ui, track, is_favorite, playlists, &mut action, theme);
+                                render_track_context_menu(
+                                    ui,
+                                    track,
+                                    is_favorite,
+                                    playlists,
+                                    &mut action,
+                                    theme,
+                                );
                             });
 
                         // Right-Click Context Menu on Row
                         row_resp.context_menu(|ui| {
-                            render_track_context_menu(ui, track, is_favorite, playlists, &mut action, theme);
+                            render_track_context_menu(
+                                ui,
+                                track,
+                                is_favorite,
+                                playlists,
+                                &mut action,
+                                theme,
+                            );
                         });
                     }
                 });
@@ -786,19 +986,34 @@ fn render_bulk_bar(
                 );
                 ui.add_space(4.0);
 
-                if ui.button(egui::RichText::new("Play").font(FontId::proportional(12.0))).clicked() {
+                if ui
+                    .button(egui::RichText::new("Play").font(FontId::proportional(12.0)))
+                    .clicked()
+                {
                     action.play_selected = true;
                 }
-                if ui.button(egui::RichText::new("Play Next").font(FontId::proportional(12.0))).clicked() {
+                if ui
+                    .button(egui::RichText::new("Play Next").font(FontId::proportional(12.0)))
+                    .clicked()
+                {
                     action.queue_next_selected = true;
                 }
-                if ui.button(egui::RichText::new("Add to Queue").font(FontId::proportional(12.0))).clicked() {
+                if ui
+                    .button(egui::RichText::new("Add to Queue").font(FontId::proportional(12.0)))
+                    .clicked()
+                {
                     action.add_selected_to_queue = true;
                 }
-                if ui.button(egui::RichText::new("Favorite").font(FontId::proportional(12.0))).clicked() {
+                if ui
+                    .button(egui::RichText::new("Favorite").font(FontId::proportional(12.0)))
+                    .clicked()
+                {
                     action.favorite_selected = true;
                 }
-                if ui.button(egui::RichText::new("Organize").font(FontId::proportional(12.0))).clicked() {
+                if ui
+                    .button(egui::RichText::new("Organize").font(FontId::proportional(12.0)))
+                    .clicked()
+                {
                     action.organize_selected = true;
                 }
                 if !playlists.is_empty() {
@@ -826,7 +1041,10 @@ fn render_bulk_bar(
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(egui::RichText::new("Clear").font(FontId::proportional(12.0))).clicked() {
+                    if ui
+                        .button(egui::RichText::new("Clear").font(FontId::proportional(12.0)))
+                        .clicked()
+                    {
                         action.clear_selection = true;
                     }
                 });
@@ -885,10 +1103,18 @@ fn render_grid_card(
     } else {
         theme.border_card
     };
-    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0_f32, stroke_col), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(10),
+        Stroke::new(1.0_f32, stroke_col),
+        egui::StrokeKind::Inside,
+    );
 
     if is_selected {
-        let cb = Rect::from_center_size(Pos2::new(rect.min.x + 18.0, rect.min.y + 18.0), Vec2::new(16.0, 16.0));
+        let cb = Rect::from_center_size(
+            Pos2::new(rect.min.x + 18.0, rect.min.y + 18.0),
+            Vec2::new(16.0, 16.0),
+        );
         paint_checkbox(&p, cb, true, false, theme);
     }
 
@@ -902,20 +1128,44 @@ fn render_grid_card(
             .paint_at(ui, art_rect);
     } else {
         p.rect_filled(art_rect, CornerRadius::same(8), theme.bg_pill);
-        crate::components::icons::draw_disc(ui, art_rect.shrink2(Vec2::new(30.0, 30.0)), theme.accent_pink);
+        crate::components::icons::draw_disc(
+            ui,
+            art_rect.shrink2(Vec2::new(30.0, 30.0)),
+            theme.accent_pink,
+        );
     }
 
     if resp.hovered() {
-        p.circle_filled(art_rect.center(), 18.0, Color32::from_rgba_premultiplied(0, 0, 0, 160));
+        p.circle_filled(
+            art_rect.center(),
+            18.0,
+            Color32::from_rgba_premultiplied(0, 0, 0, 160),
+        );
         let play_icon_rect = Rect::from_center_size(art_rect.center(), Vec2::new(16.0, 16.0));
         crate::components::icons::draw_play(ui, play_icon_rect, Color32::WHITE, true);
     }
 
-    let title_g = p.layout_no_wrap(track.title.clone(), FontId::proportional(12.8), theme.text_primary);
-    p.galley(Pos2::new(rect.min.x + 8.0, art_rect.max.y + 6.0), title_g, theme.text_primary);
+    let title_g = p.layout_no_wrap(
+        track.title.clone(),
+        FontId::proportional(12.8),
+        theme.text_primary,
+    );
+    p.galley(
+        Pos2::new(rect.min.x + 8.0, art_rect.max.y + 6.0),
+        title_g,
+        theme.text_primary,
+    );
 
-    let artist_g = p.layout_no_wrap(track.artist.clone(), FontId::proportional(11.2), theme.text_muted);
-    p.galley(Pos2::new(rect.min.x + 8.0, art_rect.max.y + 22.0), artist_g, theme.text_muted);
+    let artist_g = p.layout_no_wrap(
+        track.artist.clone(),
+        FontId::proportional(11.2),
+        theme.text_muted,
+    );
+    p.galley(
+        Pos2::new(rect.min.x + 8.0, art_rect.max.y + 22.0),
+        artist_g,
+        theme.text_muted,
+    );
 
     resp.context_menu(|ui| {
         render_track_context_menu(ui, track, is_fav, playlists, action, theme);
@@ -963,7 +1213,11 @@ fn render_track_context_menu(
 
     ui.separator();
 
-    let fav_text = if is_fav { "Remove from Favorites" } else { "Add to Favorites" };
+    let fav_text = if is_fav {
+        "Remove from Favorites"
+    } else {
+        "Add to Favorites"
+    };
     if ui.button(fav_text).clicked() {
         action.toggle_favorite = Some(track.id);
         ui.close();
@@ -1001,7 +1255,10 @@ fn render_track_context_menu(
 
     ui.separator();
 
-    if ui.button(egui::RichText::new("Remove from Library").color(theme.destructive)).clicked() {
+    if ui
+        .button(egui::RichText::new("Remove from Library").color(theme.destructive))
+        .clicked()
+    {
         action.remove_track = Some(track.id);
         ui.close();
     }

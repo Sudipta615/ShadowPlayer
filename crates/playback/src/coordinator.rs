@@ -190,7 +190,11 @@ impl PlaybackCoordinator {
         candidates.extend(sibling_cue_candidates(&real_path));
 
         for sheet in candidates {
-            if sheet.exists() && self.session.open_cue_track(&real_path, &sheet, cue.track_number) {
+            if sheet.exists()
+                && self
+                    .session
+                    .open_cue_track(&real_path, &sheet, cue.track_number)
+            {
                 self.session.play();
                 return;
             }
@@ -391,7 +395,11 @@ impl PlaybackCoordinator {
 
     /// Shuffle the queue from just after the current track to the end.
     fn shuffle_upcoming(&mut self) {
-        let from = self.current_index.map(|i| i + 1).unwrap_or(0).min(self.queue.len());
+        let from = self
+            .current_index
+            .map(|i| i + 1)
+            .unwrap_or(0)
+            .min(self.queue.len());
         self.shuffle_upcoming_from(from);
     }
 
@@ -542,9 +550,9 @@ impl PlaybackCoordinator {
         if let Err(e) = self.track_repo.increment_play_count(&track_id) {
             warn!("Could not increment play count for {track_id}: {e}");
         }
-        if let Err(e) = self
-            .history_repo
-            .record_play(&track_id, self.listen_secs.max(threshold), completed)
+        if let Err(e) =
+            self.history_repo
+                .record_play(&track_id, self.listen_secs.max(threshold), completed)
         {
             warn!("Could not record play history for {track_id}: {e}");
         }
@@ -586,6 +594,18 @@ fn credited_listen_secs(last_position: f32, pos: f32) -> f32 {
     }
 }
 
+/// The conventional `.cue` names to try beside an album image, for rows written
+/// before the sheet's own path was recorded.
+fn sibling_cue_candidates(real_path: &std::path::Path) -> [std::path::PathBuf; 3] {
+    let stem = real_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let parent = real_path.parent().unwrap_or(std::path::Path::new("."));
+    [
+        parent.join(format!("{}.cue", stem)),
+        parent.join(SIBLING_CUE_NAMES[0]),
+        parent.join(SIBLING_CUE_NAMES[1]),
+    ]
+}
+
 #[cfg(test)]
 mod coordinator_unit_tests {
     use super::credited_listen_secs;
@@ -603,16 +623,4 @@ mod coordinator_unit_tests {
         assert_eq!(credited_listen_secs(100.0, 5.0), 0.0);
         assert_eq!(credited_listen_secs(0.0, 0.0), 0.0);
     }
-}
-
-/// The conventional `.cue` names to try beside an album image, for rows written
-/// before the sheet's own path was recorded.
-fn sibling_cue_candidates(real_path: &std::path::Path) -> [std::path::PathBuf; 3] {
-    let stem = real_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let parent = real_path.parent().unwrap_or(std::path::Path::new("."));
-    [
-        parent.join(format!("{}.cue", stem)),
-        parent.join(SIBLING_CUE_NAMES[0]),
-        parent.join(SIBLING_CUE_NAMES[1]),
-    ]
 }

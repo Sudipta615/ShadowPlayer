@@ -254,14 +254,16 @@ impl TrackRepo {
     pub fn get_by_id(&self, id: &TrackId) -> Result<Option<Track>> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE id = ?1;")?;
-            stmt.query_row(params![id.to_string()], map_track).optional()
+            stmt.query_row(params![id.to_string()], map_track)
+                .optional()
         })
     }
 
     pub fn get_by_path(&self, path: &Path) -> Result<Option<Track>> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE path = ?1;")?;
-            stmt.query_row(params![encode_path_key(path)], map_track).optional()
+            stmt.query_row(params![encode_path_key(path)], map_track)
+                .optional()
         })
     }
 
@@ -332,8 +334,7 @@ impl TrackRepo {
                  )
                  ORDER BY content_hash, id;",
             )?;
-            let tracks: Vec<Track> =
-                stmt.query_map([], map_track)?.collect::<Result<_, _>>()?;
+            let tracks: Vec<Track> = stmt.query_map([], map_track)?.collect::<Result<_, _>>()?;
 
             // The rows arrive grouped: start a new group whenever the hash
             // changes.
@@ -359,9 +360,8 @@ impl TrackRepo {
     }
 
     pub fn count(&self) -> Result<usize> {
-        self.db.with_conn(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM tracks;", [], |r| r.get(0))
-        })
+        self.db
+            .with_conn(|conn| conn.query_row("SELECT COUNT(*) FROM tracks;", [], |r| r.get(0)))
     }
 
     pub fn list(&self, sort: SortField, order: SortOrder) -> Result<Vec<Track>> {
@@ -567,8 +567,9 @@ impl TrackRepo {
     pub fn get_tracks_by_folder(&self, folder_path: &Path) -> Result<Vec<Track>> {
         let search = like_prefix(folder_path);
         self.db.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT * FROM tracks WHERE path LIKE ?1 ESCAPE '\\' ORDER BY path ASC;")?;
+            let mut stmt = conn.prepare(
+                "SELECT * FROM tracks WHERE path LIKE ?1 ESCAPE '\\' ORDER BY path ASC;",
+            )?;
             let iter = stmt.query_map(params![search], map_track)?;
             let mut tracks = Vec::new();
             for t in iter {
@@ -723,7 +724,10 @@ impl PlaylistRepo {
 
     pub fn delete(&self, id: &PlaylistId) -> Result<()> {
         self.db.with_conn(|conn| {
-            conn.execute("DELETE FROM playlists WHERE id = ?1;", params![id.to_string()])?;
+            conn.execute(
+                "DELETE FROM playlists WHERE id = ?1;",
+                params![id.to_string()],
+            )?;
             Ok(())
         })
     }
@@ -770,8 +774,9 @@ impl PlaylistRepo {
                      WHERE playlist_id = ?1
                      ORDER BY position ASC, id ASC;",
                 )?;
-                let rows =
-                    stmt.query_map(params![playlist_id.to_string()], |row| row.get::<_, String>(0))?;
+                let rows = stmt.query_map(params![playlist_id.to_string()], |row| {
+                    row.get::<_, String>(0)
+                })?;
                 rows.collect::<Result<Vec<_>>>()?
             };
             {
@@ -898,7 +903,10 @@ impl HistoryRepo {
     pub fn prune_older_than_window(&self) -> Result<usize> {
         let cutoff = Self::now_secs() - Self::WINDOW_SECS;
         self.db.with_conn(|conn| {
-            let n = conn.execute("DELETE FROM play_history WHERE played_at < ?1;", params![cutoff])?;
+            let n = conn.execute(
+                "DELETE FROM play_history WHERE played_at < ?1;",
+                params![cutoff],
+            )?;
             Ok(n)
         })
     }
@@ -1115,7 +1123,8 @@ impl ScanRootsRepo {
 
     pub fn list(&self) -> Result<Vec<ScanRoot>> {
         self.db.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT id, path, watch_enabled, last_scanned_at FROM scan_roots;")?;
+            let mut stmt =
+                conn.prepare("SELECT id, path, watch_enabled, last_scanned_at FROM scan_roots;")?;
             let iter = stmt.query_map([], |row| {
                 let id_str: String = row.get(0)?;
                 let path_str: String = row.get(1)?;
@@ -1182,7 +1191,10 @@ impl ScanRootsRepo {
 
     pub fn remove(&self, id: &ScanRootId) -> Result<()> {
         self.db.with_conn(|conn| {
-            conn.execute("DELETE FROM scan_roots WHERE id = ?1;", params![id.to_string()])?;
+            conn.execute(
+                "DELETE FROM scan_roots WHERE id = ?1;",
+                params![id.to_string()],
+            )?;
             Ok(())
         })
     }
@@ -1249,7 +1261,8 @@ impl AlbumRepo {
                  ORDER BY cnt DESC, album COLLATE NOCASE ASC
                  LIMIT ?2;",
             )?;
-            let iter = stmt.query_map(params![like, limit as i64], |row| row.get::<_, String>(0))?;
+            let iter =
+                stmt.query_map(params![like, limit as i64], |row| row.get::<_, String>(0))?;
             let mut albums = Vec::new();
             for a in iter {
                 albums.push(a?);
@@ -1299,7 +1312,8 @@ impl ArtistRepo {
                  ORDER BY trk_cnt DESC, artist COLLATE NOCASE ASC
                  LIMIT ?2;",
             )?;
-            let iter = stmt.query_map(params![like, limit as i64], |row| row.get::<_, String>(0))?;
+            let iter =
+                stmt.query_map(params![like, limit as i64], |row| row.get::<_, String>(0))?;
             let mut artists = Vec::new();
             for a in iter {
                 artists.push(a?);
@@ -1481,7 +1495,10 @@ fn rule_to_clause(rule: &SmartRule) -> Option<(String, Vec<SqlValue>)> {
             if v.is_empty() {
                 None
             } else {
-                Some((format!("{col} LIKE ?"), vec![SqlValue::Text(format!("%{v}%"))]))
+                Some((
+                    format!("{col} LIKE ?"),
+                    vec![SqlValue::Text(format!("%{v}%"))],
+                ))
             }
         }
         SmartOp::NotContains => {
@@ -1510,7 +1527,11 @@ fn rule_to_clause(rule: &SmartRule) -> Option<(String, Vec<SqlValue>)> {
         }
         SmartOp::GreaterThan | SmartOp::LessThan => {
             let n = parse_num(v)?;
-            let op = if rule.op == SmartOp::GreaterThan { ">" } else { "<" };
+            let op = if rule.op == SmartOp::GreaterThan {
+                ">"
+            } else {
+                "<"
+            };
             Some((format!("{col} {op} ?"), vec![n]))
         }
         SmartOp::InLastDays | SmartOp::NotInLastDays => {
@@ -1628,11 +1649,13 @@ impl SmartPlaylistRepo {
     /// Insert (or replace) a smart playlist. Returns the stored definition.
     pub fn save(&self, sp: &SmartPlaylist) -> Result<SmartPlaylist> {
         let now = now_secs();
-        let created = if sp.created_at == 0 { now } else { sp.created_at };
+        let created = if sp.created_at == 0 {
+            now
+        } else {
+            sp.created_at
+        };
         let rules_json = serde_json::to_string(&sp.rules).unwrap_or_else(|_| "[]".to_string());
-        let sort_by = sp
-            .sort_by
-            .and_then(|f| serde_json::to_string(&f).ok());
+        let sort_by = sp.sort_by.and_then(|f| serde_json::to_string(&f).ok());
         let limit = sp.limit_count.map(|n| n as i64);
 
         self.db.with_conn(|conn| {
@@ -1696,4 +1719,3 @@ impl SmartPlaylistRepo {
         })
     }
 }
-

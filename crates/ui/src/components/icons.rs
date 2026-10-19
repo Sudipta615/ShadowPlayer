@@ -250,4 +250,3 @@ pub fn draw_headphones(ui: &Ui, rect: Rect, color: Color32) {
         .tint(color)
         .paint_at(ui, fit_square(rect));
 }
-

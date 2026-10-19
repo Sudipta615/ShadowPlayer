@@ -127,10 +127,13 @@ fn parse_extinf(line: &str) -> (Option<u64>, Option<String>, Option<String>) {
         None => (rest.trim(), ""),
     };
 
-    let duration = len_part
-        .parse::<f64>()
-        .ok()
-        .map(|f| if f.is_finite() && f > 0.0 { f.round() as u64 } else { 0 });
+    let duration = len_part.parse::<f64>().ok().map(|f| {
+        if f.is_finite() && f > 0.0 {
+            f.round() as u64
+        } else {
+            0
+        }
+    });
 
     if name_part.is_empty() {
         return (duration, None, None);
@@ -204,10 +207,9 @@ pub fn parse_m3u_file(path: &Path) -> std::io::Result<Vec<M3uEntry>> {
 /// worked on the machine that wrote it. Both sides are canonicalised first, and
 /// the plain comparison is kept as the fallback for paths that no longer exist.
 fn relative_to(path: &Path, base_dir: &Path) -> Option<PathBuf> {
-    if let (Ok(real_path), Ok(real_base)) = (
-        std::fs::canonicalize(path),
-        std::fs::canonicalize(base_dir),
-    ) {
+    if let (Ok(real_path), Ok(real_base)) =
+        (std::fs::canonicalize(path), std::fs::canonicalize(base_dir))
+    {
         if let Ok(rel) = real_path.strip_prefix(&real_base) {
             return Some(rel.to_path_buf());
         }
@@ -275,7 +277,10 @@ mod tests {
         let entries = parse_m3u(text, Some(dir));
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].path, Path::new("/music/Kid A/01 Everything.flac"));
+        assert_eq!(
+            entries[0].path,
+            Path::new("/music/Kid A/01 Everything.flac")
+        );
         assert_eq!(entries[0].duration_secs, Some(213));
         assert_eq!(entries[0].artist.as_deref(), Some("Radiohead"));
         assert_eq!(
@@ -325,7 +330,10 @@ mod tests {
 
         let parsed = parse_m3u(&text, Some(dir));
         assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].path, PathBuf::from("/music/Artist/Album/01 Song.flac"));
+        assert_eq!(
+            parsed[0].path,
+            PathBuf::from("/music/Artist/Album/01 Song.flac")
+        );
         assert_eq!(parsed[0].duration_secs, Some(215));
         assert_eq!(parsed[0].artist.as_deref(), Some("Artist"));
         assert_eq!(parsed[0].title.as_deref(), Some("Song"));

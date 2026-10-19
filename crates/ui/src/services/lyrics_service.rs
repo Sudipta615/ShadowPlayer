@@ -18,7 +18,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use domain::ids::TrackId;
 use domain::models::{SyncedLyricLine, Track};
-use lyrics::{find_sidecar_lyrics, find_active_line, interpret_lyrics_text};
+use lyrics::{find_active_line, find_sidecar_lyrics, interpret_lyrics_text};
 
 /// How many tracks' lyrics to keep. Bounds memory over a long listening
 /// session while still making back-and-forth track skips instant.
@@ -257,13 +257,13 @@ mod tests {
 
     #[test]
     fn entry_with_timestamps_is_synced() {
-        let entry = LyricsEntry::from_text("[00:01.00]Hi\n[00:02.00]There".to_string(), LyricsSource::Tag);
+        let entry = LyricsEntry::from_text(
+            "[00:01.00]Hi\n[00:02.00]There".to_string(),
+            LyricsSource::Tag,
+        );
         assert_eq!(entry.source, LyricsSource::Tag);
         assert_eq!(entry.synced.len(), 2);
-        assert_eq!(
-            LyricsService::active_index(&entry.synced, 1.5),
-            Some(0)
-        );
+        assert_eq!(LyricsService::active_index(&entry.synced, 1.5), Some(0));
     }
 
     #[test]
@@ -384,7 +384,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let audio = dir.join("tagged.mp3");
-        write_mp3_with_lyrics(&audio, "[00:04.00]Tagged line one\n[00:09.00]Tagged line two");
+        write_mp3_with_lyrics(
+            &audio,
+            "[00:04.00]Tagged line one\n[00:09.00]Tagged line two",
+        );
 
         let track = test_track(audio);
         let mut service = LyricsService::new();

@@ -104,9 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native(
         "ShadowPlayer",
         native_options,
-        Box::new(move |cc| {
-            Ok(Box::new(ShadowPlayerApp::new(cc, session_clone, db_clone)))
-        }),
+        Box::new(move |cc| Ok(Box::new(ShadowPlayerApp::new(cc, session_clone, db_clone)))),
     )?;
 
     Ok(())
@@ -172,14 +170,18 @@ mod tests {
         let real_id = domain::ids::TrackId::new();
         let real_path = data_dir.join("my music").join("real.flac");
         std::fs::create_dir_all(real_path.parent().unwrap()).unwrap();
-        tracks
-            .upsert(&sample_track(real_id, &real_path))
-            .unwrap();
+        tracks.upsert(&sample_track(real_id, &real_path)).unwrap();
 
         purge_legacy_demo_data(&db, &data_dir);
 
-        assert!(tracks.get_by_id(&demo_id).unwrap().is_none(), "demo row gone");
-        assert!(tracks.get_by_id(&real_id).unwrap().is_some(), "real row kept");
+        assert!(
+            tracks.get_by_id(&demo_id).unwrap().is_none(),
+            "demo row gone"
+        );
+        assert!(
+            tracks.get_by_id(&real_id).unwrap().is_some(),
+            "real row kept"
+        );
         assert!(!demo_dir.exists(), "demo directory removed");
 
         // A second run is a no-op rather than a second attempt.

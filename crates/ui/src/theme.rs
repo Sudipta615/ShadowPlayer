@@ -56,28 +56,28 @@ impl Default for Theme {
     fn default() -> Self {
         Self {
             is_light: false,
-            bg_app: Color32::from_rgb(3, 9, 23),             // #030917 Ultra-dark obsidian navy
-            bg_sidebar: Color32::from_rgb(9, 14, 28),         // #090e1c Deep dark sidebar
-            bg_card: Color32::from_rgb(11, 18, 34),          // #0b1222 Deep dark card surface
-            bg_card_hover: Color32::from_rgb(22, 30, 48),    // #161e30 Card hover
-            bg_card_active: Color32::from_rgb(19, 23, 57),   // #131739 Active row indigo glow
-            bg_pill: Color32::from_rgb(8, 13, 27),           // #080d1b Pill background
-            bg_pill_hover: Color32::from_rgb(19, 27, 50),    // #131b32 Pill hover
-            bg_input: Color32::from_rgb(12, 19, 34),         // #0c1322 Search input
-            border_subtle: Color32::from_rgb(19, 27, 44),    // #131b2c Subtle border
-            border_card: Color32::from_rgb(25, 35, 56),      // #192338 Card border
+            bg_app: Color32::from_rgb(3, 9, 23), // #030917 Ultra-dark obsidian navy
+            bg_sidebar: Color32::from_rgb(9, 14, 28), // #090e1c Deep dark sidebar
+            bg_card: Color32::from_rgb(11, 18, 34), // #0b1222 Deep dark card surface
+            bg_card_hover: Color32::from_rgb(22, 30, 48), // #161e30 Card hover
+            bg_card_active: Color32::from_rgb(19, 23, 57), // #131739 Active row indigo glow
+            bg_pill: Color32::from_rgb(8, 13, 27), // #080d1b Pill background
+            bg_pill_hover: Color32::from_rgb(19, 27, 50), // #131b32 Pill hover
+            bg_input: Color32::from_rgb(12, 19, 34), // #0c1322 Search input
+            border_subtle: Color32::from_rgb(19, 27, 44), // #131b2c Subtle border
+            border_card: Color32::from_rgb(25, 35, 56), // #192338 Card border
 
-            accent_purple: Color32::from_rgb(54, 42, 207),   // #362acf Electric royal indigo
+            accent_purple: Color32::from_rgb(54, 42, 207), // #362acf Electric royal indigo
             accent_magenta: Color32::from_rgb(129, 140, 248), // #818cf8 Luminous soft indigo
-            accent_pink: Color32::from_rgb(236, 72, 153),    // #ec4899 Rose pink
-            accent_violet: Color32::from_rgb(54, 42, 207),   // #362acf Primary active indigo
-            accent_orange: Color32::from_rgb(249, 115, 22),  // #f97316 Amber orange
-            accent_blue: Color32::from_rgb(59, 130, 246),    // #3b82f6 Sky blue
+            accent_pink: Color32::from_rgb(236, 72, 153),  // #ec4899 Rose pink
+            accent_violet: Color32::from_rgb(54, 42, 207), // #362acf Primary active indigo
+            accent_orange: Color32::from_rgb(249, 115, 22), // #f97316 Amber orange
+            accent_blue: Color32::from_rgb(59, 130, 246),  // #3b82f6 Sky blue
 
-            text_primary: Color32::from_rgb(248, 249, 250),   // #f8f9fa Crisp off-white
+            text_primary: Color32::from_rgb(248, 249, 250), // #f8f9fa Crisp off-white
             text_secondary: Color32::from_rgb(203, 213, 225), // #cbd5e1 Soft slate
-            text_muted: Color32::from_rgb(148, 163, 184),     // #94a3b8 Slate text
-            text_dim: Color32::from_rgb(100, 116, 139),       // #64748b Deep slate
+            text_muted: Color32::from_rgb(148, 163, 184),   // #94a3b8 Slate text
+            text_dim: Color32::from_rgb(100, 116, 139),     // #64748b Deep slate
 
             bit_perfect_green: Color32::from_rgb(52, 211, 153),
             warning_yellow: Color32::from_rgb(251, 191, 36),

@@ -32,9 +32,21 @@ pub struct LoudnessProgress {
 }
 
 enum LoudnessEvent {
-    Progress { done: usize, failed: usize, tagged: usize, current: String },
-    Finished { done: usize, failed: usize, tagged: usize },
-    Cancelled { done: usize, tagged: usize },
+    Progress {
+        done: usize,
+        failed: usize,
+        tagged: usize,
+        current: String,
+    },
+    Finished {
+        done: usize,
+        failed: usize,
+        tagged: usize,
+    },
+    Cancelled {
+        done: usize,
+        tagged: usize,
+    },
 }
 
 /// Owns the loudness scan worker and its progress channel.
@@ -168,10 +180,7 @@ impl LoudnessService {
                                     Ok(()) => tagged += 1,
                                     // Unsupported containers (PCM/DSD) are
                                     // expected; anything else is worth a log.
-                                    Err(e) => log::debug!(
-                                        "Not tagging {}: {e:?}",
-                                        path.display()
-                                    ),
+                                    Err(e) => log::debug!("Not tagging {}: {e:?}", path.display()),
                                 }
                             }
                         }
@@ -185,7 +194,11 @@ impl LoudnessService {
                     std::thread::sleep(std::time::Duration::from_millis(25));
                 }
 
-                let _ = tx.send(LoudnessEvent::Finished { done, failed, tagged });
+                let _ = tx.send(LoudnessEvent::Finished {
+                    done,
+                    failed,
+                    tagged,
+                });
             });
 
         if spawned.is_err() {
@@ -220,7 +233,11 @@ impl LoudnessService {
                         self.progress.tagged = tagged;
                         self.progress.current = current;
                     }
-                    LoudnessEvent::Finished { done, failed, tagged } => {
+                    LoudnessEvent::Finished {
+                        done,
+                        failed,
+                        tagged,
+                    } => {
                         self.progress.done = done;
                         self.progress.failed = failed;
                         self.progress.tagged = tagged;

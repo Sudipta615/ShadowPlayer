@@ -1,7 +1,7 @@
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use crate::theme::Theme;
 use domain::ids::TrackId;
 use domain::models::{Artist, Track};
-use crate::theme::Theme;
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 pub struct ArtistsViewAction {
     pub play_artist: Option<String>,
@@ -65,8 +65,16 @@ impl<'a> ArtistsView<'a> {
                     let (avatar_rect, _) = ui.allocate_exact_size(avatar_size, Sense::hover());
                     let p = ui.painter_at(avatar_rect);
                     p.circle_filled(avatar_rect.center(), 44.0, self.theme.artwork_placeholder);
-                    p.circle_stroke(avatar_rect.center(), 44.0, Stroke::new(1.5_f32, self.theme.accent_violet));
-                    crate::components::icons::draw_artist(ui, avatar_rect.shrink2(Vec2::new(26.0, 26.0)), self.theme.accent_pink);
+                    p.circle_stroke(
+                        avatar_rect.center(),
+                        44.0,
+                        Stroke::new(1.5_f32, self.theme.accent_violet),
+                    );
+                    crate::components::icons::draw_artist(
+                        ui,
+                        avatar_rect.shrink2(Vec2::new(26.0, 26.0)),
+                        self.theme.accent_pink,
+                    );
 
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
@@ -132,24 +140,38 @@ impl<'a> ArtistsView<'a> {
                         let is_fav = self.favorite_track_ids.contains(&track.id);
                         let row_h = 38.0;
 
-                        let (row_rect, row_resp) = ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
+                        let (row_rect, row_resp) =
+                            ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
                         if row_resp.double_clicked() {
                             action.play_track = Some(track.id);
                         }
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_active_row,
+                            );
+                            painter.rect_stroke(
+                                row_rect,
+                                CornerRadius::same(6),
+                                Stroke::new(1.0_f32, self.theme.border_active_row),
+                                egui::StrokeKind::Inside,
+                            );
                         } else if row_resp.hovered() {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_card_hover,
+                            );
                         }
 
                         let cy = row_rect.center().y;
                         painter.text(
                             Pos2::new(row_rect.min.x + 10.0, cy),
                             egui::Align2::LEFT_CENTER,
-                            &format!("{:02}", idx + 1),
+                            format!("{:02}", idx + 1),
                             FontId::proportional(12.0),
                             self.theme.text_muted,
                         );
@@ -159,10 +181,18 @@ impl<'a> ArtistsView<'a> {
                             egui::Align2::LEFT_CENTER,
                             &track.title,
                             FontId::proportional(13.2),
-                            if is_cur { Color32::WHITE } else { self.theme.text_primary },
+                            if is_cur {
+                                Color32::WHITE
+                            } else {
+                                self.theme.text_primary
+                            },
                         );
 
-                        let album_name = if track.album.is_empty() { "—" } else { &track.album };
+                        let album_name = if track.album.is_empty() {
+                            "—"
+                        } else {
+                            &track.album
+                        };
                         painter.text(
                             Pos2::new(row_rect.min.x + 280.0, cy),
                             egui::Align2::LEFT_CENTER,
@@ -180,9 +210,18 @@ impl<'a> ArtistsView<'a> {
                             self.theme.text_muted,
                         );
 
-                        let fav_rect = Rect::from_center_size(Pos2::new(row_rect.max.x - 16.0, cy), Vec2::new(18.0, 18.0));
+                        let fav_rect = Rect::from_center_size(
+                            Pos2::new(row_rect.max.x - 16.0, cy),
+                            Vec2::new(18.0, 18.0),
+                        );
                         let fav_hover = ui.rect_contains_pointer(fav_rect);
-                        let heart_col = if is_fav { self.theme.accent_pink } else if fav_hover { self.theme.text_primary } else { self.theme.text_muted };
+                        let heart_col = if is_fav {
+                            self.theme.accent_pink
+                        } else if fav_hover {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_muted
+                        };
                         crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_fav);
 
                         if fav_hover && ui.input(|i| i.pointer.primary_clicked()) {
@@ -212,7 +251,11 @@ impl<'a> ArtistsView<'a> {
             if self.artists.is_empty() {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
-                    ui.label(egui::RichText::new("No artists found in library").font(FontId::proportional(15.0)).color(self.theme.text_muted));
+                    ui.label(
+                        egui::RichText::new("No artists found in library")
+                            .font(FontId::proportional(15.0))
+                            .color(self.theme.text_muted),
+                    );
                 });
             } else {
                 egui::ScrollArea::vertical()
@@ -227,19 +270,40 @@ impl<'a> ArtistsView<'a> {
                             .spacing(Vec2::new(14.0, 14.0))
                             .show(ui, |ui| {
                                 for (idx, artist) in self.artists.iter().enumerate() {
-                                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::click());
+                                    let (rect, resp) = ui.allocate_exact_size(
+                                        Vec2::new(card_w, card_h),
+                                        Sense::click(),
+                                    );
                                     let p = ui.painter_at(rect);
 
-                                    let bg = if resp.hovered() { self.theme.bg_card_hover } else { self.theme.bg_card };
+                                    let bg = if resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else {
+                                        self.theme.bg_card
+                                    };
                                     p.rect_filled(rect, CornerRadius::same(10), bg);
-                                    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0_f32, self.theme.border_card), egui::StrokeKind::Inside);
+                                    p.rect_stroke(
+                                        rect,
+                                        CornerRadius::same(10),
+                                        Stroke::new(1.0_f32, self.theme.border_card),
+                                        egui::StrokeKind::Inside,
+                                    );
 
                                     // Circular avatar
                                     let avatar_c = Pos2::new(rect.center().x, rect.min.y + 46.0);
                                     p.circle_filled(avatar_c, 34.0, self.theme.artwork_placeholder);
-                                    p.circle_stroke(avatar_c, 34.0, Stroke::new(1.2_f32, self.theme.accent_violet));
-                                    let icon_rect = Rect::from_center_size(avatar_c, Vec2::new(26.0, 26.0));
-                                    crate::components::icons::draw_artist(ui, icon_rect, self.theme.accent_pink);
+                                    p.circle_stroke(
+                                        avatar_c,
+                                        34.0,
+                                        Stroke::new(1.2_f32, self.theme.accent_violet),
+                                    );
+                                    let icon_rect =
+                                        Rect::from_center_size(avatar_c, Vec2::new(26.0, 26.0));
+                                    crate::components::icons::draw_artist(
+                                        ui,
+                                        icon_rect,
+                                        self.theme.accent_pink,
+                                    );
 
                                     // Artist Name
                                     let name_galley = p.layout_no_wrap(
@@ -247,7 +311,14 @@ impl<'a> ArtistsView<'a> {
                                         FontId::proportional(13.2),
                                         self.theme.text_primary,
                                     );
-                                    p.galley(Pos2::new(rect.center().x - name_galley.size().x * 0.5, rect.min.y + 94.0), name_galley, self.theme.text_primary);
+                                    p.galley(
+                                        Pos2::new(
+                                            rect.center().x - name_galley.size().x * 0.5,
+                                            rect.min.y + 94.0,
+                                        ),
+                                        name_galley,
+                                        self.theme.text_primary,
+                                    );
 
                                     let sub_str = format!("{} songs", artist.track_count);
                                     p.text(

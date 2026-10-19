@@ -1,6 +1,6 @@
-use eframe::egui::{self, Vec2};
 use audio_session::AudioSession;
 use domain::models::SyncedLyricLine;
+use eframe::egui::{self, Vec2};
 use playback::PlaybackCoordinator;
 
 use crate::components::right_panel::RightPanel;
@@ -9,6 +9,7 @@ use crate::state::AppState;
 use crate::theme::Theme;
 
 /// Render right column drawer: window controls, Queue/Lyrics tabs, volume controls
+#[allow(clippy::too_many_arguments)]
 pub fn render_right_drawer(
     ui: &mut egui::Ui,
     ctx: &egui::Context,

@@ -12,8 +12,8 @@ use std::time::Instant;
 use walkdir::WalkDir;
 
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "flac", "mp3", "ogg", "wav", "m4a", "aac", "opus", "alac", "aiff", "aif", "ape", "wv",
-    "tta", "dsf", "dff", "cue",
+    "flac", "mp3", "ogg", "wav", "m4a", "aac", "opus", "alac", "aiff", "aif", "ape", "wv", "tta",
+    "dsf", "dff", "cue",
 ];
 
 /// True if `path` carries a supported audio (or CUE) extension.
@@ -178,7 +178,11 @@ impl LibraryScanner {
                     match metadata::extract_cue_metadata(path) {
                         Ok(cue_tracks) => {
                             for extracted in cue_tracks {
-                                let is_new = repo.get_by_path(&extracted.track.path).ok().flatten().is_none();
+                                let is_new = repo
+                                    .get_by_path(&extracted.track.path)
+                                    .ok()
+                                    .flatten()
+                                    .is_none();
                                 if is_new {
                                     added_count += 1;
                                 } else {
@@ -187,14 +191,21 @@ impl LibraryScanner {
 
                                 if let Some((bytes, _mime)) = extracted.embedded_artwork {
                                     self.artwork_mgr.save_thumbnail(&extracted.track.id, &bytes);
-                                } else if let Some(folder_art) = self.artwork_mgr.find_folder_artwork(path) {
+                                } else if let Some(folder_art) =
+                                    self.artwork_mgr.find_folder_artwork(path)
+                                {
                                     if let Ok(bytes) = std::fs::read(&folder_art) {
-                                        self.artwork_mgr.save_thumbnail(&extracted.track.id, &bytes);
+                                        self.artwork_mgr
+                                            .save_thumbnail(&extracted.track.id, &bytes);
                                     }
                                 }
 
                                 if let Err(e) = repo.upsert(&extracted.track) {
-                                    warn!("Failed to save CUE track {}: {}", extracted.track.path.display(), e);
+                                    warn!(
+                                        "Failed to save CUE track {}: {}",
+                                        extracted.track.path.display(),
+                                        e
+                                    );
                                 }
                             }
                         }
@@ -224,8 +235,7 @@ impl LibraryScanner {
                         ) {
                             extracted.track.id = stable_id;
                         }
-                        let is_new = !already_indexed
-                            && extracted.track.id == path_derived_id;
+                        let is_new = !already_indexed && extracted.track.id == path_derived_id;
 
                         if is_new {
                             added_count += 1;
@@ -236,7 +246,8 @@ impl LibraryScanner {
                         // Save artwork thumbnail if embedded
                         if let Some((bytes, _mime)) = extracted.embedded_artwork {
                             self.artwork_mgr.save_thumbnail(&extracted.track.id, &bytes);
-                        } else if let Some(folder_art) = self.artwork_mgr.find_folder_artwork(path) {
+                        } else if let Some(folder_art) = self.artwork_mgr.find_folder_artwork(path)
+                        {
                             if let Ok(bytes) = std::fs::read(&folder_art) {
                                 self.artwork_mgr.save_thumbnail(&extracted.track.id, &bytes);
                             }
@@ -281,12 +292,20 @@ impl LibraryScanner {
                         if !seen.contains(&cue_base_path(&path)) {
                             match repo.delete(&id) {
                                 Ok(()) => removed_count += 1,
-                                Err(e) => warn!("Could not remove missing track {}: {}", path.display(), e),
+                                Err(e) => warn!(
+                                    "Could not remove missing track {}: {}",
+                                    path.display(),
+                                    e
+                                ),
                             }
                         }
                     }
                 }
-                Err(e) => warn!("Could not reconcile removed files under {}: {}", root.display(), e),
+                Err(e) => warn!(
+                    "Could not reconcile removed files under {}: {}",
+                    root.display(),
+                    e
+                ),
             }
         } else {
             warn!(
@@ -322,11 +341,7 @@ impl LibraryScanner {
 
     /// The album images that a `.cue` sheet in `root` claims, so the walk can
     /// index the sheet instead of the image.
-    fn collect_cue_covered_audio(
-        &self,
-        root: &Path,
-        cancel_flag: &AtomicBool,
-    ) -> HashSet<PathBuf> {
+    fn collect_cue_covered_audio(&self, root: &Path, cancel_flag: &AtomicBool) -> HashSet<PathBuf> {
         let mut covered = HashSet::new();
         let walker = WalkDir::new(root).follow_links(false).into_iter();
         for entry in walker.filter_map(|e| e.ok()) {
@@ -426,7 +441,8 @@ mod tests {
         write_wav(&original, 440.0, 1.0);
 
         let db = Database::in_memory().expect("in-memory db");
-        let scanner = LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
+        let scanner =
+            LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
         let repo = TrackRepo::new(db.clone());
 
         scan(&scanner, &root);
@@ -490,13 +506,16 @@ mod tests {
         write_wav(&root.join("jingle.wav"), 440.0, 0.5);
 
         let db = Database::in_memory().expect("in-memory db");
-        let scanner = LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
+        let scanner =
+            LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
         let repo = TrackRepo::new(db.clone());
 
         scan(&scanner, &root);
 
         assert_eq!(repo.count().unwrap(), 1);
-        assert!(repo.list_paths_under_prefix(&root).unwrap()[0].1.ends_with("jingle.wav"));
+        assert!(repo.list_paths_under_prefix(&root).unwrap()[0]
+            .1
+            .ends_with("jingle.wav"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -514,7 +533,8 @@ mod tests {
         .unwrap();
 
         let db = Database::in_memory().expect("in-memory db");
-        let scanner = LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
+        let scanner =
+            LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
         let repo = TrackRepo::new(db.clone());
 
         scan(&scanner, &root);
@@ -545,7 +565,8 @@ mod tests {
         write_wav(&root.join("drop.wav"), 660.0, 1.0);
 
         let db = Database::in_memory().expect("in-memory db");
-        let scanner = LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
+        let scanner =
+            LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
         let repo = TrackRepo::new(db.clone());
 
         scan(&scanner, &root);
@@ -554,8 +575,14 @@ mod tests {
         std::fs::remove_file(root.join("drop.wav")).unwrap();
         scan(&scanner, &root);
 
-        assert_eq!(repo.count().unwrap(), 1, "the missing file is reconciled away");
-        assert!(repo.list_paths_under_prefix(&root).unwrap()[0].1.ends_with("keep.wav"));
+        assert_eq!(
+            repo.count().unwrap(),
+            1,
+            "the missing file is reconciled away"
+        );
+        assert!(repo.list_paths_under_prefix(&root).unwrap()[0]
+            .1
+            .ends_with("keep.wav"));
 
         let _ = std::fs::remove_dir_all(&root);
     }

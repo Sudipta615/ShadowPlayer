@@ -11,9 +11,7 @@
 //! which keeps "what the rack looks like" and "what the rack does" separable —
 //! and testable without a window.
 
-use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Margin, Pos2, Rect, Stroke, Vec2, Window,
-};
+use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, Pos2, Rect, Stroke, Vec2, Window};
 
 use crate::state::clap_rack::{ClapRackActions, ClapRackPreset, ClapRackState};
 use crate::theme::Theme;
@@ -327,8 +325,7 @@ fn render_unloaded(
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if pill(ui, "Load", theme, true).clicked() {
-                            actions.load_plugin =
-                                Some((library.path.clone(), plugin.id.clone()));
+                            actions.load_plugin = Some((library.path.clone(), plugin.id.clone()));
                         }
                     });
                 });
@@ -590,7 +587,19 @@ fn render_preset_row(
 fn pill(ui: &mut egui::Ui, label: &str, theme: &Theme, primary: bool) -> egui::Response {
     let text = egui::RichText::new(label)
         .font(FontId::proportional(11.5))
-        .color(if primary { Color32::WHITE } else { theme.text_primary });
-    let fill = if primary { theme.accent_violet } else { theme.bg_pill };
-    ui.add(egui::Button::new(text).fill(fill).corner_radius(CornerRadius::same(7)))
+        .color(if primary {
+            Color32::WHITE
+        } else {
+            theme.text_primary
+        });
+    let fill = if primary {
+        theme.accent_violet
+    } else {
+        theme.bg_pill
+    };
+    ui.add(
+        egui::Button::new(text)
+            .fill(fill)
+            .corner_radius(CornerRadius::same(7)),
+    )
 }

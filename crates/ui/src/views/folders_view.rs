@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use eframe::egui;
 use database::{FavoritesRepo, ScanRootsRepo, TrackRepo};
 use domain::models::Track;
+use eframe::egui;
 use playback::PlaybackCoordinator;
 
 use crate::components::folders_view::FoldersView;
@@ -10,6 +10,7 @@ use crate::services::{ImportKind, ScannerService};
 use crate::state::LibraryState;
 use crate::theme::Theme;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_folders_view(
     ui: &mut egui::Ui,
     library_state: &mut LibraryState,
@@ -67,7 +68,12 @@ pub fn render_folders_view(
         }
     }
     if let Some(t_id) = fld_action.play_track {
-        if let Some(t) = library_state.folder_tracks.iter().find(|x| x.id == t_id).cloned() {
+        if let Some(t) = library_state
+            .folder_tracks
+            .iter()
+            .find(|x| x.id == t_id)
+            .cloned()
+        {
             coordinator.play_track(t, Some(library_state.folder_tracks.clone()));
         }
     }

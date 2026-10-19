@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod unit {
     use crate::ids::TrackId;
     use crate::models::{format_duration, AppSettings, SortField};
     use std::path::PathBuf;
@@ -14,7 +14,10 @@ mod tests {
         let id2 = TrackId::from_canonical_path(&p2);
         let id3 = TrackId::from_canonical_path(&p3);
 
-        assert_eq!(id1, id2, "Identical paths must produce identical stable IDs");
+        assert_eq!(
+            id1, id2,
+            "Identical paths must produce identical stable IDs"
+        );
         assert_ne!(id1, id3, "Different paths must produce distinct IDs");
     }
 

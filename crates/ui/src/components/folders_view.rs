@@ -1,8 +1,8 @@
-use std::path::PathBuf;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use crate::theme::Theme;
 use domain::ids::{ScanRootId, TrackId};
 use domain::models::{ScanRoot, Track};
-use crate::theme::Theme;
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use std::path::PathBuf;
 
 pub struct FoldersViewAction {
     pub add_folder: Option<PathBuf>,
@@ -80,9 +80,22 @@ impl<'a> FoldersView<'a> {
                     let box_size = Vec2::new(80.0, 80.0);
                     let (box_rect, _) = ui.allocate_exact_size(box_size, Sense::hover());
                     let p = ui.painter_at(box_rect);
-                    p.rect_filled(box_rect, CornerRadius::same(12), self.theme.artwork_placeholder);
-                    p.rect_stroke(box_rect, CornerRadius::same(12), Stroke::new(1.2_f32, self.theme.accent_violet), egui::StrokeKind::Inside);
-                    crate::components::icons::draw_folder(ui, box_rect.shrink2(Vec2::new(20.0, 20.0)), self.theme.accent_pink);
+                    p.rect_filled(
+                        box_rect,
+                        CornerRadius::same(12),
+                        self.theme.artwork_placeholder,
+                    );
+                    p.rect_stroke(
+                        box_rect,
+                        CornerRadius::same(12),
+                        Stroke::new(1.2_f32, self.theme.accent_violet),
+                        egui::StrokeKind::Inside,
+                    );
+                    crate::components::icons::draw_folder(
+                        ui,
+                        box_rect.shrink2(Vec2::new(20.0, 20.0)),
+                        self.theme.accent_pink,
+                    );
 
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
@@ -93,7 +106,10 @@ impl<'a> FoldersView<'a> {
                                 .color(self.theme.accent_magenta),
                         );
 
-                        let folder_name = sel_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| sel_path.to_string_lossy().to_string());
+                        let folder_name = sel_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| sel_path.to_string_lossy().to_string());
                         ui.label(
                             egui::RichText::new(folder_name)
                                 .font(FontId::proportional(20.0))
@@ -108,9 +124,12 @@ impl<'a> FoldersView<'a> {
                         );
 
                         ui.label(
-                            egui::RichText::new(format!("{} songs in directory", self.folder_tracks.len()))
-                                .font(FontId::proportional(12.0))
-                                .color(self.theme.text_muted),
+                            egui::RichText::new(format!(
+                                "{} songs in directory",
+                                self.folder_tracks.len()
+                            ))
+                            .font(FontId::proportional(12.0))
+                            .color(self.theme.text_muted),
                         );
 
                         ui.add_space(4.0);
@@ -169,24 +188,38 @@ impl<'a> FoldersView<'a> {
                         let is_fav = self.favorite_track_ids.contains(&track.id);
                         let row_h = 38.0;
 
-                        let (row_rect, row_resp) = ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
+                        let (row_rect, row_resp) =
+                            ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
                         if row_resp.double_clicked() {
                             action.play_track = Some(track.id);
                         }
 
                         let painter = ui.painter_at(row_rect);
                         if is_cur {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_active_row);
-                            painter.rect_stroke(row_rect, CornerRadius::same(6), Stroke::new(1.0_f32, self.theme.border_active_row), egui::StrokeKind::Inside);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_active_row,
+                            );
+                            painter.rect_stroke(
+                                row_rect,
+                                CornerRadius::same(6),
+                                Stroke::new(1.0_f32, self.theme.border_active_row),
+                                egui::StrokeKind::Inside,
+                            );
                         } else if row_resp.hovered() {
-                            painter.rect_filled(row_rect, CornerRadius::same(6), self.theme.bg_card_hover);
+                            painter.rect_filled(
+                                row_rect,
+                                CornerRadius::same(6),
+                                self.theme.bg_card_hover,
+                            );
                         }
 
                         let cy = row_rect.center().y;
                         painter.text(
                             Pos2::new(row_rect.min.x + 10.0, cy),
                             egui::Align2::LEFT_CENTER,
-                            &format!("{:02}", idx + 1),
+                            format!("{:02}", idx + 1),
                             FontId::proportional(12.0),
                             self.theme.text_muted,
                         );
@@ -196,7 +229,11 @@ impl<'a> FoldersView<'a> {
                             egui::Align2::LEFT_CENTER,
                             &track.title,
                             FontId::proportional(13.2),
-                            if is_cur { Color32::WHITE } else { self.theme.text_primary },
+                            if is_cur {
+                                Color32::WHITE
+                            } else {
+                                self.theme.text_primary
+                            },
                         );
 
                         painter.text(
@@ -216,9 +253,18 @@ impl<'a> FoldersView<'a> {
                             self.theme.text_muted,
                         );
 
-                        let fav_rect = Rect::from_center_size(Pos2::new(row_rect.max.x - 16.0, cy), Vec2::new(18.0, 18.0));
+                        let fav_rect = Rect::from_center_size(
+                            Pos2::new(row_rect.max.x - 16.0, cy),
+                            Vec2::new(18.0, 18.0),
+                        );
                         let fav_hover = ui.rect_contains_pointer(fav_rect);
-                        let heart_col = if is_fav { self.theme.accent_pink } else if fav_hover { self.theme.text_primary } else { self.theme.text_muted };
+                        let heart_col = if is_fav {
+                            self.theme.accent_pink
+                        } else if fav_hover {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_muted
+                        };
                         crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_fav);
 
                         if fav_hover && ui.input(|i| i.pointer.primary_clicked()) {
@@ -399,12 +445,23 @@ impl<'a> FoldersView<'a> {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
 
-                                    let (folder_icon_rect, _) = ui.allocate_exact_size(Vec2::new(24.0, 24.0), Sense::hover());
-                                    crate::components::icons::draw_folder(ui, folder_icon_rect, self.theme.accent_pink);
+                                    let (folder_icon_rect, _) = ui
+                                        .allocate_exact_size(Vec2::new(24.0, 24.0), Sense::hover());
+                                    crate::components::icons::draw_folder(
+                                        ui,
+                                        folder_icon_rect,
+                                        self.theme.accent_pink,
+                                    );
 
                                     ui.vertical(|ui| {
                                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-                                        let name = root.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| root.path.to_string_lossy().to_string());
+                                        let name = root
+                                            .path
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| {
+                                                root.path.to_string_lossy().to_string()
+                                            });
                                         ui.label(
                                             egui::RichText::new(name)
                                                 .font(FontId::proportional(13.8))
@@ -418,45 +475,52 @@ impl<'a> FoldersView<'a> {
                                         );
                                     });
 
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
-                                        let del_btn = egui::Button::new(
-                                            egui::RichText::new("Del")
-                                                .font(FontId::proportional(12.0))
-                                                .color(self.theme.accent_magenta),
-                                        )
-                                        .fill(self.theme.bg_pill)
-                                        .corner_radius(CornerRadius::same(6));
+                                            let del_btn = egui::Button::new(
+                                                egui::RichText::new("Del")
+                                                    .font(FontId::proportional(12.0))
+                                                    .color(self.theme.accent_magenta),
+                                            )
+                                            .fill(self.theme.bg_pill)
+                                            .corner_radius(CornerRadius::same(6));
 
-                                        if ui.add(del_btn).on_hover_text("Remove folder from library").clicked() {
-                                            action.remove_folder = Some(root.id);
-                                        }
+                                            if ui
+                                                .add(del_btn)
+                                                .on_hover_text("Remove folder from library")
+                                                .clicked()
+                                            {
+                                                action.remove_folder = Some(root.id);
+                                            }
 
-                                        let scan_btn = egui::Button::new(
-                                            egui::RichText::new("Scan")
-                                                .font(FontId::proportional(12.0))
-                                                .color(self.theme.text_primary),
-                                        )
-                                        .fill(self.theme.bg_pill)
-                                        .corner_radius(CornerRadius::same(6));
+                                            let scan_btn = egui::Button::new(
+                                                egui::RichText::new("Scan")
+                                                    .font(FontId::proportional(12.0))
+                                                    .color(self.theme.text_primary),
+                                            )
+                                            .fill(self.theme.bg_pill)
+                                            .corner_radius(CornerRadius::same(6));
 
-                                        if ui.add(scan_btn).clicked() {
-                                            action.rescan_folder = Some(root.path.clone());
-                                        }
+                                            if ui.add(scan_btn).clicked() {
+                                                action.rescan_folder = Some(root.path.clone());
+                                            }
 
-                                        let view_btn = egui::Button::new(
-                                            egui::RichText::new("View Tracks →")
-                                                .font(FontId::proportional(12.0))
-                                                .color(self.theme.accent_purple),
-                                        )
-                                        .fill(self.theme.bg_pill)
-                                        .corner_radius(CornerRadius::same(6));
+                                            let view_btn = egui::Button::new(
+                                                egui::RichText::new("View Tracks →")
+                                                    .font(FontId::proportional(12.0))
+                                                    .color(self.theme.accent_purple),
+                                            )
+                                            .fill(self.theme.bg_pill)
+                                            .corner_radius(CornerRadius::same(6));
 
-                                        if ui.add(view_btn).clicked() {
-                                            *self.selected_folder = Some(root.path.clone());
-                                        }
-                                    });
+                                            if ui.add(view_btn).clicked() {
+                                                *self.selected_folder = Some(root.path.clone());
+                                            }
+                                        },
+                                    );
                                 });
                             });
                         }

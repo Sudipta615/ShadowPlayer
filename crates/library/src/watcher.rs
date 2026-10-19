@@ -139,12 +139,18 @@ mod tests {
         merge_paths(
             &mut pending,
             &mut seen,
-            vec![PathBuf::from("/music/a.flac"), PathBuf::from("/music/b.flac")],
+            vec![
+                PathBuf::from("/music/a.flac"),
+                PathBuf::from("/music/b.flac"),
+            ],
         );
         merge_paths(
             &mut pending,
             &mut seen,
-            vec![PathBuf::from("/music/a.flac"), PathBuf::from("/music/c.flac")],
+            vec![
+                PathBuf::from("/music/a.flac"),
+                PathBuf::from("/music/c.flac"),
+            ],
         );
 
         assert_eq!(pending.len(), 3);

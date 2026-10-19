@@ -1,8 +1,8 @@
-use eframe::egui::{self, Color32, FontId, Stroke, Vec2};
 use audio_session::AudioSession;
 use database::{FavoritesRepo, PlaylistRepo, TrackRepo};
 use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
+use eframe::egui::{self, Color32, FontId, Stroke, Vec2};
 use playback::PlaybackCoordinator;
 
 use crate::components::now_playing::{NowPlayingCard, SleepTimerRequest};
@@ -29,6 +29,7 @@ pub struct MainViewAction {
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
+#[allow(clippy::too_many_arguments)]
 pub fn render_main_playback_view(
     ui: &mut egui::Ui,
     app_state: &mut AppState,
@@ -45,8 +46,12 @@ pub fn render_main_playback_view(
     is_eq_open: bool,
 ) -> MainViewAction {
     let mut view_action = MainViewAction::default();
-    let title = current_track.map(|t| t.title.as_str()).unwrap_or("No Track Selected");
-    let artist = current_track.map(|t| t.artist.as_str()).unwrap_or("ShadowPlayer");
+    let title = current_track
+        .map(|t| t.title.as_str())
+        .unwrap_or("No Track Selected");
+    let artist = current_track
+        .map(|t| t.artist.as_str())
+        .unwrap_or("ShadowPlayer");
     let album = current_track.map(|t| t.album.as_str()).unwrap_or("Ready");
     if let Some(t) = current_track {
         artwork_service.ensure_loaded(ui.ctx(), t);
@@ -160,10 +165,20 @@ pub fn render_main_playback_view(
                     (VisualizerMode::Spectrum, "FFT Spectrum"),
                 ] {
                     let is_sel = app_state.visualizer_mode == mode;
-                    let bg = if is_sel { theme.accent_violet } else { theme.bg_pill };
-                    let fg = if is_sel { Color32::WHITE } else { theme.text_secondary };
+                    let bg = if is_sel {
+                        theme.accent_violet
+                    } else {
+                        theme.bg_pill
+                    };
+                    let fg = if is_sel {
+                        Color32::WHITE
+                    } else {
+                        theme.text_secondary
+                    };
                     let btn = egui::Button::new(
-                        egui::RichText::new(lbl).font(FontId::proportional(11.0)).color(fg),
+                        egui::RichText::new(lbl)
+                            .font(FontId::proportional(11.0))
+                            .color(fg),
                     )
                     .fill(bg)
                     .corner_radius(egui::CornerRadius::same(6));
@@ -176,13 +191,20 @@ pub fn render_main_playback_view(
 
         match app_state.visualizer_mode {
             VisualizerMode::Spectrum => {
-                crate::widgets::SpectrumVisualizerWidget::new(&telemetry.spectrum.spectrum_db, theme)
-                    .height(72.0)
-                    .show(ui);
+                crate::widgets::SpectrumVisualizerWidget::new(
+                    &telemetry.spectrum.spectrum_db,
+                    theme,
+                )
+                .height(72.0)
+                .show(ui);
                 ui.add_space(4.0);
             }
             VisualizerMode::VuMeters => {
-                let tp = telemetry.meters.as_ref().map(|m| m.max_true_peak_dbtp).unwrap_or(0.0);
+                let tp = telemetry
+                    .meters
+                    .as_ref()
+                    .map(|m| m.max_true_peak_dbtp)
+                    .unwrap_or(0.0);
                 crate::widgets::VuMeterWidget::new(
                     telemetry.spectrum.peak_db_l,
                     telemetry.spectrum.peak_db_r,
@@ -224,8 +246,16 @@ pub fn render_main_playback_view(
 
                         for (item_nav, label) in standard_tabs {
                             let is_active = app_state.active_nav == item_nav;
-                            let text_color = if is_active { theme.accent_magenta } else { theme.text_secondary };
-                            let bg = if is_active { theme.bg_card_active } else { theme.bg_pill };
+                            let text_color = if is_active {
+                                theme.accent_magenta
+                            } else {
+                                theme.text_secondary
+                            };
+                            let bg = if is_active {
+                                theme.bg_card_active
+                            } else {
+                                theme.bg_pill
+                            };
                             let stroke = if is_active {
                                 Stroke::new(1.0_f32, theme.accent_magenta)
                             } else {
@@ -250,8 +280,16 @@ pub fn render_main_playback_view(
                         for pl in &library_state.playlists {
                             let item_nav = NavItem::Playlist(pl.id);
                             let is_active = app_state.active_nav == item_nav;
-                            let text_color = if is_active { theme.accent_magenta } else { theme.text_secondary };
-                            let bg = if is_active { theme.bg_card_active } else { theme.bg_pill };
+                            let text_color = if is_active {
+                                theme.accent_magenta
+                            } else {
+                                theme.text_secondary
+                            };
+                            let bg = if is_active {
+                                theme.bg_card_active
+                            } else {
+                                theme.bg_pill
+                            };
                             let stroke = if is_active {
                                 Stroke::new(1.0_f32, theme.accent_magenta)
                             } else {
@@ -282,7 +320,11 @@ pub fn render_main_playback_view(
                         .stroke(Stroke::new(1.0_f32, theme.border_subtle))
                         .corner_radius(egui::CornerRadius::same(6));
 
-                        if ui.add(add_btn).on_hover_text("Create New Playlist").clicked() {
+                        if ui
+                            .add(add_btn)
+                            .on_hover_text("Create New Playlist")
+                            .clicked()
+                        {
                             view_action.create_playlist = true;
                         }
 
@@ -290,8 +332,16 @@ pub fn render_main_playback_view(
                         for sp in &library_state.smart_playlists {
                             let item_nav = NavItem::SmartPlaylist(sp.id);
                             let is_active = app_state.active_nav == item_nav;
-                            let text_color = if is_active { theme.accent_blue } else { theme.text_secondary };
-                            let bg = if is_active { theme.bg_card_active } else { theme.bg_pill };
+                            let text_color = if is_active {
+                                theme.accent_blue
+                            } else {
+                                theme.text_secondary
+                            };
+                            let bg = if is_active {
+                                theme.bg_card_active
+                            } else {
+                                theme.bg_pill
+                            };
                             let stroke = if is_active {
                                 Stroke::new(1.0_f32, theme.accent_blue)
                             } else {
@@ -337,9 +387,12 @@ pub fn render_main_playback_view(
                         .color(theme.accent_magenta),
                 );
                 ui.label(
-                    egui::RichText::new(format!("({} tracks)", library_state.displayed_tracks.len()))
-                        .font(FontId::proportional(12.0))
-                        .color(theme.text_muted),
+                    egui::RichText::new(format!(
+                        "({} tracks)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Delete Playlist").clicked() {
@@ -359,9 +412,12 @@ pub fn render_main_playback_view(
                         .color(theme.bit_perfect_green),
                 );
                 ui.label(
-                    egui::RichText::new(format!("({} tracks >48kHz / >1000kbps)", library_state.displayed_tracks.len()))
-                        .font(FontId::proportional(12.0))
-                        .color(theme.text_muted),
+                    egui::RichText::new(format!(
+                        "({} tracks >48kHz / >1000kbps)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
                 );
             });
             ui.add_space(4.0);
@@ -375,9 +431,12 @@ pub fn render_main_playback_view(
                         .color(theme.accent_blue),
                 );
                 ui.label(
-                    egui::RichText::new(format!("({} FLAC / ALAC / WAV / DSD tracks)", library_state.displayed_tracks.len()))
-                        .font(FontId::proportional(12.0))
-                        .color(theme.text_muted),
+                    egui::RichText::new(format!(
+                        "({} FLAC / ALAC / WAV / DSD tracks)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
                 );
             });
             ui.add_space(4.0);
@@ -391,9 +450,12 @@ pub fn render_main_playback_view(
                         .color(theme.accent_pink),
                 );
                 ui.label(
-                    egui::RichText::new(format!("({} tracks)", library_state.displayed_tracks.len()))
-                        .font(FontId::proportional(12.0))
-                        .color(theme.text_muted),
+                    egui::RichText::new(format!(
+                        "({} tracks)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
                 );
             });
             ui.add_space(4.0);
@@ -426,9 +488,12 @@ pub fn render_main_playback_view(
                         .color(Color32::from_rgb(99, 102, 241)),
                 );
                 ui.label(
-                    egui::RichText::new(format!("({} tracks)", library_state.displayed_tracks.len()))
-                        .font(FontId::proportional(12.0))
-                        .color(theme.text_muted),
+                    egui::RichText::new(format!(
+                        "({} tracks)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
                 );
             });
             ui.add_space(4.0);
@@ -442,15 +507,22 @@ pub fn render_main_playback_view(
                         .color(theme.accent_orange),
                 );
                 ui.label(
-                    egui::RichText::new(format!("({} tracks)", library_state.displayed_tracks.len()))
-                        .font(FontId::proportional(12.0))
-                        .color(theme.text_muted),
+                    egui::RichText::new(format!(
+                        "({} tracks)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
                 );
             });
             ui.add_space(4.0);
         }
         NavItem::SmartPlaylist(sp_id) => {
-            let sp = library_state.smart_playlists.iter().find(|s| s.id == sp_id).cloned();
+            let sp = library_state
+                .smart_playlists
+                .iter()
+                .find(|s| s.id == sp_id)
+                .cloned();
             let name = sp
                 .as_ref()
                 .map(|s| s.name.clone())
@@ -463,9 +535,12 @@ pub fn render_main_playback_view(
                         .color(theme.accent_blue),
                 );
                 ui.label(
-                    egui::RichText::new(format!("({} tracks)", library_state.displayed_tracks.len()))
-                        .font(FontId::proportional(12.0))
-                        .color(theme.text_muted),
+                    egui::RichText::new(format!(
+                        "({} tracks)",
+                        library_state.displayed_tracks.len()
+                    ))
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Edit Rules").clicked() {
@@ -549,17 +624,32 @@ fn handle_songs_table_action(
     favorites_repo: &FavoritesRepo,
 ) {
     if let Some(play_id) = action.play_track {
-        if let Some(track) = library_state.displayed_tracks.iter().find(|t| t.id == play_id).cloned() {
+        if let Some(track) = library_state
+            .displayed_tracks
+            .iter()
+            .find(|t| t.id == play_id)
+            .cloned()
+        {
             coordinator.play_track(track, Some(library_state.displayed_tracks.clone()));
         }
     }
     if let Some(next_id) = action.queue_next_track {
-        if let Some(track) = library_state.displayed_tracks.iter().find(|t| t.id == next_id).cloned() {
+        if let Some(track) = library_state
+            .displayed_tracks
+            .iter()
+            .find(|t| t.id == next_id)
+            .cloned()
+        {
             coordinator.add_to_queue_next(track);
         }
     }
     if let Some(q_id) = action.add_to_queue {
-        if let Some(track) = library_state.displayed_tracks.iter().find(|t| t.id == q_id).cloned() {
+        if let Some(track) = library_state
+            .displayed_tracks
+            .iter()
+            .find(|t| t.id == q_id)
+            .cloned()
+        {
             coordinator.add_to_queue(track);
         }
     }
@@ -581,7 +671,12 @@ fn handle_songs_table_action(
         let _ = std::process::Command::new("explorer").arg(&folder).spawn();
     }
     if let Some(prop_id) = action.show_properties {
-        if let Some(track) = library_state.displayed_tracks.iter().find(|t| t.id == prop_id).cloned() {
+        if let Some(track) = library_state
+            .displayed_tracks
+            .iter()
+            .find(|t| t.id == prop_id)
+            .cloned()
+        {
             app_state.track_properties_track = Some(track);
             app_state.track_properties_open = true;
         }

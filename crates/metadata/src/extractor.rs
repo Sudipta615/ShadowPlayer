@@ -184,17 +184,28 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
         // The sheet is part of the identity. Without it, playback can only
         // guess at the `.cue` filename and silently falls back to playing the
         // whole album image when the guess is wrong.
-        let virtual_path = domain::cue::format_cue_virtual_path(&audio_path, cue_track.number, cue_path);
+        let virtual_path =
+            domain::cue::format_cue_virtual_path(&audio_path, cue_track.number, cue_path);
         let track_id = TrackId::from_canonical_path(Path::new(&virtual_path));
 
-        let title = cue_track.title.clone()
+        let title = cue_track
+            .title
+            .clone()
             .unwrap_or_else(|| format!("Track {:02}", cue_track.number));
-        let artist = cue_track.performer.clone()
+        let artist = cue_track
+            .performer
+            .clone()
             .or_else(|| sheet.performer.clone())
             .unwrap_or_else(|| audio_meta.track.artist.clone());
-        let album = sheet.title.clone()
+        let album = sheet
+            .title
+            .clone()
             .unwrap_or_else(|| audio_meta.track.album.clone());
-        let year = sheet.date.as_ref().and_then(|d| d.parse().ok()).or(audio_meta.track.year);
+        let year = sheet
+            .date
+            .as_ref()
+            .and_then(|d| d.parse().ok())
+            .or(audio_meta.track.year);
 
         let track = Track {
             id: track_id,
@@ -202,7 +213,10 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             title,
             artist,
             album,
-            genre: sheet.genre.clone().or_else(|| audio_meta.track.genre.clone()),
+            genre: sheet
+                .genre
+                .clone()
+                .or_else(|| audio_meta.track.genre.clone()),
             year,
             track_number: Some(cue_track.number),
             disc_number: Some(1),
@@ -259,8 +273,8 @@ mod tests {
         let mut data = Vec::with_capacity(frames as usize * 4);
         for i in 0..frames {
             let t = i as f32 / sr as f32;
-            let sample = ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.3 * i16::MAX as f32)
-                as i16;
+            let sample =
+                ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.3 * i16::MAX as f32) as i16;
             data.extend_from_slice(&sample.to_le_bytes());
             data.extend_from_slice(&sample.to_le_bytes());
         }
@@ -323,7 +337,10 @@ mod tests {
         assert_eq!(first.track.mtime_unix_secs, second.track.mtime_unix_secs);
         assert_eq!(first.track.mtime_nanos, second.track.mtime_nanos);
         assert!(first.track.mtime_nanos > 0, "sub-second component recorded");
-        assert_eq!(first.track.id, second.track.id, "id is a function of the path");
+        assert_eq!(
+            first.track.id, second.track.id,
+            "id is a function of the path"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

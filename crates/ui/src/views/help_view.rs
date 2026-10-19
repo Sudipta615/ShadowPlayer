@@ -1,7 +1,7 @@
-use std::collections::HashSet;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Vec2};
-use crate::theme::Theme;
 use crate::state::{AppState, DspState};
+use crate::theme::Theme;
+use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HelpTab {
@@ -209,8 +209,8 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
 
                 ui.add(search_edit);
 
-                if has_query {
-                    if ui.add(
+                if has_query
+                    && ui.add(
                         egui::Button::new(
                             egui::RichText::new("x")
                                 .font(FontId::proportional(13.0))
@@ -221,7 +221,6 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     ).clicked() {
                         state.search_query.clear();
                     }
-                }
             });
         });
     });
@@ -249,9 +248,17 @@ fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &The
         for (tab, label) in tabs {
             let is_active = state.active_tab == tab;
             let (bg, fg, stroke) = if is_active {
-                (theme.accent_violet, Color32::WHITE, Stroke::new(1.0, theme.accent_magenta))
+                (
+                    theme.accent_violet,
+                    Color32::WHITE,
+                    Stroke::new(1.0, theme.accent_magenta),
+                )
             } else {
-                (theme.bg_card, theme.text_secondary, Stroke::new(1.0, theme.border_card))
+                (
+                    theme.bg_card,
+                    theme.text_secondary,
+                    Stroke::new(1.0, theme.border_card),
+                )
             };
 
             let resp = ui.add(
@@ -281,7 +288,12 @@ fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &The
 
 fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. Welcome to ShadowPlayer", "The audiophile music workstation engineered for bit-exact transparency", theme);
+        card_title(
+            ui,
+            "1. Welcome to ShadowPlayer",
+            "The audiophile music workstation engineered for bit-exact transparency",
+            theme,
+        );
 
         ui.label(
             egui::RichText::new(
@@ -324,7 +336,12 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
 
     // Technical Diagram Image Card
     manual_card(ui, theme, |ui| {
-        card_title(ui, "2. High-Level System Architecture Diagram", "Complete flow from encoded audio file to analog headphone output", theme);
+        card_title(
+            ui,
+            "2. High-Level System Architecture Diagram",
+            "Complete flow from encoded audio file to analog headphone output",
+            theme,
+        );
 
         let img = egui::Image::new(egui::include_image!("../../assets/help/audio_flow.jpg"))
             .corner_radius(CornerRadius::same(12))
@@ -337,7 +354,12 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
 
     // Interface Navigation Walkthrough
     manual_card(ui, theme, |ui| {
-        card_title(ui, "3. Interface Elements & Layout Walkthrough", "How to navigate and control the desktop workspace", theme);
+        card_title(
+            ui,
+            "3. Interface Elements & Layout Walkthrough",
+            "How to navigate and control the desktop workspace",
+            theme,
+        );
 
         let layout_points = [
             ("Left Navigation Sidebar", "Quick access to your curated Library (Home, Albums, Artists, Genres, Folders), Playlists, Favorites, History, Settings & Audio Studio, and this Help Manual."),
@@ -353,8 +375,20 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
                 ui.label(egui::RichText::new("•").color(theme.accent_pink));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-                    ui.label(egui::RichText::new(name).strong().color(theme.text_primary).font(FontId::proportional(13.0)));
-                    ui.add(egui::Label::new(egui::RichText::new(desc).color(theme.text_secondary).font(FontId::proportional(12.5))).wrap());
+                    ui.label(
+                        egui::RichText::new(name)
+                            .strong()
+                            .color(theme.text_primary)
+                            .font(FontId::proportional(13.0)),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(desc)
+                                .color(theme.text_secondary)
+                                .font(FontId::proportional(12.5)),
+                        )
+                        .wrap(),
+                    );
                 });
             });
             ui.add_space(4.0);
@@ -382,7 +416,12 @@ fn render_signal_path_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Them
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "2. Internal Mathematical Precision & Buffer Health", "64-bit double precision IEEE 754 vs 32-bit single precision", theme);
+        card_title(
+            ui,
+            "2. Internal Mathematical Precision & Buffer Health",
+            "64-bit double precision IEEE 754 vs 32-bit single precision",
+            theme,
+        );
 
         ui.label(
             egui::RichText::new(
@@ -398,7 +437,12 @@ fn render_signal_path_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Them
             spec_badge(ui, "PRECISION", "64-bit IEEE Float", theme.accent_violet);
             spec_badge(ui, "BUFFER JITTER", "< 0.05 ms", theme.bit_perfect_green);
             spec_badge(ui, "INTERNAL NOISE FLOOR", "-310 dBFS", theme.accent_pink);
-            spec_badge(ui, "THREAD LOCKS", "0 (Lock-Free Atomics)", theme.accent_magenta);
+            spec_badge(
+                ui,
+                "THREAD LOCKS",
+                "0 (Lock-Free Atomics)",
+                theme.accent_magenta,
+            );
         });
     });
 }
@@ -409,9 +453,17 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
         (SignalBlock::RingBuffer, "2. RingBuffer", "Lock-Free Atomic"),
         (SignalBlock::Resampler, "3. Resampler", "Rubato Sinc FIR"),
         (SignalBlock::Equalizer, "4. DSP / EQ Rack", "64-bit Biquads"),
-        (SignalBlock::LimiterHeadroom, "5. Auto Headroom", "Dynamic Limiter"),
+        (
+            SignalBlock::LimiterHeadroom,
+            "5. Auto Headroom",
+            "Dynamic Limiter",
+        ),
         (SignalBlock::Dither, "6. TPDF Dither", "Noise Shaping"),
-        (SignalBlock::AudioBackend, "7. Driver Output", "ALSA / WASAPI"),
+        (
+            SignalBlock::AudioBackend,
+            "7. Driver Output",
+            "ALSA / WASAPI",
+        ),
         (SignalBlock::HardwareDac, "8. DAC Unit", "Bit-Exact Analog"),
     ];
 
@@ -421,7 +473,11 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
         for (block, title, subtitle) in blocks {
             let is_selected = state.selected_signal_block == Some(block);
             let (bg, border, fg) = if is_selected {
-                (theme.accent_violet.linear_multiply(0.3), theme.accent_magenta, theme.accent_pink)
+                (
+                    theme.accent_violet.linear_multiply(0.3),
+                    theme.accent_magenta,
+                    theme.accent_pink,
+                )
             } else {
                 (theme.bg_card_hover, theme.border_card, theme.text_primary)
             };
@@ -430,7 +486,12 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
             let painter = ui.painter_at(rect);
 
             painter.rect_filled(rect, CornerRadius::same(10), bg);
-            painter.rect_stroke(rect, CornerRadius::same(10), Stroke::new(if is_selected { 2.0 } else { 1.0 }, border), egui::StrokeKind::Inside);
+            painter.rect_stroke(
+                rect,
+                CornerRadius::same(10),
+                Stroke::new(if is_selected { 2.0 } else { 1.0 }, border),
+                egui::StrokeKind::Inside,
+            );
 
             painter.text(
                 Pos2::new(rect.center().x, rect.top() + 16.0),
@@ -558,11 +619,18 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
 
 fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. Equalizer Spectrum & Filter Topologies", "Understanding graphic bands, shelves, Q factors, and frequency bands", theme);
+        card_title(
+            ui,
+            "1. Equalizer Spectrum & Filter Topologies",
+            "Understanding graphic bands, shelves, Q factors, and frequency bands",
+            theme,
+        );
 
-        let img = egui::Image::new(egui::include_image!("../../assets/help/equalizer_bands.jpg"))
-            .corner_radius(CornerRadius::same(12))
-            .max_width(ui.available_width());
+        let img = egui::Image::new(egui::include_image!(
+            "../../assets/help/equalizer_bands.jpg"
+        ))
+        .corner_radius(CornerRadius::same(12))
+        .max_width(ui.available_width());
         ui.add(img);
 
         ui.add_space(6.0);
@@ -586,16 +654,26 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
-                    ui.label(egui::RichText::new("Simulated Controls:").strong().color(theme.accent_pink));
+                    ui.label(
+                        egui::RichText::new("Simulated Controls:")
+                            .strong()
+                            .color(theme.accent_pink),
+                    );
 
                     ui.horizontal(|ui| {
                         ui.label("Bass Shelf (80 Hz):");
-                        ui.add(egui::Slider::new(&mut state.demo_shelf_gain, -12.0..=12.0).suffix(" dB"));
+                        ui.add(
+                            egui::Slider::new(&mut state.demo_shelf_gain, -12.0..=12.0)
+                                .suffix(" dB"),
+                        );
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Mid Peak (1.5 kHz):");
-                        ui.add(egui::Slider::new(&mut state.demo_peak_gain, -12.0..=12.0).suffix(" dB"));
+                        ui.add(
+                            egui::Slider::new(&mut state.demo_peak_gain, -12.0..=12.0)
+                                .suffix(" dB"),
+                        );
                     });
 
                     ui.horizontal(|ui| {
@@ -605,7 +683,10 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
 
                     ui.horizontal(|ui| {
                         ui.label("Treble Shelf (10 kHz):");
-                        ui.add(egui::Slider::new(&mut state.demo_treble_gain, -12.0..=12.0).suffix(" dB"));
+                        ui.add(
+                            egui::Slider::new(&mut state.demo_treble_gain, -12.0..=12.0)
+                                .suffix(" dB"),
+                        );
                     });
 
                     if ui.button("Reset Sandbox to Flat (0 dB)").clicked() {
@@ -618,14 +699,20 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
             );
 
             // Column 2: Live Drawn Frequency Response Curve
-            let (canvas_rect, _) = ui.allocate_exact_size(Vec2::new(canvas_w, 160.0), Sense::hover());
+            let (canvas_rect, _) =
+                ui.allocate_exact_size(Vec2::new(canvas_w, 160.0), Sense::hover());
             render_frequency_response_curve_painter(ui, canvas_rect, state, theme);
         });
     });
 
     // Detailed Section Breakdown
     manual_card(ui, theme, |ui| {
-        card_title(ui, "3. Complete Equalizer Settings Guide", "Every slider, toggle, and acoustic mode explained", theme);
+        card_title(
+            ui,
+            "3. Complete Equalizer Settings Guide",
+            "Every slider, toggle, and acoustic mode explained",
+            theme,
+        );
 
         let eq_features = [
             ("Graphic EQ Band Topology (10, 15, 31, 64 Bands)", "Standard consumer EQs offer 10 bands spaced at 1-octave intervals (32Hz, 64Hz, 125Hz... 16kHz). ShadowPlayer also includes 15 bands (2/3-octave), 31 bands (1/3-octave studio standard), and 64 bands (1/6-octave surgical tuning) to eliminate specific room resonances or headphone peaks."),
@@ -652,17 +739,46 @@ fn render_frequency_response_curve_painter(
 ) {
     let p = ui.painter_at(rect);
     p.rect_filled(rect, CornerRadius::same(10), theme.bg_card);
-    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0, theme.border_card), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(10),
+        Stroke::new(1.0, theme.border_card),
+        egui::StrokeKind::Inside,
+    );
 
     // Grid lines for 0 dB, +12 dB, -12 dB
     let y_zero = rect.center().y;
     let y_plus12 = rect.top() + 20.0;
     let y_minus12 = rect.bottom() - 20.0;
 
-    p.line_segment([Pos2::new(rect.left(), y_zero), Pos2::new(rect.right(), y_zero)], Stroke::new(1.0, theme.border_subtle));
-    p.text(Pos2::new(rect.left() + 8.0, y_zero - 6.0), egui::Align2::LEFT_BOTTOM, "0 dB", FontId::monospace(9.5), theme.text_muted);
-    p.text(Pos2::new(rect.left() + 8.0, y_plus12 + 2.0), egui::Align2::LEFT_TOP, "+12 dB", FontId::monospace(9.5), theme.text_muted);
-    p.text(Pos2::new(rect.left() + 8.0, y_minus12 - 2.0), egui::Align2::LEFT_BOTTOM, "-12 dB", FontId::monospace(9.5), theme.text_muted);
+    p.line_segment(
+        [
+            Pos2::new(rect.left(), y_zero),
+            Pos2::new(rect.right(), y_zero),
+        ],
+        Stroke::new(1.0, theme.border_subtle),
+    );
+    p.text(
+        Pos2::new(rect.left() + 8.0, y_zero - 6.0),
+        egui::Align2::LEFT_BOTTOM,
+        "0 dB",
+        FontId::monospace(9.5),
+        theme.text_muted,
+    );
+    p.text(
+        Pos2::new(rect.left() + 8.0, y_plus12 + 2.0),
+        egui::Align2::LEFT_TOP,
+        "+12 dB",
+        FontId::monospace(9.5),
+        theme.text_muted,
+    );
+    p.text(
+        Pos2::new(rect.left() + 8.0, y_minus12 - 2.0),
+        egui::Align2::LEFT_BOTTOM,
+        "-12 dB",
+        FontId::monospace(9.5),
+        theme.text_muted,
+    );
 
     // Compute curve points across logarithmic frequency range (20 Hz to 20,000 Hz)
     let steps = 120;
@@ -698,7 +814,10 @@ fn render_frequency_response_curve_painter(
     mesh_points.push(Pos2::new(rect.left(), y_zero));
 
     for i in 0..points.len() - 1 {
-        p.line_segment([points[i], points[i + 1]], Stroke::new(2.5, theme.accent_pink));
+        p.line_segment(
+            [points[i], points[i + 1]],
+            Stroke::new(2.5, theme.accent_pink),
+        );
     }
 }
 
@@ -720,7 +839,12 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "2. Why the Operating System Degrades Sound", "Three critical flaws in standard OS audio engines", theme);
+        card_title(
+            ui,
+            "2. Why the Operating System Degrades Sound",
+            "Three critical flaws in standard OS audio engines",
+            theme,
+        );
 
         ui.columns(3, |cols| {
             cols[0].vertical(|ui| {
@@ -751,7 +875,12 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "3. Hardware Output Settings Reference", "Configuring drivers, fallback policies, and sample rates", theme);
+        card_title(
+            ui,
+            "3. Hardware Output Settings Reference",
+            "Configuring drivers, fallback policies, and sample rates",
+            theme,
+        );
 
         let output_features = [
             ("Audiophile Bit-Perfect Direct Stream", "When enabled, completely disengages all software volume attenuation, equalizer biquads, spatializers, and dithering. Hands the unaltered FLAC/WAV PCM bits straight to your external USB DAC."),
@@ -801,16 +930,25 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
-                    ui.label(egui::RichText::new("Acoustic Coordinates:").strong().color(theme.accent_pink));
+                    ui.label(
+                        egui::RichText::new("Acoustic Coordinates:")
+                            .strong()
+                            .color(theme.accent_pink),
+                    );
 
                     ui.horizontal(|ui| {
                         ui.label("Source Azimuth Angle:");
-                        ui.add(egui::Slider::new(&mut state.demo_azimuth_deg, -180.0..=180.0).suffix("°"));
+                        ui.add(
+                            egui::Slider::new(&mut state.demo_azimuth_deg, -180.0..=180.0)
+                                .suffix("°"),
+                        );
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Virtual Distance:");
-                        ui.add(egui::Slider::new(&mut state.demo_distance_m, 0.5..=10.0).suffix(" m"));
+                        ui.add(
+                            egui::Slider::new(&mut state.demo_distance_m, 0.5..=10.0).suffix(" m"),
+                        );
                     });
 
                     // Calculated psychoacoustic readouts
@@ -822,21 +960,37 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     let ild_db = (rad.sin() * 7.5).round();
 
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Calculated Psychoacoustic Cues:").strong().color(theme.bit_perfect_green));
+                    ui.label(
+                        egui::RichText::new("Calculated Psychoacoustic Cues:")
+                            .strong()
+                            .color(theme.bit_perfect_green),
+                    );
                     ui.label(format!("• Interaural Time Difference (ITD): {} µs", itd_us));
-                    ui.label(format!("• Interaural Level Difference (ILD): {} dB", ild_db));
-                    ui.label(format!("• Inverse-Square Sound Attenuation: -{:.1} dB", 20.0 * state.demo_distance_m.log10()));
+                    ui.label(format!(
+                        "• Interaural Level Difference (ILD): {} dB",
+                        ild_db
+                    ));
+                    ui.label(format!(
+                        "• Inverse-Square Sound Attenuation: -{:.1} dB",
+                        20.0 * state.demo_distance_m.log10()
+                    ));
                 },
             );
 
             // Radar Visualizer Painter
-            let (radar_rect, _) = ui.allocate_exact_size(Vec2::new(radar_size, radar_size), Sense::hover());
+            let (radar_rect, _) =
+                ui.allocate_exact_size(Vec2::new(radar_size, radar_size), Sense::hover());
             render_radar_painter(ui, radar_rect, state, theme);
         });
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "3. Spatial & Acoustics Settings Guide", "Understanding SOFA profiles, listener tracking smoothing, and RT60 room decay", theme);
+        card_title(
+            ui,
+            "3. Spatial & Acoustics Settings Guide",
+            "Understanding SOFA profiles, listener tracking smoothing, and RT60 room decay",
+            theme,
+        );
 
         let spatial_features = [
             ("Spatial Synthesis Quality (Low, Medium, High, Ultra)", "Controls the order of spherical harmonics and the convolution FIR filter length. 'High' (recommended) provides 512-point convolution for pristine localization without excessive CPU consumption. 'Ultra' expands to 2048-point convolution."),
@@ -855,19 +1009,44 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
 fn render_radar_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme: &Theme) {
     let p = ui.painter_at(rect);
     p.rect_filled(rect, CornerRadius::same(12), theme.bg_card);
-    p.rect_stroke(rect, CornerRadius::same(12), Stroke::new(1.0, theme.border_card), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(12),
+        Stroke::new(1.0, theme.border_card),
+        egui::StrokeKind::Inside,
+    );
 
     let center = rect.center();
     let max_radius = rect.width() * 0.42;
 
     // Range rings
-    p.circle_stroke(center, max_radius * 0.33, Stroke::new(1.0, theme.border_subtle));
-    p.circle_stroke(center, max_radius * 0.66, Stroke::new(1.0, theme.border_subtle));
+    p.circle_stroke(
+        center,
+        max_radius * 0.33,
+        Stroke::new(1.0, theme.border_subtle),
+    );
+    p.circle_stroke(
+        center,
+        max_radius * 0.66,
+        Stroke::new(1.0, theme.border_subtle),
+    );
     p.circle_stroke(center, max_radius, Stroke::new(1.0, theme.border_subtle));
 
     // Crosshairs
-    p.line_segment([Pos2::new(rect.left() + 10.0, center.y), Pos2::new(rect.right() - 10.0, center.y)], Stroke::new(1.0, theme.border_subtle));
-    p.line_segment([Pos2::new(center.x, rect.top() + 10.0), Pos2::new(center.x, rect.bottom() - 10.0)], Stroke::new(1.0, theme.border_subtle));
+    p.line_segment(
+        [
+            Pos2::new(rect.left() + 10.0, center.y),
+            Pos2::new(rect.right() - 10.0, center.y),
+        ],
+        Stroke::new(1.0, theme.border_subtle),
+    );
+    p.line_segment(
+        [
+            Pos2::new(center.x, rect.top() + 10.0),
+            Pos2::new(center.x, rect.bottom() - 10.0),
+        ],
+        Stroke::new(1.0, theme.border_subtle),
+    );
 
     // Listener Head in center
     p.circle_filled(center, 9.0, theme.accent_violet);
@@ -875,7 +1054,10 @@ fn render_radar_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme:
     p.circle_filled(Pos2::new(center.x - 11.0, center.y), 3.0, theme.accent_pink);
     p.circle_filled(Pos2::new(center.x + 11.0, center.y), 3.0, theme.accent_pink);
     // Nose pointer (facing North)
-    p.line_segment([center, Pos2::new(center.x, center.y - 14.0)], Stroke::new(2.0, theme.accent_magenta));
+    p.line_segment(
+        [center, Pos2::new(center.x, center.y - 14.0)],
+        Stroke::new(2.0, theme.accent_magenta),
+    );
 
     // Source position
     let rad = (state.demo_azimuth_deg - 90.0).to_radians();
@@ -885,7 +1067,10 @@ fn render_radar_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme:
     let src_pos = Pos2::new(src_x, src_y);
 
     // Connecting line & speaker dot
-    p.line_segment([center, src_pos], Stroke::new(1.5, theme.accent_magenta.linear_multiply(0.5)));
+    p.line_segment(
+        [center, src_pos],
+        Stroke::new(1.5, theme.accent_magenta.linear_multiply(0.5)),
+    );
     p.circle_filled(src_pos, 7.0, theme.bit_perfect_green);
     p.circle_stroke(src_pos, 11.0, Stroke::new(1.2, theme.bit_perfect_green));
 }
@@ -896,7 +1081,12 @@ fn render_radar_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme:
 
 fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. Processing Engine: Varispeed vs TimeStretch", "Analog tape pitch shift vs modern decoupled granular time-stretching", theme);
+        card_title(
+            ui,
+            "1. Processing Engine: Varispeed vs TimeStretch",
+            "Analog tape pitch shift vs modern decoupled granular time-stretching",
+            theme,
+        );
 
         ui.label(
             egui::RichText::new(
@@ -913,15 +1103,29 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
             ui.label("Interactive Speed Multiplier:");
             ui.add(egui::Slider::new(&mut state.demo_speed, 0.25..=4.0).suffix("x"));
             let semitones = 12.0 * state.demo_speed.log2();
-            badge(ui, format!("Varispeed Pitch: {:+.2} semitones", semitones), theme.accent_violet, Color32::WHITE);
+            badge(
+                ui,
+                format!("Varispeed Pitch: {:+.2} semitones", semitones),
+                theme.accent_violet,
+                Color32::WHITE,
+            );
         });
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "2. Track Transitions: Gapless Direct vs Crossfades", "Why Constant Power crossfading prevents volume drops", theme);
+        card_title(
+            ui,
+            "2. Track Transitions: Gapless Direct vs Crossfades",
+            "Why Constant Power crossfading prevents volume drops",
+            theme,
+        );
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Crossfade Curve Type:").strong().color(theme.accent_pink));
+            ui.label(
+                egui::RichText::new("Crossfade Curve Type:")
+                    .strong()
+                    .color(theme.accent_pink),
+            );
 
             let curves = ["Constant Power (Equal Energy)", "Linear", "S-Curve"];
             for (idx, name) in curves.iter().enumerate() {
@@ -941,12 +1145,18 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
 
         ui.add_space(8.0);
         // Painter for crossfade curves spanning full card width
-        let (curve_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 110.0), Sense::hover());
+        let (curve_rect, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 110.0), Sense::hover());
         render_crossfade_painter(ui, curve_rect, state, theme);
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "3. Loudness Normalization: EBU R128 vs ReplayGain", "Eliminate volume jumps without compressing dynamic range", theme);
+        card_title(
+            ui,
+            "3. Loudness Normalization: EBU R128 vs ReplayGain",
+            "Eliminate volume jumps without compressing dynamic range",
+            theme,
+        );
 
         ui.label(
             egui::RichText::new(
@@ -961,7 +1171,12 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
 fn render_crossfade_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme: &Theme) {
     let p = ui.painter_at(rect);
     p.rect_filled(rect, CornerRadius::same(10), theme.bg_card);
-    p.rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0, theme.border_card), egui::StrokeKind::Inside);
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(10),
+        Stroke::new(1.0, theme.border_card),
+        egui::StrokeKind::Inside,
+    );
 
     let steps = 60;
     let mut out_points = Vec::with_capacity(steps);
@@ -995,14 +1210,41 @@ fn render_crossfade_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, th
     }
 
     for i in 0..steps - 1 {
-        p.line_segment([out_points[i], out_points[i + 1]], Stroke::new(2.0, theme.accent_pink));
-        p.line_segment([in_points[i], in_points[i + 1]], Stroke::new(2.0, theme.accent_violet));
-        p.line_segment([sum_points[i], sum_points[i + 1]], Stroke::new(1.5, theme.bit_perfect_green));
+        p.line_segment(
+            [out_points[i], out_points[i + 1]],
+            Stroke::new(2.0, theme.accent_pink),
+        );
+        p.line_segment(
+            [in_points[i], in_points[i + 1]],
+            Stroke::new(2.0, theme.accent_violet),
+        );
+        p.line_segment(
+            [sum_points[i], sum_points[i + 1]],
+            Stroke::new(1.5, theme.bit_perfect_green),
+        );
     }
 
-    p.text(Pos2::new(rect.left() + 10.0, y_top), egui::Align2::LEFT_TOP, "Fade Out (Track A)", FontId::monospace(10.0), theme.accent_pink);
-    p.text(Pos2::new(rect.right() - 10.0, y_top), egui::Align2::RIGHT_TOP, "Fade In (Track B)", FontId::monospace(10.0), theme.accent_violet);
-    p.text(Pos2::new(rect.center().x, y_top), egui::Align2::CENTER_TOP, "Summed Perceived Energy", FontId::monospace(10.0), theme.bit_perfect_green);
+    p.text(
+        Pos2::new(rect.left() + 10.0, y_top),
+        egui::Align2::LEFT_TOP,
+        "Fade Out (Track A)",
+        FontId::monospace(10.0),
+        theme.accent_pink,
+    );
+    p.text(
+        Pos2::new(rect.right() - 10.0, y_top),
+        egui::Align2::RIGHT_TOP,
+        "Fade In (Track B)",
+        FontId::monospace(10.0),
+        theme.accent_violet,
+    );
+    p.text(
+        Pos2::new(rect.center().x, y_top),
+        egui::Align2::CENTER_TOP,
+        "Summed Perceived Energy",
+        FontId::monospace(10.0),
+        theme.bit_perfect_green,
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1011,7 +1253,12 @@ fn render_crossfade_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, th
 
 fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. Multi-Track Mixer & Audio Stem Ingestion", "Control gain, stereo pan, and mute states for secondary audio sources", theme);
+        card_title(
+            ui,
+            "1. Multi-Track Mixer & Audio Stem Ingestion",
+            "Control gain, stereo pan, and mute states for secondary audio sources",
+            theme,
+        );
 
         ui.label(
             egui::RichText::new(
@@ -1023,7 +1270,12 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "2. Sidechain Ducking Compressor", "Automatically dip background music when speech is detected", theme);
+        card_title(
+            ui,
+            "2. Sidechain Ducking Compressor",
+            "Automatically dip background music when speech is detected",
+            theme,
+        );
 
         ui.label(
             egui::RichText::new(
@@ -1035,7 +1287,12 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     });
 
     manual_card(ui, theme, |ui| {
-        card_title(ui, "3. High-Resolution Stream Capture", "Direct live bit-perfect loopback recording to uncompressed PCM WAV", theme);
+        card_title(
+            ui,
+            "3. High-Resolution Stream Capture",
+            "Direct live bit-perfect loopback recording to uncompressed PCM WAV",
+            theme,
+        );
 
         ui.label(
             egui::RichText::new(
@@ -1053,7 +1310,12 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
 
 fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. Audiophile Keyboard Shortcuts", "Complete reference of keyboard commands for instant mouse-free operation", theme);
+        card_title(
+            ui,
+            "1. Audiophile Keyboard Shortcuts",
+            "Complete reference of keyboard commands for instant mouse-free operation",
+            theme,
+        );
 
         let shortcuts = [
             ("Space / K", "Play / Pause active track playback"),
@@ -1066,22 +1328,37 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
             ("Right Arrow", "Seek forward by 5 seconds"),
             ("Up Arrow", "Increase master volume by 5%"),
             ("Down Arrow", "Decrease master volume by 5%"),
-            ("Ctrl + B", "Instant toggle for Bit-Perfect Pure Direct Mode"),
+            (
+                "Ctrl + B",
+                "Instant toggle for Bit-Perfect Pure Direct Mode",
+            ),
             ("Ctrl + P", "Open Settings & Audio DSP Studio"),
-            ("Ctrl + N", "Open the playlist editor (create or manage playlists)"),
+            (
+                "Ctrl + N",
+                "Open the playlist editor (create or manage playlists)",
+            ),
             ("Ctrl + O", "Open Folders & Music Library Manager"),
             ("Ctrl + E", "Toggle the Equalizer & DSP studio panel"),
-            ("Escape", "Close the open dialog (one layer per press), or clear search queries"),
+            (
+                "Escape",
+                "Close the open dialog (one layer per press), or clear search queries",
+            ),
         ];
 
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
             for (key, desc) in shortcuts {
                 ui.horizontal_top(|ui| {
-                    let (badge_rect, _) = ui.allocate_exact_size(Vec2::new(120.0, 24.0), Sense::hover());
+                    let (badge_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(120.0, 24.0), Sense::hover());
                     let p = ui.painter_at(badge_rect);
                     p.rect_filled(badge_rect, CornerRadius::same(6), theme.bg_pill);
-                    p.rect_stroke(badge_rect, CornerRadius::same(6), Stroke::new(1.0, theme.border_subtle), egui::StrokeKind::Inside);
+                    p.rect_stroke(
+                        badge_rect,
+                        CornerRadius::same(6),
+                        Stroke::new(1.0, theme.border_subtle),
+                        egui::StrokeKind::Inside,
+                    );
                     p.text(
                         badge_rect.center(),
                         egui::Align2::CENTER_CENTER,
@@ -1090,7 +1367,14 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
                         theme.accent_pink,
                     );
 
-                    ui.add(egui::Label::new(egui::RichText::new(desc).font(FontId::proportional(13.0)).color(theme.text_secondary)).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(desc)
+                                .font(FontId::proportional(13.0))
+                                .color(theme.text_secondary),
+                        )
+                        .wrap(),
+                    );
                 });
             }
         });
@@ -1103,7 +1387,12 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
 
 fn render_glossary_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "Complete Technical Glossary & Definitions", "Clear definitions of every acoustic, DSP, and engineering term in ShadowPlayer", theme);
+        card_title(
+            ui,
+            "Complete Technical Glossary & Definitions",
+            "Clear definitions of every acoustic, DSP, and engineering term in ShadowPlayer",
+            theme,
+        );
 
         let glossary = [
             ("dBFS (Decibels relative to Full Scale)", "The standard unit of volume in digital audio systems. 0.0 dBFS is the maximum possible volume a digital file can store without clipping. All normal music levels are expressed in negative decibels (-14 dBFS, -6 dBFS)."),
@@ -1177,8 +1466,20 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
-                            ui.label(egui::RichText::new(title).font(FontId::proportional(14.0)).strong().color(theme.accent_pink));
-                            ui.add(egui::Label::new(egui::RichText::new(snippet).font(FontId::proportional(12.5)).color(theme.text_secondary)).wrap());
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .font(FontId::proportional(14.0))
+                                    .strong()
+                                    .color(theme.accent_pink),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(snippet)
+                                        .font(FontId::proportional(12.5))
+                                        .color(theme.text_secondary),
+                                )
+                                .wrap(),
+                            );
                         },
                     );
 
@@ -1186,17 +1487,20 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
                         Vec2::new(btn_w, 32.0),
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("Jump to Section >>")
-                                        .font(FontId::proportional(11.5))
-                                        .strong()
-                                        .color(Color32::WHITE),
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Jump to Section >>")
+                                            .font(FontId::proportional(11.5))
+                                            .strong()
+                                            .color(Color32::WHITE),
+                                    )
+                                    .fill(theme.accent_violet)
+                                    .corner_radius(CornerRadius::same(6))
+                                    .min_size(Vec2::new(135.0, 26.0)),
                                 )
-                                .fill(theme.accent_violet)
-                                .corner_radius(CornerRadius::same(6))
-                                .min_size(Vec2::new(135.0, 26.0)),
-                            ).clicked() {
+                                .clicked()
+                            {
                                 state.active_tab = tab;
                                 state.search_query.clear();
                             }
@@ -1239,9 +1543,18 @@ fn manual_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(&mut 
 fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str, theme: &Theme) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-        ui.label(egui::RichText::new(title).font(FontId::proportional(16.0)).strong().color(theme.text_primary));
+        ui.label(
+            egui::RichText::new(title)
+                .font(FontId::proportional(16.0))
+                .strong()
+                .color(theme.text_primary),
+        );
         if !subtitle.is_empty() {
-            ui.label(egui::RichText::new(subtitle).font(FontId::proportional(12.0)).color(theme.text_muted));
+            ui.label(
+                egui::RichText::new(subtitle)
+                    .font(FontId::proportional(12.0))
+                    .color(theme.text_muted),
+            );
         }
     });
     ui.add_space(2.0);
@@ -1259,8 +1572,20 @@ fn feature_pillar_card(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme
     frame.show(ui, |ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
-            ui.label(egui::RichText::new(title).font(FontId::proportional(13.5)).strong().color(theme.accent_pink));
-            ui.add(egui::Label::new(egui::RichText::new(desc).font(FontId::proportional(12.0)).color(theme.text_secondary)).wrap());
+            ui.label(
+                egui::RichText::new(title)
+                    .font(FontId::proportional(13.5))
+                    .strong()
+                    .color(theme.accent_pink),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(desc)
+                        .font(FontId::proportional(12.0))
+                        .color(theme.text_secondary),
+                )
+                .wrap(),
+            );
         });
     });
 }
@@ -1271,8 +1596,20 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
         // Vertical layout for narrow windows: title on top, description below
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
-            ui.label(egui::RichText::new(title).font(FontId::proportional(13.5)).strong().color(theme.accent_pink));
-            ui.add(egui::Label::new(egui::RichText::new(desc).font(FontId::proportional(12.5)).color(theme.text_secondary)).wrap());
+            ui.label(
+                egui::RichText::new(title)
+                    .font(FontId::proportional(13.5))
+                    .strong()
+                    .color(theme.accent_pink),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(desc)
+                        .font(FontId::proportional(12.5))
+                        .color(theme.text_secondary),
+                )
+                .wrap(),
+            );
         });
     } else {
         // Side-by-side two column layout with auto-wrapping on both columns
@@ -1285,7 +1622,15 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
                 Vec2::new(label_w, 20.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(title).font(FontId::proportional(13.0)).strong().color(theme.text_primary)).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(title)
+                                .font(FontId::proportional(13.0))
+                                .strong()
+                                .color(theme.text_primary),
+                        )
+                        .wrap(),
+                    );
                 },
             );
 
@@ -1293,7 +1638,14 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
                 Vec2::new(desc_w, 20.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(desc).font(FontId::proportional(12.5)).color(theme.text_secondary)).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(desc)
+                                .font(FontId::proportional(12.5))
+                                .color(theme.text_secondary),
+                        )
+                        .wrap(),
+                    );
                 },
             );
         });
@@ -1305,7 +1657,15 @@ fn caption_box(ui: &mut egui::Ui, text: &str, theme: &Theme) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
         badge(ui, "DIAGRAM", theme.bg_pill, theme.accent_pink);
-        ui.add(egui::Label::new(egui::RichText::new(text).font(FontId::proportional(11.5)).italics().color(theme.text_muted)).wrap());
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(FontId::proportional(11.5))
+                    .italics()
+                    .color(theme.text_muted),
+            )
+            .wrap(),
+        );
     });
 }
 
@@ -1315,7 +1675,12 @@ fn badge(ui: &mut egui::Ui, text: impl Into<String>, bg: Color32, fg: Color32) {
         .corner_radius(CornerRadius::same(6))
         .inner_margin(egui::Margin::symmetric(7, 2))
         .show(ui, |ui| {
-            ui.label(egui::RichText::new(text.into()).font(FontId::proportional(10.5)).strong().color(fg));
+            ui.label(
+                egui::RichText::new(text.into())
+                    .font(FontId::proportional(10.5))
+                    .strong()
+                    .color(fg),
+            );
         });
 }
 
@@ -1328,8 +1693,18 @@ fn spec_badge(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-                ui.label(egui::RichText::new(label).font(FontId::proportional(10.0)).strong().color(color));
-                ui.label(egui::RichText::new(value).font(FontId::proportional(11.0)).strong().color(Color32::WHITE));
+                ui.label(
+                    egui::RichText::new(label)
+                        .font(FontId::proportional(10.0))
+                        .strong()
+                        .color(color),
+                );
+                ui.label(
+                    egui::RichText::new(value)
+                        .font(FontId::proportional(11.0))
+                        .strong()
+                        .color(Color32::WHITE),
+                );
             });
         });
 }

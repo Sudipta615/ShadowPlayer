@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod unit {
     use crate::db::Database;
     use crate::repos::*;
     use domain::ids::{PlaylistId, TrackId};
@@ -93,7 +93,13 @@ mod tests {
         for path in ["/music/100% real.flac", "/music/song%20name.flac"] {
             let track = sample_track(TrackId::new(), path, "T", "A", "B");
             repo.upsert(&track).unwrap();
-            assert_eq!(repo.get_by_path(std::path::Path::new(path)).unwrap().unwrap().id, track.id);
+            assert_eq!(
+                repo.get_by_path(std::path::Path::new(path))
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                track.id
+            );
         }
     }
 
@@ -182,18 +188,32 @@ mod tests {
         );
 
         // Play counts update on the hot path; the search index must not care.
-        conn.execute("UPDATE tracks SET play_count = play_count + 1 WHERE id = 't1';", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE tracks SET play_count = play_count + 1 WHERE id = 't1';",
+            [],
+        )
+        .unwrap();
         let title: String = conn
-            .query_row("SELECT title FROM tracks_fts WHERE track_id = 't1';", [], |r| r.get(0))
+            .query_row(
+                "SELECT title FROM tracks_fts WHERE track_id = 't1';",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(title, "sentinel", "a play-count update must not rebuild the index");
+        assert_eq!(
+            title, "sentinel",
+            "a play-count update must not rebuild the index"
+        );
 
         // A real editorial change still does.
         conn.execute("UPDATE tracks SET title = 'New Title' WHERE id = 't1';", [])
             .unwrap();
         let title: String = conn
-            .query_row("SELECT title FROM tracks_fts WHERE track_id = 't1';", [], |r| r.get(0))
+            .query_row(
+                "SELECT title FROM tracks_fts WHERE track_id = 't1';",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(title, "New Title");
 
@@ -211,14 +231,20 @@ mod tests {
         let fav_repo = FavoritesRepo::new(db.clone());
 
         let t1_id = TrackId::new();
-        let t1 = sample_track(t1_id, "/music/midnight_dreams.flac", "Midnight Dreams", "Horizon Lines", "Lost in Reverie");
+        let t1 = sample_track(
+            t1_id,
+            "/music/midnight_dreams.flac",
+            "Midnight Dreams",
+            "Horizon Lines",
+            "Lost in Reverie",
+        );
         repo.upsert(&t1).expect("Failed to insert track");
 
         assert_eq!(repo.count().unwrap(), 1);
 
         let retrieved = repo.get_by_id(&t1_id).unwrap().expect("Track not found");
         assert_eq!(retrieved.title, "Midnight Dreams");
-        assert_eq!(retrieved.is_favorite, false);
+        assert!(!retrieved.is_favorite);
 
         // Toggle favorite
         repo.set_favorite(&t1_id, true).unwrap();
@@ -241,9 +267,27 @@ mod tests {
         let db = Database::in_memory().expect("In-memory DB creation failed");
         let repo = TrackRepo::new(db.clone());
 
-        let t1 = sample_track(TrackId::new(), "/music/1.flac", "Midnight Dreams", "Horizon Lines", "Lost in Reverie");
-        let t2 = sample_track(TrackId::new(), "/music/2.flac", "Echoes", "Aurora Skies", "Waves of Time");
-        let t3 = sample_track(TrackId::new(), "/music/3.flac", "Starlight", "Nova Bloom", "Starlight EP");
+        let t1 = sample_track(
+            TrackId::new(),
+            "/music/1.flac",
+            "Midnight Dreams",
+            "Horizon Lines",
+            "Lost in Reverie",
+        );
+        let t2 = sample_track(
+            TrackId::new(),
+            "/music/2.flac",
+            "Echoes",
+            "Aurora Skies",
+            "Waves of Time",
+        );
+        let t3 = sample_track(
+            TrackId::new(),
+            "/music/3.flac",
+            "Starlight",
+            "Nova Bloom",
+            "Starlight EP",
+        );
 
         repo.upsert(&t1).unwrap();
         repo.upsert(&t2).unwrap();
@@ -272,13 +316,27 @@ mod tests {
         let pl_repo = PlaylistRepo::new(db.clone());
         let q_repo = QueueRepo::new(db.clone());
 
-        let t1 = sample_track(TrackId::new(), "/music/1.flac", "Midnight Dreams", "Horizon Lines", "Lost in Reverie");
-        let t2 = sample_track(TrackId::new(), "/music/2.flac", "Echoes", "Aurora Skies", "Waves of Time");
+        let t1 = sample_track(
+            TrackId::new(),
+            "/music/1.flac",
+            "Midnight Dreams",
+            "Horizon Lines",
+            "Lost in Reverie",
+        );
+        let t2 = sample_track(
+            TrackId::new(),
+            "/music/2.flac",
+            "Echoes",
+            "Aurora Skies",
+            "Waves of Time",
+        );
         track_repo.upsert(&t1).unwrap();
         track_repo.upsert(&t2).unwrap();
 
         // Playlist creation & tracks
-        let pl = pl_repo.create("Chill Vibes", Some("Evening tunes")).unwrap();
+        let pl = pl_repo
+            .create("Chill Vibes", Some("Evening tunes"))
+            .unwrap();
         pl_repo.add_track(&pl.id, &t1.id).unwrap();
         pl_repo.add_track(&pl.id, &t2.id).unwrap();
 
@@ -334,7 +392,12 @@ mod tests {
         tracks.upsert(&outside).unwrap();
         queue.save_queue(&[inside.id, outside.id]).unwrap();
 
-        assert_eq!(queue.purge_path_prefix(PathBuf::from("/music/demo").as_path()).unwrap(), 1);
+        assert_eq!(
+            queue
+                .purge_path_prefix(PathBuf::from("/music/demo").as_path())
+                .unwrap(),
+            1
+        );
         let loaded = queue.load_queue().unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].id, outside.id);
@@ -374,7 +437,10 @@ mod tests {
                 .unwrap();
             rows
         };
-        assert_eq!(columns, vec!["position".to_string(), "track_id".to_string()]);
+        assert_eq!(
+            columns,
+            vec!["position".to_string(), "track_id".to_string()]
+        );
         assert!(
             columns.iter().all(|c| c != "path"),
             "the write-only path column must be gone"
@@ -393,7 +459,10 @@ mod tests {
         };
         assert_eq!(
             queue,
-            vec![(0i64, "real-track".to_string()), (1, "second-track".to_string())],
+            vec![
+                (0i64, "real-track".to_string()),
+                (1, "second-track".to_string())
+            ],
             "real entries in order, orphan dropped"
         );
 
@@ -409,7 +478,9 @@ mod tests {
         }
 
         let version: i64 = conn
-            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |r| r.get(0))
+            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(version, 4);
     }
@@ -433,10 +504,12 @@ mod tests {
         let db = Database::in_memory().expect("In-memory DB creation failed");
         let settings_repo = SettingsRepo::new(db.clone());
 
-        let mut s = AppSettings::default();
-        s.volume = 0.92;
-        s.sort_field = SortField::Duration;
-        s.sort_order = SortOrder::Descending;
+        let s = AppSettings {
+            volume: 0.92,
+            sort_field: SortField::Duration,
+            sort_order: SortOrder::Descending,
+            ..AppSettings::default()
+        };
 
         settings_repo.save(&s).unwrap();
         let loaded = settings_repo.load().unwrap();
@@ -446,9 +519,17 @@ mod tests {
         assert_eq!(loaded.sort_order, SortOrder::Descending);
 
         // Test arbitrary key-value persistence for EQ and Studio Settings
-        settings_repo.set_value("eq_panel_v1", r#"{"layout":"TenBand","graphic_gains":[1.5,-2.0]}"#).unwrap();
+        settings_repo
+            .set_value(
+                "eq_panel_v1",
+                r#"{"layout":"TenBand","graphic_gains":[1.5,-2.0]}"#,
+            )
+            .unwrap();
         let eq_json = settings_repo.get_value("eq_panel_v1").unwrap();
-        assert_eq!(eq_json, Some(r#"{"layout":"TenBand","graphic_gains":[1.5,-2.0]}"#.to_string()));
+        assert_eq!(
+            eq_json,
+            Some(r#"{"layout":"TenBand","graphic_gains":[1.5,-2.0]}"#.to_string())
+        );
 
         let non_existent = settings_repo.get_value("non_existent_key").unwrap();
         assert_eq!(non_existent, None);
@@ -462,9 +543,27 @@ mod tests {
         let artist_repo = ArtistRepo::new(db.clone());
         let genre_repo = GenreRepo::new(db.clone());
 
-        let t1 = sample_track(TrackId::new(), "/music/rock/1.flac", "Song 1", "Artist A", "Album X");
-        let t2 = sample_track(TrackId::new(), "/music/rock/2.flac", "Song 2", "Artist A", "Album X");
-        let mut t3 = sample_track(TrackId::new(), "/music/jazz/3.flac", "Song 3", "Artist B", "Album Y");
+        let t1 = sample_track(
+            TrackId::new(),
+            "/music/rock/1.flac",
+            "Song 1",
+            "Artist A",
+            "Album X",
+        );
+        let t2 = sample_track(
+            TrackId::new(),
+            "/music/rock/2.flac",
+            "Song 2",
+            "Artist A",
+            "Album X",
+        );
+        let mut t3 = sample_track(
+            TrackId::new(),
+            "/music/jazz/3.flac",
+            "Song 3",
+            "Artist B",
+            "Album Y",
+        );
         t3.genre = Some("Jazz".to_string());
 
         track_repo.upsert(&t1).unwrap();
@@ -474,7 +573,9 @@ mod tests {
         // Album repo list and get tracks
         let albums = album_repo.list().unwrap();
         assert_eq!(albums.len(), 2);
-        let x_tracks = album_repo.get_tracks_by_album("Album X", "Artist A").unwrap();
+        let x_tracks = album_repo
+            .get_tracks_by_album("Album X", "Artist A")
+            .unwrap();
         assert_eq!(x_tracks.len(), 2);
 
         // Artist repo list and get tracks
@@ -491,9 +592,13 @@ mod tests {
         assert_eq!(jazz_tracks[0].title, "Song 3");
 
         // Folder querying
-        let rock_tracks = track_repo.get_tracks_by_folder(&PathBuf::from("/music/rock")).unwrap();
+        let rock_tracks = track_repo
+            .get_tracks_by_folder(&PathBuf::from("/music/rock"))
+            .unwrap();
         assert_eq!(rock_tracks.len(), 2);
-        let jazz_folder_tracks = track_repo.get_tracks_by_folder(&PathBuf::from("/music/jazz")).unwrap();
+        let jazz_folder_tracks = track_repo
+            .get_tracks_by_folder(&PathBuf::from("/music/jazz"))
+            .unwrap();
         assert_eq!(jazz_folder_tracks.len(), 1);
     }
 
@@ -533,7 +638,13 @@ mod tests {
         let favorites = FavoritesRepo::new(db.clone());
         let playlists = PlaylistRepo::new(db.clone());
 
-        let mut t1 = sample_track(TrackId::new(), "/music/old/album/01.flac", "Song", "Band", "Album");
+        let mut t1 = sample_track(
+            TrackId::new(),
+            "/music/old/album/01.flac",
+            "Song",
+            "Band",
+            "Album",
+        );
         t1.content_hash = Some("12345-abcdef".to_string());
         repo.upsert(&t1).unwrap();
 
@@ -544,7 +655,13 @@ mod tests {
 
         // The file is moved to a new folder; the new row has a fresh
         // path-derived id but the same content fingerprint.
-        let moved = sample_track(TrackId::new(), "/music/new/album/01.flac", "Song", "Band", "Album");
+        let moved = sample_track(
+            TrackId::new(),
+            "/music/new/album/01.flac",
+            "Song",
+            "Band",
+            "Album",
+        );
         assert_ne!(moved.id, t1.id, "a new path yields a new id");
 
         let found = repo.find_by_content_hash("12345-abcdef").unwrap();
@@ -574,7 +691,10 @@ mod tests {
         refreshed.title = "Song (Remaster)".to_string();
         repo.upsert(&refreshed).unwrap();
         assert_eq!(repo.count().unwrap(), 1);
-        assert_eq!(repo.get_by_id(&t1.id).unwrap().unwrap().title, "Song (Remaster)");
+        assert_eq!(
+            repo.get_by_id(&t1.id).unwrap().unwrap().title,
+            "Song (Remaster)"
+        );
 
         // An ambiguous fingerprint (two rows sharing content) is never used to
         // relink, so we can't silently steal the wrong row.
@@ -773,19 +893,35 @@ mod tests {
         let repo = TrackRepo::new(db.clone());
 
         let rock = sample_track(TrackId::new(), "/music/rock/a.flac", "A", "X", "Rock");
-        let rockabilly = sample_track(TrackId::new(), "/music/rockabilly/b.flac", "B", "X", "Billy");
+        let rockabilly = sample_track(
+            TrackId::new(),
+            "/music/rockabilly/b.flac",
+            "B",
+            "X",
+            "Billy",
+        );
         repo.upsert(&rock).unwrap();
         repo.upsert(&rockabilly).unwrap();
 
         // The folder listing is scoped to the folder itself.
-        let listed = repo.get_tracks_by_folder(&PathBuf::from("/music/rock")).unwrap();
+        let listed = repo
+            .get_tracks_by_folder(&PathBuf::from("/music/rock"))
+            .unwrap();
         assert_eq!(listed.len(), 1, "only the file inside /music/rock");
         assert_eq!(listed[0].title, "A");
 
-        let removed = repo.delete_by_path_prefix(&PathBuf::from("/music/rock")).unwrap();
+        let removed = repo
+            .delete_by_path_prefix(&PathBuf::from("/music/rock"))
+            .unwrap();
         assert_eq!(removed, 1, "the sibling directory must survive");
         assert_eq!(repo.count().unwrap(), 1);
-        assert_eq!(repo.get_by_path(&PathBuf::from("/music/rockabilly/b.flac")).unwrap().unwrap().title, "B");
+        assert_eq!(
+            repo.get_by_path(&PathBuf::from("/music/rockabilly/b.flac"))
+                .unwrap()
+                .unwrap()
+                .title,
+            "B"
+        );
     }
 
     /// `%` and `_` in a folder name are literals, not wildcards.
@@ -804,7 +940,12 @@ mod tests {
             .unwrap();
         assert_eq!(removed, 1, "the % must not match another character");
         assert_eq!(repo.count().unwrap(), 1);
-        assert_eq!(repo.list_paths_under_prefix(&PathBuf::from("/music/100% hits")).unwrap().len(), 0);
+        assert_eq!(
+            repo.list_paths_under_prefix(&PathBuf::from("/music/100% hits"))
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     /// Re-registering a scan root must return the stored row, not a phantom id.
@@ -896,7 +1037,11 @@ mod tests {
 
         let albums = album_repo.list().unwrap();
         assert_eq!(albums.len(), 1);
-        assert_eq!(albums[0].year, Some(1994), "the earliest year is the album's");
+        assert_eq!(
+            albums[0].year,
+            Some(1994),
+            "the earliest year is the album's"
+        );
         assert_eq!(albums[0].track_count, 2);
     }
 
@@ -907,10 +1052,22 @@ mod tests {
         let db = Database::in_memory().expect("In-memory DB creation failed");
         let repo = TrackRepo::new(db.clone());
 
-        let mut acdc = sample_track(TrackId::new(), "/music/rock/01.flac", "Thunderstruck", "AC/DC", "The Razors Edge");
+        let mut acdc = sample_track(
+            TrackId::new(),
+            "/music/rock/01.flac",
+            "Thunderstruck",
+            "AC/DC",
+            "The Razors Edge",
+        );
         acdc.artist = "AC/DC".to_string();
         repo.upsert(&acdc).unwrap();
-        let mut dont = sample_track(TrackId::new(), "/music/pop/02.flac", "Don't Stop", "Fleetwood Mac", "Rumours");
+        let mut dont = sample_track(
+            TrackId::new(),
+            "/music/pop/02.flac",
+            "Don't Stop",
+            "Fleetwood Mac",
+            "Rumours",
+        );
         dont.title = "Don't Stop".to_string();
         repo.upsert(&dont).unwrap();
 
@@ -920,7 +1077,11 @@ mod tests {
         assert_eq!(hits("Thunder"), 1, "prefix search still works");
         assert_eq!(hits("Don't Stop"), 1, "apostrophes are token separators");
         assert_eq!(hits("rumours"), 1, "case-insensitive");
-        assert_eq!(hits("!!!"), 0, "no tokens means no results, not a syntax error");
+        assert_eq!(
+            hits("!!!"),
+            0,
+            "no tokens means no results, not a syntax error"
+        );
     }
 
     /// Smart-playlist rules that the field cannot express are repaired on load,
@@ -937,7 +1098,9 @@ mod tests {
         let mut b = sample_track(TrackId::new(), "/music/b.flac", "Beta", "X", "B");
         b.is_favorite = true;
         track_repo.upsert(&b).unwrap();
-        TrackRepo::new(db.clone()).set_favorite(&b.id, true).unwrap();
+        TrackRepo::new(db.clone())
+            .set_favorite(&b.id, true)
+            .unwrap();
 
         // `Date Added is 2024` can never be true as stored: `added_at` is a
         // unix timestamp. It is read as "in the last 2024 days" instead.
@@ -999,7 +1162,13 @@ mod tests {
         let repo = SmartPlaylistRepo::new(db.clone());
         let track_repo = TrackRepo::new(db.clone());
         track_repo
-            .upsert(&sample_track(TrackId::new(), "/music/a.flac", "A", "X", "A"))
+            .upsert(&sample_track(
+                TrackId::new(),
+                "/music/a.flac",
+                "A",
+                "X",
+                "A",
+            ))
             .unwrap();
 
         let mut playlist = SmartPlaylist::draft(PlaylistId::new());
@@ -1020,4 +1189,3 @@ mod tests {
         assert!(repo.evaluate(&loaded).unwrap().is_empty());
     }
 }
-
