@@ -7,27 +7,167 @@
 //! [`ItemKey::Lyrics`] (`USLT`, `LYRICS`, `©lyr`, …), so it is the one reader
 //! used here.
 //!
+//! Timed lyrics are a second, separate item: ID3v2 stores them in `SYLT`
+//! (a list of `(timestamp, text)` pairs) rather than in `USLT` prose. Those are
+//! rendered back out as LRC, so a file with synchronized lyrics scrolls with the
+//! music instead of showing nothing at all.
+//!
 //! Reading tags is a header-only operation: no audio is decoded.
 
 use std::path::Path;
 
+use lofty::id3::v2::{
+    FrameFlags, SyncTextContentType, SynchronizedTextFrame, TimestampFormat,
+};
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
 
-/// Read unsynced lyrics embedded in a file's tags, if any.
+/// Read lyrics embedded in a file's tags, if any.
 ///
-/// The value is returned verbatim; callers decide whether it is timed (LRC) or
-/// plain prose.
+/// Timed (`SYLT`) lyrics are converted to LRC and are preferred over unsynced
+/// prose when both are present: a file that carries timed lyrics is a file whose
+/// author wanted them to scroll. The value is returned verbatim otherwise;
+/// callers decide whether it is timed (LRC) or plain prose.
 pub fn extract_lyrics(path: &Path) -> Option<String> {
-    let tagged = lofty::read_from_path(path).ok()?;
+    let tagged = match lofty::read_from_path(path) {
+        Ok(tagged) => tagged,
+        Err(e) => {
+            // Not silent any more: an unreadable header is worth knowing about
+            // when a track turns up without lyrics.
+            log::debug!("Could not read tags from {}: {e}", path.display());
+            return None;
+        }
+    };
 
-    // Prefer the container's primary tag, then try any other tag present.
+    // Timed lyrics win, then unsynced prose from the primary or any other tag.
+    if let Some(lrc) = synced_lyrics(path) {
+        return Some(lrc);
+    }
     if let Some(tag) = tagged.primary_tag() {
         if let Some(text) = lyrics_in(tag) {
             return Some(text);
         }
     }
     tagged.tags().iter().find_map(lyrics_in)
+}
+
+/// Read an ID3v2 `SYLT` frame and render it as LRC text.
+///
+/// `lofty` keeps `SYLT` as an opaque binary frame and does not expose the
+/// containing ID3v2 tag, so the frame is located here with a small ID3v2 header
+/// walk — and then handed to `lofty`'s own `SynchronizedTextFrame::parse` for the
+/// encoding/UTF-16/terminator work, rather than re-implementing that.
+fn synced_lyrics(path: &Path) -> Option<String> {
+    let data = read_sylt_frame(path)?;
+    let frame = match SynchronizedTextFrame::parse(&data, FrameFlags::default()) {
+        Ok(frame) => frame,
+        Err(e) => {
+            log::warn!("{} has an unreadable SYLT frame: {e}", path.display());
+            return None;
+        }
+    };
+
+    // Only lyrics are lyrics: the same frame type also carries chords and
+    // trivia, which should not be rendered as the song's words.
+    if frame.content_type != SyncTextContentType::Lyrics || frame.content.is_empty() {
+        return None;
+    }
+    // MPEG-frame timestamps would need the file's frame rate to convert; treat
+    // them as unavailable rather than inventing a timeline.
+    if frame.timestamp_format != TimestampFormat::MS {
+        log::debug!(
+            "{} has SYLT lyrics in MPEG-frame units, which cannot be converted to a timeline",
+            path.display()
+        );
+        return None;
+    }
+
+    let mut out = String::new();
+    for (ms, text) in &frame.content {
+        let total_secs = *ms as f64 / 1000.0;
+        let minutes = (total_secs / 60.0).floor() as u64;
+        let seconds = total_secs - (minutes as f64 * 60.0);
+        // LRC's `mm:ss.xx` form.
+        out.push_str(&format!("[{minutes:02}:{seconds:05.2}]{text}\n"));
+    }
+    Some(out)
+}
+
+/// Pull the raw bytes of the first `SYLT` frame out of a file's ID3v2 tag.
+///
+/// ID3v2.3 and ID3v2.4 frames only (ID3v2.2's three-character frames predate
+/// `SYLT` in practice). Whole-tag unsynchronisation is undone, because the frame
+/// bodies are stored unsynchronised in that case.
+fn read_sylt_frame(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut header = [0u8; 10];
+    file.read_exact(&mut header).ok()?;
+    if &header[..3] != b"ID3" {
+        return None;
+    }
+    let major = header[3];
+    if major != 3 && major != 4 {
+        return None;
+    }
+    let unsynchronised = header[5] & 0x80 != 0;
+    let size = synchsafe_u32(&header[6..10])? as usize;
+
+    let mut body = vec![0u8; size];
+    file.read_exact(&mut body).ok()?;
+    if unsynchronised {
+        // 0xFF followed by 0x00 is an escaped 0xFF (or 0x00) in the stream.
+        let mut plain = Vec::with_capacity(body.len());
+        let mut i = 0;
+        while i < body.len() {
+            plain.push(body[i]);
+            if body[i] == 0xFF && body.get(i + 1) == Some(&0x00) {
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        body = plain;
+    }
+
+    let mut pos = 0usize;
+    while pos + 10 <= body.len() {
+        let id = &body[pos..pos + 4];
+        // A zero id marks the padding at the end of the tag.
+        if id == [0, 0, 0, 0] {
+            return None;
+        }
+        let frame_size = if major == 4 {
+            synchsafe_u32(&body[pos + 4..pos + 8])? as usize
+        } else {
+            u32::from_be_bytes([body[pos + 4], body[pos + 5], body[pos + 6], body[pos + 7]]) as usize
+        };
+        let start = pos + 10;
+        let end = start.checked_add(frame_size)?;
+        if end > body.len() {
+            return None;
+        }
+        if id == b"SYLT" {
+            return Some(body[start..end].to_vec());
+        }
+        pos = end;
+    }
+
+    None
+}
+
+/// Decode an ID3v2 synchsafe integer (7 bits per byte).
+fn synchsafe_u32(bytes: &[u8]) -> Option<u32> {
+    if bytes.len() != 4 || bytes.iter().any(|b| b & 0x80 != 0) {
+        return None;
+    }
+    Some(
+        ((bytes[0] as u32) << 21)
+            | ((bytes[1] as u32) << 14)
+            | ((bytes[2] as u32) << 7)
+            | (bytes[3] as u32),
+    )
 }
 
 /// Pull a non-empty `Lyrics` item out of one tag.
@@ -107,5 +247,42 @@ mod tests {
     #[test]
     fn missing_file_returns_none() {
         assert_eq!(extract_lyrics(Path::new("/nonexistent/nope.flac")), None);
+    }
+
+    /// `SYLT` is where MP3s keep *timed* lyrics. It arrived as an opaque binary
+    /// frame and was never read, so those files showed no lyrics at all.
+    #[test]
+    fn reads_sylt_timed_lyrics_as_lrc() {
+        let mut body = vec![0x00]; // ISO-8859-1 encoding byte
+        body.extend_from_slice(b"eng");
+        body.push(0x02); // timestamp unit: milliseconds
+        body.push(0x01); // content type: lyrics
+        body.push(0x00); // empty description
+        for (ms, text) in [(4_000u32, "First line"), (9_500, "Second line")] {
+            body.extend_from_slice(text.as_bytes());
+            body.push(0x00);
+            body.extend_from_slice(&ms.to_be_bytes());
+        }
+        let path = write_mp3("sylt", b"SYLT", &body);
+
+        let lyrics = extract_lyrics(&path).expect("SYLT lyrics should be found");
+        assert!(lyrics.contains("[00:04.00]First line"), "got {lyrics}");
+        assert!(lyrics.contains("[00:09.50]Second line"), "got {lyrics}");
+    }
+
+    /// The same frame type also carries chords and trivia; those are not words.
+    #[test]
+    fn non_lyric_sylt_content_is_ignored() {
+        let mut body = vec![0x00];
+        body.extend_from_slice(b"eng");
+        body.push(0x02); // milliseconds
+        body.push(0x05); // content type: chord
+        body.push(0x00);
+        body.extend_from_slice(&1_000u32.to_be_bytes());
+        body.extend_from_slice(b"Cmaj7");
+        body.push(0x00);
+        let path = write_mp3("sylt_chords", b"SYLT", &body);
+
+        assert_eq!(extract_lyrics(&path), None);
     }
 }

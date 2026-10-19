@@ -11,7 +11,8 @@ use domain::smart::SmartPlaylist;
 use search::SearchEngine;
 
 use crate::components::sidebar::NavItem;
-use crate::components::songs_table::{QuickFilter, SortField};
+use crate::components::songs_table::QuickFilter;
+use domain::models::{SortField, SortOrder};
 
 /// State store managing music tracks, collections, playlists, and drilldown views
 pub struct LibraryState {
@@ -49,7 +50,7 @@ pub struct LibraryState {
     /// Identity of the currently materialised `displayed_tracks`. Used to skip
     /// needless rebuilds (and the associated 10k-track clones) when the user
     /// bounces between tabs.
-    displayed_key: Option<(NavItem, String, SortField, QuickFilter)>,
+    displayed_key: Option<(NavItem, String, SortField, SortOrder, QuickFilter)>,
 }
 
 impl Default for LibraryState {
@@ -103,6 +104,7 @@ impl LibraryState {
         active_nav: NavItem,
         search_query: &str,
         current_sort: SortField,
+        sort_order: SortOrder,
     ) {
         if let Ok(tracks) = track_repo.list(
             domain::models::SortField::TrackNumber,
@@ -156,6 +158,7 @@ impl LibraryState {
             active_nav,
             search_query,
             current_sort,
+            sort_order,
         );
     }
 
@@ -172,10 +175,17 @@ impl LibraryState {
         active_nav: NavItem,
         search_query: &str,
         current_sort: SortField,
+        sort_order: SortOrder,
     ) {
         // Skip the rebuild (and the clone of up to 10k tracks) if nothing that
         // affects the visible list has changed.
-        let key = (active_nav, search_query.to_string(), current_sort, self.quick_filter);
+        let key = (
+            active_nav,
+            search_query.to_string(),
+            current_sort,
+            sort_order,
+            self.quick_filter,
+        );
         if self.displayed_key.as_ref() == Some(&key) {
             return;
         }
@@ -246,18 +256,7 @@ impl LibraryState {
         // "Recently Added" defines itself by recency, so the user's global sort
         // would fight the view. Everything else honours the chosen sort.
         if active_nav != NavItem::RecentlyAdded {
-            match current_sort {
-                SortField::Default => tracks.sort_by_key(|t| t.track_number.unwrap_or(0)),
-                SortField::Title => {
-                    tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-                }
-                SortField::Artist => {
-                    tracks.sort_by(|a, b| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
-                }
-                SortField::Album => tracks.sort_by(|a, b| a.album.cmp(&b.album)),
-                SortField::Duration => tracks.sort_by(|a, b| a.duration_secs.total_cmp(&b.duration_secs)),
-                SortField::DateAdded => tracks.sort_by_key(|t| t.added_at),
-            }
+            sort_tracks(&mut tracks, current_sort, sort_order);
         }
 
         self.displayed_tracks = tracks;
@@ -337,5 +336,129 @@ impl LibraryState {
         }
         let alive: HashSet<TrackId> = self.all_tracks.iter().map(|t| t.id).collect();
         self.selected_track_ids.retain(|id| alive.contains(id));
+    }
+}
+
+/// Sort a materialised list by `field` and `order`.
+///
+/// Keys are case-folded once per track instead of twice per comparison, which
+/// used to allocate two `String`s on every sort step. `Album` used to compare
+/// case-*sensitively* while `Title` and `Artist` did not, so the same list could
+/// order differently depending only on which column was chosen.
+pub fn sort_tracks(tracks: &mut [Track], field: SortField, order: SortOrder) {
+    match field {
+        SortField::Title => tracks.sort_by_cached_key(|t| t.title.to_lowercase()),
+        SortField::Artist => tracks.sort_by_cached_key(|t| {
+            (
+                t.artist.to_lowercase(),
+                t.album.to_lowercase(),
+                t.track_number.unwrap_or(0),
+            )
+        }),
+        SortField::Album => tracks.sort_by_cached_key(|t| {
+            (
+                t.album.to_lowercase(),
+                t.disc_number.unwrap_or(1),
+                t.track_number.unwrap_or(0),
+            )
+        }),
+        SortField::Duration => tracks.sort_by(|a, b| a.duration_secs.total_cmp(&b.duration_secs)),
+        SortField::TrackNumber => tracks.sort_by_key(|t| {
+            (
+                t.disc_number.unwrap_or(1),
+                t.track_number.unwrap_or(0),
+                t.title.to_lowercase(),
+            )
+        }),
+        SortField::DateAdded => tracks.sort_by_key(|t| t.added_at),
+        // Favourites first regardless of direction: "sort by favourites" with
+        // the least-favourite track at the top would be a strange reading.
+        SortField::Favorite => {
+            tracks.sort_by_key(|t| std::cmp::Reverse(t.is_favorite));
+            return;
+        }
+    }
+    if order == SortOrder::Descending {
+        tracks.reverse();
+    }
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use super::*;
+    use domain::ids::TrackId;
+    use std::path::PathBuf;
+
+    fn track(title: &str, artist: &str, album: &str, favorite: bool, duration: f32) -> Track {
+        Track {
+            id: TrackId::new(),
+            path: PathBuf::from("/music/x.flac"),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album: album.to_string(),
+            genre: None,
+            year: None,
+            track_number: Some(1),
+            disc_number: Some(1),
+            duration_secs: duration,
+            sample_rate: 44100,
+            channels: 2,
+            format: "FLAC".to_string(),
+            bitrate_kbps: None,
+            is_lossless: true,
+            replaygain_track_db: None,
+            replaygain_track_peak: None,
+            r128_loudness_lufs: None,
+            file_size_bytes: 0,
+            mtime_unix_secs: 0,
+            content_hash: None,
+            is_favorite: favorite,
+            play_count: 0,
+            last_played_at: None,
+            added_at: 0,
+        }
+    }
+
+    fn titles(tracks: &[Track]) -> Vec<&str> {
+        tracks.iter().map(|t| t.title.as_str()).collect()
+    }
+
+    #[test]
+    fn sorting_is_case_insensitive_and_direction_aware() {
+        let mut tracks = vec![
+            track("banana", "Zed", "Beta", false, 3.0),
+            track("Apple", "alpha", "alpha", false, 1.0),
+            track("cherry", "Beta", "Gamma", false, 2.0),
+        ];
+
+        sort_tracks(&mut tracks, SortField::Title, SortOrder::Ascending);
+        assert_eq!(titles(&tracks), ["Apple", "banana", "cherry"]);
+
+        sort_tracks(&mut tracks, SortField::Title, SortOrder::Descending);
+        assert_eq!(titles(&tracks), ["cherry", "banana", "Apple"]);
+
+        sort_tracks(&mut tracks, SortField::Artist, SortOrder::Ascending);
+        assert_eq!(titles(&tracks), ["Apple", "cherry", "banana"]);
+
+        // Album used to compare case-sensitively, which put `Beta` before
+        // `alpha` even though `alpha` comes first alphabetically.
+        sort_tracks(&mut tracks, SortField::Album, SortOrder::Ascending);
+        assert_eq!(titles(&tracks), ["Apple", "banana", "cherry"]);
+
+        sort_tracks(&mut tracks, SortField::Duration, SortOrder::Ascending);
+        assert_eq!(titles(&tracks), ["Apple", "cherry", "banana"]);
+    }
+
+    #[test]
+    fn favourites_lead_in_both_directions() {
+        let mut tracks = vec![
+            track("one", "A", "A", false, 1.0),
+            track("two", "A", "A", true, 1.0),
+            track("three", "A", "A", false, 1.0),
+        ];
+        sort_tracks(&mut tracks, SortField::Favorite, SortOrder::Ascending);
+        assert_eq!(tracks[0].title, "two");
+        sort_tracks(&mut tracks, SortField::Favorite, SortOrder::Descending);
+        assert_eq!(tracks[0].title, "two", "a favourite is never last");
     }
 }

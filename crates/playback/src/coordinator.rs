@@ -1,4 +1,4 @@
-use audio_session::{AudioSession, EngineEvent, PlaybackState};
+use audio_session::{AudioSession, EngineEvent, OutputEvent, PlaybackState};
 use database::{Database, HistoryRepo, QueueRepo, TrackRepo};
 use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
@@ -10,6 +10,11 @@ use std::sync::Arc;
 /// A track counts as "played" once this many seconds have been listened to (or
 /// the whole track, whichever is shorter). Skips before this do not register.
 const PLAY_THRESHOLD_SECS: f32 = 20.0;
+
+/// The largest position advance between two polls that still counts as
+/// continuous playback. Anything bigger is a seek and must not inflate the
+/// listening total; a normal frame is two orders of magnitude smaller.
+const MAX_CREDITED_STEP_SECS: f32 = 2.0;
 
 pub struct PlaybackCoordinator {
     session: Arc<AudioSession>,
@@ -30,6 +35,12 @@ pub struct PlaybackCoordinator {
     listen_secs: f32,
     last_position: f32,
     play_registered: bool,
+
+    /// Engine and audio-device problems worth showing the user, collected by
+    /// [`PlaybackCoordinator::poll_events`] and drained by the shell. These
+    /// used to be dropped on the floor (`_ => {}`), so a decode failure or a
+    /// disconnected DAC was invisible.
+    engine_notices: Vec<String>,
 }
 
 impl PlaybackCoordinator {
@@ -56,6 +67,7 @@ impl PlaybackCoordinator {
             listen_secs: 0.0,
             last_position: 0.0,
             play_registered: false,
+            engine_notices: Vec::new(),
         };
 
         coordinator.restore_saved_queue();
@@ -98,6 +110,7 @@ impl PlaybackCoordinator {
     }
 
     pub fn play_track(&mut self, track: Track, new_queue: Option<Vec<Track>>) {
+        let queue_replaced = new_queue.is_some();
         if let Some(q) = new_queue {
             self.queue = q;
             self.persist_queue();
@@ -114,7 +127,14 @@ impl PlaybackCoordinator {
         // If shuffle is on, permute everything after the chosen track and keep
         // the original order for when shuffle is turned back off.
         if self.shuffle {
-            self.unshuffled_queue = Some(self.queue.clone());
+            // Snapshot only when there is no snapshot yet. `self.queue` is
+            // already a permutation when shuffle is on, so re-snapshotting on
+            // every track change replaced the user's real order with a
+            // shuffled one — and turning shuffle off could never restore it.
+            // A brand new queue does need a fresh snapshot.
+            if queue_replaced || self.unshuffled_queue.is_none() {
+                self.unshuffled_queue = Some(self.queue.clone());
+            }
             self.shuffle_upcoming();
             self.persist_queue();
         } else {
@@ -250,23 +270,21 @@ impl PlaybackCoordinator {
         if moved.is_empty() {
             return;
         }
-        let lookup = |id: &TrackId| {
-            moved
-                .iter()
-                .find(|(moved_id, _)| moved_id == id)
-                .map(|(_, path)| path.clone())
-        };
+        // A map, not a scan: this was an O(queue x moved) linear search, which
+        // is tens of millions of comparisons when organizing a large library.
+        let lookup: std::collections::HashMap<TrackId, &PathBuf> =
+            moved.iter().map(|(id, path)| (*id, path)).collect();
 
         let mut changed = false;
         for track in self.queue.iter_mut() {
-            if let Some(new_path) = lookup(&track.id) {
-                track.path = new_path;
+            if let Some(new_path) = lookup.get(&track.id) {
+                track.path = (*new_path).clone();
                 changed = true;
             }
         }
         if let Some(current) = self.current_track.as_mut() {
-            if let Some(new_path) = lookup(&current.id) {
-                current.path = new_path;
+            if let Some(new_path) = lookup.get(&current.id) {
+                current.path = (*new_path).clone();
                 changed = true;
             }
         }
@@ -278,8 +296,15 @@ impl PlaybackCoordinator {
     pub fn clear_queue(&mut self) {
         self.queue.clear();
         self.current_index = None;
+        // The current track used to survive: the queue was emptied but the
+        // coordinator still reported a current track and kept crediting
+        // listening time for it.
+        self.current_track = None;
         self.unshuffled_queue = None;
-        let _ = self.queue_repo.clear();
+        self.begin_tracking();
+        if let Err(e) = self.queue_repo.clear() {
+            warn!("Could not clear the saved queue: {e}");
+        }
         self.session.clear_playlist();
     }
 
@@ -401,19 +426,70 @@ impl PlaybackCoordinator {
                     }
 
                     if self.repeat_mode == RepeatModeChoice::One {
-                        if let Some(track) = self.current_track.clone() {
-                            self.begin_tracking();
-                            self.session.open_file(&track.path);
-                            self.session.play();
-                            return;
-                        }
+                        // The engine already restarts the source at 0:00 for
+                        // Repeat-One, so do not reopen the file: reopening is a
+                        // second restart, and for a CUE virtual track it played
+                        // the whole album image instead of the track. Only the
+                        // listening accounting needs resetting.
+                        self.begin_tracking();
+                        continue;
                     }
 
                     self.next();
                 }
+                EngineEvent::Error(message) => {
+                    warn!("Engine error: {message}");
+                    self.push_notice(format!("Audio engine error: {message}"));
+                }
+                EngineEvent::PlaylistLoadFailed { path, message } => {
+                    warn!("Playlist load failed for {}: {message}", path.display());
+                    self.push_notice(format!(
+                        "Could not load playlist {}: {message}",
+                        path.display()
+                    ));
+                }
+                // Opened/paused/stopped/seek/format/telemetry events carry no
+                // action for the coordinator.
                 _ => {}
             }
         }
+
+        // Output-device events are not just decoration: a disconnected DAC
+        // stops playback, and the user needs to be told rather than left
+        // wondering why the transport is dead.
+        while let Some(event) = self.session.try_recv_output_event() {
+            match event {
+                OutputEvent::DeviceDisconnected { device } => {
+                    warn!("Audio device disconnected: {device}");
+                    self.push_notice(format!("Audio device disconnected: {device}"));
+                }
+                OutputEvent::EndpointError { endpoint, message } => {
+                    warn!("Audio endpoint {endpoint} failed: {message}");
+                    self.push_notice(format!("Audio endpoint {endpoint} failed: {message}"));
+                }
+                // Arrivals, list changes and the negotiated device are already
+                // reflected by the device picker.
+                OutputEvent::DeviceConnected { .. }
+                | OutputEvent::DeviceListChanged { .. }
+                | OutputEvent::OutputDeviceChanged { .. } => {}
+            }
+        }
+    }
+
+    /// Record a user-facing engine problem, keeping the list bounded so a
+    /// misbehaving engine cannot grow it without limit.
+    fn push_notice(&mut self, message: String) {
+        const MAX_NOTICES: usize = 16;
+        if self.engine_notices.len() == MAX_NOTICES {
+            self.engine_notices.remove(0);
+        }
+        self.engine_notices.push(message);
+    }
+
+    /// Take the engine/device problems seen since the last call, for the shell
+    /// to present (toast, status line).
+    pub fn take_engine_notices(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.engine_notices)
     }
 
     /// Reset per-track listening accounting.
@@ -438,11 +514,7 @@ impl PlaybackCoordinator {
         }
 
         let pos = self.session.position_secs_compensated();
-        if pos >= self.last_position {
-            self.listen_secs += pos - self.last_position;
-        }
-        // On a seek backwards (or track restart) we simply carry on from the new
-        // position without crediting the jump.
+        self.listen_secs += credited_listen_secs(self.last_position, pos);
         self.last_position = pos;
 
         let duration = self
@@ -457,10 +529,17 @@ impl PlaybackCoordinator {
     }
 
     fn register_play(&mut self, track_id: TrackId, threshold: f32, completed: bool) {
-        let _ = self.track_repo.increment_play_count(&track_id);
-        let _ = self
+        // Reported rather than swallowed: silently failing here means a track
+        // that was heard never appears in "recently played" or the play counts.
+        if let Err(e) = self.track_repo.increment_play_count(&track_id) {
+            warn!("Could not increment play count for {track_id}: {e}");
+        }
+        if let Err(e) = self
             .history_repo
-            .record_play(&track_id, self.listen_secs.max(threshold), completed);
+            .record_play(&track_id, self.listen_secs.max(threshold), completed)
+        {
+            warn!("Could not record play history for {track_id}: {e}");
+        }
         self.play_registered = true;
     }
 
@@ -476,7 +555,45 @@ impl PlaybackCoordinator {
 
     fn persist_queue(&self) {
         let entries: Vec<_> = self.queue.iter().map(|t| (t.id, t.path.clone())).collect();
-        let _ = self.queue_repo.save_queue(&entries);
+        // A failure here means the queue will not survive a restart, which is
+        // worth a log line: it used to fail completely silently.
+        if let Err(e) = self.queue_repo.save_queue(&entries) {
+            warn!("Could not persist the queue ({} entries): {e}", entries.len());
+        }
+    }
+}
+
+/// Listening time to credit for a poll that moved the playhead from
+/// `last_position` to `pos`.
+///
+/// Only *contiguous* playback counts. A forward jump is a seek too, so without
+/// the guard, dragging the progress bar to the end registered a play for a
+/// track the user never heard; a normal UI frame advances by a few milliseconds.
+fn credited_listen_secs(last_position: f32, pos: f32) -> f32 {
+    let delta = pos - last_position;
+    if delta > 0.0 && delta <= MAX_CREDITED_STEP_SECS {
+        delta
+    } else {
+        0.0
+    }
+}
+
+#[cfg(test)]
+mod coordinator_unit_tests {
+    use super::credited_listen_secs;
+
+    /// A forward jump in the playhead is a seek, not listening.
+    #[test]
+    fn only_contiguous_playback_counts_as_listening() {
+        // A normal UI frame.
+        assert!((credited_listen_secs(10.0, 10.016) - 0.016).abs() < 1e-6);
+        // A stalled frame is still playback.
+        assert!((credited_listen_secs(10.0, 11.5) - 1.5).abs() < 1e-6);
+        // Dragging the progress bar near the end is not.
+        assert_eq!(credited_listen_secs(10.0, 175.0), 0.0);
+        // Neither is seeking backwards or restarting a track.
+        assert_eq!(credited_listen_secs(100.0, 5.0), 0.0);
+        assert_eq!(credited_listen_secs(0.0, 0.0), 0.0);
     }
 }
 

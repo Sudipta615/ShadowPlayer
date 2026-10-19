@@ -90,4 +90,74 @@ mod tests {
         let persisted = queue_repo.load_queue().unwrap();
         assert_eq!(persisted.len(), 4);
     }
+
+    /// Clearing the queue must not leave a "current track" behind.
+    #[test]
+    fn clearing_the_queue_forgets_the_current_track() {
+        let config = EngineConfig::default();
+        let session = Arc::new(AudioSession::with_sink(config, Box::new(NoopSink)).unwrap());
+        let db = Database::in_memory().unwrap();
+        let track_repo = TrackRepo::new(db.clone());
+        let queue_repo = QueueRepo::new(db.clone());
+
+        let t1 = sample_track(TrackId::new(), "Track 1");
+        let t2 = sample_track(TrackId::new(), "Track 2");
+        track_repo.upsert(&t1).unwrap();
+        track_repo.upsert(&t2).unwrap();
+
+        let mut coord = PlaybackCoordinator::new(session, db);
+        coord.play_track(t1.clone(), Some(vec![t1, t2]));
+        assert!(coord.current_track().is_some());
+
+        coord.clear_queue();
+
+        assert!(coord.queue().is_empty());
+        assert_eq!(coord.current_index(), None);
+        assert!(
+            coord.current_track().is_none(),
+            "a cleared queue must not keep a playable current track"
+        );
+        assert!(queue_repo.load_queue().unwrap().is_empty());
+    }
+
+    /// Playing tracks while shuffle is on must not overwrite the remembered
+    /// order, or turning shuffle off can never restore it.
+    #[test]
+    fn turning_shuffle_off_restores_the_original_order() {
+        let config = EngineConfig::default();
+        let session = Arc::new(AudioSession::with_sink(config, Box::new(NoopSink)).unwrap());
+        let db = Database::in_memory().unwrap();
+        let track_repo = TrackRepo::new(db.clone());
+
+        let tracks: Vec<Track> = (0..8)
+            .map(|i| sample_track(TrackId::new(), &format!("Track {i}")))
+            .collect();
+        for track in &tracks {
+            track_repo.upsert(track).unwrap();
+        }
+
+        let mut coord = PlaybackCoordinator::new(session, db);
+        coord.play_track(tracks[0].clone(), Some(tracks.clone()));
+        coord.set_shuffle(true);
+
+        // Advance and pick tracks explicitly, the way a user would.
+        coord.next();
+        coord.play_track(coord.queue()[3].clone(), None);
+        coord.next();
+        coord.play_track(coord.queue()[5].clone(), None);
+
+        coord.set_shuffle(false);
+
+        let titles: Vec<&str> = coord.queue().iter().map(|t| t.title.as_str()).collect();
+        let expected: Vec<&str> = tracks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(
+            titles, expected,
+            "the original order comes back, not a snapshot of the shuffle"
+        );
+        assert_eq!(
+            coord.current_track().map(|t| t.id),
+            Some(coord.queue()[coord.current_index().unwrap()].id),
+            "the playing track stays current after restoring the order"
+        );
+    }
 }

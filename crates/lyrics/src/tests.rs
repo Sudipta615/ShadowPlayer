@@ -106,4 +106,68 @@ mod tests {
         fs::write(&song, b"x").unwrap();
         assert!(find_sidecar_lyrics(&song).is_none());
     }
+
+    /// Metadata tags are consumed, not sung: a tag sharing a line with a
+    /// timestamp used to end up in the lyric body.
+    #[test]
+    fn metadata_tags_never_leak_into_the_lyric_body() {
+        let lrc = "[00:12.00][ar:Artist]Sing the words\n\
+                   [00:41.00][al:Album][ti:Title]Second line\n\
+                   [by:Somebody]\n\
+                   [offset:+500]\n";
+        let lines = parse_lrc(lrc);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "Sing the words");
+        assert_eq!(lines[1].text, "Second line");
+    }
+
+    /// `[offset:ms]` shifts every line; positive means the sheet ran late.
+    #[test]
+    fn the_offset_tag_shifts_every_line() {
+        let lrc = "[offset:+500]\n[00:10.00]A\n[00:20.00]B";
+        let lines = parse_lrc(lrc);
+        assert_eq!(lines[0].start_time_secs, 9.5);
+        assert_eq!(lines[1].start_time_secs, 19.5);
+
+        let early = parse_lrc("[offset:-250]\n[00:10.00]A");
+        assert!((early[0].start_time_secs - 10.25).abs() < 1e-6);
+
+        // A wild offset cannot push a timestamp below zero.
+        let clamped = parse_lrc("[offset:+99000]\n[00:10.00]A");
+        assert_eq!(clamped[0].start_time_secs, 0.0);
+    }
+
+    /// Several timestamps on one line repeat the words at each time.
+    #[test]
+    fn repeated_timestamps_produce_one_line_each() {
+        let lines = parse_lrc("[00:10.00][00:40.00]same words");
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "same words");
+        assert_eq!(lines[1].start_time_secs, 40.0);
+    }
+
+    /// An unknown bracket is part of the words, not a tag.
+    #[test]
+    fn an_unknown_bracket_stays_in_the_text() {
+        let lines = parse_lrc("[00:10.00][Chorus]Oh oh oh");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "[Chorus]Oh oh oh");
+    }
+
+    /// A non-UTF-8 sidecar still loads (Windows-1252 quote in the title).
+    #[test]
+    fn a_non_utf8_sidecar_is_decoded_rather_than_skipped() {
+        let dir = scratch("latin1");
+        let song = dir.join("track.flac");
+        fs::write(&song, b"x").unwrap();
+
+        let mut bytes = b"[00:05.00]Don".to_vec();
+        bytes.push(0x92); // ’ in Windows-1252
+        bytes.extend_from_slice(b"t stop\n");
+        fs::write(dir.join("track.lrc"), &bytes).unwrap();
+
+        let (is_synced, lines, _) = find_sidecar_lyrics(&song).expect("sidecar should be found");
+        assert!(is_synced);
+        assert_eq!(lines[0].text, "Don\u{2019}t stop");
+    }
 }

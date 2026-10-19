@@ -213,6 +213,76 @@ impl SmartRule {
             value: String::new(),
         }
     }
+
+    /// Repair an operator the field cannot use, returning a description of the
+    /// change when one was made.
+    ///
+    /// `SmartField::operators` has always said which pairs are meaningful, but
+    /// nothing enforced it: a rule stored as `Date Added is 2024` reached SQL as
+    /// `added_at = '2024' COLLATE NOCASE` — a comparison between a unix
+    /// timestamp and four characters — so the playlist quietly matched nothing
+    /// and gave the user no way to see why. Values are never invented: a
+    /// non-numeric value on a date or number field is left alone and the SQL
+    /// layer ignores the rule.
+    pub fn normalized(&self) -> (SmartRule, Option<String>) {
+        let mut fixed = self.clone();
+        if self.field.operators().contains(&self.op) {
+            return (fixed, None);
+        }
+
+        let was = self.op;
+        if self.field.is_bool() {
+            // "Favorite is true/yes/1" — anything else, including an
+            // unparseable value, is read as "no".
+            fixed.op = if matches!(
+                self.value.trim().to_ascii_lowercase().as_str(),
+                "true" | "yes" | "1"
+            ) {
+                SmartOp::IsTrue
+            } else {
+                SmartOp::IsFalse
+            };
+            fixed.value = String::new();
+        } else if self.field.is_date() {
+            fixed.op = match self.op {
+                SmartOp::NotEquals | SmartOp::NotContains | SmartOp::NotInLastDays => {
+                    SmartOp::NotInLastDays
+                }
+                // A year was the most likely intent of `Date Added is 2024`
+                // (the year field is separate), but the only date value the
+                // engine stores is a timestamp, so `in the last N days` is the
+                // nearest reading that a human can also see and correct.
+                _ => SmartOp::InLastDays,
+            };
+        } else if self.field.is_numeric() {
+            fixed.op = match self.op {
+                SmartOp::NotEquals | SmartOp::NotContains => SmartOp::NotEquals,
+                SmartOp::InLastDays | SmartOp::NotInLastDays | SmartOp::Contains => {
+                    SmartOp::Equals
+                }
+                _ => SmartOp::Equals,
+            };
+        } else {
+            fixed.op = match self.op {
+                SmartOp::GreaterThan | SmartOp::LessThan | SmartOp::InLastDays => {
+                    SmartOp::Contains
+                }
+                SmartOp::NotInLastDays => SmartOp::NotContains,
+                SmartOp::IsTrue => SmartOp::IsNotEmpty,
+                SmartOp::IsFalse => SmartOp::IsEmpty,
+                other => other,
+            };
+        }
+
+        let note = format!(
+            "{} {} {:?} is not a valid test, reading it as {}",
+            self.field.label(),
+            was.label(),
+            self.value,
+            fixed.op.label()
+        );
+        (fixed, Some(note))
+    }
 }
 
 /// A saved, self-updating playlist definition.
@@ -229,6 +299,14 @@ pub struct SmartPlaylist {
     pub sort_desc: bool,
     pub created_at: i64,
     pub updated_at: i64,
+    /// The stored rule list could not be read back at all.
+    ///
+    /// Not persisted — it describes this load, not the definition. Such a
+    /// playlist matches nothing rather than everything: an unreadable blob used
+    /// to load as "no rules", and a query with no conditions quietly returned
+    /// the entire library under the playlist's name.
+    #[serde(skip)]
+    pub rules_unreadable: bool,
 }
 
 impl SmartPlaylist {
@@ -244,6 +322,7 @@ impl SmartPlaylist {
             sort_desc: false,
             created_at: 0,
             updated_at: 0,
+            rules_unreadable: false,
         }
     }
 }

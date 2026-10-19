@@ -26,6 +26,50 @@ fn parse_id<T: FromStr>(text: &str, column: &str) -> Result<T> {
     })
 }
 
+/// Build an FTS5 query that can match what the table's `porter unicode61`
+/// tokenizer actually indexed.
+///
+/// The old builder stripped every non-alphanumeric character and appended a
+/// single `*`, so `AC/DC` became `ACDC*` — a token that is nowhere in the index,
+/// because the tokenizer had stored `ac` and `dc` — and `don't` became `dont*`,
+/// which never matched `don't Stop`. Nothing the index could contain was
+/// reachable through punctuation.
+///
+/// Here the input is split exactly the way the tokenizer splits it (whitespace
+/// gives terms, alphanumeric runs give tokens), and each term becomes either
+/// `"token"*` or, for a term that spans several tokens, the phrase
+/// `"first last"*` so `AC/DC` still finds `AC/DC` (and `AC DC`) while `ACDC`
+/// stays a single unrelated token. Terms are `AND`ed. Everything is quoted, so
+/// FTS5 operators a user happens to type (`AND`, `NOT`, `^`) are searched for
+/// literally instead of being interpreted — and the result is always a valid
+/// query, never a syntax error.
+///
+/// `None` means the input holds no searchable token at all.
+fn fts_query(input: &str) -> Option<String> {
+    let mut terms: Vec<String> = Vec::new();
+
+    for term in input.split_whitespace() {
+        // A term's own alphanumeric runs, in order — the tokenizer's output.
+        let tokens: Vec<String> = term
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_lowercase())
+            .collect();
+
+        match tokens.len() {
+            0 => continue,
+            1 => terms.push(format!("\"{}\"*", tokens[0])),
+            _ => terms.push(format!("\"{}\"*", tokens.join(" "))),
+        }
+    }
+
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" AND "))
+    }
+}
+
 /// Escape a path for use as a `LIKE` prefix under `ESCAPE '\'`.
 ///
 /// Two things the naive `format!("{}%", path)` got wrong: a prefix with no
@@ -266,8 +310,11 @@ impl TrackRepo {
                 SortField::Artist => "artist COLLATE NOCASE, album COLLATE NOCASE, track_number",
                 SortField::Album => "album COLLATE NOCASE, track_number",
                 SortField::Duration => "duration_secs",
-                SortField::TrackNumber => "track_number",
+                SortField::TrackNumber => "disc_number, track_number",
                 SortField::DateAdded => "added_at",
+                // One-sided by design: favourites first, then title, in both
+                // directions the caller may ask for.
+                SortField::Favorite => "is_favorite DESC, title COLLATE NOCASE",
             };
             let dir = match order {
                 SortOrder::Ascending => "ASC",
@@ -437,15 +484,9 @@ impl TrackRepo {
             return Ok(Vec::new());
         }
         self.db.with_conn(|conn| {
-            // Escape special characters and add prefix match token
-            let sanitized: String = trimmed
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == ' ')
-                .collect();
-            if sanitized.is_empty() {
+            let Some(fts_query) = fts_query(trimmed) else {
                 return Ok(Vec::new());
-            }
-            let fts_query = format!("{}*", sanitized);
+            };
             let mut stmt = conn.prepare(
                 "SELECT t.* FROM tracks t
                  JOIN tracks_fts fts ON fts.track_id = t.id
@@ -622,18 +663,30 @@ impl PlaylistRepo {
                 "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2;",
                 params![playlist_id.to_string(), track_id.to_string()],
             )?;
-            // Re-number positions to keep them contiguous.
-            tx.execute(
-                "UPDATE playlist_tracks
-                 SET position = (
-                     SELECT COUNT(*) FROM playlist_tracks AS p2
-                     WHERE p2.playlist_id = playlist_tracks.playlist_id
-                       AND (p2.position < playlist_tracks.position
-                            OR (p2.position = playlist_tracks.position AND p2.id <= playlist_tracks.id))
-                 ) - 1
-                 WHERE playlist_id = ?1;",
-                params![playlist_id.to_string()],
-            )?;
+            // Re-number positions to keep them contiguous. Done in Rust from an
+            // explicitly ordered read: the previous correlated
+            // `UPDATE ... (SELECT COUNT(*) FROM playlist_tracks ...)` counted the
+            // rows of the table it was updating, so which number each row ended
+            // up with depended on SQLite's unspecified row order within the
+            // statement — the running order could survive a delete of the track
+            // currently playing, or not, run to run.
+            let ordered_ids: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM playlist_tracks
+                     WHERE playlist_id = ?1
+                     ORDER BY position ASC, id ASC;",
+                )?;
+                let rows =
+                    stmt.query_map(params![playlist_id.to_string()], |row| row.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>>>()?
+            };
+            {
+                let mut update =
+                    tx.prepare("UPDATE playlist_tracks SET position = ?1 WHERE id = ?2;")?;
+                for (position, row_id) in ordered_ids.iter().enumerate() {
+                    update.execute(params![position as i64, row_id])?;
+                }
+            }
             tx.execute(
                 "UPDATE playlists SET updated_at = ?1 WHERE id = ?2;",
                 params![now, playlist_id.to_string()],
@@ -1041,8 +1094,12 @@ impl AlbumRepo {
 
     pub fn list(&self) -> Result<Vec<Album>> {
         self.db.with_conn(|conn| {
+            // `MIN(year)`, not `year`: with a bare column in a GROUP BY, SQLite
+            // picks the value from an arbitrary row of the group, so an album
+            // whose tracks disagree about the year (reissues, compilations,
+            // sloppy tags) could show a different year on each run.
             let mut stmt = conn.prepare(
-                "SELECT album, artist, year, COUNT(*) as cnt
+                "SELECT album, artist, MIN(year), COUNT(*) as cnt
                  FROM tracks
                  WHERE album IS NOT NULL AND album != ''
                  GROUP BY album, artist
@@ -1202,16 +1259,46 @@ fn map_smart_playlist(row: &Row<'_>) -> Result<SmartPlaylist> {
     let sort_by: Option<String> = row.get("sort_by")?;
     let limit: Option<i64> = row.get("limit_count")?;
 
+    // A rule JSON blob that will not parse used to become "no rules", which for
+    // an AND playlist means "match everything" — the opposite of what the user
+    // saved, and with no trace of the corruption. Report it, and keep the
+    // playlist matching nothing until it is fixed, rather than everything.
+    let (rules, rules_unreadable): (Vec<SmartRule>, bool) =
+        match serde_json::from_str::<Vec<SmartRule>>(&rules_json) {
+            Ok(rules) => (rules, false),
+            Err(e) => {
+                log::warn!(
+                    "Smart playlist {id_str} has unreadable rules ({e}); it will match nothing. \
+                     The stored definition is left untouched — re-save the playlist to replace it."
+                );
+                (Vec::new(), true)
+            }
+        };
+
+    // Repair field/operator pairs the field cannot use, so a saved playlist
+    // does not silently match nothing.
+    let rules: Vec<SmartRule> = rules
+        .into_iter()
+        .map(|rule| {
+            let (rule, note) = rule.normalized();
+            if let Some(note) = note {
+                log::warn!("Smart playlist {id_str}: {note}");
+            }
+            rule
+        })
+        .collect();
+
     Ok(SmartPlaylist {
         id: parse_id(&id_str, "smart_playlists.id")?,
         name: row.get("name")?,
         match_all: row.get::<_, i32>("match_all")? != 0,
-        rules: serde_json::from_str(&rules_json).unwrap_or_default(),
+        rules,
         limit_count: limit.map(|n| n.max(0) as u32),
         sort_by: sort_by.and_then(|s| serde_json::from_str(&s).ok()),
         sort_desc: row.get::<_, i32>("sort_desc")? != 0,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        rules_unreadable,
     })
 }
 
@@ -1219,6 +1306,14 @@ fn map_smart_playlist(row: &Row<'_>) -> Result<SmartPlaylist> {
 /// `None` when the rule is incomplete (e.g. an empty value), so half-typed
 /// rules are simply ignored rather than matching nothing.
 fn rule_to_clause(rule: &SmartRule) -> Option<(String, Vec<SqlValue>)> {
+    // A pair the field cannot use (see `SmartRule::normalized`) is ignored
+    // rather than translated into a comparison that can never be true — the old
+    // behaviour for `Date Added is 2024` was `added_at = '2024' COLLATE NOCASE`,
+    // which matches nothing and says nothing.
+    if !rule.field.operators().contains(&rule.op) {
+        return None;
+    }
+
     let col = rule.field.column();
     let v = rule.value.trim();
 
@@ -1291,6 +1386,13 @@ fn parse_num(v: &str) -> Option<SqlValue> {
 
 /// Build the `SELECT` tail (WHERE/ORDER BY/LIMIT) for a smart playlist.
 fn build_smart_query(sp: &SmartPlaylist) -> (String, Vec<SqlValue>) {
+    // A definition whose rules could not be read is not a definition with no
+    // conditions: matching the whole library would silently relabel every track
+    // as a member of a playlist that is, in fact, broken.
+    if sp.rules_unreadable {
+        return (" WHERE 0".to_string(), Vec::new());
+    }
+
     let mut clauses = Vec::new();
     let mut vals: Vec<SqlValue> = Vec::new();
 

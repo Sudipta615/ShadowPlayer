@@ -1,7 +1,6 @@
-use domain::models::Track;
+use domain::models::{SortField, SortOrder, Track};
 use crate::components::right_panel::RightTab;
 use crate::components::sidebar::NavItem;
-use crate::components::songs_table::SortField;
 use crate::modals::edit_track_modal::EditTrackState;
 use crate::modals::playlist_editor_modal::PlaylistEditorState;
 use crate::state::sleep_timer::SleepTimer;
@@ -20,6 +19,8 @@ pub struct AppState {
     pub active_nav: NavItem,
     pub search_query: String,
     pub current_sort: SortField,
+    /// Ascending or descending, for the current sort field.
+    pub current_sort_order: SortOrder,
     pub is_grid_view: bool,
     pub right_tab: RightTab,
     pub visualizer_mode: VisualizerMode,
@@ -54,7 +55,8 @@ impl Default for AppState {
         Self {
             active_nav: NavItem::Home,
             search_query: String::new(),
-            current_sort: SortField::Default,
+            current_sort: SortField::TrackNumber,
+            current_sort_order: SortOrder::Ascending,
             is_grid_view: false,
             right_tab: RightTab::Queue,
             visualizer_mode: VisualizerMode::Spectrum,

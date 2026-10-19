@@ -14,7 +14,7 @@ use crate::components::clap_rack_panel::show_clap_rack_panel;
 use crate::components::sidebar::NavItem;
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
-    show_advanced_audio_modal, show_autoeq_modal, show_bit_perfect_modal, show_duplicates_modal,
+    show_autoeq_modal, show_bit_perfect_modal, show_duplicates_modal,
     show_edit_track_modal, show_eq_panel, show_help_modal, show_organize_modal,
     show_playlist_editor, show_smart_playlist_editor, show_track_properties_modal, DuplicateGroup,
     DuplicatesState, OrganizeState, SmartPlaylistEditorState,
@@ -104,6 +104,10 @@ pub struct ShadowPlayerApp {
     clap_eval: Option<ClapEval>,
     /// Transient user-facing notifications.
     toasts: crate::components::toasts::ToastState,
+    /// Last observed window size in logical points. Written every frame and
+    /// persisted, so the next launch opens where the user left it instead of
+    /// at the hard-coded default.
+    window_size: (f32, f32),
 }
 
 /// How many frames the app keeps asking for the CLAP rack view after startup.
@@ -203,6 +207,7 @@ impl ShadowPlayerApp {
             clap_refresh_frames: 0,
             clap_eval: None,
             toasts: crate::components::toasts::ToastState::default(),
+            window_size: (1280.0, 800.0),
         };
 
         // Load all persistent settings (normal, theme, EQ, DSP)
@@ -307,8 +312,47 @@ impl ShadowPlayerApp {
         }
     }
 
+    /// Close whatever dialog is in front, innermost first.
+    ///
+    /// Escape used to close only four of the thirteen overlays (search, help,
+    /// new playlist, track properties, EQ) and left the rest — bit-perfect,
+    /// AutoEq, the playlist and smart-playlist editors, duplicates, organize,
+    /// the plugin rack — open with no keyboard way out. One press closes one
+    /// layer, so Escape never tears down the whole UI at once.
+    fn dismiss_foreground_overlay(&mut self) {
+        // Editors and dialogs that were opened deliberately, newest concept
+        // first.
+        if self.dsp_state.autoeq.is_open {
+            self.dsp_state.autoeq.is_open = false;
+        } else if self.app_state.bit_perfect_modal_open {
+            self.app_state.bit_perfect_modal_open = false;
+        } else if self.duplicates.is_open {
+            self.duplicates.is_open = false;
+        } else if self.organize.is_open {
+            self.organize.is_open = false;
+        } else if self.app_state.edit_track.is_open {
+            self.app_state.edit_track.is_open = false;
+        } else if self.smart_playlist_editor.is_open {
+            self.smart_playlist_editor.is_open = false;
+        } else if self.app_state.playlist_editor.is_open {
+            self.app_state.playlist_editor.is_open = false;
+        } else if self.app_state.track_properties_open {
+            self.app_state.track_properties_open = false;
+        } else if self.app_state.new_playlist_modal_open {
+            self.app_state.new_playlist_modal_open = false;
+        } else if self.app_state.help_modal_open {
+            self.app_state.help_modal_open = false;
+        } else if self.dsp_state.clap_rack.is_open {
+            self.dsp_state.clap_rack.is_open = false;
+        } else if self.dsp_state.eq_panel.is_open {
+            self.dsp_state.eq_panel.is_open = false;
+        } else if !self.app_state.search_query.is_empty() {
+            self.app_state.search_query.clear();
+            self.refresh_view();
+        }
+    }
+
     pub fn load_persisted_settings(&mut self) {
-        // 1. AppSettings (Theme, Volume, Mute, Sort, Shuffle, Repeat, Bit-Perfect)
         if let Ok(app_settings) = self.settings_repo.load() {
             self.theme = if app_settings.theme_dark {
                 Theme::dark()
@@ -317,18 +361,20 @@ impl ShadowPlayerApp {
             };
             self.app_state.volume = app_settings.volume;
             self.app_state.is_muted = app_settings.is_muted;
-            self.app_state.current_sort = match app_settings.sort_field {
-                domain::models::SortField::Title => crate::components::songs_table::SortField::Title,
-                domain::models::SortField::Artist => crate::components::songs_table::SortField::Artist,
-                domain::models::SortField::Album => crate::components::songs_table::SortField::Album,
-                domain::models::SortField::Duration => crate::components::songs_table::SortField::Duration,
-                domain::models::SortField::DateAdded => crate::components::songs_table::SortField::DateAdded,
-                _ => crate::components::songs_table::SortField::Default,
-            };
+            self.app_state.current_sort = app_settings.sort_field;
+            self.app_state.current_sort_order = app_settings.sort_order;
             self.app_state.is_grid_view = app_settings.view_mode == domain::models::ViewMode::Grid;
+            self.window_size = (
+                app_settings.window_width.max(1024.0),
+                app_settings.window_height.max(682.0),
+            );
             self.coordinator.set_shuffle(app_settings.shuffle);
             self.coordinator.set_repeat_mode(app_settings.repeat_mode);
             self.dsp_state.settings_tab.bit_perfect = app_settings.bit_perfect_enabled;
+            self.dsp_state.settings_tab.audio_profile = app_settings.audio_profile;
+            if let Some(device) = &app_settings.selected_device {
+                self.dsp_state.settings_tab.output_device = device.clone();
+            }
 
             let eff_vol = if app_settings.is_muted { 0.0 } else { app_settings.volume };
             self.session.set_volume(eff_vol);
@@ -343,8 +389,18 @@ impl ShadowPlayerApp {
 
         // 3. Persistent Audio / DSP Settings (Speed, pitch, crossfade, spatial acoustics, dac config)
         if let Ok(Some(json)) = self.settings_repo.get_value("dsp_settings") {
-            if let Ok(saved_dsp) = serde_json::from_str::<crate::components::settings_tab::PersistentSettingsTabState>(&json) {
-                saved_dsp.apply_to(&mut self.dsp_state.settings_tab);
+            match serde_json::from_str::<crate::components::settings_tab::SettingsTabState>(&json) {
+                Ok(saved) => {
+                    // Presets and the live CLAP summary are skipped by serde:
+                    // they keep their own storage key / are refreshed each
+                    // frame.
+                    let clap = std::mem::take(&mut self.dsp_state.settings_tab.clap);
+                    self.dsp_state.settings_tab = saved;
+                    self.dsp_state.settings_tab.clap = clap;
+                }
+                Err(e) => {
+                    log::warn!("Could not read the saved audio settings, using defaults: {e}");
+                }
             }
         }
 
@@ -400,28 +456,19 @@ impl ShadowPlayerApp {
     }
 
     pub fn save_persisted_settings(&self) {
-        let domain_sort = match self.app_state.current_sort {
-            crate::components::songs_table::SortField::Title => domain::models::SortField::Title,
-            crate::components::songs_table::SortField::Artist => domain::models::SortField::Artist,
-            crate::components::songs_table::SortField::Album => domain::models::SortField::Album,
-            crate::components::songs_table::SortField::Duration => domain::models::SortField::Duration,
-            crate::components::songs_table::SortField::DateAdded => domain::models::SortField::DateAdded,
-            crate::components::songs_table::SortField::Default => domain::models::SortField::Title,
-        };
-
         // 1. Save AppSettings
         let app_settings = domain::models::AppSettings {
             theme_dark: !self.theme.is_light,
             volume: self.app_state.volume,
             is_muted: self.app_state.is_muted,
-            sort_field: domain_sort,
-            sort_order: domain::models::SortOrder::Ascending,
+            sort_field: self.app_state.current_sort,
+            sort_order: self.app_state.current_sort_order,
             view_mode: if self.app_state.is_grid_view {
                 domain::models::ViewMode::Grid
             } else {
                 domain::models::ViewMode::List
             },
-            audio_profile: domain::models::AudioProfileChoice::Normal,
+            audio_profile: self.dsp_state.settings_tab.audio_profile,
             repeat_mode: self.coordinator.repeat_mode(),
             shuffle: self.coordinator.is_shuffle(),
             selected_device: if self.dsp_state.settings_tab.output_device.is_empty() {
@@ -430,10 +477,14 @@ impl ShadowPlayerApp {
                 Some(self.dsp_state.settings_tab.output_device.clone())
             },
             bit_perfect_enabled: self.dsp_state.settings_tab.bit_perfect,
-            window_width: 1280.0,
-            window_height: 800.0,
+            // Read from the live window, not a fixed pair of numbers: the value
+            // written here is what the next launch restores.
+            window_width: self.window_size.0,
+            window_height: self.window_size.1,
         };
-        let _ = self.settings_repo.save(&app_settings);
+        if let Err(e) = self.settings_repo.save(&app_settings) {
+            log::warn!("Could not persist app settings: {e}");
+        }
 
         // 2. Save EQ Settings
         let eq_persisted = crate::components::eq_panel::PersistentEqState::from(&self.dsp_state.eq_panel);
@@ -442,9 +493,13 @@ impl ShadowPlayerApp {
         }
 
         // 3. Save DSP & Settings Tab State
-        let dsp_persisted = crate::components::settings_tab::PersistentSettingsTabState::from(&self.dsp_state.settings_tab);
-        if let Ok(json) = serde_json::to_string(&dsp_persisted) {
-            let _ = self.settings_repo.set_value("dsp_settings", &json);
+        match serde_json::to_string(&self.dsp_state.settings_tab) {
+            Ok(json) => {
+                if let Err(e) = self.settings_repo.set_value("dsp_settings", &json) {
+                    log::warn!("Could not save the audio settings: {e}");
+                }
+            }
+            Err(e) => log::warn!("Could not serialize the audio settings: {e}"),
         }
 
         // 4. Save imported-file directory list
@@ -1069,6 +1124,7 @@ impl ShadowPlayerApp {
             self.app_state.active_nav,
             &self.app_state.search_query,
             self.app_state.current_sort,
+            self.app_state.current_sort_order,
         );
     }
 
@@ -1092,6 +1148,7 @@ impl ShadowPlayerApp {
             self.app_state.active_nav,
             &self.app_state.search_query,
             self.app_state.current_sort,
+            self.app_state.current_sort_order,
         );
     }
 
@@ -1386,8 +1443,17 @@ impl eframe::App for ShadowPlayerApp {
         let ctx = ui.ctx().clone();
         self.theme.apply(&ctx);
 
+        // Remember the live window size: this is what the next launch restores.
+        let size = ctx.content_rect().size();
+        if size.x > 0.0 && size.y > 0.0 {
+            self.window_size = (size.x, size.y);
+        }
+
         // 1. Poll Coordinator & Session events
         self.coordinator.poll_events();
+        for notice in self.coordinator.take_engine_notices() {
+            self.toasts.warning(notice);
+        }
 
         // 2. Poll Library Scanner progress
         if self.scanner_service.poll() {
@@ -2036,14 +2102,7 @@ impl eframe::App for ShadowPlayerApp {
                 self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
             }
             if i.key_pressed(egui::Key::Escape) {
-                if !self.app_state.search_query.is_empty() {
-                    self.app_state.search_query.clear();
-                    self.refresh_view();
-                }
-                self.app_state.new_playlist_modal_open = false;
-                self.app_state.help_modal_open = false;
-                self.app_state.track_properties_open = false;
-                self.dsp_state.eq_panel.is_open = false;
+                self.dismiss_foreground_overlay();
             }
         });
 
@@ -2349,15 +2408,6 @@ impl eframe::App for ShadowPlayerApp {
             });
 
         // 10. Modals Execution
-        let audio_actions = show_advanced_audio_modal(
-            &ctx,
-            &mut self.dsp_state.advanced_audio,
-            telemetry.bit_perfect,
-            telemetry.bit_perfect_cause.as_deref(),
-            &self.theme,
-        );
-        self.dsp_state.handle_audio_modal_actions(&self.session, audio_actions);
-
         let eq_actions = show_eq_panel(&ctx, &mut self.dsp_state.eq_panel, &self.theme);
         self.dsp_state.handle_eq_panel_actions(&self.session, eq_actions);
         if self.dsp_state.eq_panel.is_open {

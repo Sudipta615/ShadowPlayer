@@ -56,18 +56,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Strip any demo data left behind by earlier development builds.
     purge_legacy_demo_data(&db, &data_dir);
 
+    // The user's own settings decide the engine profile and the window size.
+    // This used to force `Fidelity` on every launch — silently overriding the
+    // choice saved in Settings, and quietly changing a working setup for anyone
+    // whose machine cannot afford the strict preset.
+    let saved_settings = SettingsRepo::new(db.clone()).load().unwrap_or_default();
+
     // Initialize authoritative Audio Engine session
-    info!("Initializing Audio Engine v1.2.1 session...");
+    info!(
+        "Initializing {} v{} session...",
+        engine::NAME,
+        engine::VERSION
+    );
     let session = Arc::new(AudioSession::new()?);
 
-    // Apply initial profile
-    session.apply_profile(domain::models::AudioProfileChoice::Fidelity);
+    // Apply the persisted profile
+    session.apply_profile(saved_settings.audio_profile);
 
     // Native window options
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("ShadowPlayer")
-            .with_inner_size(Vec2::new(1280.0, 830.0))
+            .with_inner_size(Vec2::new(
+                saved_settings.window_width.max(1024.0),
+                saved_settings.window_height.max(682.0),
+            ))
             .with_min_inner_size(Vec2::new(1024.0, 682.0))
             .with_decorations(true)
             .with_transparent(false),

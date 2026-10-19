@@ -3,8 +3,11 @@ use crate::theme::Theme;
 
 /// Interactive 2D/3D Soundstage and Spatial Radar Canvas
 pub struct SpatialRadarWidget<'a> {
-    pub source_azimuth_deg: &'a mut f32,
-    pub source_distance_m: &'a mut f32,
+    /// Azimuth of the virtual centre, in degrees. Dragging the source node
+    /// writes this: it is the only spatial placement the engine exposes.
+    pub center_azimuth_deg: &'a mut f32,
+    /// Where the listener's head is facing, in degrees. Independent of the
+    /// centre.
     pub listener_yaw_deg: f32,
     pub room_width_m: f32,
     pub room_depth_m: f32,
@@ -18,14 +21,12 @@ pub struct SpatialRadarResponse {
 
 impl<'a> SpatialRadarWidget<'a> {
     pub fn new(
-        source_azimuth_deg: &'a mut f32,
-        source_distance_m: &'a mut f32,
+        center_azimuth_deg: &'a mut f32,
         listener_yaw_deg: f32,
         theme: &'a Theme,
     ) -> Self {
         Self {
-            source_azimuth_deg,
-            source_distance_m,
+            center_azimuth_deg,
             listener_yaw_deg,
             room_width_m: 6.0,
             room_depth_m: 8.0,
@@ -123,14 +124,12 @@ impl<'a> SpatialRadarWidget<'a> {
         let nose_tip = Pos2::new(center.x + 14.0 * yaw_rad.cos(), center.y + 14.0 * yaw_rad.sin());
         painter.line_segment([center, nose_tip], Stroke::new(2.5_f32, self.theme.accent_violet));
 
-        // 5. Handle Dragging of Sound Source
+        // 5. Handle Dragging of the Virtual Centre
         let mouse_pos = ui.input(|i| i.pointer.hover_pos());
         if response.dragged() {
             if let Some(mpos) = mouse_pos {
                 let dx = mpos.x - center.x;
                 let dy = mpos.y - center.y;
-                let dist_px = (dx * dx + dy * dy).sqrt();
-                let new_dist = (dist_px / scale).clamp(0.2, max_dist);
 
                 // Azimuth in degrees: 0° is ahead (negative Y), 90° right, -90° left
                 let angle_rad = dy.atan2(dx);
@@ -139,15 +138,14 @@ impl<'a> SpatialRadarWidget<'a> {
                     deg -= 360.0;
                 }
 
-                *self.source_azimuth_deg = deg;
-                *self.source_distance_m = new_dist;
+                *self.center_azimuth_deg = deg;
                 changed = true;
             }
         }
 
-        // 6. Draw Audio Source Node
-        let src_az_rad = (*self.source_azimuth_deg - 90.0).to_radians();
-        let src_dist_px = *self.source_distance_m * scale;
+        // 6. Draw the Virtual Centre Node
+        let src_az_rad = (*self.center_azimuth_deg - 90.0).to_radians();
+        let src_dist_px = 3.0 * scale;
         let source_pos = Pos2::new(
             center.x + src_dist_px * src_az_rad.cos(),
             center.y + src_dist_px * src_az_rad.sin(),
@@ -169,7 +167,7 @@ impl<'a> SpatialRadarWidget<'a> {
         painter.circle_stroke(source_pos, 7.0, Stroke::new(1.5_f32, Color32::WHITE));
 
         // Source Label & Telemetry
-        let source_info = format!("{:.1}m @ {:+.0}°", *self.source_distance_m, *self.source_azimuth_deg);
+        let source_info = format!("Centre {:+.0}°", *self.center_azimuth_deg);
         painter.text(
             Pos2::new(source_pos.x, source_pos.y - 12.0),
             egui::Align2::CENTER_BOTTOM,

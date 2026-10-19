@@ -2,23 +2,13 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2};
 use domain::ids::{PlaylistId, TrackId};
-use domain::models::{Playlist, Track};
+use domain::models::{Playlist, SortField, SortOrder, Track};
 use crate::services::ArtworkService;
 use crate::theme::Theme;
 
 /// Maximum number of new cover textures decoded per frame. Caps the work done in
 /// a single frame so fast scrolling on a slow CPU can't cause a stutter.
 const ART_LOADS_PER_FRAME: usize = 8;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SortField {
-    Default,
-    Title,
-    Artist,
-    Album,
-    Duration,
-    DateAdded,
-}
 
 /// Quality/format chips that narrow whatever view is open, so the user can
 /// filter the current list without navigating away. Lives here (next to
@@ -65,6 +55,8 @@ pub struct SongsTableAction {
     pub add_to_playlist: Option<(TrackId, PlaylistId)>,
     pub toggle_favorite: Option<TrackId>,
     pub sort_field_changed: Option<SortField>,
+    /// User tapped the ascending/descending toggle.
+    pub sort_order_changed: Option<SortOrder>,
     /// User tapped a quality/format chip.
     pub quick_filter_changed: Option<QuickFilter>,
     pub toggle_view_mode: bool,
@@ -96,6 +88,8 @@ pub struct SongsTable<'a> {
     pub favorite_track_ids: &'a HashSet<TrackId>,
     pub playlists: &'a [Playlist],
     pub current_sort: SortField,
+    /// Whether the current sort runs ascending or descending.
+    pub sort_order: SortOrder,
     pub is_grid_view: bool,
     /// Active quality/format chip.
     pub quick_filter: QuickFilter,
@@ -117,6 +111,7 @@ impl<'a> SongsTable<'a> {
             add_to_playlist: None,
             toggle_favorite: None,
             sort_field_changed: None,
+            sort_order_changed: None,
             quick_filter_changed: None,
             toggle_view_mode: false,
             open_folder: None,
@@ -142,6 +137,7 @@ impl<'a> SongsTable<'a> {
             favorite_track_ids,
             playlists,
             current_sort,
+            sort_order,
             is_grid_view,
             quick_filter,
             selected_track_ids,
@@ -206,8 +202,9 @@ impl<'a> SongsTable<'a> {
                     SortField::Album => "Album",
                     SortField::Duration => "Duration",
                     SortField::DateAdded => "Added",
+                    SortField::Favorite => "Favourites",
                     SortField::Title => "Title",
-                    SortField::Default => "Title",
+                    SortField::TrackNumber => "Track",
                 };
                 let sort_label = format!("Sort by: {}", sort_name);
 
@@ -226,16 +223,79 @@ impl<'a> SongsTable<'a> {
                 let chev_rect = Rect::from_center_size(Pos2::new(sort_rect.max.x - 14.0, sort_rect.center().y), Vec2::new(12.0, 12.0));
                 crate::components::icons::draw_chevron_down(ui, chev_rect, theme.text_muted);
 
-                if sort_resp.clicked() {
+                if sort_resp.on_hover_text("Change the sort field").clicked() {
+                    // A deliberate cycle rather than a menu: one click walks
+                    // the fields, and the direction is a separate button so the
+                    // two never fight each other.
                     let next = match current_sort {
-                        SortField::Default => SortField::Title,
+                        SortField::TrackNumber => SortField::Title,
                         SortField::Title => SortField::Artist,
                         SortField::Artist => SortField::Album,
                         SortField::Album => SortField::Duration,
                         SortField::Duration => SortField::DateAdded,
-                        SortField::DateAdded => SortField::Default,
+                        SortField::DateAdded => SortField::Favorite,
+                        SortField::Favorite => SortField::TrackNumber,
                     };
                     action.sort_field_changed = Some(next);
+                }
+
+                // Sort direction toggle
+                let (dir_rect, dir_resp) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
+                let dp = ui.painter_at(dir_rect);
+                let dir_bg = if dir_resp.hovered() { theme.bg_card_hover } else { theme.bg_pill };
+                dp.rect_filled(dir_rect, CornerRadius::same(8), dir_bg);
+                dp.rect_stroke(dir_rect, CornerRadius::same(8), Stroke::new(1.0_f32, theme.border_subtle), egui::StrokeKind::Inside);
+                let ascending = sort_order == SortOrder::Ascending;
+                let arrow_col = if dir_resp.hovered() { theme.accent_pink } else { theme.text_secondary };
+                let cy = dir_rect.center().y;
+                let cx = dir_rect.center().x;
+                if ascending {
+                    // ↑ : tip at the top, barbs below it
+                    dp.add(egui::Shape::line(
+                        vec![
+                            Pos2::new(cx, cy - 6.0),
+                            Pos2::new(cx, cy + 6.0),
+                        ],
+                        Stroke::new(1.8_f32, arrow_col),
+                    ));
+                    dp.add(egui::Shape::line(
+                        vec![
+                            Pos2::new(cx - 4.5, cy - 1.5),
+                            Pos2::new(cx, cy - 6.0),
+                            Pos2::new(cx + 4.5, cy - 1.5),
+                        ],
+                        Stroke::new(1.8_f32, arrow_col),
+                    ));
+                } else {
+                    dp.add(egui::Shape::line(
+                        vec![
+                            Pos2::new(cx, cy - 6.0),
+                            Pos2::new(cx, cy + 6.0),
+                        ],
+                        Stroke::new(1.8_f32, arrow_col),
+                    ));
+                    dp.add(egui::Shape::line(
+                        vec![
+                            Pos2::new(cx - 4.5, cy + 1.5),
+                            Pos2::new(cx, cy + 6.0),
+                            Pos2::new(cx + 4.5, cy + 1.5),
+                        ],
+                        Stroke::new(1.8_f32, arrow_col),
+                    ));
+                }
+                if dir_resp
+                    .on_hover_text(if ascending {
+                        "Ascending — click for descending"
+                    } else {
+                        "Descending — click for ascending"
+                    })
+                    .clicked()
+                {
+                    action.sort_order_changed = Some(if ascending {
+                        SortOrder::Descending
+                    } else {
+                        SortOrder::Ascending
+                    });
                 }
             });
         });
@@ -385,7 +445,7 @@ impl<'a> SongsTable<'a> {
                         }
                         *last_clicked_index = None;
                     } else {
-                        action.sort_field_changed = Some(SortField::Default);
+                        action.sort_field_changed = Some(SortField::TrackNumber);
                     }
                 }
 
@@ -421,8 +481,8 @@ impl<'a> SongsTable<'a> {
                 let (heart_rect, heart_resp) = ui.allocate_exact_size(Vec2::new(col_fav_w, 20.0), Sense::click());
                 let heart_icon_rect = Rect::from_center_size(heart_rect.center(), Vec2::new(14.0, 14.0));
                 crate::components::icons::draw_heart(ui, heart_icon_rect, theme.text_muted, false);
-                if heart_resp.on_hover_text("Sort by Favorites").clicked() {
-                    action.sort_field_changed = Some(SortField::DateAdded);
+                if heart_resp.on_hover_text("Sort by Favourites").clicked() {
+                    action.sort_field_changed = Some(SortField::Favorite);
                 }
 
                 ui.add_sized([col_menu_w, 20.0], egui::Label::new(""));
@@ -553,7 +613,14 @@ impl<'a> SongsTable<'a> {
                             );
                         }
 
-                        let active_text = if is_active { theme.text_primary } else { theme.text_primary };
+                        // The playing track's title is tinted as well as its row
+                        // being highlighted: the two branches here used to be
+                        // identical, so the highlight was a no-op.
+                        let active_text = if is_active {
+                            theme.accent_violet
+                        } else {
+                            theme.text_primary
+                        };
                         let title_x = vis_rect.min.x + col_num_w + 44.0;
                         let title_galley = painter.layout_no_wrap(track.title.clone(), FontId::proportional(13.8), active_text);
                         let title_w_actual = title_galley.size().x;
@@ -621,7 +688,20 @@ impl<'a> SongsTable<'a> {
 
                         // Column 7: Overflow Menu "⋮"
                         let menu_hover = ui.rect_contains_pointer(menu_rect);
+                        let menu_resp = ui.interact(
+                            menu_rect,
+                            ui.scope_id().with(("row_menu", idx)),
+                            Sense::click(),
+                        );
                         crate::components::icons::draw_more_menu(ui, menu_rect, if menu_hover || is_active { theme.text_primary } else { theme.text_secondary });
+                        // The ⋮ used to be painted with no handler at all, so
+                        // it looked clickable and did nothing. It now opens the
+                        // same menu as a right-click on the row.
+                        egui::Popup::menu(&menu_resp)
+                            .id(menu_resp.id.with("popup"))
+                            .show(|ui| {
+                                render_track_context_menu(ui, track, is_favorite, playlists, &mut action, theme);
+                            });
 
                         // Right-Click Context Menu on Row
                         row_resp.context_menu(|ui| {

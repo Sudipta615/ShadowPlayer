@@ -1,6 +1,5 @@
 use audio_session::AudioSession;
-use config::{CrossfadeConfig, EnginePreset};
-use crate::components::advanced_audio::{AdvancedAudioActions, AdvancedAudioState};
+use config::{CrossfadeConfig, TransitionMode};
 use crate::components::eq_panel::{EqPanelActions, EqPanelState};
 use crate::components::settings_tab::{SettingsTabActions, SettingsTabState};
 use crate::state::chain_preset::{self, ChainPreset};
@@ -8,7 +7,6 @@ use crate::state::clap_rack::{ClapRackActions, ClapRackState};
 
 /// Central DSP state container and command dispatcher
 pub struct DspState {
-    pub advanced_audio: AdvancedAudioState,
     pub eq_panel: EqPanelState,
     pub settings_tab: SettingsTabState,
     pub autoeq: crate::modals::AutoEqModalState,
@@ -19,7 +17,6 @@ pub struct DspState {
 impl Default for DspState {
     fn default() -> Self {
         Self {
-            advanced_audio: AdvancedAudioState::default(),
             eq_panel: EqPanelState::default(),
             settings_tab: SettingsTabState::default(),
             autoeq: crate::modals::AutoEqModalState::default(),
@@ -44,12 +41,16 @@ impl DspState {
         session.set_speed_mode(st.speed_mode);
         session.set_transition_mode(st.transition_mode);
         session.set_crossfade_config(CrossfadeConfig {
-            enabled: true,
+            // Only the crossfade transition actually crossfades. This used to
+            // be `true` unconditionally, so choosing Gapless, Fade or Stop
+            // still overlapped the tracks.
+            enabled: st.transition_mode == TransitionMode::Crossfade,
             duration_ms: (st.crossfade_duration_secs * 1000.0) as u64,
             curve: st.crossfade_curve,
         });
         session.set_crossfade_curve(st.crossfade_curve);
         session.set_loudness_mode(st.loudness_mode);
+        session.apply_profile(st.audio_profile);
         session.set_output_backend(st.output_backend);
         if !st.output_device.is_empty() {
             session.set_output_device(Some(st.output_device.clone()));
@@ -83,6 +84,8 @@ impl DspState {
             st.room_wet,
         );
         session.set_spatial_screen(st.screen_center_az, st.screen_half_w, st.screen_elevation, st.screen_gain);
+        session.set_spatial_listener_orientation(st.listener_yaw_deg);
+        session.set_spatial_air_absorption(st.air_absorption_enabled);
         session.set_spatial_voice(
             st.voice_budget_enabled,
             st.voice_capacity,
@@ -191,7 +194,9 @@ impl DspState {
         if let Some(m) = s.transition_mode_changed { session.set_transition_mode(m); }
         if s.crossfade_config_changed {
             session.set_crossfade_config(CrossfadeConfig {
-                enabled: true,
+                // Same rule as `sync_all_to_session`: only the crossfade
+                // transition crossfades.
+                enabled: self.settings_tab.transition_mode == TransitionMode::Crossfade,
                 duration_ms: (self.settings_tab.crossfade_duration_secs * 1000.0) as u64,
                 curve: self.settings_tab.crossfade_curve,
             });
@@ -224,6 +229,15 @@ impl DspState {
         if s.spatial_screen_changed {
             let st = &self.settings_tab;
             session.set_spatial_screen(st.screen_center_az, st.screen_half_w, st.screen_elevation, st.screen_gain);
+        }
+        if s.spatial_listener_changed {
+            session.set_spatial_listener_orientation(self.settings_tab.listener_yaw_deg);
+        }
+        if let Some(enabled) = s.air_absorption_changed {
+            session.set_spatial_air_absorption(enabled);
+        }
+        if let Some(profile) = s.audio_profile_changed {
+            session.apply_profile(profile);
         }
         if s.voice_budget_changed {
             let st = &self.settings_tab;
@@ -459,38 +473,6 @@ impl DspState {
             .is_some_and(|p| p.expired())
         {
             self.clap_rack.save_without_state(&view);
-        }
-    }
-
-    /// Dispatch quick advanced audio modal actions
-    pub fn handle_audio_modal_actions(&mut self, session: &AudioSession, audio_actions: AdvancedAudioActions) {
-        if let Some(preset) = audio_actions.preset_changed {
-            let choice = match preset {
-                EnginePreset::Consumer => domain::models::AudioProfileChoice::Normal,
-                EnginePreset::Fidelity => domain::models::AudioProfileChoice::Fidelity,
-                EnginePreset::LegacyLowPower => domain::models::AudioProfileChoice::LegacyLowPower,
-            };
-            session.apply_profile(choice);
-        }
-        if let Some((band, gain)) = audio_actions.eq_band_changed {
-            session.set_graphic_eq_slider(band, gain);
-        }
-        if audio_actions.eq_reset {
-            for b in 0..10 {
-                session.set_graphic_eq_slider(b, 0.0);
-            }
-        }
-        if let Some(eq_on) = audio_actions.eq_enabled_changed {
-            session.set_graphic_eq_enabled(eq_on);
-        }
-        if let Some(sp_on) = audio_actions.spatial_enabled_changed {
-            session.set_spatial_enabled(sp_on);
-        }
-        if let Some(sp_w) = audio_actions.spatial_width_changed {
-            session.set_stereo_width(sp_w);
-        }
-        if let Some(bb) = audio_actions.bass_boost_changed {
-            session.set_bass_shelf(bb);
         }
     }
 

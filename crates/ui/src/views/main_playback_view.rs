@@ -130,9 +130,6 @@ pub fn render_main_playback_view(
             SleepTimerRequest::EndOfTrack => Some(SleepTimer::end_of_track()),
         };
     }
-    if np_events.open_advanced_audio {
-        app_state.help_modal_open = false;
-    }
     if np_events.open_properties {
         app_state.track_properties_track = current_track.cloned();
         app_state.track_properties_open = true;
@@ -490,6 +487,7 @@ pub fn render_main_playback_view(
         favorite_track_ids: &library_state.favorite_ids,
         playlists: &library_state.playlists,
         current_sort: app_state.current_sort,
+        sort_order: app_state.current_sort_order,
         is_grid_view: app_state.is_grid_view,
         quick_filter: library_state.quick_filter,
         selected_track_ids: &mut library_state.selected_track_ids,
@@ -505,6 +503,10 @@ pub fn render_main_playback_view(
         view_action.needs_reload = true;
     }
 
+    if let Some(order) = table_action.sort_order_changed {
+        app_state.current_sort_order = order;
+        view_action.needs_reload = true;
+    }
     if table_action.sort_field_changed.is_some()
         || table_action.remove_track.is_some()
         || table_action.toggle_favorite.is_some()

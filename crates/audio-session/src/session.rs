@@ -892,6 +892,20 @@ impl AudioSession {
         self.handle.set_spatial_air(air);
     }
 
+    /// Switch distance-dependent air absorption on or off, keeping the engine's
+    /// own coefficients for everything else.
+    pub fn set_spatial_air_absorption(&self, enabled: bool) {
+        self.handle.set_spatial_air(engine::spatial::AirAbsorption {
+            enabled,
+            ..Default::default()
+        });
+    }
+
+    /// Rotate the listener's head to `yaw_deg`, leaving pitch and roll level.
+    pub fn set_spatial_listener_orientation(&self, yaw_deg: f32) {
+        self.handle.set_spatial_listener(yaw_deg, 0.0, 0.0);
+    }
+
     /// Replace the spatial master's cue bank from the scene-file model.
     pub fn set_spatial_cues(&self, cues: Vec<config::SpatialCueConfig>) {
         self.handle.set_spatial_cues(cues);

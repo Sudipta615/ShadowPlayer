@@ -21,7 +21,6 @@ pub use playlist_editor_modal::{
 pub use smart_playlist_modal::{
     show_smart_playlist_editor, SmartPlaylistActions, SmartPlaylistEditorState,
 };
-pub use crate::components::advanced_audio::show_advanced_audio_modal;
 pub use crate::components::eq_panel::show_eq_panel;
 pub use crate::components::help_modal::show_help_modal;
 pub use crate::components::track_properties_modal::show_track_properties_modal;

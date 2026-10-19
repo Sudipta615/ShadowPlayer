@@ -300,11 +300,19 @@ fn token_value(token: &str, track: &Track) -> Option<String> {
     Some(value)
 }
 
+/// Name Windows refuses outright, whatever the extension.
+const WINDOWS_RESERVED: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
 /// Make one path component safe for every filesystem we care about.
 ///
 /// Reserved characters become `_`, whitespace runs collapse to a single space,
 /// and leading/trailing dots and spaces are dropped (they hide files on Unix
-/// and are rejected outright on Windows).
+/// and are rejected outright on Windows). A device name (`CON`, `NUL`, `COM1`,
+/// … — reserved with or without an extension) gets a leading underscore, which
+/// is all Windows needs to treat it as an ordinary name.
 fn sanitize_component(component: &str) -> String {
     let mut cleaned = String::with_capacity(component.len());
     for ch in component.chars() {
@@ -315,12 +323,28 @@ fn sanitize_component(component: &str) -> String {
         cleaned.push(if illegal { '_' } else { ch });
     }
 
-    cleaned
+    let mut cleaned = cleaned
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .trim_matches(|c: char| c == '.' || c == ' ')
-        .to_string()
+        .to_string();
+
+    if is_windows_reserved(&cleaned) {
+        cleaned.insert(0, '_');
+    }
+    cleaned
+}
+
+/// `true` for names Windows reserves for devices (`CON`, `NUL`, `COM4`, …).
+///
+/// The check is on the part before the first dot: `NUL.tar.gz` is just as
+/// reserved as `NUL`, because Windows resolves the device before the extension.
+fn is_windows_reserved(component: &str) -> bool {
+    let stem = component.split('.').next().unwrap_or(component);
+    WINDOWS_RESERVED
+        .iter()
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
 }
 
 /// Move every applicable file, creating destination folders as needed.
@@ -340,7 +364,7 @@ pub fn apply_plan(plan: &OrganizePlan) -> OrganizeOutcome {
             }
         }
 
-        match fs::rename(&entry.from, &entry.to) {
+        match move_file(&entry.from, &entry.to) {
             Ok(()) => outcome.moved.push((
                 entry.track_id,
                 entry.to.clone(),
@@ -348,17 +372,71 @@ pub fn apply_plan(plan: &OrganizePlan) -> OrganizeOutcome {
             )),
             Err(e) => outcome
                 .failures
-                .push((entry.from.clone(), describe_rename_error(&e))),
+                .push((entry.from.clone(), describe_move_error(&e))),
         }
     }
 
     outcome
 }
 
-fn describe_rename_error(e: &std::io::Error) -> String {
+/// Move a file, never replacing an existing destination and working across
+/// filesystems.
+///
+/// `fs::rename` does neither. On Unix it silently replaces an existing
+/// destination — the plan checks for conflicts, but the plan was made minutes
+/// ago and the disk is free to change underneath it — and across filesystems it
+/// fails outright, so organizing a library spread over two drives simply did
+/// not work.
+///
+/// A hard link is the same-filesystem case: it cannot clobber (`AlreadyExists`
+/// is an error, not a replacement) and it never copies the bytes. When linking
+/// is impossible — another filesystem, or a filesystem that does not support
+/// links — the file is copied with `create_new` and the copy is durable before
+/// the original is unlinked.
+fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    match fs::hard_link(from, to) {
+        Ok(()) => {
+            // The destination now names the same file. Dropping the old name
+            // cannot lose data: if this fails the two names still agree.
+            fs::remove_file(from)
+        }
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => Err(e),
+        Err(_) => copy_then_delete(from, to),
+    }
+}
+
+/// The cross-filesystem fallback: copy, flush, then unlink the source.
+fn copy_then_delete(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut source = fs::File::open(from)?;
+    let mut destination = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(to)?;
+
+    if let Err(e) = std::io::copy(&mut source, &mut destination)
+        .and_then(|_| destination.flush())
+        .and_then(|_| destination.sync_all())
+    {
+        // Never leave a partial copy at the destination: the next run would
+        // see it as a conflict and the library would gain a truncated file.
+        drop(destination);
+        let _ = fs::remove_file(to);
+        return Err(e);
+    }
+    drop(destination);
+
+    fs::remove_file(from)
+}
+
+fn describe_move_error(e: &std::io::Error) -> String {
     if e.kind() == ErrorKind::CrossesDevices {
         return "destination is on another filesystem; pick a folder on the same drive"
             .to_string();
+    }
+    if e.kind() == ErrorKind::AlreadyExists {
+        return "a file already exists there (not overwritten)".to_string();
     }
     if e.kind() == ErrorKind::PermissionDenied {
         return "permission denied".to_string();
@@ -614,5 +692,82 @@ mod tests {
         assert_eq!(outcome.moved.len(), 1);
         assert!(dir.join("01 - First.flac").exists());
         assert!(bad.exists(), "conflicting source must be left alone");
+    }
+
+    #[test]
+    fn windows_device_names_are_escaped() {
+        assert_eq!(sanitize_component("CON"), "_CON");
+        assert_eq!(sanitize_component("nul"), "_nul");
+        assert_eq!(sanitize_component("COM4"), "_COM4");
+        // The reservation applies before the first dot.
+        assert_eq!(sanitize_component("NUL.tar.gz"), "_NUL.tar.gz");
+        // Only real device names are touched.
+        assert_eq!(sanitize_component("Console"), "Console");
+        assert_eq!(sanitize_component("Com"), "Com");
+    }
+
+    /// A file that appears at the destination between plan time and apply time
+    /// (another program, or a second run) must not be replaced.
+    #[test]
+    fn applying_never_replaces_a_file_that_appeared_after_the_plan() {
+        let dir = scratch("race");
+        let src = dir.join("incoming.flac");
+        fs::write(&src, b"audio").unwrap();
+
+        let mut t = track(1, &src.to_string_lossy(), "Racer", "A", "B");
+        t.path = src.clone();
+        let plan = build_plan(&[t], "{track} - {title}", None);
+        assert_eq!(plan.pending_count(), 1);
+
+        // The plan is already made; now somebody else writes the destination.
+        let target = dir.join("01 - Racer.flac");
+        fs::write(&target, b"not mine").unwrap();
+
+        let outcome = apply_plan(&plan);
+        assert!(outcome.moved.is_empty());
+        assert_eq!(outcome.failures.len(), 1);
+        assert!(
+            outcome.failures[0].1.contains("not overwritten"),
+            "got {:?}",
+            outcome.failures[0].1
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"not mine");
+        assert!(src.exists(), "the source must survive a refused move");
+    }
+
+    /// The cross-filesystem path, exercised directly: copy, flush, unlink.
+    #[test]
+    fn the_copy_fallback_moves_bytes_and_refuses_to_overwrite() {
+        let dir = scratch("copy_fallback");
+        let src = dir.join("from.flac");
+        fs::write(&src, b"audio bytes").unwrap();
+
+        let dest = dir.join("nested/to.flac");
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        copy_then_delete(&src, &dest).unwrap();
+
+        assert_eq!(fs::read(&dest).unwrap(), b"audio bytes");
+        assert!(!src.exists(), "the source is unlinked once the copy is durable");
+
+        // An occupied destination is an error, not a replacement.
+        let occupied = dir.join("taken.flac");
+        fs::write(&occupied, b"keep me").unwrap();
+        let other = dir.join("other.flac");
+        fs::write(&other, b"other").unwrap();
+        let err = copy_then_delete(&other, &occupied).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&occupied).unwrap(), b"keep me");
+        assert!(other.exists());
+    }
+
+    /// A failure mid-copy must not leave a half-written file behind.
+    #[test]
+    fn a_failed_copy_leaves_no_partial_destination() {
+        let dir = scratch("partial_copy");
+        let src = dir.join("dir_not_file");
+        fs::create_dir_all(&src).unwrap(); // opening a directory as a file fails
+        let dest = dir.join("dest.flac");
+        assert!(copy_then_delete(&src, &dest).is_err());
+        assert!(!dest.exists(), "no partial copy may be left at the destination");
     }
 }

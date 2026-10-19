@@ -89,7 +89,10 @@ pub fn render_settings_view(
                                 let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                                 ui.painter_at(dot_rect).circle_filled(dot_rect.center(), 3.5, theme.accent_pink);
                                 ui.label(
-                                    egui::RichText::new("Engine 1.2.1 Active (44.1 - 192kHz)")
+                                    egui::RichText::new(format!(
+                                        "Engine {} Active (44.1 - 192kHz)",
+                                        engine::VERSION
+                                    ))
                                         .font(FontId::proportional(11.5))
                                         .strong()
                                         .color(theme.accent_pink),
@@ -100,7 +103,10 @@ pub fn render_settings_view(
             );
         });
         ui.label(
-            egui::RichText::new("Configure Audio Engine v1.2.1, bit-perfect streaming, 3D acoustics, and library")
+            egui::RichText::new(format!(
+                "Configure Audio Engine v{}, bit-perfect streaming, 3D acoustics, and library",
+                engine::VERSION
+            ))
                 .font(FontId::proportional(12.5))
                 .color(theme.text_muted),
         );
@@ -123,6 +129,16 @@ pub fn render_settings_view(
             loudness_current: &loudness.current,
             loudness_has_run: loudness.has_run,
             latency_ms: session.latency_ms(),
+            requested_backend: session
+                .playback_info()
+                .output_info
+                .as_ref()
+                .and_then(|i| i.requested_backend),
+            actual_backend: session
+                .playback_info()
+                .output_info
+                .as_ref()
+                .and_then(|i| i.actual_backend),
             graph_build_ms: session.graph_build_stats().0,
             graph_builds: session.graph_build_stats().1,
         };

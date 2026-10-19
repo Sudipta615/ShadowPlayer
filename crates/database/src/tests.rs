@@ -2,8 +2,9 @@
 mod tests {
     use crate::db::Database;
     use crate::repos::*;
-    use domain::ids::TrackId;
+    use domain::ids::{PlaylistId, TrackId};
     use domain::models::{AppSettings, SortField, SortOrder, Track};
+    use domain::smart::{SmartField, SmartOp, SmartPlaylist, SmartRule};
     use std::path::PathBuf;
 
     fn sample_track(id: TrackId, path_str: &str, title: &str, artist: &str, album: &str) -> Track {
@@ -551,6 +552,147 @@ mod tests {
             AppSettings::default().sort_field,
             "absent fields fall back to their defaults"
         );
+    }
+
+    /// An album's year is a property of the album, not of whichever row SQLite
+    /// happened to pick for the group.
+    #[test]
+    fn album_year_is_aggregated_deterministically() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let track_repo = TrackRepo::new(db.clone());
+        let album_repo = AlbumRepo::new(db.clone());
+
+        let mut older = sample_track(TrackId::new(), "/music/repress/a.flac", "A", "X", "Reissue");
+        older.year = Some(1994);
+        let mut newer = sample_track(TrackId::new(), "/music/repress/b.flac", "B", "X", "Reissue");
+        newer.year = Some(2011);
+        track_repo.upsert(&older).unwrap();
+        track_repo.upsert(&newer).unwrap();
+
+        let albums = album_repo.list().unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].year, Some(1994), "the earliest year is the album's");
+        assert_eq!(albums[0].track_count, 2);
+    }
+
+    /// Punctuation must not put music out of reach: the tokenizer splits
+    /// `AC/DC` into `ac` and `dc`, so the query has to ask for those.
+    #[test]
+    fn search_reaches_artist_names_with_punctuation() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let mut acdc = sample_track(TrackId::new(), "/music/rock/01.flac", "Thunderstruck", "AC/DC", "The Razors Edge");
+        acdc.artist = "AC/DC".to_string();
+        repo.upsert(&acdc).unwrap();
+        let mut dont = sample_track(TrackId::new(), "/music/pop/02.flac", "Don't Stop", "Fleetwood Mac", "Rumours");
+        dont.title = "Don't Stop".to_string();
+        repo.upsert(&dont).unwrap();
+
+        let hits = |q: &str| repo.search_fts(q, 20).unwrap().len();
+        assert_eq!(hits("AC/DC"), 1, "punctuation must not hide the artist");
+        assert_eq!(hits("acdc"), 0, "no such token was indexed");
+        assert_eq!(hits("Thunder"), 1, "prefix search still works");
+        assert_eq!(hits("Don't Stop"), 1, "apostrophes are token separators");
+        assert_eq!(hits("rumours"), 1, "case-insensitive");
+        assert_eq!(hits("!!!"), 0, "no tokens means no results, not a syntax error");
+    }
+
+    /// Smart-playlist rules that the field cannot express are repaired on load,
+    /// instead of silently matching nothing.
+    #[test]
+    fn smart_playlist_rules_are_normalised_on_load() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = SmartPlaylistRepo::new(db.clone());
+        let track_repo = TrackRepo::new(db.clone());
+
+        let mut a = sample_track(TrackId::new(), "/music/a.flac", "Alpha", "X", "A");
+        a.added_at = 1_700_000_000;
+        track_repo.upsert(&a).unwrap();
+        let mut b = sample_track(TrackId::new(), "/music/b.flac", "Beta", "X", "B");
+        b.is_favorite = true;
+        track_repo.upsert(&b).unwrap();
+        TrackRepo::new(db.clone()).set_favorite(&b.id, true).unwrap();
+
+        // `Date Added is 2024` can never be true as stored: `added_at` is a
+        // unix timestamp. It is read as "in the last 2024 days" instead.
+        let mut playlist = SmartPlaylist::draft(PlaylistId::new());
+        playlist.name = "Recent-ish".to_string();
+        playlist.rules = vec![SmartRule {
+            field: SmartField::Added,
+            op: SmartOp::Equals,
+            value: "2024".to_string(),
+        }];
+        repo.save(&playlist).unwrap();
+
+        let loaded = repo.get(&playlist.id).unwrap().expect("playlist");
+        assert_eq!(loaded.rules[0].op, SmartOp::InLastDays);
+        let matched = repo.evaluate(&loaded).unwrap();
+        assert_eq!(matched.len(), 2, "the repaired rule is satisfiable");
+    }
+
+    /// Removing the middle of a playlist renumbers the rest in order.
+    #[test]
+    fn removing_a_playlist_track_keeps_the_remaining_order() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let playlists = PlaylistRepo::new(db.clone());
+        let tracks = TrackRepo::new(db.clone());
+
+        let mut ids = Vec::new();
+        for i in 0..4 {
+            let t = sample_track(
+                TrackId::new(),
+                &format!("/music/{i}.flac"),
+                &format!("Track {i}"),
+                "X",
+                "A",
+            );
+            tracks.upsert(&t).unwrap();
+            ids.push(t.id);
+        }
+
+        let playlist = playlists.create("Order", None).unwrap();
+        for id in &ids {
+            playlists.add_track(&playlist.id, id).unwrap();
+        }
+        playlists.remove_track(&playlist.id, &ids[1]).unwrap();
+
+        let remaining: Vec<TrackId> = playlists
+            .get_tracks(&playlist.id)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(remaining, vec![ids[0], ids[2], ids[3]], "order survives");
+    }
+
+    /// A rule JSON blob that will not parse must not turn an AND playlist into
+    /// "match everything".
+    #[test]
+    fn corrupt_smart_playlist_rules_do_not_widen_the_match() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = SmartPlaylistRepo::new(db.clone());
+        let track_repo = TrackRepo::new(db.clone());
+        track_repo
+            .upsert(&sample_track(TrackId::new(), "/music/a.flac", "A", "X", "A"))
+            .unwrap();
+
+        let mut playlist = SmartPlaylist::draft(PlaylistId::new());
+        playlist.name = "Broken".to_string();
+        repo.save(&playlist).unwrap();
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE smart_playlists SET rules_json = 'not json' WHERE id = ?1;",
+                rusqlite::params![playlist.id.to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let loaded = repo.get(&playlist.id).unwrap().expect("playlist");
+        assert!(loaded.rules.is_empty());
+        // An empty AND playlist matches nothing, which is the safe reading.
+        assert!(repo.evaluate(&loaded).unwrap().is_empty());
     }
 }
 

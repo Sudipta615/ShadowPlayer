@@ -31,7 +31,10 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
                             .color(theme.text_primary),
                     );
                     ui.label(
-                        egui::RichText::new("Audiophile Local Desktop Music Player • Audio Engine v1.2.1")
+                        egui::RichText::new(format!(
+                            "Audiophile Local Desktop Music Player • Audio Engine v{}",
+                            engine::VERSION
+                        ))
                             .font(FontId::proportional(12.0))
                             .color(theme.text_secondary),
                     );
@@ -58,10 +61,11 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
                 ("Up Arrow", "Increase volume by 5%"),
                 ("Down Arrow", "Decrease volume by 5%"),
                 ("Ctrl + B", "Toggle Bit-Perfect Pure Direct mode"),
-                ("Ctrl + N", "Create new playlist"),
+                ("Ctrl + N", "Open the playlist editor (create or manage playlists)"),
                 ("Ctrl + P", "Open Settings & DSP Studio"),
                 ("Ctrl + O", "Open Folders & Library Manager"),
-                ("Escape", "Clear search / Dismiss modal"),
+                ("Ctrl + E", "Toggle the Equalizer & DSP studio panel"),
+                ("Escape", "Close the open dialog (one layer per press), or clear the search"),
             ];
 
             let table_frame = egui::Frame::NONE

@@ -30,6 +30,15 @@ pub mod decode;
 pub mod diagnostics;
 pub mod dsp;
 pub mod dsp_utils;
+
+/// The engine crate's version.
+///
+/// Hosts hard-coded this string (`"Audio Engine v1.2.1"`) in five places, so it
+/// drifted from `Cargo.toml` on every release. Read it from here instead.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The engine crate's package name.
+pub const NAME: &str = env!("CARGO_PKG_NAME");
 // NOT gated on `audio-output`. The engine state machine is the crate's core
 // and compiles without a backend; gating the whole module made
 // `--no-default-features` fail with ten unrelated "cannot find module

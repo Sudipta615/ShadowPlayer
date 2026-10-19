@@ -63,6 +63,16 @@ impl SettingsCategory {
 // State
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Everything the settings panel needs to remember between launches.
+///
+/// Serde lives **on this struct** rather than on a hand-written mirror. The
+/// mirror (`PersistentSettingsTabState`) listed 34 fields while the live struct
+/// had more, so the two drifted: spatial screen placement, the mix-bus scratch
+/// values and the capture fields silently reset on every launch, and nothing
+/// caught the omission at compile time. Deriving here means a new field is
+/// persisted unless it is explicitly skipped.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SettingsTabState {
     pub active_category: SettingsCategory,
 
@@ -84,6 +94,12 @@ pub struct SettingsTabState {
     pub dither_enabled: bool,
     pub resampler_quality: ResamplerQuality,
     pub fallback_policy: FallbackPolicy,
+    /// Engine processing profile, applied to the session on change.
+    ///
+    /// Persisted with `AppSettings` rather than here: the engine needs it at
+    /// startup, before the UI (and this struct) exist.
+    #[serde(skip)]
+    pub audio_profile: domain::models::AudioProfileChoice,
 
     // Internal DSP precision (f32 vs f64 core). `None` until the user chooses,
     // so the engine's own persisted setting is never clobbered at startup.
@@ -94,32 +110,43 @@ pub struct SettingsTabState {
     pub lfe: LfeConfig,
     pub channel_mix: ChannelMixConfig,
 
-    // Whole-chain named presets, plus the small amount of UI scratch state
-    // (the name being typed) that the card needs.
+    // Whole-chain named presets. Stored under their own key: they are a library
+    // the user curates, not a setting, and a preset outlives the state it was
+    // captured from.
+    #[serde(skip)]
     pub chain_presets: Vec<crate::state::chain_preset::ChainPreset>,
+    /// Scratch text for the preset name being typed.
+    #[serde(skip)]
     pub chain_preset_draft_name: String,
+    #[serde(skip)]
     pub chain_preset_draft_note: String,
     /// Index of the preset whose rename box is open.
+    #[serde(skip)]
     pub chain_preset_renaming: Option<usize>,
     /// Scratch text for the inline rename box.
+    #[serde(skip)]
     pub chain_preset_rename_buffer: String,
     /// Pending user-facing message about the last preset save/apply. Consumed
     /// by the app and shown as a toast.
+    #[serde(skip)]
     pub chain_preset_notice: Option<String>,
 
     // CLAP plugin insert. The card only describes the plugin; everything that
     // changes it happens in the rack window.
     /// Live summary of the hosted plugin, refreshed by the app each frame.
+    #[serde(skip)]
     pub clap: crate::state::clap_rack::ClapCardSummary,
 
     // Library maintenance
     /// Set by the Settings > Library "Organize Files" button; the app raises the
     /// batch organizer and clears it.
+    #[serde(skip)]
     pub request_organize: bool,
     /// Set by the CLAP card when the user asks for a plugin file; the app owns
     /// the native picker, so the card can only ask. A flag rather than an action
     /// because both settings surfaces can raise it and only one of them returns
     /// actions.
+    #[serde(skip)]
     pub request_clap_library: bool,
 
     // Spatial
@@ -127,6 +154,8 @@ pub struct SettingsTabState {
     pub hrtf_profile: String,
     pub listener_smoothing_ms: f32,
     pub listener_max_rate: f32,
+    /// Head orientation in degrees, independent of the virtual centre.
+    pub listener_yaw_deg: f32,
     pub room_enabled: bool,
     pub room_width: f32,
     pub room_depth: f32,
@@ -137,14 +166,14 @@ pub struct SettingsTabState {
     pub air_absorption_enabled: bool,
     pub voice_budget_enabled: bool,
     pub voice_capacity: usize,
+    /// Azimuth of the virtual centre, driven by the soundstage radar.
     pub screen_center_az: f32,
     pub screen_half_w: f32,
     pub screen_elevation: f32,
     pub screen_gain: f32,
-    pub source_azimuth_deg: f32,
-    pub source_distance_m: f32,
 
     // Mix Bus
+    #[serde(skip)]
     pub add_track_path: String,
     pub track_slot: u8,
     pub track_gain: f32,
@@ -164,13 +193,13 @@ pub struct SettingsTabState {
     pub capture_device: String,
     pub stereo_enhancer_enabled: bool,
     pub loudness_tag_path: String,
-    pub write_rg_path: String,
     /// When set, the library ReplayGain scan also writes the measured values
     /// into each file's tags. Off by default: the app never modifies files
     /// without explicit consent.
     pub loudness_write_tags: bool,
 
     // Library input
+    #[serde(skip)]
     pub new_scan_path: String,
 
     // Legacy collapsible section flags preserved for compatibility
@@ -203,6 +232,7 @@ impl Default for SettingsTabState {
             dither_enabled: true,
             resampler_quality: ResamplerQuality::HighQuality,
             fallback_policy: FallbackPolicy::Allow,
+            audio_profile: domain::models::AudioProfileChoice::default(),
             precision_mode: None,
             bass_management: BassManagementConfig::default(),
             lfe: LfeConfig::default(),
@@ -222,6 +252,7 @@ impl Default for SettingsTabState {
             hrtf_profile: String::new(),
             listener_smoothing_ms: 50.0,
             listener_max_rate: 0.0,
+            listener_yaw_deg: 0.0,
             room_enabled: false,
             room_width: 5.0,
             room_depth: 4.0,
@@ -236,8 +267,6 @@ impl Default for SettingsTabState {
             screen_half_w: 30.0,
             screen_elevation: 0.0,
             screen_gain: 1.0,
-            source_azimuth_deg: 0.0,
-            source_distance_m: 2.0,
 
             add_track_path: String::new(),
             track_slot: 2,
@@ -257,7 +286,6 @@ impl Default for SettingsTabState {
             capture_device: String::new(),
             stereo_enhancer_enabled: false,
             loudness_tag_path: String::new(),
-            write_rg_path: String::new(),
             loudness_write_tags: false,
 
             new_scan_path: String::new(),
@@ -269,141 +297,6 @@ impl Default for SettingsTabState {
             section_capture: false,
             section_advanced: false,
         }
-    }
-}
-
-/// Serde-serializable snapshot of Settings Tab state for persistent storage
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PersistentSettingsTabState {
-    pub active_category: SettingsCategory,
-    pub speed: f32,
-    pub pitch_semitones: f32,
-    pub speed_mode: SpeedMode,
-    pub transition_mode: TransitionMode,
-    pub crossfade_duration_secs: f32,
-    pub crossfade_curve: CrossfadeCurve,
-    pub loudness_mode: LoudnessMode,
-
-    pub output_backend: AudioBackend,
-    pub output_device: String,
-    pub sample_rate_policy: SampleRatePolicy,
-    pub volume_mode: VolumeMode,
-    pub bit_perfect: bool,
-    pub dither_enabled: bool,
-    pub resampler_quality: ResamplerQuality,
-    pub fallback_policy: FallbackPolicy,
-
-    #[serde(default)]
-    pub precision_mode: Option<PrecisionMode>,
-
-    #[serde(default)]
-    pub bass_management: BassManagementConfig,
-    #[serde(default)]
-    pub lfe: LfeConfig,
-    #[serde(default)]
-    pub channel_mix: ChannelMixConfig,
-
-    pub spatial_quality: SpatialQuality,
-    pub hrtf_profile: String,
-    pub listener_smoothing_ms: f32,
-    pub listener_max_rate: f32,
-    pub room_enabled: bool,
-    pub room_width: f32,
-    pub room_depth: f32,
-    pub room_height: f32,
-    pub room_absorption: f32,
-    pub room_rt60_ms: f32,
-    pub room_wet: f32,
-    pub air_absorption_enabled: bool,
-    pub voice_budget_enabled: bool,
-    pub voice_capacity: usize,
-    pub stereo_enhancer_enabled: bool,
-    /// Write measured ReplayGain values into the audio files during a scan.
-    #[serde(default)]
-    pub loudness_write_tags: bool,
-}
-
-impl From<&SettingsTabState> for PersistentSettingsTabState {
-    fn from(s: &SettingsTabState) -> Self {
-        Self {
-            active_category: s.active_category,
-            speed: s.speed,
-            pitch_semitones: s.pitch_semitones,
-            speed_mode: s.speed_mode,
-            transition_mode: s.transition_mode,
-            crossfade_duration_secs: s.crossfade_duration_secs,
-            crossfade_curve: s.crossfade_curve,
-            loudness_mode: s.loudness_mode,
-            output_backend: s.output_backend,
-            output_device: s.output_device.clone(),
-            sample_rate_policy: s.sample_rate_policy.clone(),
-            volume_mode: s.volume_mode,
-            bit_perfect: s.bit_perfect,
-            dither_enabled: s.dither_enabled,
-            resampler_quality: s.resampler_quality,
-            fallback_policy: s.fallback_policy,
-            precision_mode: s.precision_mode,
-            bass_management: s.bass_management.clone(),
-            lfe: s.lfe.clone(),
-            channel_mix: s.channel_mix.clone(),
-            spatial_quality: s.spatial_quality,
-            hrtf_profile: s.hrtf_profile.clone(),
-            listener_smoothing_ms: s.listener_smoothing_ms,
-            listener_max_rate: s.listener_max_rate,
-            room_enabled: s.room_enabled,
-            room_width: s.room_width,
-            room_depth: s.room_depth,
-            room_height: s.room_height,
-            room_absorption: s.room_absorption,
-            room_rt60_ms: s.room_rt60_ms,
-            room_wet: s.room_wet,
-            air_absorption_enabled: s.air_absorption_enabled,
-            voice_budget_enabled: s.voice_budget_enabled,
-            voice_capacity: s.voice_capacity,
-            stereo_enhancer_enabled: s.stereo_enhancer_enabled,
-            loudness_write_tags: s.loudness_write_tags,
-        }
-    }
-}
-
-impl PersistentSettingsTabState {
-    pub fn apply_to(&self, s: &mut SettingsTabState) {
-        s.active_category = self.active_category;
-        s.speed = self.speed;
-        s.pitch_semitones = self.pitch_semitones;
-        s.speed_mode = self.speed_mode;
-        s.transition_mode = self.transition_mode;
-        s.crossfade_duration_secs = self.crossfade_duration_secs;
-        s.crossfade_curve = self.crossfade_curve;
-        s.loudness_mode = self.loudness_mode;
-        s.output_backend = self.output_backend;
-        s.output_device = self.output_device.clone();
-        s.sample_rate_policy = self.sample_rate_policy.clone();
-        s.volume_mode = self.volume_mode;
-        s.bit_perfect = self.bit_perfect;
-        s.dither_enabled = self.dither_enabled;
-        s.resampler_quality = self.resampler_quality;
-        s.fallback_policy = self.fallback_policy;
-        s.precision_mode = self.precision_mode;
-        s.bass_management = self.bass_management.clone();
-        s.lfe = self.lfe.clone();
-        s.channel_mix = self.channel_mix.clone();
-        s.spatial_quality = self.spatial_quality;
-        s.hrtf_profile = self.hrtf_profile.clone();
-        s.listener_smoothing_ms = self.listener_smoothing_ms;
-        s.listener_max_rate = self.listener_max_rate;
-        s.room_enabled = self.room_enabled;
-        s.room_width = self.room_width;
-        s.room_depth = self.room_depth;
-        s.room_height = self.room_height;
-        s.room_absorption = self.room_absorption;
-        s.room_rt60_ms = self.room_rt60_ms;
-        s.room_wet = self.room_wet;
-        s.air_absorption_enabled = self.air_absorption_enabled;
-        s.voice_budget_enabled = self.voice_budget_enabled;
-        s.voice_capacity = self.voice_capacity;
-        s.stereo_enhancer_enabled = self.stereo_enhancer_enabled;
-        s.loudness_write_tags = self.loudness_write_tags;
     }
 }
 
@@ -504,6 +397,8 @@ pub struct SettingsTabActions {
     pub dither_changed: Option<bool>,
     pub resampler_quality_changed: Option<ResamplerQuality>,
     pub fallback_policy_changed: Option<FallbackPolicy>,
+    /// The engine processing profile changed (Consumer / Fidelity / Low power).
+    pub audio_profile_changed: Option<domain::models::AudioProfileChoice>,
     pub precision_mode_changed: Option<PrecisionMode>,
     pub bass_management_changed: Option<BassManagementConfig>,
     pub lfe_changed: Option<LfeConfig>,
@@ -517,6 +412,10 @@ pub struct SettingsTabActions {
     pub listener_tracking_changed: bool,
     pub spatial_room_changed: bool,
     pub spatial_screen_changed: bool,
+    /// The listener's head orientation changed.
+    pub spatial_listener_changed: bool,
+    /// Air absorption was switched on or off.
+    pub air_absorption_changed: Option<bool>,
     pub voice_budget_changed: bool,
 
     // Mix Bus
@@ -600,6 +499,13 @@ pub struct SettingsExtraContext<'a> {
     pub loudness_has_run: bool,
     /// Round-trip output latency reported by the backend, in milliseconds.
     pub latency_ms: f32,
+    /// Backend the settings asked for.
+    pub requested_backend: Option<AudioBackend>,
+    /// Backend the engine actually opened. Differs from
+    /// [`Self::requested_backend`] when the native path was unavailable and the
+    /// engine fell back — which the user needs to see, because the fallback is
+    /// shared-mode.
+    pub actual_backend: Option<AudioBackend>,
     /// Mean DSP graph-rebuild cost in milliseconds.
     pub graph_build_ms: f64,
     /// Number of DSP graph rebuilds since startup.
@@ -1040,15 +946,28 @@ fn render_output_category(
             Some(&crate::components::info_box::INFO_AUDIO_BACKEND),
             theme,
             |ui| {
+                crate::components::backend_options::backend_picker(
+                    ui,
+                    &mut state.output_backend,
+                    theme,
+                    &mut actions.backend_changed,
+                );
+            },
+        );
+
+        setting_item(
+            ui,
+            "Processing Profile",
+            "Engine preset: resampler quality, dither, EQ, crossfeed and buffer sizes move together. Consumer keeps the lightest chain, Fidelity the strictest, Low Power the cheapest",
+            theme,
+            |ui| {
                 let options = [
-                    (AudioBackend::Auto, "Auto Detect"),
-                    (AudioBackend::ExclusiveAlsa, "ALSA Exclusive"),
-                    (AudioBackend::ExclusiveWasapi, "WASAPI Exclusive"),
-                    (AudioBackend::ExclusiveCoreAudioHog, "CoreAudio Hog"),
-                    (AudioBackend::ExclusiveAsio, "ASIO Direct"),
+                    (domain::models::AudioProfileChoice::Normal, "Consumer"),
+                    (domain::models::AudioProfileChoice::Fidelity, "Fidelity"),
+                    (domain::models::AudioProfileChoice::LegacyLowPower, "Low Power"),
                 ];
-                if segment_picker(ui, &mut state.output_backend, &options, theme) {
-                    actions.backend_changed = Some(state.output_backend);
+                if segment_picker(ui, &mut state.audio_profile, &options, theme) {
+                    actions.audio_profile_changed = Some(state.audio_profile);
                 }
             },
         );
@@ -1228,10 +1147,14 @@ fn render_spatial_category(
         );
 
         ui.vertical_centered(|ui| {
+            // The drag moves the **virtual centre** — that is the one spatial
+            // parameter the engine actually exposes (`set_spatial_screen`).
+            // This used to also write a separate "source azimuth" and then copy
+            // it into the centre on every frame, so the two readouts could
+            // never differ.
             let radar_resp = crate::widgets::SpatialRadarWidget::new(
-                &mut state.source_azimuth_deg,
-                &mut state.source_distance_m,
-                state.screen_center_az,
+                &mut state.screen_center_az,
+                state.listener_yaw_deg,
                 theme,
             )
             .room_dimensions(state.room_width, state.room_depth)
@@ -1239,17 +1162,45 @@ fn render_spatial_category(
             .show(ui);
 
             if radar_resp.changed {
-                state.screen_center_az = state.source_azimuth_deg;
                 actions.spatial_screen_changed = true;
             }
         });
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
-            badge_label(ui, format!("Source Azimuth: {:+.1}°", state.source_azimuth_deg), theme);
-            badge_label(ui, format!("Source Distance: {:.2} m", state.source_distance_m), theme);
             badge_label(ui, format!("Virtual Center: {:+.1}°", state.screen_center_az), theme);
+            badge_label(ui, format!("Listener Facing: {:+.1}°", state.listener_yaw_deg), theme);
         });
+
+        setting_item_with_info(
+            ui,
+            "Listener Orientation",
+            "Rotates the listener's head independently of the virtual centre, so the soundstage can be auditioned from an angle",
+            None,
+            theme,
+            |ui| {
+                let mut yaw = state.listener_yaw_deg;
+                if dual_tone_slider(ui, &mut yaw, -180.0..=180.0, 1.0, 240.0, theme) {
+                    state.listener_yaw_deg = yaw;
+                    actions.spatial_listener_changed = true;
+                }
+            },
+        );
+
+        setting_item_with_info(
+            ui,
+            "Air Absorption",
+            "Distance-dependent high-frequency roll-off along each path, as air itself absorbs treble over distance",
+            None,
+            theme,
+            |ui| {
+                let mut enabled = state.air_absorption_enabled;
+                if toggle_switch(ui, &mut enabled, theme) {
+                    state.air_absorption_enabled = enabled;
+                    actions.air_absorption_changed = Some(enabled);
+                }
+            },
+        );
     });
 
     // Card 2: HRTF & Precision
@@ -2391,6 +2342,38 @@ fn render_tools_category(
 
         setting_item(
             ui,
+            "Negotiated Output",
+            "The backend the engine actually opened, and the one you asked for. Exclusive requests fall back to shared mode when the native path is unavailable",
+            theme,
+            |ui| {
+                match (extra.requested_backend, extra.actual_backend) {
+                    (Some(req), Some(actual)) if req != actual => {
+                        badge_label(
+                            ui,
+                            format!(
+                                "{} (requested {} — fell back)",
+                                crate::components::backend_options::backend_label(actual),
+                                crate::components::backend_options::backend_label(req)
+                            ),
+                            theme,
+                        );
+                    }
+                    (_, Some(actual)) => {
+                        badge_label(
+                            ui,
+                            crate::components::backend_options::backend_label(actual),
+                            theme,
+                        );
+                    }
+                    _ => {
+                        badge_label(ui, "Waiting for output".to_string(), theme);
+                    }
+                }
+            },
+        );
+
+        setting_item(
+            ui,
             "Output Latency",
             "Round-trip buffering between the DSP graph and the hardware device",
             theme,
@@ -2681,7 +2664,11 @@ fn render_library_category(
                         .color(theme.text_secondary),
                 );
                 ui.label(
-                    egui::RichText::new("Engine: Audio Engine v1.2.1 | Framework: egui v0.37.0 / eframe | SQLite FTS5")
+                    egui::RichText::new(format!(
+                        "Engine: {} v{} | Framework: egui v0.37.0 / eframe | SQLite FTS5",
+                        engine::NAME,
+                        engine::VERSION
+                    ))
                         .font(FontId::proportional(11.0))
                         .color(theme.text_muted),
                 );

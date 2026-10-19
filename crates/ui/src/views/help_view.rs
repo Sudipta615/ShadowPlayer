@@ -156,7 +156,16 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                             .strong()
                             .color(theme.text_primary),
                     );
-                    badge(ui, concat!("v", env!("CARGO_PKG_VERSION"), " • CORE v1.2.1"), theme.accent_violet, Color32::WHITE);
+                    badge(
+                        ui,
+                        format!(
+                            "v{} • CORE v{}",
+                            env!("CARGO_PKG_VERSION"),
+                            engine::VERSION
+                        ),
+                        theme.accent_violet,
+                        Color32::WHITE,
+                    );
                 });
                 ui.label(
                     egui::RichText::new(
@@ -1059,9 +1068,10 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
             ("Down Arrow", "Decrease master volume by 5%"),
             ("Ctrl + B", "Instant toggle for Bit-Perfect Pure Direct Mode"),
             ("Ctrl + P", "Open Settings & Audio DSP Studio"),
-            ("Ctrl + N", "Create new playlist dialog"),
+            ("Ctrl + N", "Open the playlist editor (create or manage playlists)"),
             ("Ctrl + O", "Open Folders & Music Library Manager"),
-            ("Escape", "Dismiss modals, info popups, or clear search queries"),
+            ("Ctrl + E", "Toggle the Equalizer & DSP studio panel"),
+            ("Escape", "Close the open dialog (one layer per press), or clear search queries"),
         ];
 
         ui.vertical(|ui| {

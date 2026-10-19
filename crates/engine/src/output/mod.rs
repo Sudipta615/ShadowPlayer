@@ -69,6 +69,73 @@ pub use output::{
     create_output, NativeDsdCapability, NativeDsdParams, Output, StreamErrorBatch,
     StreamErrorEvent, StreamErrorKind, StreamErrorState,
 };
+
+/// The output backends this build can actually try, in menu order.
+///
+/// Compile-time truth rather than a fixed list: a backend whose native
+/// implementation is not compiled in, or which belongs to another operating
+/// system, is not offered. Asking for one of those used to be possible from the
+/// picker and silently degraded to shared cpal output — the exact opposite of
+/// what "exclusive" promises. Which backend was *actually* negotiated is
+/// reported separately by [`OutputInfo::actual_backend`].
+pub fn available_backends() -> Vec<config::AudioBackend> {
+    // `Auto` is always first: it is the only entry that is meaningful
+    // everywhere.
+    let mut backends = vec![config::AudioBackend::Auto];
+
+    #[cfg(target_os = "linux")]
+    {
+        backends.push(config::AudioBackend::ExclusiveAlsa);
+    }
+    #[cfg(all(target_os = "windows", feature = "wasapi-native"))]
+    {
+        backends.push(config::AudioBackend::ExclusiveWasapi);
+    }
+    #[cfg(all(target_os = "windows", feature = "asio-native"))]
+    {
+        backends.push(config::AudioBackend::ExclusiveAsio);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        backends.push(config::AudioBackend::ExclusiveCoreAudioHog);
+    }
+
+    let _ = &mut backends;
+    backends
+}
+
+#[cfg(test)]
+mod available_backends_tests {
+    use super::available_backends;
+    use config::AudioBackend;
+
+    /// The picker must never offer a backend this build cannot open, and `Auto`
+    /// must always be offered.
+    #[test]
+    fn only_backends_this_build_can_open_are_listed() {
+        let backends = available_backends();
+        assert_eq!(backends.first(), Some(&AudioBackend::Auto));
+
+        #[cfg(target_os = "linux")]
+        assert!(backends.contains(&AudioBackend::ExclusiveAlsa));
+
+        // Never offered: no implementation exists for them on any platform.
+        assert!(!backends.contains(&AudioBackend::Null));
+    }
+
+    /// Backends gated on a native feature must not appear without it.
+    #[cfg(not(all(target_os = "windows", feature = "wasapi-native")))]
+    #[test]
+    fn exclusive_wasapi_is_hidden_without_the_native_backend() {
+        assert!(!available_backends().contains(&AudioBackend::ExclusiveWasapi));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn coreaudio_hog_is_hidden_off_macos() {
+        assert!(!available_backends().contains(&AudioBackend::ExclusiveCoreAudioHog));
+    }
+}
 pub use output_info::OutputInfo;
 pub use output_profile::{OutputProfile, OutputProfileLibrary};
 pub use pipewire::{PipeWireConfig, PipeWireOutput, PipeWireQuantumInfo, PipeWireStreamState};
