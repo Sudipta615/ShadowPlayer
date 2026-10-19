@@ -106,7 +106,10 @@ impl AdmSceneConverter {
                 })?;
             } else if pack.audio_type == AudioTypeDefinition::Hoa {
                 scene.create_field().ok_or_else(|| {
-                    AdmError::Unsupported(format!("HOA field capacity exceeded (pack '{}')", pack.id))
+                    AdmError::Unsupported(format!(
+                        "HOA field capacity exceeded (pack '{}')",
+                        pack.id
+                    ))
                 })?;
             }
         }

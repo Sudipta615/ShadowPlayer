@@ -37,9 +37,7 @@ pub use plugin_clap_node::ClapPluginHostNode;
 pub use plugin_host_node::{PluginHostNode, MAX_PLUGIN_SLOTS};
 
 #[allow(unused_imports)]
-pub use plugin_sandbox::{
-    PluginProcessSandbox, SandboxedPluginInstance, MAX_SANDBOX_CHANNELS,
-};
+pub use plugin_sandbox::{PluginProcessSandbox, SandboxedPluginInstance, MAX_SANDBOX_CHANNELS};
 pub use resampler_node::ResamplerNode;
 pub use routing_node::RoutingNode;
 pub use spatial_node::SpatialNode;

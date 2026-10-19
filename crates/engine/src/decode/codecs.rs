@@ -910,6 +910,10 @@ mod tests {
         // features: the old matrix spelled out only four of the eight
         // combinations, so e.g. a build with TTA on and Opus/WavPack off did
         // not compile.
+        // In a build with every codec feature on, nothing below extends this
+        // and the `mut` is unused; in a build with one off, the `cfg`-gated
+        // push needs it.
+        #[allow(unused_mut)]
         let mut unavailable: Vec<Codec> = vec![Codec::Musepack, Codec::Tak];
         #[cfg(not(feature = "codec-opus"))]
         unavailable.push(Codec::Opus);

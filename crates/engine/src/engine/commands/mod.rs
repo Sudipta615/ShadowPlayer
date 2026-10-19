@@ -329,7 +329,7 @@ impl AudioEngine {
 
         // A probe result describes a library file, not the loaded plugin, so it
         // outlives any change to what is loaded.
-        let library = (**self.clap_view.load()).library.clone();
+        let library = self.clap_view.load().library.clone();
         self.clap_view
             .store(std::sync::Arc::new(crate::dsp::clap_rack::ClapRackView {
                 rack: report,
@@ -576,8 +576,7 @@ impl AudioEngine {
                         Some(format!("No such CLAP library: {path}"))
                     } else {
                         let rate = self.output_sample_rate as f32;
-                        let mut clap_node =
-                            crate::dsp::graph2::prod::ClapPluginHostNode::new(rate);
+                        let mut clap_node = crate::dsp::graph2::prod::ClapPluginHostNode::new(rate);
                         match clap_node.load_plugin(p, plugin_id.as_deref()) {
                             Ok(()) => {
                                 self.graph.with_graph(|g| {
@@ -700,9 +699,9 @@ impl AudioEngine {
             EngineCommand::LoadClapState { bytes } => {
                 #[cfg(feature = "clap-host")]
                 {
-                    let restored = self
-                        .graph
-                        .with_graph(|g| g.plugin_mut().clap_node_mut().map(|c| c.load_state(&bytes)));
+                    let restored = self.graph.with_graph(|g| {
+                        g.plugin_mut().clap_node_mut().map(|c| c.load_state(&bytes))
+                    });
                     let error = match restored {
                         Some(Ok(())) => None,
                         Some(Err(e)) => {

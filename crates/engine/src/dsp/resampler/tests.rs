@@ -266,7 +266,11 @@ fn a_drained_resampler_reports_no_dropped_frames() {
         read += 1;
     }
     assert!(read > 20_000, "the output really was read: {read}");
-    assert_eq!(resampler.dropped_frames(), 0, "a drained stream drops nothing");
+    assert_eq!(
+        resampler.dropped_frames(),
+        0,
+        "a drained stream drops nothing"
+    );
 }
 
 /// A consumer that stops reading must not take the incoming audio down with

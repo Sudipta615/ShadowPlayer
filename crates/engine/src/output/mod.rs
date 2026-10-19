@@ -99,6 +99,14 @@ pub fn available_backends() -> Vec<config::AudioBackend> {
     backends
 }
 
+pub use output_info::OutputInfo;
+pub use output_profile::{OutputProfile, OutputProfileLibrary};
+pub use rate_policy::SampleRatePolicy;
+pub use recovery::rescale_clock_frames;
+pub use rt_thread::{
+    promote_current_thread_to_realtime, promote_current_thread_to_realtime_silent,
+};
+
 #[cfg(test)]
 mod available_backends_tests {
     use super::available_backends;
@@ -136,10 +144,3 @@ mod available_backends_tests {
         assert!(!available_backends().contains(&AudioBackend::ExclusiveCoreAudioHog));
     }
 }
-pub use output_info::OutputInfo;
-pub use output_profile::{OutputProfile, OutputProfileLibrary};
-pub use rate_policy::SampleRatePolicy;
-pub use recovery::rescale_clock_frames;
-pub use rt_thread::{
-    promote_current_thread_to_realtime, promote_current_thread_to_realtime_silent,
-};

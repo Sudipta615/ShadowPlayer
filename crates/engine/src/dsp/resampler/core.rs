@@ -434,7 +434,9 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
     fn push_sample_direct(&mut self, left: T, right: T) {
         // The buffer's own length is the authoritative capacity; it is at
         // least `MAX_OUTPUT_BUFFER_FRAMES` (see `allocate_buffers`).
-        let cap = self.output_buffers[0].len().min(self.output_buffers[1].len());
+        let cap = self.output_buffers[0]
+            .len()
+            .min(self.output_buffers[1].len());
         // When the consumer has drained the queue completely, the read cursor
         // may sit at the old end of the backing storage. Rewind it before the
         // next direct write; otherwise passthrough silently drops every sample
@@ -521,8 +523,12 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         // them from `output_frames_max()`, so `out_frames <= scratch.len()`
         // always holds; if it does not, the buffer invariant is broken and
         // the chunk is bypassed (never truncated, never partially written).
-        let capacity = self.output_buffers[0].len().min(self.output_buffers[1].len());
-        if capacity < out_frames || self.scratch[0].len() < out_frames || self.scratch[1].len() < out_frames
+        let capacity = self.output_buffers[0]
+            .len()
+            .min(self.output_buffers[1].len());
+        if capacity < out_frames
+            || self.scratch[0].len() < out_frames
+            || self.scratch[1].len() < out_frames
         {
             log::error!(
                 "Resampler buffers are under-allocated for a {out_frames}-frame chunk \
@@ -590,7 +596,10 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
                 // No output was produced for this chunk's input; the frames
                 // are gone, so say so in the accounting.
                 self.dropped_frames += needed as u64;
-                log::warn!("Resampler process error ({} input frames dropped): {e}", needed);
+                log::warn!(
+                    "Resampler process error ({} input frames dropped): {e}",
+                    needed
+                );
             }
         }
 

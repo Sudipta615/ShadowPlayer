@@ -164,7 +164,9 @@ pub struct LookaheadLimiter {
     /// `process_sample_multichannel`, which re-seeded it to unity on every
     /// sample and made the one-pole smoothing memoryless:
     ///
-    ///     g = desired + (1.0 - desired) * coeff
+    /// ```text
+    /// g = desired + (1.0 - desired) * coeff
+    /// ```
     ///
     /// At the documented defaults (48 kHz, 0.5 ms attack, 100 ms release)
     /// `attack_coeff = exp(-1/24) = 0.9592`, so the gain converged to

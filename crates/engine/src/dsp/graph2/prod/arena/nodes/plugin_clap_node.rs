@@ -40,12 +40,6 @@ use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
 };
 #[cfg(feature = "clap-host")]
-use clap_sys::ext::params::{
-    clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_BYPASS,
-    CLAP_PARAM_IS_ENUM, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_PERIODIC, CLAP_PARAM_IS_READONLY,
-    CLAP_PARAM_IS_STEPPED,
-};
-#[cfg(feature = "clap-host")]
 use clap_sys::ext::audio_ports::{
     clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,
 };
@@ -55,17 +49,20 @@ use clap_sys::ext::log::{
     CLAP_LOG_HOST_MISBEHAVING, CLAP_LOG_INFO, CLAP_LOG_PLUGIN_MISBEHAVING, CLAP_LOG_WARNING,
 };
 #[cfg(feature = "clap-host")]
+use clap_sys::ext::params::{
+    clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_ENUM,
+    CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_PERIODIC, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED,
+};
+#[cfg(feature = "clap-host")]
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
 #[cfg(feature = "clap-host")]
 use clap_sys::ext::thread_check::{clap_host_thread_check, CLAP_EXT_THREAD_CHECK};
 #[cfg(feature = "clap-host")]
-use clap_sys::id::CLAP_INVALID_ID;
-#[cfg(feature = "clap-host")]
-use clap_sys::string_sizes::{CLAP_NAME_SIZE, CLAP_PATH_SIZE};
-#[cfg(feature = "clap-host")]
 use clap_sys::factory::plugin_factory::{clap_plugin_factory, CLAP_PLUGIN_FACTORY_ID};
 #[cfg(feature = "clap-host")]
 use clap_sys::host::clap_host;
+#[cfg(feature = "clap-host")]
+use clap_sys::id::CLAP_INVALID_ID;
 #[cfg(feature = "clap-host")]
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 #[cfg(feature = "clap-host")]
@@ -74,6 +71,8 @@ use clap_sys::process::{
 };
 #[cfg(feature = "clap-host")]
 use clap_sys::stream::{clap_istream, clap_ostream};
+#[cfg(feature = "clap-host")]
+use clap_sys::string_sizes::{CLAP_NAME_SIZE, CLAP_PATH_SIZE};
 #[cfg(feature = "clap-host")]
 use clap_sys::version::CLAP_VERSION;
 
@@ -789,7 +788,9 @@ impl ClapPluginHostNode {
         // honored, and pretending otherwise would hand the plugin pointers it
         // was told not to expect.
         let (channels, in_place) = match unsafe { probe_main_ports(plugin_ptr) } {
-            Some(declaration) if declaration.input_channels > 2 || declaration.output_channels > 2 => {
+            Some(declaration)
+                if declaration.input_channels > 2 || declaration.output_channels > 2 =>
+            {
                 unsafe {
                     if let Some(destroy) = plugin.destroy {
                         destroy(plugin_ptr);
@@ -1572,7 +1573,8 @@ impl DspNode for ClapPluginHostNode {
                 // silences the block, so there is nothing worth copying back.
                 if status != CLAP_PROCESS_ERROR {
                     for (index, plane) in planes.iter_mut().take(channels).enumerate() {
-                        for (destination, source) in plane.iter_mut().zip(f32_planes[index].iter()) {
+                        for (destination, source) in plane.iter_mut().zip(f32_planes[index].iter())
+                        {
                             *destination = *source as f64;
                         }
                     }
@@ -1788,7 +1790,11 @@ fn cstr_to_string(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
-    Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+    Some(
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 /// Read one of CLAP's fixed-size inline char arrays.

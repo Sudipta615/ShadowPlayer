@@ -94,7 +94,6 @@ enum MixSampleFormat {
 }
 
 impl MixSampleFormat {
-
     /// Decode one packet's worth of samples into `scratch` (interleaved f32).
     ///
     /// `data`/`frames` come from `IAudioCaptureClient::GetBuffer`, so the

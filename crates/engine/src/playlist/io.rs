@@ -1426,7 +1426,8 @@ mod tests {
     /// into the queue: `from_parsed` used to drop it silently.
     #[test]
     fn playlist_from_parsed_keeps_extinf_metadata() {
-        let text = "#EXTM3U\n#EXTINF:12,Artist - Title\na.flac\nb.flac\n#EXTINF:-1,Just a title\nc.flac\n";
+        let text =
+            "#EXTM3U\n#EXTINF:12,Artist - Title\na.flac\nb.flac\n#EXTINF:-1,Just a title\nc.flac\n";
         let parsed = PlaylistFormat::M3u.parse(text, None).unwrap();
         let mut q = Playlist::from_parsed(parsed);
         let first = q.metadata(0).expect("EXTINF metadata is kept");

@@ -276,10 +276,7 @@ pub fn build_health(inputs: SpatialHealthInputs) -> SpatialHealthSnapshot {
                      extrapolated from the nearest measured responses"
                 ),
             ),
-            None => (
-                0.9,
-                "analytic head model (no HRTF dataset)".to_string(),
-            ),
+            None => (0.9, "analytic head model (no HRTF dataset)".to_string()),
         };
         if obj.spread > 0.5 {
             loc_score *= 1.0 - 0.4 * obj.spread.min(1.0);

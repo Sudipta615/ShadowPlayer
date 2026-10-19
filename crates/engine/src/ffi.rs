@@ -419,7 +419,10 @@ fn engine_codec_index_for_codec_string_impl(name: *const c_char, out_index: *mut
 /// `out_index`.
 fn resolve_codec_index(codec: Option<codec_registry::Codec>, out_index: &mut u32) -> i32 {
     let index = match codec {
-        Some(codec) => match codec_registry::all_codecs().iter().position(|&c| c == codec) {
+        Some(codec) => match codec_registry::all_codecs()
+            .iter()
+            .position(|&c| c == codec)
+        {
             Some(index) => index,
             // Reachable only if `for_extension`/`for_codec_string` learn a
             // codec that `all_codecs` never lists: an internal
@@ -2363,7 +2366,10 @@ mod tests {
         // entry point must refuse it before dereferencing anything.
         assert_eq!(engine_play(handle), EngineStatus::InvalidHandle as i32);
         assert_eq!(engine_pause(handle), EngineStatus::InvalidHandle as i32);
-        assert_eq!(engine_playback_state(handle), EngineStatus::InvalidHandle as i32);
+        assert_eq!(
+            engine_playback_state(handle),
+            EngineStatus::InvalidHandle as i32
+        );
         assert_eq!(engine_position_secs(handle), -1.0);
         assert_eq!(engine_playlist_len(handle), -1);
         assert_eq!(engine_endpoint_count(handle), -1);

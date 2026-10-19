@@ -487,6 +487,7 @@ pub fn bs1770_weights_for_layout(layout: &ChannelLayout) -> [f32; MAX_CHANNELS] 
 ///    integrated = mean of all blocks passing both gates.
 /// 7. LRA = 95th percentile − 10th percentile of the gated short-term
 ///    histogram (EBU Tech 3342).
+///
 /// One pass over the integrated-loudness blocks: what the two gates did.
 ///
 /// `total_blocks` is every 400 ms block the meter evaluated, and

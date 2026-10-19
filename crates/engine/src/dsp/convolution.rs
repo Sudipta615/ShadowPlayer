@@ -624,8 +624,7 @@ impl ConvolutionEngine {
                 }
                 Err(SymphoniaError::ResetRequired) => {
                     return Err(ConvolutionError::FileLoad(
-                        "IR file requires a format reset; refusing a partial response"
-                            .to_string(),
+                        "IR file requires a format reset; refusing a partial response".to_string(),
                     ));
                 }
                 Err(e) => {
@@ -1009,8 +1008,7 @@ impl ConvolutionEngine {
                     .copy_from_slice(&self.fft_workspace_output_right_f64[..spec_len]);
             }
             (left, right) => {
-                self.input_spectra_left_f64[cur_idx][..spec_len]
-                    .fill(Complex::new(0.0f64, 0.0f64));
+                self.input_spectra_left_f64[cur_idx][..spec_len].fill(Complex::new(0.0f64, 0.0f64));
                 self.input_spectra_right_f64[cur_idx][..spec_len]
                     .fill(Complex::new(0.0f64, 0.0f64));
                 let error = left

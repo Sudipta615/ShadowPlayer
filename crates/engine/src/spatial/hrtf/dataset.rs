@@ -1,8 +1,7 @@
 //! HRTF dataset storage, synthetic generator, and multi-mesh interpolation (spec §47–48, §62).
 
 use super::corpus::{
-    resample_impulse, HrtfCorpus, HrtfLoadError, HrtfLoadOptions, HrtfMeasurement, HrtfMeshKind,
-    HrtfNormalize,
+    resample_impulse, HrtfCorpus, HrtfLoadError, HrtfLoadOptions, HrtfMeshKind, HrtfNormalize,
 };
 use super::interpolate::SphericalHrtfInterpolator;
 use super::quality::MAX_HRTF_TAPS;
@@ -651,6 +650,7 @@ impl HrtfDataset {
 
 #[cfg(test)]
 mod tests {
+    use super::super::corpus::HrtfMeasurement;
     use super::*;
 
     #[test]

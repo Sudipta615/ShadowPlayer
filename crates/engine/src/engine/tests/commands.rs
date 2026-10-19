@@ -783,7 +783,10 @@ fn test_public_set_volume_routes_like_the_command_path() {
         "the endpoint owns the level; the DSP must stay at unity"
     );
     let pb = engine.playback_info();
-    assert_eq!(pb.volume_path, Some(crate::dsp::pipeline::VolumePath::Hardware));
+    assert_eq!(
+        pb.volume_path,
+        Some(crate::dsp::pipeline::VolumePath::Hardware)
+    );
     assert!(pb.volume_error.is_none());
 }
 

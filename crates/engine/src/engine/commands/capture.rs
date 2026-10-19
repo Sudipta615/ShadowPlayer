@@ -56,7 +56,8 @@ fn open_capture(
         // Through the `SystemCapture` impl, so the error type and the box
         // match what the rest of this function returns.
         return <crate::output::capture::WasapiLoopbackCapture as SystemCapture>::new(
-            device, RING_FRAMES,
+            device,
+            RING_FRAMES,
         )
         .map(|c| Box::new(c) as Box<dyn SystemCapture>);
     }

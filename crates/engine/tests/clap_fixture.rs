@@ -29,10 +29,7 @@ const SAMPLE_RATE: f32 = 48_000.0;
 /// root puts it in the root one. Both are checked, and the root manifest is
 /// used to build it when neither has it.
 fn locate_fixture() -> PathBuf {
-    let name = format!(
-        "libclap_fixture_plugin{}",
-        std::env::consts::DLL_SUFFIX
-    );
+    let name = format!("libclap_fixture_plugin{}", std::env::consts::DLL_SUFFIX);
 
     // A test binary lives in `<target>/<profile>/deps/`.
     let mut test_directory = std::env::current_exe().expect("test binary path");
@@ -72,9 +69,7 @@ fn locate_fixture() -> PathBuf {
         .iter()
         .find(|path| path.is_file())
         .cloned()
-        .unwrap_or_else(|| {
-            panic!("the fixture plugin was built but not found in {candidates:?}")
-        })
+        .unwrap_or_else(|| panic!("the fixture plugin was built but not found in {candidates:?}"))
 }
 
 /// The built fixture library, resolved once for the whole test binary.
@@ -130,7 +125,10 @@ fn loading_reports_the_plugin_and_the_parameters_it_exposes() {
     let plugin = report.plugin.as_ref().expect("a descriptor");
     assert_eq!(plugin.name, "Fixture Gain");
     assert_eq!(plugin.id, GAIN_ID);
-    assert!(report.has_state, "the fixture implements the state extension");
+    assert!(
+        report.has_state,
+        "the fixture implements the state extension"
+    );
     assert_eq!(report.latency_samples, 0);
     assert!(!report.bypassed);
     assert!(report.path.is_some());
@@ -145,10 +143,16 @@ fn loading_reports_the_plugin_and_the_parameters_it_exposes() {
     assert_eq!(gain.module, "main");
 
     let mix = &report.params[1];
-    assert_eq!((mix.min, mix.max, mix.default, mix.value), (0.0, 1.0, 1.0, 1.0));
+    assert_eq!(
+        (mix.min, mix.max, mix.default, mix.value),
+        (0.0, 1.0, 1.0, 1.0)
+    );
 
     let mode = &report.params[2];
-    assert!(mode.is_enum && mode.is_stepped, "the mode is an enumeration");
+    assert!(
+        mode.is_enum && mode.is_stepped,
+        "the mode is an enumeration"
+    );
 
     let bypass = &report.params[3];
     assert!(bypass.is_bypass, "the plugin declares its bypass switch");
@@ -163,7 +167,10 @@ fn loading_reports_the_plugin_and_the_parameters_it_exposes() {
 fn the_two_plugins_in_the_library_are_not_the_same_plugin() {
     let node = load(TRIM_ID);
     let report = node.rack_report();
-    assert_eq!(report.plugin.as_ref().map(|p| p.name.as_str()), Some("Fixture Trim"));
+    assert_eq!(
+        report.plugin.as_ref().map(|p| p.name.as_str()),
+        Some("Fixture Trim")
+    );
 
     let names: Vec<&str> = report.params.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["Input Trim", "Output Trim", "Bypass"]);
@@ -233,7 +240,10 @@ fn a_parameter_reaches_the_plugin_without_processing_a_block() {
     // The state it would hand back carries the same value, which is what makes
     // a preset's blob worth storing alongside the parameter list.
     let bytes = node.save_state().expect("state save");
-    assert!(bytes.len() >= 16, "the fixture writes a header and its values");
+    assert!(
+        bytes.len() >= 16,
+        "the fixture writes a header and its values"
+    );
     let restored = f64::from_le_bytes(bytes[8..16].try_into().expect("eight bytes"));
     assert!((restored - 6.0).abs() < 1e-9, "the blob holds {restored}");
 }
@@ -263,7 +273,10 @@ fn the_bypass_parameter_passes_audio_through_untouched() {
     let mut right = vec![0.25f32; 32];
     process(&mut node, &mut left, &mut right);
 
-    assert!((left[0] - 0.25).abs() < 1e-9, "bypassed audio must not change");
+    assert!(
+        (left[0] - 0.25).abs() < 1e-9,
+        "bypassed audio must not change"
+    );
 }
 
 #[test]
@@ -331,7 +344,10 @@ fn the_node_degrades_to_a_pass_through_when_bypassed_by_the_host() {
     let mut right = vec![0.1f32; 16];
     process(&mut node, &mut left, &mut right);
 
-    assert!((left[0] - 0.1).abs() < 1e-9, "a disabled host node is not in the chain");
+    assert!(
+        (left[0] - 0.1).abs() < 1e-9,
+        "a disabled host node is not in the chain"
+    );
     assert!(node.rack_report().bypassed);
 }
 
@@ -429,7 +445,10 @@ fn a_plugin_that_fails_mid_block_is_taken_out_of_the_chain() {
     let mut right = vec![0.25f32; 32];
     process(&mut node, &mut left, &mut right);
     assert!(left.iter().all(|sample| *sample == 0.0));
-    assert!(!node.is_active(), "the latch comes back on the next failure");
+    assert!(
+        !node.is_active(),
+        "the latch comes back on the next failure"
+    );
 }
 
 #[test]
