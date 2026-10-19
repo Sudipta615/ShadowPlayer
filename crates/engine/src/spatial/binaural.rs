@@ -67,7 +67,7 @@ use super::doppler::{Doppler, DopplerState};
 use super::field::AmbisonicFieldMixer;
 use super::hrtf::{
     ear_delay_sec, head_shadow_alpha, max_itd_sec, read_delayed, Ear, ElevationNotch, HeadShadow,
-    HrtfDataset, DEFAULT_HEAD_RADIUS, DEFAULT_SPEED_OF_SOUND,
+    HrtfDataset, HrtfMeshKind, DEFAULT_HEAD_RADIUS, DEFAULT_SPEED_OF_SOUND,
 };
 use super::level::{AbsorptionState, AirAbsorption};
 use super::math::Vec3;
@@ -470,6 +470,25 @@ impl BinauralRenderer {
     /// and the diffuse ring keep the analytic model — documented: the
     /// spectral upgrade targets direct sources.
     pub fn use_dataset(&mut self, dataset: Option<std::sync::Arc<HrtfDataset>>) -> &mut Self {
+        if let Some(ds) = dataset.as_deref() {
+            let kind = match ds.mesh_kind() {
+                HrtfMeshKind::RegularGrid => "regular grid",
+                HrtfMeshKind::IrregularMesh => "irregular mesh",
+            };
+            let directions = ds.measured_direction_count();
+            match ds.coverage_extents() {
+                Some((a0, a1, e0, e1)) => log::info!(
+                    "HRTF: dataset loaded — {directions} measured directions ({kind}), \
+                     az {a0:.0}°..{a1:.0}°, el {e0:.0}°..{e1:.0}°; directions outside the span \
+                     run on the nearest measured responses, never the analytic model"
+                ),
+                None => {
+                    log::info!("HRTF: dataset loaded — {directions} measured directions ({kind})")
+                }
+            }
+        } else {
+            log::info!("HRTF: dataset cleared — analytic head model in use");
+        }
         self.dataset = dataset;
         self
     }
@@ -489,17 +508,13 @@ impl BinauralRenderer {
         self.dataset.is_some()
     }
 
-    /// The loaded dataset's grid extents `(az_min, az_max, el_min, el_max)`
-    /// in degrees, for spatial-health localization scoring (control path).
-    /// `None` when no dataset is loaded (analytic model in use).
+    /// The loaded dataset's coverage extents `(az_min, az_max, el_min,
+    /// el_max)` in degrees, for spatial-health localization scoring (control
+    /// path). Azimuths are in `[0, 360)` and wrap through 0° when
+    /// `az_min > az_max` (irregular meshes). `None` when no dataset is loaded
+    /// (analytic model in use).
     pub fn hrtf_grid(&self) -> Option<(f32, f32, f32, f32)> {
-        let ds = self.dataset.as_ref()?;
-        let az = ds.azimuths();
-        let el = ds.elevations();
-        if az.is_empty() || el.is_empty() {
-            return None;
-        }
-        Some((az[0], az[az.len() - 1], el[0], el[el.len() - 1]))
+        self.dataset.as_ref()?.coverage_extents()
     }
 
     /// Expose the current ITD ring length (samples) — used by tests to size

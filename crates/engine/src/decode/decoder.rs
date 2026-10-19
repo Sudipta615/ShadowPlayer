@@ -9,7 +9,7 @@
 //! | `.ape` / `.mac`    | `ape-decoder` (range coder + predictor) | ✅ Available (`codec-ape`) |
 //! | `.alac` / `.m4a` (ALAC inner) | Symphonia 0.6.0 ALAC codec | ✅ Available |
 //! | `.opus`            | `ogg` + pure-Rust `opus-decoder` (RFC 8251) | ✅ Available (`codec-opus`) |
-//! | `.oga`             | content sniff: Opus → Opus backend, else Symphonia (Vorbis) | ✅ Available |
+//! | `.oga`             | content sniff (with `codec-opus`): Opus → Opus backend, else Symphonia (Vorbis) | ✅ Available |
 //! | `.tta`             | native pure-Rust TTA1 decoder | ✅ Available (`codec-tta`) |
 //! | `.wv`              | `wavicle` pure-Rust v5 codec (16/24/32-bit int + f32, mono/stereo) | ✅ Available (`codec-wavpack`) — multichannel/DSD/hybrid `.wv` rejected explicitly |
 //! | `.tak`             | none | ⛔ DeclaredUnavailable — rejected with an explicit error |
@@ -238,10 +238,35 @@ impl Decoder {
             }
         }
         if ext.eq_ignore_ascii_case("oga") {
-            // `.oga` may hold Opus or Vorbis: for byte sources, defer to
-            // Symphonia which probes the container correctly. The Opus probe
-            // requires a filesystem path (it opens the file a second time).
-            return SymphoniaDecoder::open_from_source(source).map(Self::Symphonia);
+            // `.oga` may hold Opus or Vorbis. This used to route every `.oga`
+            // to Symphonia — which has no Opus codec — on the grounds that
+            // the Opus probe needs a filesystem path, so Opus-in-Ogg `.oga`
+            // could not open even with `codec-opus` enabled. Sniff the first
+            // Ogg packet instead: the byte source is seekable, so the probe
+            // can run in place and the stream is rewound afterwards. An
+            // OpusHead routes to the RFC 8251 backend (which opens from a
+            // path, hence the bridge); anything else — Vorbis, or a container
+            // the sniff does not recognise — goes to Symphonia from byte 0.
+            #[cfg(feature = "codec-opus")]
+            {
+                let mut source = source;
+                let is_opus = OpusSource::probe_reader(&mut *source);
+                if source.seek(SeekFrom::Start(0)).is_err() {
+                    return Err(DecodeError::FileOpen(
+                        "rewinding `.oga` source after the content sniff".to_string(),
+                    ));
+                }
+                if is_opus {
+                    return buf_and_open_file(source, |path| {
+                        OpusSource::open(path).map(Self::Opus)
+                    });
+                }
+                return SymphoniaDecoder::open_from_source(source).map(Self::Symphonia);
+            }
+            #[cfg(not(feature = "codec-opus"))]
+            {
+                return SymphoniaDecoder::open_from_source(source).map(Self::Symphonia);
+            }
         }
         if ext.eq_ignore_ascii_case("wv") {
             #[cfg(feature = "codec-wavpack")]
@@ -290,6 +315,23 @@ impl Decoder {
                         .into(),
                 ));
             }
+        }
+
+        // Matroska (`.mka`/`.mkv`/`.webm`) is served by the Symphonia
+        // fallback below when the container reader is compiled in. Without
+        // `codec-mkv`, refuse explicitly: falling through would report a
+        // build option as a corrupt file, and the registry row for MKA is
+        // `DeclaredUnavailable` in this build.
+        #[cfg(not(feature = "codec-mkv"))]
+        if ext.eq_ignore_ascii_case("mka")
+            || ext.eq_ignore_ascii_case("mkv")
+            || ext.eq_ignore_ascii_case("webm")
+        {
+            return Err(DecodeError::UnsupportedFormat(
+                "Matroska (MKA/MKV/WebM) container support is not enabled in this build. \
+                 Rebuild with the `codec-mkv` feature to open these files."
+                    .into(),
+            ));
         }
 
         // Everything else: Symphonia as universal fallback.
@@ -635,9 +677,6 @@ mod tests {
         }
     }
 
-    #[test]
-    #[test]
-
     /// Declared-but-unavailable codecs must fail with an explicit,
     /// codec-named error instead of Symphonia's generic "Probe failed"
     /// (which would silently mislead the user into thinking the file is
@@ -777,6 +816,51 @@ mod tests {
                 );
             }
             Ok(_) => panic!("non-Ogg file must not open"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `.oga` is ambiguous (Opus or Vorbis). With `codec-opus`, the dispatch
+    /// must sniff the first Ogg packet and route an Opus stream to the Opus
+    /// backend — it used to send every `.oga` to Symphonia, which has no Opus
+    /// codec, so Opus-in-Ogg `.oga` could not open at all.
+    #[cfg(feature = "codec-opus")]
+    #[test]
+    fn test_decoder_dispatch_oga_routes_opus_by_content() {
+        let path = temp_path("oga");
+        let bytes = crate::decode::opus::test_support::build_ogg_opus_bytes(2, 960, 312, &[]);
+        std::fs::write(&path, &bytes).unwrap();
+        match Decoder::open(&path) {
+            Ok(Decoder::Opus(opus)) => {
+                assert_eq!(opus.info().sample_rate, 48_000, "Opus decodes at 48 kHz");
+            }
+            Ok(_) => panic!("an Opus-in-Ogg `.oga` must open through the Opus backend"),
+            Err(e) => panic!("Opus `.oga` must decode: {e:?}"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The same extension must still fall through to Symphonia for content
+    /// the sniff does not claim: `.oga` is not an Opus-only route. Garbage
+    /// reaches Symphonia's probe (and fails there), never the Opus backend.
+    #[cfg(feature = "codec-opus")]
+    #[test]
+    fn test_decoder_dispatch_oga_falls_through_to_symphonia() {
+        let path = temp_path("oga");
+        std::fs::write(&path, b"not a real audio file").unwrap();
+        match Decoder::open(&path) {
+            Err(e) => {
+                let msg = format!("{e:?}");
+                assert!(
+                    msg.contains("Probe failed"),
+                    "non-Opus `.oga` content must reach Symphonia's probe: {msg}"
+                );
+                assert!(
+                    !msg.contains("OpusHead"),
+                    "a non-Opus `.oga` must not be rejected by the Opus backend: {msg}"
+                );
+            }
+            Ok(_) => panic!("non-audio must not open"),
         }
         let _ = std::fs::remove_file(&path);
     }

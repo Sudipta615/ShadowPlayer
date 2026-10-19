@@ -492,11 +492,17 @@ impl LookaheadLimiter {
     /// Enable or disable the true-peak FIR oversampling detector.
     ///
     /// When `TruePeakMode::Fir4x` is active, the peak detector runs a
-    /// 4× polyphase FIR upsampler before computing the envelope maximum.
-    /// This gives accurate inter-sample peak detection per ITU-R BS.1770-5 Annex 2.
+    /// 4× polyphase FIR upsampler before computing the envelope maximum —
+    /// the BS.1770-5 Annex 2 *definition* of the inter-sample peak. The
+    /// filter is the engine prototype documented in
+    /// [`crate::dsp::true_peak`] (a Kaiser design meeting the Annex 2 filter
+    /// criteria, not the published 48-tap table), so the result is a faithful
+    /// estimate, not a certified Annex 2 meter.
     ///
     /// **Note:** The old `true_peak_enabled = true` mode used 4× linear
-    /// interpolation, which is NOT EBU R128-compliant.  The new FIR mode is.
+    /// interpolation, which is not inter-sample-accurate at all. The FIR
+    /// mode is a strict improvement; see the module above for its exact
+    /// conformance status.
     pub fn set_true_peak_mode(&mut self, mode: TruePeakMode) {
         if self.true_peak_mode == mode {
             return;

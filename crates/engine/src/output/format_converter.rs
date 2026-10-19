@@ -71,7 +71,9 @@ impl AudioFormatConverter {
     /// * `format`         — target sample format
     /// * `dither_type`    — which dithering algorithm to apply
     /// * `sample_rate`    — the rate the stream will be played at, which
-    ///   selects the noise-shaping coefficients
+    ///   selects the noise-shaping coefficients (Shibata designs exist for
+    ///   exactly 44.1/48 kHz; other rates reuse the nearer table and
+    ///   `dsp::dither` logs one warning — see `Dither::with_sample_rate`)
     pub fn new_at_rate(format: TargetFormat, dither_type: DitherType, sample_rate: u32) -> Self {
         let bit_depth = match format {
             TargetFormat::F32 | TargetFormat::F64 => 32,

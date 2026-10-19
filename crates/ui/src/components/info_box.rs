@@ -389,7 +389,7 @@ pub const INFO_DITHER: InfoBoxContent = InfoBoxContent {
     title: "TPDF Triangular Dithering",
     subtitle: "Quantization Noise Shaping",
     description: "Applies high-resolution Triangular Probability Density Function dither noise to prevent low-level quantization distortion.",
-    technical_note: "Eliminates harmonic distortion when truncating 32-bit float audio to 16-bit or 24-bit fixed point. Operates with Shibata sample-rate-aware coefficients.",
+    technical_note: "Eliminates harmonic distortion when truncating 32-bit float audio to 16-bit or 24-bit fixed point. Shibata noise shaping selects coefficients for the stream's sample rate, using the published 44.1/48 kHz designs; other rates reuse the nearer table and log one warning.",
     recommendation: "Keep OFF for 24-bit/32-bit DACs for a zero-noise-floor bit-accurate signal. Enable for 16-bit soundcards.",
 };
 

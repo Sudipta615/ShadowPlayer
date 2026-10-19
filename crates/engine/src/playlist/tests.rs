@@ -145,3 +145,60 @@ fn peek_next_does_not_mutate() {
     assert_eq!(q.current_index(), Some(0));
     assert!(q.advance().is_some()); // still b
 }
+
+#[test]
+fn metadata_is_carried_into_the_queue_and_stays_aligned() {
+    // `from_parsed` used to drop the parsed per-entry metadata on the floor.
+    // The queue now stores it parallel to its entries, and queue mutations
+    // must keep the two vectors aligned — a drift here would show one track's
+    // titles for another.
+    let parsed = ParsedPlaylist {
+        entries: vec![src("a.flac"), src("b.flac"), src("c.flac")],
+        metadata: vec![
+            TrackMetadata {
+                title: Some("First".into()),
+                ..TrackMetadata::default()
+            },
+            TrackMetadata::default(), // the file said nothing about b
+            TrackMetadata {
+                artist: Some("Third Artist".into()),
+                ..TrackMetadata::default()
+            },
+        ],
+        repeat: None,
+    };
+    let mut q = Playlist::from_parsed(parsed);
+    assert_eq!(
+        q.metadata(0).and_then(|m| m.title.as_deref()),
+        Some("First")
+    );
+    assert_eq!(q.metadata(1), None, "an empty record means 'no metadata'");
+    assert_eq!(
+        q.metadata(2).and_then(|m| m.artist.as_deref()),
+        Some("Third Artist")
+    );
+    assert_eq!(q.metadata(3), None, "out of range");
+    assert_eq!(q.metadata.len(), q.len());
+
+    // Removal shifts metadata with its entry.
+    assert_eq!(q.remove(0).unwrap().to_string(), "a.flac");
+    assert_eq!(q.metadata(0), None, "b's absent record moved up with b");
+    assert_eq!(
+        q.metadata(1).and_then(|m| m.artist.as_deref()),
+        Some("Third Artist")
+    );
+    assert_eq!(q.metadata.len(), q.len());
+
+    // A live enqueue carries no file metadata.
+    q.enqueue(src("d.flac"));
+    assert_eq!(q.metadata(2), None, "enqueue adds no metadata");
+    assert_eq!(q.metadata.len(), q.len());
+
+    // `clear` and `set_single` keep the vectors consistent too.
+    q.clear();
+    assert_eq!(q.metadata(0), None);
+    assert_eq!(q.metadata.len(), q.len());
+    q.set_single(src("only.flac"));
+    assert_eq!(q.metadata(0), None);
+    assert_eq!(q.metadata.len(), q.len());
+}

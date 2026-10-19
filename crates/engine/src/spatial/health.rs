@@ -101,9 +101,13 @@ impl HealthFactor {
     }
 }
 
-/// HRTF dataset grid coverage (degrees), used for localization scoring.
-/// Built from the loaded dataset's azimuth/elevation tables; `None` means
-/// the analytic head model is in use.
+/// HRTF dataset coverage (degrees), used for localization scoring.
+/// Built from the loaded dataset — regular grids from their azimuth/elevation
+/// tables, irregular meshes from their measurement directions; `None` means
+/// the analytic head model is in use. The azimuth span runs from
+/// `azimuth_min_deg` to `azimuth_max_deg` in 360° space and may wrap through
+/// 0° (irregular meshes whose arc does not cross the seam report
+/// `azimuth_min_deg > azimuth_max_deg`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct HrtfCoverage {
     pub azimuth_min_deg: f32,
@@ -114,12 +118,13 @@ pub struct HrtfCoverage {
 
 impl HrtfCoverage {
     /// Whether `azimuth_deg` (any range) is within the grid, allowing a
-    /// `grace_deg` tolerance on each side. Datasets store azimuths
-    /// monotonically ascending (the dataset constructor rejects non-monotonic
-    /// grids), so `azimuth_min_deg..=azimuth_max_deg` is the full span; the
-    /// queried angle is normalized into that span's own 360° window.
+    /// `grace_deg` tolerance on each side. The span is measured in 360°
+    /// space from `azimuth_min_deg`, so it works both for the ascending
+    /// tables of regular grids and for the wrapped arcs of irregular meshes
+    /// (`azimuth_min_deg > azimuth_max_deg`), whose query is normalized
+    /// into the covered window the same way.
     pub fn azimuth_covered(&self, azimuth_deg: f32, grace_deg: f32) -> bool {
-        let span = self.azimuth_max_deg - self.azimuth_min_deg;
+        let span = (self.azimuth_max_deg - self.azimuth_min_deg).rem_euclid(360.0);
         let az_norm = (azimuth_deg - self.azimuth_min_deg).rem_euclid(360.0);
         az_norm >= -grace_deg && az_norm <= span + grace_deg
     }
@@ -267,7 +272,8 @@ pub fn build_health(inputs: SpatialHealthInputs) -> SpatialHealthSnapshot {
             Some(_) => (
                 0.55,
                 format!(
-                    "HRTF out of measured grid (az {azimuth_deg:.0}° el {elevation_deg:.0}°) — analytic fallback"
+                    "HRTF out of measured grid (az {azimuth_deg:.0}° el {elevation_deg:.0}°) — \
+                     extrapolated from the nearest measured responses"
                 ),
             ),
             None => (
@@ -712,6 +718,23 @@ mod tests {
         assert!(g.azimuth_covered(95.0, 10.0)); // grace
         assert!(g.elevation_covered(38.0, 5.0));
         assert!(!g.elevation_covered(60.0, 5.0));
+
+        // A front arc that crosses 0° (irregular-mesh extents) is covered
+        // across the seam and nowhere behind the listener.
+        let wrapped = HrtfCoverage {
+            azimuth_min_deg: 270.0,
+            azimuth_max_deg: 90.0,
+            elevation_min_deg: -10.0,
+            elevation_max_deg: 10.0,
+        };
+        assert!(wrapped.azimuth_covered(0.0, 0.0));
+        assert!(wrapped.azimuth_covered(300.0, 0.0));
+        assert!(wrapped.azimuth_covered(359.0, 0.0));
+        assert!(wrapped.azimuth_covered(270.0, 0.0));
+        assert!(wrapped.azimuth_covered(90.0, 0.0));
+        assert!(!wrapped.azimuth_covered(180.0, 0.0));
+        assert!(!wrapped.azimuth_covered(200.0, 0.0));
+        assert!(!wrapped.azimuth_covered(90.1, 0.0));
     }
 
     #[test]

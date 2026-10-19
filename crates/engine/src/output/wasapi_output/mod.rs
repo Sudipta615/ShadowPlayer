@@ -78,11 +78,11 @@ use std::sync::Arc;
 
 use config::AudioBackend;
 use windows::Win32::{
-    Foundation::{CloseHandle, HANDLE},
+    Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0},
     Media::Audio::{IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator},
     System::{
         Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED},
-        Threading::CreateEventW,
+        Threading::{CreateEventW, ResetEvent, WaitForSingleObject},
     },
 };
 
@@ -122,7 +122,6 @@ pub struct WasapiOutput {
     requested_backend: AudioBackend,
     buffer: Arc<FixedFrameBuffer>,
     paused: Arc<AtomicBool>,
-    in_callback: Arc<AtomicBool>,
     underruns: Arc<AtomicU32>,
     clip_counter: Arc<AtomicU32>,
     nan_counter: Arc<AtomicU32>,
@@ -197,7 +196,6 @@ impl WasapiOutput {
             requested_backend: backend,
             buffer,
             paused: Arc::new(AtomicBool::new(false)),
-            in_callback: Arc::new(AtomicBool::new(false)),
             underruns: Arc::new(AtomicU32::new(0)),
             clip_counter: Arc::new(AtomicU32::new(0)),
             nan_counter: Arc::new(AtomicU32::new(0)),
@@ -239,13 +237,34 @@ impl WasapiOutput {
         // done before Start().
         let event = unsafe { CreateEventW(None, false, false, None) }
             .map_err(|e| OutputError::StreamOpen(format!("CreateEventW: {e}")))?;
+        // The pause acknowledgement event (`pause()` waits on it; the render
+        // thread sets it at the top of its loop while paused). Manual-reset,
+        // so a set is never lost to timing, and `pause()` clears it before
+        // each wait. It shares the buffer event's lifecycle — one pair per
+        // Start cycle — so no handle outlives the stream.
+        let idle_event = match unsafe { CreateEventW(None, true, false, None) } {
+            Ok(handle) => handle,
+            Err(e) => {
+                unsafe {
+                    let _ = CloseHandle(event);
+                }
+                return Err(OutputError::StreamOpen(format!("CreateEventW(idle): {e}")));
+            }
+        };
         {
             let client = self.client_mut();
-            unsafe { client.audio_client.SetEventHandle(event) }.map_err(|e| {
-                OutputError::StreamOpen(format!("IAudioClient::SetEventHandle: {e}"))
-            })?;
-            // Keep the handle so stop() can close it after the thread joins.
+            if let Err(e) = unsafe { client.audio_client.SetEventHandle(event) } {
+                unsafe {
+                    let _ = CloseHandle(event);
+                    let _ = CloseHandle(idle_event);
+                }
+                return Err(OutputError::StreamOpen(format!(
+                    "IAudioClient::SetEventHandle: {e}"
+                )));
+            }
+            // Keep the handles so stop() can close them after the thread joins.
             client.event = event;
+            client.idle_event = idle_event;
         }
 
         let running = Arc::clone(&self.running);
@@ -269,9 +288,9 @@ impl WasapiOutput {
             audio_client: SendCom(self.client().audio_client.clone()),
             render_client: SendCom(self.client().render_client.clone()),
             event: SendHandle(event),
+            idle_event: SendHandle(idle_event),
             buffer: Arc::clone(&self.buffer),
             paused: Arc::clone(&self.paused),
-            in_callback: Arc::clone(&self.in_callback),
             running: Arc::clone(&self.running),
             underruns: Arc::clone(&self.underruns),
             clip_counter: Arc::clone(&self.clip_counter),
@@ -339,14 +358,20 @@ impl WasapiOutput {
         if let Some(client) = self.client.as_ref() {
             let _ = unsafe { client.0.audio_client.Stop() };
         }
-        // Release the event handle (the thread has been joined, so nobody is
-        // waiting on it anymore).
+        // Release the event handles (the thread has been joined, so nobody is
+        // waiting on either anymore).
         if let Some(client) = self.client.as_mut() {
             if !client.0.event.is_invalid() {
                 unsafe {
                     let _ = CloseHandle(client.0.event);
                 }
                 client.0.event = HANDLE(std::ptr::null_mut());
+            }
+            if !client.0.idle_event.is_invalid() {
+                unsafe {
+                    let _ = CloseHandle(client.0.idle_event);
+                }
+                client.0.idle_event = HANDLE(std::ptr::null_mut());
             }
         }
         self.exclusive_verified = false;
@@ -562,15 +587,36 @@ impl WasapiOutput {
         self.dither_enabled.store(enabled, Ordering::Release);
     }
 
+    /// Pause buffer consumption and wait until any in-flight callback has
+    /// finished, so the caller may safely reset the shared buffer.
+    ///
+    /// The wait is event-driven: the render thread sets the idle event at the
+    /// top of its loop while `paused` is observed, which by construction is
+    /// after the last callback (and its buffer pull) completed. The old
+    /// implementation polled an atomic flag with 100 µs sleeps for up to
+    /// 50 ms on this thread. The 200 ms bound here catches a wedged render
+    /// thread only — a healthy one acknowledges within a buffer period, and
+    /// its own event wait is itself capped at 50 ms.
     pub fn pause(&self) {
+        let Some(client) = self.client.as_ref() else {
+            self.paused.store(true, Ordering::Release);
+            return;
+        };
+        if client.0.idle_event.is_invalid() {
+            // No stream is running (never started, or already stopped):
+            // nothing is pulling the shared buffer.
+            self.paused.store(true, Ordering::Release);
+            return;
+        }
+        // Clear an acknowledgement left over from an earlier pause before
+        // arming this one, so the wait cannot consume a stale set.
+        unsafe {
+            let _ = ResetEvent(client.0.idle_event);
+        }
         self.paused.store(true, Ordering::Release);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
-        while self.in_callback.load(Ordering::Acquire) {
-            if std::time::Instant::now() >= deadline {
-                log::warn!("WasapiOutput::pause(): render callback did not exit within 50ms");
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_micros(100));
+        let wait = unsafe { WaitForSingleObject(client.0.idle_event, 200) };
+        if wait != WAIT_OBJECT_0 {
+            log::warn!("WasapiOutput::pause(): render thread did not acknowledge within 200ms");
         }
     }
 

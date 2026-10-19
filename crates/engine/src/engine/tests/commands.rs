@@ -762,6 +762,101 @@ fn test_volume_hardware_preferred_falls_back_without_endpoint() {
 }
 
 #[test]
+fn test_public_set_volume_routes_like_the_command_path() {
+    // The C FFI and embedders call `AudioEngine::set_volume` directly; it has
+    // to route exactly like `EngineCommand::SetVolume`, or a
+    // `HardwarePreferred` host gets software gain while the UI would have
+    // gotten hardware volume.
+    let (fake, hardware_db) = FakeOutput::new(true);
+    let mut config = EngineConfig::default();
+    config.volume_mode = config::VolumeMode::HardwarePreferred;
+    let mut engine = AudioEngine::new(config).unwrap();
+    engine.audio_output = Some(Box::new(fake));
+
+    engine.set_volume(0.5);
+    engine.tick();
+
+    let expected_db = 20.0 * 0.5f32.log10();
+    assert_eq!(*hardware_db.lock().unwrap(), Some(expected_db));
+    assert!(
+        (engine.pipeline().volume().processor.target_gain - 1.0).abs() < 1e-4,
+        "the endpoint owns the level; the DSP must stay at unity"
+    );
+    let pb = engine.playback_info();
+    assert_eq!(pb.volume_path, Some(crate::dsp::pipeline::VolumePath::Hardware));
+    assert!(pb.volume_error.is_none());
+}
+
+#[test]
+fn test_public_set_volume_db_routes_like_the_command_path() {
+    let (fake, hardware_db) = FakeOutput::new(true);
+    let mut config = EngineConfig::default();
+    config.volume_mode = config::VolumeMode::HardwarePreferred;
+    let mut engine = AudioEngine::new(config).unwrap();
+    engine.audio_output = Some(Box::new(fake));
+
+    engine.set_volume_db(-6.0);
+    engine.tick();
+
+    assert_eq!(*hardware_db.lock().unwrap(), Some(-6.0));
+    assert!(
+        (engine.pipeline().volume().processor.target_gain - 1.0).abs() < 1e-4,
+        "the endpoint owns the level; the DSP must stay at unity"
+    );
+}
+
+#[test]
+fn test_public_set_volume_reports_the_software_fallback() {
+    // Without endpoint volume the public method must apply the gain in
+    // software and say so, not silently drop the change.
+    let (fake, hardware_db) = FakeOutput::new(false);
+    let mut config = EngineConfig::default();
+    config.volume_mode = config::VolumeMode::HardwarePreferred;
+    let mut engine = AudioEngine::new(config).unwrap();
+    engine.audio_output = Some(Box::new(fake));
+
+    engine.set_volume(0.25);
+    engine.tick();
+
+    assert_eq!(*hardware_db.lock().unwrap(), None);
+    assert!(
+        (engine.pipeline().volume().processor.target_gain - 0.25).abs() < 1e-4,
+        "the fallback applies the gain in software"
+    );
+    // The level path is the durable record of where a set actually landed;
+    // the setup-time `volume_error` note ("endpoint volume unavailable") has
+    // already done its job by the time the software gain succeeds.
+    let pb = engine.playback_info();
+    assert_eq!(
+        pb.volume_path,
+        Some(crate::dsp::pipeline::VolumePath::Software)
+    );
+    assert!((pb.volume - 0.25).abs() < 1e-4);
+}
+
+#[test]
+fn test_public_set_volume_never_softens_hardware_only() {
+    // `HardwareOnly` means exactly that: no software gain may appear, even
+    // when the public method is the one asking.
+    let (fake, _hardware_db) = FakeOutput::new(false);
+    let mut config = EngineConfig::default();
+    config.volume_mode = config::VolumeMode::HardwareOnly;
+    let mut engine = AudioEngine::new(config).unwrap();
+    engine.audio_output = Some(Box::new(fake));
+
+    engine.set_volume(0.5);
+    engine.tick();
+
+    assert!(
+        (engine.pipeline().volume().processor.target_gain - 1.0).abs() < 1e-4,
+        "HardwareOnly must keep the signal at unity"
+    );
+    let pb = engine.playback_info();
+    assert!(pb.volume_path.is_none());
+    assert!(pb.volume_error.is_some());
+}
+
+#[test]
 fn test_volume_hardware_only_routes_to_endpoint() {
     let (fake, hardware_db) = FakeOutput::new(true);
     let mut config = EngineConfig::default();

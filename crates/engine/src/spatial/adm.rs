@@ -90,13 +90,24 @@ impl AdmSceneConverter {
         }
 
         // 2. Convert DirectSpeakers packs into Beds
+        //
+        // A swallowed failure here silently dropped the whole bus from the
+        // scene while the document still claimed it: the converter reports
+        // capacity exhaustion instead, exactly like the object loop above.
         for pack in &doc.pack_formats {
             if pack.audio_type == AudioTypeDefinition::DirectSpeakers {
                 let channels = pack.channel_formats.len();
                 let layout = ChannelLayout::from_count(channels);
-                let _ = scene.create_bed(layout);
+                scene.create_bed(layout).ok_or_else(|| {
+                    AdmError::Unsupported(format!(
+                        "bed capacity exceeded (pack '{}', {} channels)",
+                        pack.id, channels
+                    ))
+                })?;
             } else if pack.audio_type == AudioTypeDefinition::Hoa {
-                let _ = scene.create_field();
+                scene.create_field().ok_or_else(|| {
+                    AdmError::Unsupported(format!("HOA field capacity exceeded (pack '{}')", pack.id))
+                })?;
             }
         }
 
@@ -605,5 +616,56 @@ mod tests {
         assert!((round_obj.spread - 0.3).abs() < 1e-3);
         assert!((round_obj.divergence - 0.5).abs() < 1e-3);
         assert!((round_obj.diffuseness - 0.2).abs() < 1e-3);
+    }
+
+    #[test]
+    fn adm_scene_construction_reports_capacity_instead_of_dropping_buses() {
+        use crate::spatial::bed::MAX_BEDS;
+        use crate::spatial::field::MAX_FIELDS;
+
+        let pack = |i: usize, audio_type: AudioTypeDefinition| AudioPackFormat {
+            id: format!("AP_{i:04}"),
+            name: String::new(),
+            audio_type,
+            channel_formats: Vec::new(),
+        };
+
+        // One more DirectSpeakers pack than the scene has beds: previously
+        // the extra bed vanished with no error at all.
+        let doc = AdmDocument {
+            standard: AdmStandard::default(),
+            pack_formats: (0..=MAX_BEDS)
+                .map(|i| pack(i, AudioTypeDefinition::DirectSpeakers))
+                .collect(),
+            ..AdmDocument::default()
+        };
+        match AdmSceneConverter::to_spatial_scene(&doc) {
+            Err(AdmError::Unsupported(msg)) => assert!(msg.contains("bed capacity"), "{msg}"),
+            other => panic!("expected a bed-capacity error, got {other:?}"),
+        }
+
+        // Same for HOA fields.
+        let doc = AdmDocument {
+            standard: AdmStandard::default(),
+            pack_formats: (0..=MAX_FIELDS)
+                .map(|i| pack(i, AudioTypeDefinition::Hoa))
+                .collect(),
+            ..AdmDocument::default()
+        };
+        match AdmSceneConverter::to_spatial_scene(&doc) {
+            Err(AdmError::Unsupported(msg)) => assert!(msg.contains("field capacity"), "{msg}"),
+            other => panic!("expected a field-capacity error, got {other:?}"),
+        }
+
+        // Exactly at capacity still converts.
+        let doc = AdmDocument {
+            standard: AdmStandard::default(),
+            pack_formats: (0..MAX_BEDS)
+                .map(|i| pack(i, AudioTypeDefinition::DirectSpeakers))
+                .collect(),
+            ..AdmDocument::default()
+        };
+        let scene = AdmSceneConverter::to_spatial_scene(&doc).expect("at capacity");
+        assert_eq!(scene.beds.iter().count(), MAX_BEDS);
     }
 }

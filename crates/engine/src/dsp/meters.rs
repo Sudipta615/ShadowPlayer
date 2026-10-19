@@ -3,7 +3,9 @@
 //! # Features
 //!
 //! - **Sample Peak**: Peak amplitude in dBFS per channel and max peak observed.
-//! - **True Peak**: Inter-sample true-peak in dBTP via ITU-R BS.1770-5 Annex 2 4× FIR oversampling.
+//! - **True Peak**: Inter-sample peak in dBTP from the shared 4× FIR estimate
+//!   (BS.1770-5 Annex 2 definition; the prototype is the engine's own, not the
+//!   published 48-tap table — see [`crate::dsp::true_peak`]).
 //! - **RMS**: Windowed root-mean-square level in dBFS per channel.
 //! - **EBU R128 / BS.1770 LUFS**:
 //!   - Momentary LUFS (400 ms sliding window).

@@ -2,8 +2,10 @@
 //!
 //! Decodes a file end to end on a background thread and measures its
 //! loudness with the **same** [`LoudnessMeter`] used everywhere else in the
-//! engine — full BS.1770-5 K-weighting, absolute + relative gating,
-//! short-term/LRA, and the shared 4× polyphase FIR true-peak detector.
+//! engine — BS.1770-5 K-weighting, absolute + relative gating, short-term
+//! and LRA — plus the shared 4× FIR true-peak estimate (the Annex 2
+//! definition; the prototype itself is `dsp::true_peak`'s, not Annex 2's
+//! published table).
 //!
 //! The metadata the scanner produces (`integrated_lufs`, `lra`, `dbtp`) is
 //! therefore identical in definition to what the playback chain measures,

@@ -98,10 +98,21 @@ impl ResamplerHandle {
     }
 }
 
-#[cfg(feature = "resample")]
-#[cfg(not(feature = "resample"))]
-impl Default for ResamplerHandle {
-    fn default() -> Self {
-        Self::Passthrough
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `#[derive(Default)]` plus `#[default]` on `Passthrough` is the single
+    /// definition of the default. The hand-written `impl Default` that used
+    /// to sit here was gated by both `feature = "resample"` and
+    /// `not(feature = "resample")`, so it never compiled in any build — and
+    /// deleting it changes no behaviour, because the derive always produced
+    /// the same value.
+    #[test]
+    fn default_is_passthrough() {
+        assert!(matches!(
+            ResamplerHandle::default(),
+            ResamplerHandle::Passthrough
+        ));
     }
 }

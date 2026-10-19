@@ -2,7 +2,12 @@ use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2
 use engine::dsp::ProfessionalMeterSnapshot;
 use crate::theme::Theme;
 
-/// Professional ITU-R BS.1770-5 Broadcast Loudness & True-Peak Meter Widget
+/// Broadcast-style loudness & true-peak meter.
+///
+/// The LUFS blocks are the engine's BS.1770-5-gated loudness. The dBTP block
+/// is the engine's 4× FIR *estimate* of the Annex 2 true-peak definition —
+/// a different prototype filter from the 48-tap table the recommendation
+/// publishes (`engine::dsp::true_peak`) — and the widget says so on hover.
 pub struct LufsMeterWidget<'a> {
     pub meters: Option<&'a ProfessionalMeterSnapshot>,
     pub theme: &'a Theme,
@@ -24,7 +29,7 @@ impl<'a> LufsMeterWidget<'a> {
     }
 
     pub fn show(self, ui: &mut egui::Ui) {
-        let (rect, _) = ui.allocate_exact_size(
+        let (rect, response) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), self.height),
             egui::Sense::hover(),
         );
@@ -119,5 +124,11 @@ impl<'a> LufsMeterWidget<'a> {
             let bar_fill = Rect::from_min_size(Pos2::new(b_rect.left() + 8.0, bar_y), Vec2::new(fill_w, 4.0));
             painter.rect_filled(bar_fill, CornerRadius::same(2), val_color);
         }
+
+        let _ = response.on_hover_text(
+            "LUFS blocks: ITU-R BS.1770-5 gated loudness. dBTP: the engine's 4× FIR \
+             estimate of the Annex 2 true-peak definition (engine prototype filter, \
+             not the published 48-tap table).",
+        );
     }
 }

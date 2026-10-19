@@ -40,6 +40,7 @@ use std::sync::{
     Arc, Mutex, OnceLock,
 };
 
+use crate::decode::codecs::{self as codec_registry, CodecStatus, CodecSupportLevel};
 use crate::{AudioEngine, EngineHandle};
 use config::EngineConfig;
 
@@ -144,6 +145,10 @@ pub enum EngineStatus {
     InvalidHandle = -2,
     InvalidArgument = -3,
     EngineNotRunning = -4,
+    /// A well-formed query has no answer for this value — e.g. an extension
+    /// the codec registry does not carry. Distinct from `Error` so a host can
+    /// tell "no such codec" from "the query itself failed".
+    NotFound = -5,
 }
 
 /// Run an FFI body so a Rust panic cannot unwind into the host.
@@ -209,6 +214,222 @@ pub extern "C" fn engine_abi_compatible(host_version: u32) -> i32 {
     let our_major = ENGINE_ABI_VERSION >> 16;
     let our_minor = ENGINE_ABI_VERSION & 0xFFFF;
     i32::from(host_major == our_major && our_minor >= host_minor)
+}
+
+// ── Codec capability registry ──────────────────────────────────────────────
+
+/// Status values for [`EngineCodecCapabilityFFI::status`], matching
+/// [`CodecStatus`]. Plain `u32` constants for the same reason as
+/// [`backend_id`]: a `#[repr(u32)]` enum parameter in an `extern "C"`
+/// signature lets the C caller produce an out-of-range discriminant, which is
+/// undefined behaviour before any validation can run.
+pub mod codec_status_id {
+    /// Fully decodable in this build.
+    pub const AVAILABLE: u32 = 0;
+    /// Tags are parsed; the audio stream is not decodable.
+    pub const METADATA_ONLY: u32 = 1;
+    /// Declared for future parity; opening such a file fails explicitly.
+    pub const DECLARED_UNAVAILABLE: u32 = 2;
+}
+
+/// Support-level values for [`EngineCodecCapabilityFFI::support_level`],
+/// matching [`CodecSupportLevel`].
+pub mod codec_support_id {
+    pub const FULLY_SUPPORTED: u32 = 0;
+    pub const DECODE_ONLY: u32 = 1;
+    pub const METADATA_ONLY: u32 = 2;
+    pub const EXPERIMENTAL: u32 = 3;
+    pub const UNAVAILABLE: u32 = 4;
+}
+
+/// One row of the codec capability registry, filled by
+/// [`engine_codec_capability`].
+///
+/// Boolean axes are `0`/`1`. `native_precision_bits` is the native integer
+/// source precision, or `-1` when there is none to report (1-bit DSD, or a
+/// lossy codec that decodes to float). `name` points at a static
+/// NUL-terminated string owned by the library and must not be freed by the
+/// host.
+///
+/// The Rust-side `multichannel` alias of `multichannel_decode` is deliberately
+/// not carried: it is an alias, not an independent axis.
+#[repr(C)]
+pub struct EngineCodecCapabilityFFI {
+    /// Registry index — the value [`engine_codec_capability`] was called with.
+    pub index: u32,
+    /// See [`codec_status_id`].
+    pub status: u32,
+    /// See [`codec_support_id`].
+    pub support_level: u32,
+    /// Audio frames can be decoded in this build.
+    pub decode: u32,
+    /// Sample-accurate seeking is supported.
+    pub seek: u32,
+    /// Encoder delay / end padding is applied (gapless).
+    pub gapless: u32,
+    /// Metadata (tags) is extracted.
+    pub metadata: u32,
+    /// ReplayGain tags are read.
+    pub replaygain: u32,
+    /// Container-native chapters / embedded cue sheets are read.
+    pub chapters: u32,
+    /// EBU R128 tags are read.
+    pub ebu_r128: u32,
+    /// Progressive decode from a packet stream is possible.
+    pub streaming: u32,
+    /// The decoder can expose more than two source channels.
+    pub multichannel_decode: u32,
+    /// The codec is lossless.
+    pub is_lossless: u32,
+    /// Native source precision in bits, or `-1` when not applicable.
+    pub native_precision_bits: i32,
+    /// Static NUL-terminated canonical name (e.g. `"flac"`); never freed.
+    pub name: *const c_char,
+}
+
+/// Number of rows in the codec capability registry.
+///
+/// The registry is fixed at build time in a stable order, so a host can
+/// enumerate it once with
+/// `for i in 0..engine_codec_count() { engine_codec_capability(i, &row); }`.
+/// Never `0` — the registry always has rows.
+#[no_mangle]
+pub extern "C" fn engine_codec_count() -> u32 {
+    codec_registry::all_codecs().len() as u32
+}
+
+/// Fill `out` with registry row `index`.
+///
+/// Returns `Ok`, or `InvalidArgument` when `out` is NULL or `index` is not a
+/// row of the registry (see [`engine_codec_count`]). The written struct is
+/// self-contained: the `name` pointer stays valid for the life of the
+/// process.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[no_mangle]
+pub extern "C" fn engine_codec_capability(index: u32, out: *mut EngineCodecCapabilityFFI) -> i32 {
+    ffi_boundary(
+        std::panic::AssertUnwindSafe(|| engine_codec_capability_impl(index, out)),
+        EngineStatus::Error as i32,
+    )
+}
+
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+fn engine_codec_capability_impl(index: u32, out: *mut EngineCodecCapabilityFFI) -> i32 {
+    if out.is_null() {
+        return EngineStatus::InvalidArgument as i32;
+    }
+    let Some(&codec) = codec_registry::all_codecs().get(index as usize) else {
+        return EngineStatus::InvalidArgument as i32;
+    };
+    let cap = codec_registry::capability(codec);
+    let row = EngineCodecCapabilityFFI {
+        index,
+        status: match cap.status {
+            CodecStatus::Available => codec_status_id::AVAILABLE,
+            CodecStatus::MetadataOnly => codec_status_id::METADATA_ONLY,
+            CodecStatus::DeclaredUnavailable => codec_status_id::DECLARED_UNAVAILABLE,
+        },
+        support_level: match cap.support_level {
+            CodecSupportLevel::FullySupported => codec_support_id::FULLY_SUPPORTED,
+            CodecSupportLevel::DecodeOnly => codec_support_id::DECODE_ONLY,
+            CodecSupportLevel::MetadataOnly => codec_support_id::METADATA_ONLY,
+            CodecSupportLevel::Experimental => codec_support_id::EXPERIMENTAL,
+            CodecSupportLevel::Unavailable => codec_support_id::UNAVAILABLE,
+        },
+        decode: u32::from(cap.decode),
+        seek: u32::from(cap.seek),
+        gapless: u32::from(cap.gapless),
+        metadata: u32::from(cap.metadata),
+        replaygain: u32::from(cap.replaygain),
+        chapters: u32::from(cap.chapters),
+        ebu_r128: u32::from(cap.ebu_r128),
+        streaming: u32::from(cap.streaming),
+        multichannel_decode: u32::from(cap.multichannel_decode),
+        is_lossless: u32::from(cap.is_lossless),
+        native_precision_bits: cap.native_precision_bits.map_or(-1, |bits| bits as i32),
+        name: codec_registry::codec_name(codec).as_ptr(),
+    };
+    unsafe { out.write(row) };
+    EngineStatus::Ok as i32
+}
+
+/// Resolve a file extension (case-insensitive, without the dot) to a registry
+/// index.
+///
+/// Writes the index and returns `Ok`; returns `NotFound` for an extension the
+/// registry does not carry and `InvalidArgument` for NULL pointers or
+/// non-UTF-8 input. A failed lookup leaves `*out_index` untouched.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[no_mangle]
+pub extern "C" fn engine_codec_index_for_extension(ext: *const c_char, out_index: *mut u32) -> i32 {
+    ffi_boundary(
+        std::panic::AssertUnwindSafe(|| engine_codec_index_for_extension_impl(ext, out_index)),
+        EngineStatus::Error as i32,
+    )
+}
+
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+fn engine_codec_index_for_extension_impl(ext: *const c_char, out_index: *mut u32) -> i32 {
+    if ext.is_null() || out_index.is_null() {
+        return EngineStatus::InvalidArgument as i32;
+    }
+    let ext = match unsafe { CStr::from_ptr(ext) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return EngineStatus::InvalidArgument as i32,
+    };
+    // Non-null, checked above.
+    let out_index = unsafe { &mut *out_index };
+    resolve_codec_index(codec_registry::for_extension(ext), out_index)
+}
+
+/// Resolve a codec identifier string (as reported by decoder diagnostics,
+/// e.g. `"flac"`, `"vorbis"`, `"s16"`) to a registry index.
+///
+/// Matching is the registry's own `for_codec_string` rule (case-insensitive
+/// substring), so it accepts what diagnostics actually print. Returns `Ok`,
+/// `NotFound`, or `InvalidArgument` for NULL/invalid pointers, exactly like
+/// [`engine_codec_index_for_extension`].
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[no_mangle]
+pub extern "C" fn engine_codec_index_for_codec_string(
+    name: *const c_char,
+    out_index: *mut u32,
+) -> i32 {
+    ffi_boundary(
+        std::panic::AssertUnwindSafe(|| engine_codec_index_for_codec_string_impl(name, out_index)),
+        EngineStatus::Error as i32,
+    )
+}
+
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+fn engine_codec_index_for_codec_string_impl(name: *const c_char, out_index: *mut u32) -> i32 {
+    if name.is_null() || out_index.is_null() {
+        return EngineStatus::InvalidArgument as i32;
+    }
+    let name = match unsafe { CStr::from_ptr(name) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return EngineStatus::InvalidArgument as i32,
+    };
+    // Non-null, checked above.
+    let out_index = unsafe { &mut *out_index };
+    resolve_codec_index(codec_registry::for_codec_string(name), out_index)
+}
+
+/// Write the registry index of `codec` (or the right status) into
+/// `out_index`.
+fn resolve_codec_index(codec: Option<codec_registry::Codec>, out_index: &mut u32) -> i32 {
+    let index = match codec {
+        Some(codec) => match codec_registry::all_codecs().iter().position(|&c| c == codec) {
+            Some(index) => index,
+            // Reachable only if `for_extension`/`for_codec_string` learn a
+            // codec that `all_codecs` never lists: an internal
+            // inconsistency, not a bad query.
+            None => return EngineStatus::Error as i32,
+        },
+        None => return EngineStatus::NotFound as i32,
+    };
+    *out_index = index as u32;
+    EngineStatus::Ok as i32
 }
 
 /// Backend selection constants for `engine_create`.
@@ -2807,5 +3028,124 @@ mod tests {
         );
         assert_eq!(engine_clear_endpoints(ptr), EngineStatus::Ok as i32);
         shutdown(&mut ffi);
+    }
+
+    #[test]
+    fn ffi_codec_registry_enumerates_and_resolves_extensions() {
+        let count = engine_codec_count();
+        let rows = codec_registry::all_codecs();
+        assert_eq!(count as usize, rows.len());
+        assert!(!rows.is_empty(), "the registry must never be empty");
+
+        let mut flac_index = None;
+        for i in 0..count {
+            let mut row = std::mem::MaybeUninit::<EngineCodecCapabilityFFI>::uninit();
+            assert_eq!(
+                engine_codec_capability(i, row.as_mut_ptr()),
+                EngineStatus::Ok as i32,
+                "row {i}"
+            );
+            let row = unsafe { row.assume_init() };
+            assert_eq!(row.index, i);
+            assert!(
+                row.status <= codec_status_id::DECLARED_UNAVAILABLE,
+                "status {} out of range",
+                row.status
+            );
+            assert!(
+                row.support_level <= codec_support_id::UNAVAILABLE,
+                "support level {} out of range",
+                row.support_level
+            );
+            for (axis, value) in [
+                ("decode", row.decode),
+                ("seek", row.seek),
+                ("gapless", row.gapless),
+                ("metadata", row.metadata),
+                ("replaygain", row.replaygain),
+                ("chapters", row.chapters),
+                ("ebu_r128", row.ebu_r128),
+                ("streaming", row.streaming),
+                ("multichannel_decode", row.multichannel_decode),
+                ("is_lossless", row.is_lossless),
+            ] {
+                assert!(value <= 1, "{axis} = {value} is not a boolean");
+            }
+            assert!(
+                row.native_precision_bits == -1 || (1..=64).contains(&row.native_precision_bits),
+                "precision {} out of range",
+                row.native_precision_bits
+            );
+            assert!(!row.name.is_null(), "row {i} name is NULL");
+            let name = unsafe { CStr::from_ptr(row.name) };
+            assert_eq!(
+                name,
+                codec_registry::codec_name(rows[i as usize]),
+                "row {i} name must be the registry's own static name"
+            );
+            if name.to_bytes() == b"flac" {
+                flac_index = Some(i);
+            }
+        }
+        let flac_index = flac_index.expect("flac must be a registry row");
+
+        // The row's axes agree with its status: FLAC is available, decodable
+        // and lossless in every build this registry describes.
+        let mut flac_row = std::mem::MaybeUninit::<EngineCodecCapabilityFFI>::uninit();
+        assert_eq!(
+            engine_codec_capability(flac_index, flac_row.as_mut_ptr()),
+            EngineStatus::Ok as i32
+        );
+        let flac = unsafe { flac_row.assume_init() };
+        assert_eq!(flac.status, codec_status_id::AVAILABLE);
+        assert_eq!(flac.decode, 1);
+        assert_eq!(flac.is_lossless, 1);
+
+        // Out-of-range index and NULL out-pointers are argument errors.
+        let mut row = std::mem::MaybeUninit::<EngineCodecCapabilityFFI>::uninit();
+        assert_eq!(
+            engine_codec_capability(count, row.as_mut_ptr()),
+            EngineStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            engine_codec_capability(0, std::ptr::null_mut()),
+            EngineStatus::InvalidArgument as i32
+        );
+
+        // Extension lookup agrees with the row enumeration; a miss and a
+        // malformed call are distinct statuses.
+        let mut index = u32::MAX;
+        assert_eq!(
+            engine_codec_index_for_extension(c"flac".as_ptr(), &mut index),
+            EngineStatus::Ok as i32
+        );
+        assert_eq!(index, flac_index);
+
+        let mut index = u32::MAX;
+        assert_eq!(
+            engine_codec_index_for_extension(c"XYZ".as_ptr(), &mut index),
+            EngineStatus::NotFound as i32
+        );
+        assert_eq!(index, u32::MAX, "a failed lookup must not write the index");
+        assert_eq!(
+            engine_codec_index_for_extension(std::ptr::null(), &mut index),
+            EngineStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            engine_codec_index_for_extension(c"flac".as_ptr(), std::ptr::null_mut()),
+            EngineStatus::InvalidArgument as i32
+        );
+
+        // Codec-string lookup (the diagnostics spelling) reaches the same row.
+        let mut index = u32::MAX;
+        assert_eq!(
+            engine_codec_index_for_codec_string(c"flac".as_ptr(), &mut index),
+            EngineStatus::Ok as i32
+        );
+        assert_eq!(index, flac_index);
+        assert_eq!(
+            engine_codec_index_for_codec_string(c"no-such-codec".as_ptr(), &mut index),
+            EngineStatus::NotFound as i32
+        );
     }
 }

@@ -119,6 +119,87 @@ impl Container {
     }
 }
 
+/// The period/buffer the backend *asks* ALSA for.
+///
+/// Only a request: `set_period_size_near`/`set_buffer_size_near` are `*_near`
+/// calls and a device (or a `plughw:`/`dmix` route) may settle on other
+/// values. [`NegotiatedGeometry`] holds what it actually gave.
+const REQUESTED_PERIOD_FRAMES: u32 = 1024;
+const REQUESTED_BUFFER_FRAMES: u32 = 8192;
+
+/// What a PCM handle's `hw_params` actually settled on.
+///
+/// These are hardware facts the render path must use: the scratch is sized by
+/// the period and an underrun fills exactly one period of silence. They used
+/// to be discarded — the render loop hardcoded 1024 — so on a device that
+/// settled on anything else the loop disagreed with the hardware about where
+/// the period boundaries were.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NegotiatedGeometry {
+    rate: u32,
+    channels: u32,
+    period_frames: u32,
+    buffer_frames: u32,
+}
+
+impl NegotiatedGeometry {
+    /// Read the settled geometry back from a handle whose `hw_params` have
+    /// been applied.
+    fn read(pcm: &PCM) -> Result<Self, OutputError> {
+        let hw = pcm
+            .hw_params_current()
+            .map_err(|e| OutputError::StreamOpen(format!("hw_params_current: {e}")))?;
+        let rate = hw
+            .get_rate()
+            .map_err(|e| OutputError::StreamOpen(format!("get_rate: {e}")))?;
+        let channels = hw
+            .get_channels()
+            .map_err(|e| OutputError::StreamOpen(format!("get_channels: {e}")))?;
+        let period = hw.get_period_size().map(|p| p as u64).unwrap_or(0);
+        let buffer = hw.get_buffer_size().map(|b| b as u64).unwrap_or(0);
+        let geometry = Self::from_raw(rate, channels, period, buffer);
+        if geometry.period_frames != REQUESTED_PERIOD_FRAMES
+            || geometry.buffer_frames != REQUESTED_BUFFER_FRAMES
+        {
+            log::info!(
+                "ALSA: device settled on a {}-frame period / {}-frame buffer (requested {} / {})",
+                geometry.period_frames,
+                geometry.buffer_frames,
+                REQUESTED_PERIOD_FRAMES,
+                REQUESTED_BUFFER_FRAMES
+            );
+        }
+        Ok(geometry)
+    }
+
+    /// Apply the fallback rules to raw `hw_params` read-backs.
+    ///
+    /// Pure, so the rules are testable without a device.
+    fn from_raw(rate: u32, channels: u32, period: u64, buffer: u64) -> Self {
+        // A zero period means the read-back is unusable; the conventional
+        // period keeps the render loop well-defined. The upper bound rejects
+        // absurd read-backs before they become a multi-megabyte scratch.
+        let period_frames = if (1..=65_536).contains(&period) {
+            period as u32
+        } else {
+            REQUESTED_PERIOD_FRAMES
+        };
+        // A buffer smaller than the period (or a failed read-back) falls back
+        // to eight periods, matching what `open_pcm` requested.
+        let buffer_frames = if buffer >= u64::from(period_frames) {
+            buffer.min(u64::from(u32::MAX)) as u32
+        } else {
+            period_frames.saturating_mul(8)
+        };
+        Self {
+            rate,
+            channels,
+            period_frames,
+            buffer_frames,
+        }
+    }
+}
+
 /// Native ALSA output backend.
 pub struct AlsaOutput {
     device_name: String,
@@ -151,6 +232,11 @@ pub struct AlsaOutput {
     pcm_rate: u32,
     channels: u16,
     container: Container,
+    /// The device's settled period, read back from `hw_params`.
+    ///
+    /// The render thread sizes its scratch by this and writes one period per
+    /// iteration, so the numbers on both sides of `writei` agree.
+    period_frames: u32,
     buffer_size_frames: u32,
     render_thread: Option<JoinHandle<()>>,
     is_fallback: bool,
@@ -202,8 +288,10 @@ impl AlsaOutput {
             hwp.set_access(Access::RWInterleaved)
                 .map_err(|e| OutputError::StreamOpen(format!("set_access: {e}")))?;
             // Period = 1024 frames, buffer = 8 periods (≈ 21 ms at 48 kHz).
-            let _ = hwp.set_period_size_near(1024, ValueOr::Nearest);
-            let _ = hwp.set_buffer_size_near(8192);
+            // A request only: `NegotiatedGeometry::read` records what the
+            // device actually settled on, and the render path uses that.
+            let _ = hwp.set_period_size_near(REQUESTED_PERIOD_FRAMES as _, ValueOr::Nearest);
+            let _ = hwp.set_buffer_size_near(REQUESTED_BUFFER_FRAMES as _);
             pcm.hw_params(&hwp)
                 .map_err(|e| OutputError::StreamOpen(format!("hw_params: {e}")))?;
         }
@@ -265,7 +353,7 @@ impl AlsaOutput {
         format: DsdWireFormat,
         bit_rate: u32,
         channels: u16,
-    ) -> Result<(PcmArc, u32), OutputError> {
+    ) -> Result<(PcmArc, NegotiatedGeometry), OutputError> {
         let alsa_format = match format {
             DsdWireFormat::U8 => AlsaFormat::DSDU8,
             DsdWireFormat::U16Le => AlsaFormat::DSDU16LE,
@@ -275,30 +363,19 @@ impl AlsaOutput {
         };
         let frame_rate = format.frame_rate_hz(bit_rate);
         let pcm = Self::open_pcm(device, alsa_format, frame_rate, channels)?;
-        let (actual_rate, actual_channels) = {
-            let hw = pcm
-                .hw_params_current()
-                .map_err(|e| OutputError::StreamOpen(format!("hw_params_current: {e}")))?;
-            let actual_rate = hw
-                .get_rate()
-                .map_err(|e| OutputError::StreamOpen(format!("get_rate: {e}")))?;
-            let actual_channels = hw
-                .get_channels()
-                .map_err(|e| OutputError::StreamOpen(format!("get_channels: {e}")))?;
-            (actual_rate, actual_channels)
-        };
-        if actual_rate != frame_rate || actual_channels != u32::from(channels) {
+        let geometry = NegotiatedGeometry::read(&pcm)?;
+        if geometry.rate != frame_rate || geometry.channels != u32::from(channels) {
             let _ = pcm.drop();
             return Err(OutputError::StreamOpen(format!(
                 "native DSD {} requested {} Hz/{} ch but ALSA settled on {} Hz/{} ch",
                 format.label(),
                 frame_rate,
                 channels,
-                actual_rate,
-                actual_channels
+                geometry.rate,
+                geometry.channels
             )));
         }
-        Ok((pcm, actual_rate))
+        Ok((pcm, geometry))
     }
 
     pub fn new(
@@ -309,19 +386,14 @@ impl AlsaOutput {
     ) -> Result<Self, OutputError> {
         let device = Self::resolve_device(target_device)?;
         let (pcm, container) = Self::open_pcm_best(&device, 44_100, 2)?;
-        let (actual_rate, buffer_size_frames) = {
-            let hw = pcm
-                .hw_params_current()
-                .map_err(|e| OutputError::StreamOpen(format!("hw_params_current: {e}")))?;
-            let rate = hw
-                .get_rate()
-                .map_err(|e| OutputError::StreamOpen(format!("get_rate: {e}")))?;
-            let buffer = hw.get_buffer_size().map(|b| b as u32).unwrap_or(8192);
-            (rate, buffer)
-        };
+        let geometry = NegotiatedGeometry::read(&pcm)?;
+        let actual_rate = geometry.rate;
         log::info!(
-            "ALSA: opened {device} at {actual_rate} Hz, {:?}, 2 ch (buffer {buffer_size_frames} frames)",
-            container
+            "ALSA: opened {device} at {} Hz, {:?}, 2 ch (period {} frames, buffer {} frames)",
+            geometry.rate,
+            container,
+            geometry.period_frames,
+            geometry.buffer_frames
         );
         let _ = fallback_policy;
         Ok(Self {
@@ -342,7 +414,8 @@ impl AlsaOutput {
             pcm_rate: actual_rate,
             channels: 2,
             container,
-            buffer_size_frames,
+            period_frames: geometry.period_frames,
+            buffer_size_frames: geometry.buffer_frames,
             render_thread: None,
             is_fallback: false,
             fallback_reason: None,
@@ -410,7 +483,11 @@ impl AlsaOutput {
         // one that lands on the first period, which is the worst moment for
         // it. `tests/realtime_contract_test.rs` holds the thread to the same
         // rule as every other audio path, and the rule has no exemptions.
-        let period_frames = 1024usize;
+        // The settled period read back when the handle was opened (E15):
+        // `set_period_size_near` is a request, and sizing scratch from an
+        // assumed 1024 made this loop disagree with the hardware whenever the
+        // device picked anything else.
+        let period_frames = self.period_frames.max(1) as usize;
         let mut scratch = vec![0.0f32; period_frames * channels];
         let mut int_scratch = vec![0i32; period_frames * channels];
         let mut short_scratch = vec![0i16; period_frames * channels];
@@ -505,7 +582,9 @@ impl AlsaOutput {
 
         // Allocated on the control thread and moved in, for the same reason as
         // the PCM path's scratch above.
-        let dsd_period_frames = 1024usize;
+        // Same settled period as the PCM path: the DSD handle's `hw_params`
+        // read-back drives one write per period here too.
+        let dsd_period_frames = self.period_frames.max(1) as usize;
         let dsd_scratch = vec![0u8; dsd_period_frames * frame_width];
 
         let handle = std::thread::Builder::new()
@@ -575,22 +654,18 @@ impl AlsaOutput {
         self.pcm = None;
         let device = self.device_name.clone();
         let (pcm, container) = Self::open_pcm_best(&device, rate, channels)?;
-        let actual_rate = {
-            let hw = pcm
-                .hw_params_current()
-                .map_err(|e| OutputError::StreamOpen(format!("hw_params_current: {e}")))?;
-            hw.get_rate()
-                .map_err(|e| OutputError::StreamOpen(format!("get_rate: {e}")))?
-        };
+        let geometry = NegotiatedGeometry::read(&pcm)?;
         self.pcm = Some(pcm);
         self.container = container;
-        self.rate = actual_rate;
-        self.pcm_rate = actual_rate;
+        self.rate = geometry.rate;
+        self.pcm_rate = geometry.rate;
+        self.period_frames = geometry.period_frames;
+        self.buffer_size_frames = geometry.buffer_frames;
         self.channels = channels;
         self.dsd_active = false;
         self.dsd_wire_format = None;
         self.dsd_buffer = None;
-        Ok(actual_rate)
+        Ok(geometry.rate)
     }
 }
 
@@ -779,20 +854,18 @@ impl super::output::Output for AlsaOutput {
         self.pcm = None;
         let device = self.device_name.clone();
         let pcm = Self::open_pcm(&device, alsa_format, target_sample_rate, self.channels)?;
-        let actual_rate = pcm
-            .hw_params_current()
-            .map_err(|e| OutputError::StreamOpen(format!("hw_params_current: {e}")))?
-            .get_rate()
-            .map_err(|e| OutputError::StreamOpen(format!("get_rate: {e}")))?;
+        let geometry = NegotiatedGeometry::read(&pcm)?;
         self.pcm = Some(pcm);
         self.container = container;
-        self.rate = actual_rate;
-        self.pcm_rate = actual_rate;
+        self.rate = geometry.rate;
+        self.pcm_rate = geometry.rate;
+        self.period_frames = geometry.period_frames;
+        self.buffer_size_frames = geometry.buffer_frames;
         self.dsd_active = false;
         self.dsd_wire_format = None;
         self.dsd_buffer = None;
         self.start_render()?;
-        Ok(actual_rate)
+        Ok(geometry.rate)
     }
 
     fn reset_buffer(&self) {
@@ -919,15 +992,18 @@ impl super::output::Output for AlsaOutput {
                 let device = self.device_name.clone();
                 for format in order {
                     match Self::open_pcm_dsd(&device, format, params.bit_rate, params.channels) {
-                        Ok((pcm, frame_rate)) => {
+                        Ok((pcm, geometry)) => {
                             log::info!(
-                                "ALSA: native DSD negotiated {} at {} Hz (bit rate {})",
+                                "ALSA: native DSD negotiated {} at {} Hz (bit rate {}; period {} frames)",
                                 format.label(),
-                                frame_rate,
-                                params.bit_rate
+                                geometry.rate,
+                                params.bit_rate,
+                                geometry.period_frames
                             );
                             self.pcm = Some(pcm);
-                            self.rate = frame_rate;
+                            self.rate = geometry.rate;
+                            self.period_frames = geometry.period_frames;
+                            self.buffer_size_frames = geometry.buffer_frames;
                             self.channels = params.channels;
                             self.dsd_active = true;
                             self.dsd_wire_format = Some(format);
@@ -1071,5 +1147,35 @@ mod tests {
         assert_eq!(DsdWireFormat::U8.frame_rate_hz(2_822_400), 352_800);
         assert_eq!(DsdWireFormat::U16Be.frame_rate_hz(2_822_400), 176_400);
         assert_eq!(DsdWireFormat::U32Le.frame_rate_hz(2_822_400), 88_200);
+    }
+
+    #[test]
+    fn test_negotiated_geometry_uses_the_read_back_values() {
+        // The device settled on different values than requested (512 / 4096):
+        // the render path must use them, not the request (E15).
+        let geometry = NegotiatedGeometry::from_raw(48_000, 2, 512, 4096);
+        assert_eq!(geometry.rate, 48_000);
+        assert_eq!(geometry.channels, 2);
+        assert_eq!(geometry.period_frames, 512);
+        assert_eq!(geometry.buffer_frames, 4096);
+    }
+
+    #[test]
+    fn test_negotiated_geometry_falls_back_on_unusable_read_backs() {
+        // A failed period read-back (zero) falls back to the conventional
+        // period and an eight-period buffer…
+        let zero = NegotiatedGeometry::from_raw(44_100, 2, 0, 0);
+        assert_eq!(zero.period_frames, REQUESTED_PERIOD_FRAMES);
+        assert_eq!(zero.buffer_frames, REQUESTED_PERIOD_FRAMES * 8);
+
+        // …an absurd one does too…
+        let absurd = NegotiatedGeometry::from_raw(44_100, 2, u64::MAX, 8192);
+        assert_eq!(absurd.period_frames, REQUESTED_PERIOD_FRAMES);
+
+        // …and a buffer smaller than the settled period is replaced by eight
+        // periods rather than being reported as-is.
+        let short_buffer = NegotiatedGeometry::from_raw(44_100, 2, 2048, 512);
+        assert_eq!(short_buffer.period_frames, 2048);
+        assert_eq!(short_buffer.buffer_frames, 2048 * 8);
     }
 }

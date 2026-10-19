@@ -1,20 +1,25 @@
 //! Codec capability registry — one declared statement of what this engine can
 //! decode, seek, and measure.
 //!
-//! # This table has no production caller
+//! # Reachability
 //!
-//! Nothing in the engine reads it. It is a hand-maintained description of the
-//! build, and the build's real dispatch is `Decoder::open_from_source`, which
-//! routes on file extension and is the only thing that decides whether a file
-//! opens. This table used to claim the opposite ("the UI and engine
-//! diagnostics query the same table, so a codec is never advertised by one
-//! layer while being silently unsupported by another") while having zero
-//! callers, so nothing could contradict it and nothing checked it either.
+//! This table is a hand-maintained description of the build, and the build's
+//! real dispatch is `Decoder::open_from_source`, which routes on file
+//! extension and is the only thing that decides whether a file opens. For a
+//! while the table had *no* production caller at all — a claim nothing could
+//! contradict and nothing checked. The C FFI surface now exports it:
+//! `engine_codec_count`, `engine_codec_capability`,
+//! `engine_codec_index_for_extension` and
+//! `engine_codec_index_for_codec_string` (behind the `c-ffi` feature) let a
+//! host enumerate exactly what this build decodes, seeks and measures,
+//! instead of guessing from documentation.
 //!
-//! Two things have been done about that. The false claim is gone, and
-//! `table_agrees_with_decode_dispatch` now asserts the property the old
-//! docstring asserted: for every codec this table calls `Available` with
-//! `decode`, opening a file of that extension must not be rejected as an
+//! The table also used to claim that "the UI and engine diagnostics query the
+//! same table, so a codec is never advertised by one layer while being
+//! silently unsupported by another" — while having zero callers. That claim
+//! is gone, and `table_agrees_with_decode_dispatch` now *asserts* the
+//! property it was reaching for: for every codec this table calls `Available`
+//! with `decode`, opening a file of that extension must not be rejected as an
 //! unsupported format, and for every codec it calls `DeclaredUnavailable`,
 //! opening one must fail with exactly that error. That test fails the moment
 //! the two disagree.
@@ -397,14 +402,38 @@ pub fn capability(codec: Codec) -> CodecCapability {
             true,
             #[cfg(not(feature = "codec-mkv"))]
             false,
-            true,  // seek (EBML cues)
-            true,  // gapless (Matroska tracks carry CodecDelay/DiscardPadding)
-            true,  // multichannel
-            true,  // metadata (Matroska tags + attachments)
-            true,  // replaygain (tags)
+            // Every axis below is provided by the Matroska reader itself, so
+            // without `codec-mkv` they are "no, this build cannot", not "the
+            // format could": a row may only claim what this build does.
+            #[cfg(feature = "codec-mkv")]
+            true, // seek (EBML cues)
+            #[cfg(not(feature = "codec-mkv"))]
+            false,
+            #[cfg(feature = "codec-mkv")]
+            true, // gapless (CodecDelay/DiscardPadding)
+            #[cfg(not(feature = "codec-mkv"))]
+            false,
+            #[cfg(feature = "codec-mkv")]
+            true, // multichannel
+            #[cfg(not(feature = "codec-mkv"))]
+            false,
+            #[cfg(feature = "codec-mkv")]
+            true, // metadata (Matroska tags + attachments)
+            #[cfg(not(feature = "codec-mkv"))]
+            false,
+            #[cfg(feature = "codec-mkv")]
+            true, // replaygain (tags)
+            #[cfg(not(feature = "codec-mkv"))]
+            false,
             false, // chapters (not exposed by this build)
-            true,  // ebu_r128 (tags)
-            true,  // streaming
+            #[cfg(feature = "codec-mkv")]
+            true, // ebu_r128 (tags)
+            #[cfg(not(feature = "codec-mkv"))]
+            false,
+            #[cfg(feature = "codec-mkv")]
+            true, // streaming
+            #[cfg(not(feature = "codec-mkv"))]
+            false,
             None,  // precision depends on the inner codec
             false, // lossless depends on the inner codec
         ),
@@ -425,10 +454,16 @@ pub fn capability(codec: Codec) -> CodecCapability {
             #[cfg(not(feature = "codec-wavpack"))]
             false,
             // seek: block-index seeks are sample-accurate
+            #[cfg(feature = "codec-wavpack")]
             true,
+            #[cfg(not(feature = "codec-wavpack"))]
+            false,
             // gapless: WavPack's total-sample count is the exact logical
             // length (no encoder priming / end padding), like APE.
+            #[cfg(feature = "codec-wavpack")]
             true,
+            #[cfg(not(feature = "codec-wavpack"))]
+            false,
             // multichannel: stereo/mono only (honest partial support)
             false,
             // metadata: APEv2/ID3 tag parsing not wired yet
@@ -480,17 +515,36 @@ pub fn capability(codec: Codec) -> CodecCapability {
         Codec::Tta => (
             // TTA (True Audio) lossless: native pure-Rust TTA1 decoder
             // (`src/decode/tta.rs`, enabled by the `codec-tta` feature).
-            // Frame-indexed seeking, 8/16/24-bit, mono–16 channels.
+            // Frame-indexed seeking, 8/16/24-bit, mono–16 channels. Without
+            // the feature the row is declared-but-unavailable: claiming the
+            // axes of a decoder that is not in the build would be a false
+            // statement about this build, and the dispatch refuses `.tta`
+            // with an explicit "not enabled in this build" error.
+            #[cfg(feature = "codec-tta")]
             CodecStatus::Available,
-            true,  // decode
-            true,  // seek
+            #[cfg(not(feature = "codec-tta"))]
+            CodecStatus::DeclaredUnavailable,
+            #[cfg(feature = "codec-tta")]
+            true, // decode
+            #[cfg(not(feature = "codec-tta"))]
+            false,
+            #[cfg(feature = "codec-tta")]
+            true, // seek
+            #[cfg(not(feature = "codec-tta"))]
+            false,
             false, // gapless (no encoder-delay concept in TTA1)
-            true,  // multichannel
+            #[cfg(feature = "codec-tta")]
+            true, // multichannel
+            #[cfg(not(feature = "codec-tta"))]
+            false,
             false, // metadata (APEv2 tag parsing not wired yet)
             false, // replaygain
             false, // chapters
             false, // ebu_r128
-            true,  // streaming (sequential frames)
+            #[cfg(feature = "codec-tta")]
+            true, // streaming (sequential frames)
+            #[cfg(not(feature = "codec-tta"))]
+            false,
             Some(24),
             true, // lossless
         ),
@@ -612,6 +666,35 @@ pub fn for_codec_string(s: &str) -> Option<Codec> {
         return None;
     };
     Some(codec)
+}
+
+/// Canonical short name for a codec, e.g. `"flac"`.
+///
+/// The name is a static NUL-terminated C string so the FFI can expose the
+/// pointer without allocating; `to_str()` it for display. Names are unique
+/// across [`all_codecs`] and are identity names, not extensions — the
+/// `matroska` row covers `.mka`, `.mkv` and `.webm`, and the `vorbis` row
+/// covers `.ogg` and `.oga`.
+pub fn codec_name(codec: Codec) -> &'static std::ffi::CStr {
+    match codec {
+        Codec::Mp3 => c"mp3",
+        Codec::Flac => c"flac",
+        Codec::OggVorbis => c"vorbis",
+        Codec::Opus => c"opus",
+        Codec::Wav => c"wav",
+        Codec::Aac => c"aac",
+        Codec::Alac => c"alac",
+        Codec::Ape => c"ape",
+        Codec::Dsd => c"dsd",
+        Codec::Pcm => c"pcm",
+        Codec::Aiff => c"aiff",
+        Codec::Mka => c"matroska",
+        Codec::WavPack => c"wavpack",
+        Codec::Musepack => c"musepack",
+        Codec::Tak => c"tak",
+        Codec::Tta => c"tta",
+        Codec::Unknown => c"unknown",
+    }
 }
 
 /// All codecs the engine knows about, in a stable order.
@@ -821,38 +904,22 @@ mod tests {
 
     #[test]
     fn test_declared_unavailable_codecs() {
-        // Opus/WavPack/TTA are only unavailable when their features are off.
-        #[cfg(all(
-            not(feature = "codec-opus"),
-            not(feature = "codec-wavpack"),
-            not(feature = "codec-tta")
-        ))]
-        let unavailable: &[Codec] = &[
-            Codec::Opus,
-            Codec::WavPack,
-            Codec::Musepack,
-            Codec::Tak,
-            Codec::Tta,
-        ];
-        #[cfg(all(
-            feature = "codec-opus",
-            not(feature = "codec-wavpack"),
-            not(feature = "codec-tta")
-        ))]
-        let unavailable: &[Codec] = &[Codec::WavPack, Codec::Musepack, Codec::Tak, Codec::Tta];
-        #[cfg(all(
-            feature = "codec-opus",
-            feature = "codec-wavpack",
-            not(feature = "codec-tta")
-        ))]
-        let unavailable: &[Codec] = &[Codec::Musepack, Codec::Tak, Codec::Tta];
-        #[cfg(all(
-            feature = "codec-opus",
-            feature = "codec-wavpack",
-            feature = "codec-tta"
-        ))]
-        let unavailable: &[Codec] = &[Codec::Musepack, Codec::Tak];
-        for &c in unavailable {
+        // Musepack and Tak have no decoder in any feature combination;
+        // Opus/WavPack/TTA/MKA are unavailable exactly when their feature is
+        // off. One `cfg` per codec rather than one per combination of the
+        // features: the old matrix spelled out only four of the eight
+        // combinations, so e.g. a build with TTA on and Opus/WavPack off did
+        // not compile.
+        let mut unavailable: Vec<Codec> = vec![Codec::Musepack, Codec::Tak];
+        #[cfg(not(feature = "codec-opus"))]
+        unavailable.push(Codec::Opus);
+        #[cfg(not(feature = "codec-wavpack"))]
+        unavailable.push(Codec::WavPack);
+        #[cfg(not(feature = "codec-tta"))]
+        unavailable.push(Codec::Tta);
+        #[cfg(not(feature = "codec-mkv"))]
+        unavailable.push(Codec::Mka);
+        for &c in &unavailable {
             let cap = capability(c);
             assert_eq!(cap.status, CodecStatus::DeclaredUnavailable, "{c:?} status");
             assert_eq!(
@@ -1208,5 +1275,24 @@ mod tests {
                  registry is missing the codec"
             );
         }
+    }
+
+    #[test]
+    fn codec_names_are_unique_lowercase_identifiers() {
+        let mut seen = std::collections::HashSet::new();
+        for &codec in all_codecs() {
+            let name = codec_name(codec).to_str().expect("codec names are ASCII");
+            assert!(!name.is_empty(), "{codec:?} has an empty name");
+            assert!(
+                name.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()),
+                "{codec:?} name '{name}' is not a lowercase identifier"
+            );
+            assert!(seen.insert(name), "duplicate codec name '{name}'");
+        }
+        // `Unknown` is not a registry row, but it still has a name and it
+        // must not collide with one.
+        assert_eq!(codec_name(Codec::Unknown).to_str().unwrap(), "unknown");
+        assert!(!seen.contains("unknown"));
     }
 }

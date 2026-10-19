@@ -700,13 +700,17 @@ impl AsioOutput {
 
 impl OutputVolume for AsioOutput {
     fn supports_hardware_volume(&self) -> bool {
-        // ASIO streams drive the hardware DAC directly without OS volume intermediate
+        // ASIO streams drive the hardware DAC directly and the ASIO API has no
+        // output-volume call; volume belongs to the software gain or the
+        // driver's own control panel, not to this host.
         false
     }
 
     fn set_hardware_volume_db(&self, _db: f32) -> Result<(), OutputError> {
         Err(OutputError::StreamError(
-            "Hardware volume is not supported on ASIO".to_string(),
+            "ASIO exposes no standard output-volume control; \
+             use software volume or the driver's control panel"
+                .to_string(),
         ))
     }
 }

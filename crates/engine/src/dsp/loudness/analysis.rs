@@ -1,9 +1,13 @@
-//! Comprehensive standards-compliant loudness analysis and verification subsystem.
+//! Comprehensive loudness analysis and verification subsystem.
 //!
-//! Provides deterministic file- and stream-level analysis adhering to ITU-R BS.1770-5
-//! and EBU R128 / Tech 3341 / Tech 3342. Computes integrated, short-term, momentary,
-//! LRA, true peak, sample peak, loudness/peak timelines, gating diagnostics, channel
-//! contributions, and compliance evaluations against broadcast and streaming profiles.
+//! Provides deterministic file- and stream-level analysis. Integrated,
+//! short-term and momentary loudness, LRA and gating follow ITU-R BS.1770-5 /
+//! EBU R128 (Tech 3341 / Tech 3342) through the shared [`LoudnessMeter`].
+//! Alongside them it reports sample peak and true peak — the latter from the
+//! engine's 4× FIR estimate (the Annex 2 definition measured with the
+//! prototype in [`crate::dsp::true_peak`], not the published 48-tap filter) —
+//! plus loudness/peak timelines, gating diagnostics, channel contributions,
+//! and compliance evaluations against broadcast and streaming profiles.
 
 use serde::{Deserialize, Serialize};
 
@@ -120,7 +124,8 @@ pub struct LoudnessAnalysisResult {
     pub lra_lu: f32,
     /// Whether LRA was computed from sufficient multi-window material.
     pub lra_valid: bool,
-    /// Maximum inter-sample true peak in dBTP.
+    /// Maximum inter-sample peak estimate in dBTP (the shared 4× FIR
+    /// detector; see [`crate::dsp::true_peak`]).
     pub max_true_peak_dbtp: f32,
     /// Maximum discrete sample peak in dBFS.
     pub max_sample_peak_dbfs: f32,

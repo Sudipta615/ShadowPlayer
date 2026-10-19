@@ -4,6 +4,11 @@
 //! (for fs ≤ 48 kHz) or 2× oversampling (for 96 kHz) using a linear-phase
 //! FIR interpolation filter with ≥ 100 dB stopband attenuation and < 0.01 dB
 //! passband ripple.
+//!
+//! The engine's implementation always runs at 4× (over-meeting the minimum)
+//! and designs its own prototype to those criteria instead of transcribing
+//! the table Annex 2 publishes — see [`crate::dsp::true_peak`], which
+//! measures the design against the criteria and documents the difference.
 
 use serde::{Deserialize, Serialize};
 

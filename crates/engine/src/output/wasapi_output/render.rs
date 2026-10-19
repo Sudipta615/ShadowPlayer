@@ -8,7 +8,7 @@ use windows::Win32::{
     Media::Audio::AUDCLNT_BUFFERFLAGS_SILENT,
     System::{
         Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
-        Threading::WaitForSingleObject,
+        Threading::{SetEvent, WaitForSingleObject},
     },
 };
 
@@ -16,7 +16,6 @@ use crate::output::format_converter::AudioFormatConverter;
 use crate::output::output::StreamErrorEvent;
 
 use super::client::{RenderContext, RenderFailure};
-use super::com::CallbackGuard;
 use super::format::WasapiContainer;
 
 // HRESULTs for WASAPI error classes (audiosession.h / audioclient.h).
@@ -224,6 +223,17 @@ pub(crate) fn render_loop(mut ctx: RenderContext) {
     let mut scratch: Vec<f32> = vec![0.0; samples_per_period];
 
     while ctx.running.load(Ordering::Acquire) {
+        // Acknowledge a pending `pause()`. Reaching the top of the loop means
+        // no callback is in flight, so the shared buffer is not being pulled
+        // and the control thread may reset it. (While paused, the callback
+        // writes silence instead of pulling; this event is the edge that
+        // tells the control side the last pull has finished.) It replaced an
+        // atomic flag the control thread polled with 100 µs sleeps, along
+        // with the guard that maintained it.
+        if ctx.paused.load(Ordering::Acquire) {
+            let _ = unsafe { SetEvent(ctx.idle_event.0) };
+        }
+
         // Wait for the buffer-end event (auto-reset). The 50 ms timeout keeps
         // shutdown responsive without an explicit SetEvent wake-up.
         let wait = unsafe { WaitForSingleObject(ctx.event.0, 50) };
@@ -231,9 +241,6 @@ pub(crate) fn render_loop(mut ctx: RenderContext) {
             continue;
         }
 
-        // The guard only sets and clears an atomic flag, so it is taken
-        // inside `render_period` rather than held across the `&mut ctx`
-        // borrow below.
         if !render_period(&mut ctx, &mut scratch) {
             break;
         }
@@ -255,8 +262,6 @@ pub(crate) fn render_loop(mut ctx: RenderContext) {
 /// one-time scratch allocation, the `WaitForSingleObject`, and nothing that
 /// the contract test has to exempt.
 fn render_period(ctx: &mut RenderContext, scratch: &mut [f32]) -> bool {
-    let _guard = CallbackGuard::new(&ctx.in_callback);
-
     // How many frames the device buffer can accept this period.
     let buffer_size = match unsafe { ctx.audio_client.0.GetCurrentPadding() } {
         Ok(padding) => ctx.buffer_size_frames.saturating_sub(padding),

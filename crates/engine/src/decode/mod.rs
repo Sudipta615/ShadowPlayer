@@ -25,8 +25,8 @@ pub mod wavpack;
 pub use aes67_source::Aes67Decoder;
 pub use ape::ApeDecoder;
 pub use codecs::{
-    all_codecs, capability, for_codec_string, for_extension, Codec, CodecCapability, CodecStatus,
-    CodecSupportLevel,
+    all_codecs, capability, codec_name, for_codec_string, for_extension, Codec, CodecCapability,
+    CodecStatus, CodecSupportLevel,
 };
 pub use cue::{CueIndex, CueParseError, CueSheet, CueTrack};
 pub use decoder::Decoder;

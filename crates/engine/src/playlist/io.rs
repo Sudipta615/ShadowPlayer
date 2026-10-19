@@ -263,15 +263,19 @@ impl PlaylistFormat {
 
 /// A parsed playlist: entries plus what the file said about them.
 ///
-/// The metadata a format carries but [`Playlist`] cannot store is kept here
-/// rather than discarded, so a caller that cares (a UI showing per-track
-/// titles) can use it without re-parsing.
+/// `metadata` is parallel to `entries` by construction: every parser pushes
+/// exactly one record per entry, [`TrackMetadata::default()`] when the format
+/// carried none. [`Playlist::from_parsed`] then carries it into the queue,
+/// where [`Playlist::metadata`] exposes it and queue mutations keep it
+/// aligned, so a caller that cares (a UI showing per-track titles) can use it
+/// without re-parsing.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedPlaylist {
     /// Resolved entries, in file order.
     pub entries: Vec<AudioSource>,
-    /// Per-entry metadata, parallel to `entries`. Absent when the format
-    /// carried none for that entry.
+    /// Per-entry metadata, parallel to `entries`. A default record when the
+    /// format carried none for that entry; `Playlist::from_parsed` normalises
+    /// those to "no metadata".
     pub metadata: Vec<TrackMetadata>,
     /// `Playlist::RepeatMode` as spelled by the format, if it expresses one.
     /// None of M3U/PLS/XSPF do, so this is currently always `None`; it exists
@@ -1416,6 +1420,35 @@ mod tests {
         q.set_repeat(RepeatMode::All);
         assert_eq!(q.len(), 2);
         assert_eq!(q.repeat(), RepeatMode::All);
+    }
+
+    /// A playlist file's own per-entry metadata (`#EXTINF` here) must survive
+    /// into the queue: `from_parsed` used to drop it silently.
+    #[test]
+    fn playlist_from_parsed_keeps_extinf_metadata() {
+        let text = "#EXTM3U\n#EXTINF:12,Artist - Title\na.flac\nb.flac\n#EXTINF:-1,Just a title\nc.flac\n";
+        let parsed = PlaylistFormat::M3u.parse(text, None).unwrap();
+        let mut q = Playlist::from_parsed(parsed);
+        let first = q.metadata(0).expect("EXTINF metadata is kept");
+        assert_eq!(first.title.as_deref(), Some("Title"));
+        assert_eq!(first.artist.as_deref(), Some("Artist"));
+        assert_eq!(first.duration_secs, Some(12.0));
+        assert_eq!(
+            q.metadata(1),
+            None,
+            "a bare path carries no metadata, not an empty record"
+        );
+        let third = q.metadata(2).expect("title-only EXTINF is kept");
+        assert_eq!(third.title.as_deref(), Some("Just a title"));
+        assert_eq!(third.duration_secs, None, "-1 is not a duration");
+
+        // Queue edits keep the parallel metadata aligned.
+        q.remove(0);
+        assert_eq!(q.metadata(0), None);
+        assert_eq!(
+            q.metadata(1).and_then(|m| m.title.as_deref()),
+            Some("Just a title")
+        );
     }
 
     #[test]

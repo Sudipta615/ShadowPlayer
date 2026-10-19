@@ -419,8 +419,8 @@ impl AudioEngine {
             ),
 
             // ── Volume ──
-            EngineCommand::SetVolume(vol) => self.handle_set_volume(vol),
-            EngineCommand::SetVolumeDb(db) => self.handle_set_volume_db(db),
+            EngineCommand::SetVolume(vol) => self.set_volume(vol),
+            EngineCommand::SetVolumeDb(db) => self.set_volume_db(db),
 
             // ── EQ ──
             EngineCommand::SetEqEnabled(enabled) => self.handle_set_eq_enabled(enabled),

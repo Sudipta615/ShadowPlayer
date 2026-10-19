@@ -169,17 +169,17 @@ The engine is a huge, unusually well-documented crate (1291 tests; zero `todo!()
 - [x] **E13 · Decoder bridge buffers whole files to RAM and uses a predictable temp name.** `decode/decoder.rs:47-76` `read_to_end`s APE/Opus/WavPack/TTA sources and writes `playtune_decoder_bridge_{pid}_{len}.{ext}` in the temp dir (clobber/symlink risk; cleanup only on the normal path).
 
 ### P2/P3 — capability gaps, dead code, hygiene
-- [ ] **E14 · ASIO hardware volume unimplemented.** `output/cpal_output/mod.rs:55-65` — documented; callers using `HardwarePreferred` must special-case.
-- [ ] **E15 · ALSA period/buffer negotiation not read back.** `output/alsa_output/mod.rs:204-223` discards `set_period_size_near`/`set_buffer_size_near` results and hardwires `period_frames = 1024` in the render path (`:413`).
-- [ ] **E16 · WASAPI exclusive path is unvalidated and `pause()` busy-waits.** `output/wasapi_output/mod.rs:565-574` polls a flag with 100 µs sleeps for up to 50 ms on the caller thread; the module self-describes as not yet hardware-validated.
-- [ ] **E17 · True-peak meter is not BS.1770-5 Annex 2 conformant.** `dsp/true_peak.rs:20-36,66` uses a 400-tap Kaiser sinc instead of the 48-tap prototype; documented, but any "R128 true-peak" claim should be softened.
-- [ ] **E18 · Shibata dither only has 44.1/48 kHz tables.** `dsp/dither.rs:64-88,157-165` switch at 46 kHz, so 96/192 kHz reuse the 48 kHz coefficients.
-- [ ] **E19 · HRTF out-of-grid directions fall back to an analytic model.** `spatial/health.rs:270`, `spatial/hrtf/dataset.rs:548` — documented and reported via health, but binaural quality degrades silently without a dense dataset.
-- [ ] **E20 · ADM scene construction swallows errors.** `spatial/adm.rs:97-99` `let _ = scene.create_bed(layout); let _ = scene.create_field();`.
-- [ ] **E21 · Codec capability registry is unreachable.** `decode/codecs.rs:1-20` self-admits "no production caller"; not exported through FFI, so a host can't query it and it can only drift.
-- [ ] **E22 · `.oga` never dispatches to the Opus backend.** `decode/decoder.rs:177-182` routes all `.oga` to Symphonia because the Opus probe needs a path; Opus-in-Ogg `.oga` fails if Symphonia lacks Opus.
-- [ ] **E23 · `Playlist::from_parsed` throws away parsed metadata.** `playlist/mod.rs:111-123` ignores `ParsedPlaylist.metadata` even though every parser populates it and the doc promises it is "kept rather than discarded".
-- [ ] **E24 · Dead/duplicate attributes.** `decode/decoder.rs:575-577` stacks two `#[test]` attributes on one function (in the no-opus/no-wavpack cfg build); `dsp/resampler_handle.rs:101-102` `impl Default` is gated by both `feature = "resample"` **and** `not(feature = "resample")`, so it never compiles (the module is a documented non-wired design artifact).
+- [x] **E14 · ASIO hardware volume unimplemented.** `output/cpal_output/mod.rs:55-65` — documented; callers using `HardwarePreferred` must special-case.
+- [x] **E15 · ALSA period/buffer negotiation not read back.** `output/alsa_output/mod.rs:204-223` discards `set_period_size_near`/`set_buffer_size_near` results and hardwires `period_frames = 1024` in the render path (`:413`).
+- [x] **E16 · WASAPI exclusive path is unvalidated and `pause()` busy-waits.** `output/wasapi_output/mod.rs:565-574` polls a flag with 100 µs sleeps for up to 50 ms on the caller thread; the module self-describes as not yet hardware-validated.
+- [x] **E17 · True-peak meter is not BS.1770-5 Annex 2 conformant.** `dsp/true_peak.rs:20-36,66` uses a 400-tap Kaiser sinc instead of the 48-tap prototype; documented, but any "R128 true-peak" claim should be softened.
+- [x] **E18 · Shibata dither only has 44.1/48 kHz tables.** `dsp/dither.rs:64-88,157-165` switch at 46 kHz, so 96/192 kHz reuse the 48 kHz coefficients.
+- [x] **E19 · HRTF out-of-grid directions fall back to an analytic model.** `spatial/health.rs:270`, `spatial/hrtf/dataset.rs:548` — documented and reported via health, but binaural quality degrades silently without a dense dataset.
+- [x] **E20 · ADM scene construction swallows errors.** `spatial/adm.rs:97-99` `let _ = scene.create_bed(layout); let _ = scene.create_field();`.
+- [x] **E21 · Codec capability registry is unreachable.** `decode/codecs.rs:1-20` self-admits "no production caller"; not exported through FFI, so a host can't query it and it can only drift.
+- [x] **E22 · `.oga` never dispatches to the Opus backend.** `decode/decoder.rs:177-182` routes all `.oga` to Symphonia because the Opus probe needs a path; Opus-in-Ogg `.oga` fails if Symphonia lacks Opus.
+- [x] **E23 · `Playlist::from_parsed` throws away parsed metadata.** `playlist/mod.rs:111-123` ignores `ParsedPlaylist.metadata` even though every parser populates it and the doc promises it is "kept rather than discarded".
+- [x] **E24 · Dead/duplicate attributes.** `decode/decoder.rs:575-577` stacks two `#[test]` attributes on one function (in the no-opus/no-wavpack cfg build); `dsp/resampler_handle.rs:101-102` `impl Default` is gated by both `feature = "resample"` **and** `not(feature = "resample")`, so it never compiles (the module is a documented non-wired design artifact).
 - [x] **E25 · Missing backends in the desktop build.** `PipeWire`/`Jack` variants exist in `config::AudioBackend` and `create_output` always compiles their arms, but the engine isn't built with those features (see `cargo tree`) and the UI doesn't offer them (B32). Decide: implement them for real (E1–E3) or gate the variants/arms behind the feature and remove the fake paths.
 
 ---

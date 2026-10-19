@@ -130,6 +130,11 @@ impl SphericalHrtfInterpolator {
         self.points.is_empty()
     }
 
+    /// The measurement directions, as normalized unit vectors.
+    pub fn points(&self) -> &[Vec3] {
+        &self.points
+    }
+
     /// Find enclosing triangle and barycentric weights for a query direction.
     /// Falls back to 3 nearest neighbors if no spherical triangle contains the query directly.
     pub fn find_weights(&self, query: Vec3) -> (SphericalTriangle, [f32; 3]) {

@@ -1,7 +1,5 @@
 //! COM ownership and thread-safety wrappers.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use windows::Win32::{Foundation::HANDLE, System::Com::CoUninitialize};
 
 /// Event-handle wrapper: `HANDLE` is not `Send`, but the render thread owns
@@ -29,20 +27,5 @@ impl Drop for ComInitGuard {
         unsafe {
             CoUninitialize();
         }
-    }
-}
-
-/// Guard marking the render thread's callback section (used by `pause()` to
-/// wait for the current pull to finish).
-pub(crate) struct CallbackGuard<'a>(&'a AtomicBool);
-impl<'a> CallbackGuard<'a> {
-    pub(crate) fn new(flag: &'a AtomicBool) -> Self {
-        flag.store(true, Ordering::Release);
-        Self(flag)
-    }
-}
-impl Drop for CallbackGuard<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
     }
 }

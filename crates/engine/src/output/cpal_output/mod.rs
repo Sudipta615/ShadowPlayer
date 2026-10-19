@@ -59,10 +59,16 @@ pub enum OutputError {
 /// - **CoreAudio (macOS)**: sets the default output device's virtual
 ///   main/master volume via `AudioObjectSetPropertyData`. Returns `true` when
 ///   the device exposes that control.
-/// - **ASIO**: not implemented in this build. Returns `false` / `Err`; an
-///   ASIO channel-gain backend is required.
-/// - Callers that route volume through `HardwarePreferred` mode must check
-///   `supports_hardware_volume()` before assuming the call is effective.
+/// - **ASIO**: no implementation — the driver API this build uses exposes no
+///   output-volume control. Returns `false`, and `set_hardware_volume_db`
+///   returns an error naming that.
+///
+/// Callers of the trait directly must treat `false`/`Err` as "the endpoint
+/// does not own the level". Callers that go through `AudioEngine` do not have
+/// to check anything: `VolumeMode::HardwarePreferred` falls back to software
+/// gain (reported in `PlaybackInfo.volume_error`) and `VolumeMode::HardwareOnly`
+/// leaves the signal untouched and reports the failure, whichever output
+/// backend is active.
 pub trait OutputVolume {
     /// Whether the active output stream/device supports native hardware volume
     /// control in this build. Returns `false` when hardware volume is not

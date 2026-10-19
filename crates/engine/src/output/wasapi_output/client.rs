@@ -190,6 +190,11 @@ pub(crate) struct ExclusiveClient {
     /// Event signaled by the audio engine each time the render buffer is
     /// available to be filled (buffer-end event).
     pub(crate) event: HANDLE,
+    /// Manual-reset acknowledgement event for `pause()`: the render thread
+    /// sets it at the top of its loop while `paused` is observed, i.e. only
+    /// once no callback is in flight. `pause()` clears it before waiting, so
+    /// an acknowledgement from an earlier pause cannot be consumed twice.
+    pub(crate) idle_event: HANDLE,
     /// Buffer size in frames (from `IAudioClient::GetBufferSize`).
     pub(crate) buffer_size_frames: u32,
     /// Sample rate this client was initialized at.
@@ -231,9 +236,11 @@ pub(crate) struct RenderContext {
     pub(crate) audio_client: SendCom<IAudioClient>,
     pub(crate) render_client: SendCom<IAudioRenderClient>,
     pub(crate) event: SendHandle,
+    /// Acknowledgement event for `pause()` (the owner's
+    /// `ExclusiveClient::idle_event`, moved to the thread that sets it).
+    pub(crate) idle_event: SendHandle,
     pub(crate) buffer: Arc<FixedFrameBuffer>,
     pub(crate) paused: Arc<AtomicBool>,
-    pub(crate) in_callback: Arc<AtomicBool>,
     pub(crate) running: Arc<AtomicBool>,
     pub(crate) underruns: Arc<AtomicU32>,
     pub(crate) clip_counter: Arc<AtomicU32>,
@@ -449,9 +456,11 @@ pub(crate) fn open_exclusive_client_preferring(
             None => (None, None),
         };
 
-        // The render-thread event is created in start_client() (a fresh
-        // event is needed for every Start cycle).
+        // The render-thread events (buffer-end and pause acknowledgement)
+        // are created in start_client() — fresh handles for every Start
+        // cycle.
         let event = HANDLE(std::ptr::null_mut());
+        let idle_event = HANDLE(std::ptr::null_mut());
 
         if format != WasapiContainer::F32 {
             log::info!(
@@ -464,6 +473,7 @@ pub(crate) fn open_exclusive_client_preferring(
             render_client,
             endpoint_volume,
             event,
+            idle_event,
             buffer_size_frames,
             sample_rate: rate,
             channels: 2,

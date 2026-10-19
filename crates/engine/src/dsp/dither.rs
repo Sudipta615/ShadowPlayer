@@ -41,8 +41,11 @@ pub enum DitherType {
     /// Shibata F-weighted IIR noise shaping.
     ///
     /// Uses a 9-tap error-feedback FIR with psychoacoustically optimised
-    /// coefficients for 44.1 kHz and 48 kHz.  This achieves the lowest
-    /// perceptible noise floor of all modes.
+    /// coefficients. Shibata published designs for exactly 44.1 kHz and
+    /// 48 kHz; every other rate reuses the nearer table (see
+    /// [`shibata_design_rate`]) and [`Dither::with_sample_rate`] warns once
+    /// per process when that happens. At the two design rates this achieves
+    /// the lowest perceptible noise floor of all modes.
     Shibata,
     /// First-order error-feedback noise shaping.
     ///
@@ -72,14 +75,57 @@ const SHIBATA_COEFFS_48000: [f32; 9] = [
     2.2374, -2.7120, 2.3784, -1.8640, 1.2035, -0.6267, 0.2625, -0.0740, 0.0119,
 ];
 
-/// Shibata published two designs, for 44.1 and 48 kHz, and the selection above
-/// is keyed at 46 kHz: anything above uses the 48 kHz set. So an 88.2, 96 or
-/// 192 kHz stream is shaped with the 48 kHz F-weighting rather than a design
-/// derived for its own band.
+/// The design rate of the Shibata table selected for `sample_rate`.
 ///
-/// That is a real limitation, stated rather than implied. It is not audible —
-/// the shaping error is already below the quantisation floor at these depths —
-/// but the alternative was worse: the conversion path used to select its
+/// Shibata published exactly two designs — 44.1 and 48 kHz — and there is no
+/// table for any other rate: this returns the nearer of the two (the 46 kHz
+/// threshold sits between them). It is a separate function from the
+/// coefficient lookup so callers — and tests — can tell "landed on a
+/// published design" from "reused the nearer table".
+fn shibata_design_rate(sample_rate: u32) -> u32 {
+    if sample_rate <= 46_000 {
+        44_100
+    } else {
+        48_000
+    }
+}
+
+/// The coefficient table for a rate returned by [`shibata_design_rate`].
+fn shibata_coefficients_for(design_rate: u32) -> [f32; 9] {
+    if design_rate == 44_100 {
+        SHIBATA_COEFFS_44100
+    } else {
+        SHIBATA_COEFFS_48000
+    }
+}
+
+/// One-time guard for the off-design-rate warning: stream setup can run per
+/// output configuration, and the same approximation does not need repeating.
+static SHIBATA_APPROX_WARNED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Report, once per process, that `sample_rate` has no Shibata design and the
+/// `design_rate` table is being reused.
+fn warn_shibata_approximation_once(sample_rate: u32, design_rate: u32) {
+    use std::sync::atomic::Ordering;
+    if !SHIBATA_APPROX_WARNED.swap(true, Ordering::Relaxed) {
+        log::warn!(
+            "dither: no Shibata noise-shaping design exists for {sample_rate} Hz; \
+             reusing the {design_rate} Hz coefficients (published designs: 44100, 48000)"
+        );
+    }
+}
+
+/// Shibata published two designs, for 44.1 and 48 kHz, and there is no table
+/// for any other rate: [`shibata_design_rate`] picks the nearer of the two, so
+/// an 88.2, 96 or 192 kHz stream is shaped with the 48 kHz F-weighting and a
+/// 32 kHz stream with the 44.1 kHz design — neither derived for its own band.
+///
+/// That is a real limitation, stated rather than implied, and
+/// [`Dither::with_sample_rate`] logs a warning (once per process) whenever a
+/// stream lands off the two published rates. Inaudibility at other rates is
+/// *not* asserted: the designs were never characterised there. The
+/// alternative was worse: the conversion path used to select its
 /// coefficients from a hardcoded `44100`, so *every* rate above 44.1 kHz was
 /// shaped against the wrong noise floor. See
 /// [`AudioFormatConverter::new_at_rate`] and
@@ -154,12 +200,21 @@ impl Dither {
     }
 
     /// Create a dither processor with sample-rate-aware Shibata coefficients.
+    ///
+    /// Shibata published designs for exactly 44.1 and 48 kHz. Any other rate
+    /// reuses the nearer table (see [`shibata_design_rate`]) and this
+    /// constructor logs a warning — once per process — when the selected
+    /// type is [`DitherType::Shibata`], so the approximation is visible in
+    /// diagnostics rather than silent.
     pub fn with_sample_rate(dither_type: DitherType, bit_depth: u32, sample_rate: u32) -> Self {
-        let shibata_coeffs = if sample_rate <= 46000 {
-            SHIBATA_COEFFS_44100
-        } else {
-            SHIBATA_COEFFS_48000
-        };
+        let design_rate = shibata_design_rate(sample_rate);
+        let shibata_coeffs = shibata_coefficients_for(design_rate);
+        if matches!(dither_type, DitherType::Shibata)
+            && sample_rate != 44_100
+            && sample_rate != 48_000
+        {
+            warn_shibata_approximation_once(sample_rate, design_rate);
+        }
         Self {
             dither_type,
             bit_depth: bit_depth.clamp(1, 32),
@@ -818,6 +873,33 @@ mod tests {
             SHIBATA_COEFFS_48000,
             "the high-rate table is the 48 kHz design; see the module note"
         );
+
+        // The design selection reports *which* published design a rate
+        // lands on, and that is exactly the predicate the off-design warning
+        // uses: a rate is either one of the two published rates or it is
+        // reusing the nearer table.
+        for (rate, expected_design) in [
+            (8_000u32, 44_100u32),
+            (32_000, 44_100),
+            (44_100, 44_100),
+            (46_000, 44_100),
+            (46_001, 48_000),
+            (48_000, 48_000),
+            (88_200, 48_000),
+            (96_000, 48_000),
+            (192_000, 48_000),
+        ] {
+            assert_eq!(
+                shibata_design_rate(rate),
+                expected_design,
+                "{rate} Hz must reuse the {expected_design} Hz Shibata design"
+            );
+            assert_eq!(
+                Dither::with_sample_rate(DitherType::Shibata, 16, rate).shibata_coeffs,
+                shibata_coefficients_for(expected_design),
+                "{rate} Hz coefficients must come from the {expected_design} Hz design"
+            );
+        }
     }
 
     /// The converter is the quantisation boundary, so it is the thing that has

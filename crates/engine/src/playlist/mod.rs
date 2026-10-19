@@ -63,6 +63,11 @@ pub enum RepeatMode {
 #[derive(Debug, Clone)]
 pub struct Playlist {
     items: Vec<AudioSource>,
+    /// Per-entry metadata carried in from a playlist file by
+    /// [`Self::from_parsed`], parallel to `items` and maintained by every
+    /// queue mutation. `None` for entries no file described — which is every
+    /// entry added through the live queue API.
+    metadata: Vec<Option<TrackMetadata>>,
     /// Index into `items` of the currently-playing track, or `None` when
     /// nothing has been selected yet (the queue is non-empty but pending
     /// the user's first play / manual choice).
@@ -88,6 +93,7 @@ impl Playlist {
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
+            metadata: Vec::new(),
             current: None,
             repeat: RepeatMode::Off,
             shuffle: false,
@@ -108,15 +114,33 @@ impl Playlist {
     /// `ParsedPlaylist::repeat` is applied when the file expressed one. None of
     /// M3U / PLS / XSPF do, so in practice this is the default — the plumbing
     /// exists so a format that does express it needs no signature change.
+    ///
+    /// Per-entry metadata the file carried (`#EXTINF` labels, XSPF titles,
+    /// …) is kept in the queue, parallel to its entries and reachable through
+    /// [`Self::metadata`]; it is not dropped on the floor. Entries the file
+    /// said nothing about store `None`, not an empty record.
     pub fn from_parsed(parsed: ParsedPlaylist) -> Self {
+        let ParsedPlaylist {
+            entries,
+            metadata,
+            repeat,
+        } = parsed;
         let mut queue = Self::new();
-        for source in parsed.entries {
+        for source in entries {
             // `enqueue` maintains the shuffled order and the current index;
             // appending to `items` directly would leave `order` empty and the
             // queue would misbehave the moment shuffle was switched on.
             queue.enqueue(source);
         }
-        if let Some(repeat) = parsed.repeat {
+        // `metadata` is parallel to `entries` by construction: every parser
+        // pushes exactly one record per entry. An all-empty record carries no
+        // information, so it normalises to `None` — "the file said nothing
+        // about this entry" and "its record had no fields" are the same
+        // answer for a caller.
+        for (slot, record) in queue.metadata.iter_mut().zip(metadata) {
+            *slot = (record != TrackMetadata::default()).then_some(record);
+        }
+        if let Some(repeat) = repeat {
             queue.repeat = repeat;
         }
         queue
@@ -169,6 +193,16 @@ impl Playlist {
         &self.items
     }
 
+    /// File-supplied metadata for the entry at `index`, as loaded by
+    /// [`Self::from_parsed`].
+    ///
+    /// `None` when the entry has no file-supplied metadata — including every
+    /// entry added through the live queue API — and when `index` is out of
+    /// range.
+    pub fn metadata(&self, index: usize) -> Option<&TrackMetadata> {
+        self.metadata.get(index).and_then(|record| record.as_ref())
+    }
+
     /// Index of the currently-playing track, if any.
     #[inline]
     pub fn current_index(&self) -> Option<usize> {
@@ -204,6 +238,7 @@ impl Playlist {
     pub fn enqueue(&mut self, source: AudioSource) {
         let index = self.items.len();
         self.items.push(source);
+        self.metadata.push(None);
         if self.shuffle {
             // Insert the new index at a random position in the remaining
             // (unplayed) portion of the order, so newly-enqueued tracks are
@@ -225,6 +260,7 @@ impl Playlist {
             return None;
         }
         let removed = self.items.remove(index);
+        self.metadata.remove(index);
 
         // Fix current.
         if self.current == Some(index) {
@@ -273,6 +309,7 @@ impl Playlist {
     /// Remove all entries and reset state.
     pub fn clear(&mut self) {
         self.items.clear();
+        self.metadata.clear();
         self.current = None;
         self.order.clear();
         self.order_pos = 0;
@@ -283,6 +320,7 @@ impl Playlist {
     /// [`AudioSource::Open`](crate::commands::EngineCommand::Open)).
     pub fn set_single(&mut self, source: AudioSource) {
         self.items = vec![source];
+        self.metadata = vec![None];
         self.current = Some(0);
         self.order.clear();
         self.order_pos = 0;

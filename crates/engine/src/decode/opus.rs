@@ -31,7 +31,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read, Seek};
 use std::path::Path;
 
 use ogg::reading::{OggReadError, PacketReader};
@@ -238,18 +238,27 @@ pub struct OpusSource {
 }
 
 impl OpusSource {
-    /// Content sniff: true when the file's first Ogg packet is an OpusHead.
-    /// Used by the decoder dispatch to route `.oga` files — which may hold
-    /// Opus *or* Vorbis — to the right backend.
-    pub fn probe(path: &Path) -> bool {
-        let Ok(file) = File::open(path) else {
-            return false;
-        };
-        let mut reader = PacketReader::new(BufReader::new(file));
+    /// Content sniff on any seekable reader: true when the first Ogg packet
+    /// is an OpusHead.
+    ///
+    /// This is what the decoder dispatch uses to route `.oga` files — which
+    /// may hold Opus *or* Vorbis — to the right backend. It consumes the
+    /// reader as far as the first packet, so the caller rewinds afterwards.
+    pub(crate) fn probe_reader<R: Read + Seek>(reader: R) -> bool {
+        let mut reader = PacketReader::new(BufReader::new(reader));
         match reader.read_packet() {
             Ok(Some(packet)) => packet.data.len() >= 8 && &packet.data[..8] == OPUS_HEAD_MAGIC,
             _ => false,
         }
+    }
+
+    /// Content sniff on a file: true when the first Ogg packet is an
+    /// OpusHead. [`Self::probe_reader`] is the reader-based form.
+    pub fn probe(path: &Path) -> bool {
+        let Ok(file) = File::open(path) else {
+            return false;
+        };
+        Self::probe_reader(BufReader::new(file))
     }
 
     /// Open an Ogg Opus file. Parses OpusHead/OpusTags, builds the

@@ -5,7 +5,10 @@
 //! magic numbers by formalizing specifications across:
 //!
 //! - **Loudness**: ITU-R BS.1770-5, EBU R128, ReplayGain 2.0 ([`loudness`])
-//! - **True Peak**: ITU-R BS.1770-5 Annex 2, EBU Tech 3341 ([`true_peak`])
+//! - **True Peak**: the ITU-R BS.1770-5 Annex 2 *definition* and EBU Tech
+//!   3341 ceilings ([`true_peak`]) — the measurement itself runs the engine
+//!   prototype in [`crate::dsp::true_peak`], which is not Annex 2's
+//!   published coefficient table
 //! - **Channel Layouts**: ITU-R BS.775, ITU-R BS.2051-3, SMPTE ST 2036-2 ([`channel_layout`])
 //! - **Spatial Coordinates & HOA**: Right-Handed Cartesian, ACN/SN3D/N3D ([`spatial`])
 //! - **Audio Definition Model (ADM)**: ITU-R BS.2076-1 / BS.2076-2 ([`adm`])

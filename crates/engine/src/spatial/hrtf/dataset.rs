@@ -1,7 +1,8 @@
 //! HRTF dataset storage, synthetic generator, and multi-mesh interpolation (spec §47–48, §62).
 
 use super::corpus::{
-    resample_impulse, HrtfCorpus, HrtfLoadError, HrtfLoadOptions, HrtfMeshKind, HrtfNormalize,
+    resample_impulse, HrtfCorpus, HrtfLoadError, HrtfLoadOptions, HrtfMeasurement, HrtfMeshKind,
+    HrtfNormalize,
 };
 use super::interpolate::SphericalHrtfInterpolator;
 use super::quality::MAX_HRTF_TAPS;
@@ -411,6 +412,75 @@ impl HrtfDataset {
         self.mesh_kind
     }
 
+    /// Number of measured directions: the full grid product for regular
+    /// grids, the measurement count for irregular meshes.
+    pub fn measured_direction_count(&self) -> usize {
+        match self.mesh_kind {
+            HrtfMeshKind::RegularGrid => self.azimuths.len() * self.elevations.len(),
+            HrtfMeshKind::IrregularMesh => self.interpolator.as_ref().map_or(0, |i| i.len()),
+        }
+    }
+
+    /// Angular coverage of the measured responses,
+    /// `(az_min, az_max, el_min, el_max)` in degrees.
+    ///
+    /// Azimuths are reported in `[0, 360)`. Regular grids take their stored
+    /// (ascending) tables directly. Irregular meshes have no tables, so the
+    /// covered azimuth arc is the complement of the largest measurement-free
+    /// gap: a front arc that crosses 0° therefore comes back as
+    /// `az_min > az_max`. `None` only when the dataset stores no directions.
+    ///
+    /// This is what spatial health scores against: a direction inside these
+    /// extents runs on the measured data directly, a direction outside them
+    /// runs on extrapolations of the nearest measured responses (never the
+    /// analytic head model — see [`Self::interpolate_direction`]).
+    pub fn coverage_extents(&self) -> Option<(f32, f32, f32, f32)> {
+        match self.mesh_kind {
+            HrtfMeshKind::RegularGrid => {
+                let (a0, a1) = (*self.azimuths.first()?, *self.azimuths.last()?);
+                let (e0, e1) = (*self.elevations.first()?, *self.elevations.last()?);
+                Some((a0, a1, e0, e1))
+            }
+            HrtfMeshKind::IrregularMesh => {
+                let pts = self.interpolator.as_ref()?.points();
+                if pts.is_empty() {
+                    return None;
+                }
+                let mut azimuths: Vec<f32> = pts
+                    .iter()
+                    .map(|p| p.azimuth_rad().to_degrees().rem_euclid(360.0))
+                    .collect();
+                azimuths.sort_by(f32::total_cmp);
+                // Largest cyclic gap between consecutive measurement
+                // azimuths; the covered arc starts just after it.
+                let mut best_gap = -1.0f32;
+                let mut best_idx = 0usize;
+                for (i, &az) in azimuths.iter().enumerate() {
+                    let next = if i + 1 < azimuths.len() {
+                        azimuths[i + 1]
+                    } else {
+                        azimuths[0] + 360.0
+                    };
+                    let gap = next - az;
+                    if gap > best_gap {
+                        best_gap = gap;
+                        best_idx = i;
+                    }
+                }
+                let (el_min, el_max) = pts
+                    .iter()
+                    .map(|p| p.elevation_rad().to_degrees())
+                    .fold((f32::MAX, f32::MIN), |(lo, hi), e| (lo.min(e), hi.max(e)));
+                Some((
+                    azimuths[(best_idx + 1) % azimuths.len()],
+                    azimuths[best_idx],
+                    el_min,
+                    el_max,
+                ))
+            }
+        }
+    }
+
     pub fn ir(&self, az_idx: usize, el_idx: usize, ear: Ear) -> &[f32] {
         let base = (az_idx * self.elevations.len() + el_idx) * Ear::COUNT * self.taps
             + ear.index() * self.taps;
@@ -547,6 +617,8 @@ impl HrtfDataset {
             // shorter window itself. The direction becomes angles, and the grid
             // blend does the rest — the same fallback the full-length version
             // uses, so the two cannot differ on a direction that falls here.
+            // Out-of-span elevations clamp to the edge planes, i.e. the nearest
+            // measured data; the analytic model is not involved.
             let dn = dir.normalized().unwrap_or(Vec3::Y);
             let az = dn.azimuth_rad().to_degrees().rem_euclid(360.0);
             let el = dn.elevation_rad().to_degrees();
@@ -555,6 +627,13 @@ impl HrtfDataset {
     }
 
     /// Interpolate HRTF impulse responses for any continuous 3D unit direction.
+    ///
+    /// The lookup never leaves the measured data: regular grids clamp the
+    /// elevation index to the measured span (the edge planes are reused) and
+    /// irregular meshes blend their nearest measurement directions with
+    /// inverse-distance weights. A loaded dataset therefore means measured
+    /// responses for every direction — the analytic head model only runs when
+    /// no dataset is loaded at all.
     pub fn interpolate_direction(&self, dir: Vec3, ear: Ear, out: &mut [f32]) {
         debug_assert!(out.len() >= self.taps);
         if let Some(ref interp) = self.interpolator {
@@ -597,5 +676,59 @@ mod tests {
         for &val in &out {
             assert!(val.is_finite());
         }
+    }
+
+    #[test]
+    fn coverage_extents_report_both_mesh_kinds() {
+        // Regular grid: the stored tables are the extents.
+        let grid = HrtfDataset::from_planes(
+            vec![0.0, 15.0, 30.0],
+            vec![-30.0, 0.0, 30.0],
+            8,
+            vec![0.0; 3 * 3 * 2 * 8],
+        )
+        .expect("grid");
+        assert_eq!(grid.coverage_extents(), Some((0.0, 30.0, -30.0, 30.0)));
+        assert_eq!(grid.measured_direction_count(), 9);
+
+        // Irregular mesh: no azimuth/elevation tables, yet the coverage must
+        // still come from the measurement directions. The front arc below
+        // crosses 0°, so it is reported as `az_min > az_max`.
+        let dir = |az_deg: f32, el_deg: f32| {
+            let (az, el) = (az_deg.to_radians(), el_deg.to_radians());
+            let h = el.cos();
+            [h * az.sin(), h * az.cos(), el.sin()]
+        };
+        let meas = |az: f32, el: f32| HrtfMeasurement {
+            direction: dir(az, el),
+            left: vec![1.0; 8],
+            right: vec![1.0; 8],
+        };
+        let corpus = HrtfCorpus {
+            sample_rate: 48_000,
+            source: Some("coverage-test".into()),
+            measurements: vec![
+                meas(270.0, 0.0),
+                meas(315.0, 0.0),
+                meas(0.0, 0.0),
+                meas(45.0, 0.0),
+                meas(90.0, 0.0),
+            ],
+            mesh_hint: Some(HrtfMeshKind::IrregularMesh),
+        };
+        let mesh = HrtfDataset::from_corpus_irregular(
+            &corpus,
+            &HrtfLoadOptions {
+                taps: 8,
+                target_sample_rate: 48_000,
+                normalize: HrtfNormalize::None,
+            },
+        )
+        .expect("irregular corpus");
+        assert_eq!(mesh.measured_direction_count(), 5);
+        let (a0, a1, e0, e1) = mesh.coverage_extents().expect("mesh extents");
+        assert!((a0 - 270.0).abs() < 0.1, "arc start {a0}");
+        assert!((a1 - 90.0).abs() < 0.1, "arc end {a1}");
+        assert!(e0.abs() < 0.1 && e1.abs() < 0.1, "el {e0}..{e1}");
     }
 }
