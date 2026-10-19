@@ -2,13 +2,11 @@ use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Strok
 use domain::models::{SyncedLyricLine, Track};
 use crate::services::{ArtworkService, LyricsSource};
 use crate::theme::Theme;
-use crate::components::settings_tab::{show_settings_tab, SettingsTabActions, SettingsTabState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightTab {
     Queue,
     Lyrics,
-    Settings,
 }
 
 pub struct RightPanelAction {
@@ -18,7 +16,6 @@ pub struct RightPanelAction {
     pub clear_queue: bool,
     pub volume_changed: Option<f32>,
     pub toggle_mute: bool,
-    pub settings: SettingsTabActions,
 }
 
 pub struct RightPanel<'a> {
@@ -33,7 +30,6 @@ pub struct RightPanel<'a> {
     pub volume: f32,
     pub is_muted: bool,
     pub artwork: &'a mut ArtworkService,
-    pub settings_state: &'a mut SettingsTabState,
     pub theme: &'a Theme,
 }
 
@@ -46,7 +42,6 @@ impl<'a> RightPanel<'a> {
             clear_queue: false,
             volume_changed: None,
             toggle_mute: false,
-            settings: SettingsTabActions::default(),
         };
 
         ui.vertical(|ui| {
@@ -369,11 +364,6 @@ impl<'a> RightPanel<'a> {
                                      }
                                 });
                         }
-                    }
-
-                    RightTab::Settings => {
-                        let settings_actions = show_settings_tab(ui, self.settings_state, self.theme);
-                        action.settings = settings_actions;
                     }
                 }
             });

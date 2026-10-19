@@ -54,6 +54,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v3(conn)?;
     }
 
+    if current_version < 4 {
+        apply_v4(conn)?;
+    }
+
     Ok(())
 }
 
@@ -293,4 +297,65 @@ fn apply_v3(conn: &mut Connection) -> Result<()> {
 
     tx.commit()?;
     Ok(())
+}
+
+/// V4: make the saved queue a real child of the library, and drop two tables
+/// nothing ever wrote to.
+///
+/// `saved_queue.track_id` had no foreign key, so a queue row outlived the track
+/// it named: the row survived every deletion, `load_queue` silently skipped it
+/// (its `JOIN tracks` found nothing) and the queue quietly shrank. The `path`
+/// column was written on every save and read by nobody except a purge that can
+/// now follow the track's own path.
+///
+/// The `lyrics` and `artwork` tables were created in V1 and never used — no
+/// repository, no inserts, no reads: lyrics are read from disk on demand and
+/// artwork dimensions are re-measured when needed. Carrying an empty table that
+/// promises a cache is worse than not having one.
+fn apply_v4(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V4 (queue foreign key, drop unused tables)");
+    let tx = conn.transaction()?;
+
+    // SQLite cannot add a foreign key to an existing table, so the queue is
+    // rebuilt. Orphan rows (whose track is gone) are dropped by the join rather
+    // than copied into the new table.
+    let statements = [
+        "CREATE TABLE saved_queue_v4 (
+            position INTEGER PRIMARY KEY NOT NULL,
+            track_id TEXT NOT NULL,
+            FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        );",
+        // `ROW_NUMBER` (rather than copying `position`) closes the gap the
+        // dropped orphans leave behind: `save_queue` writes a dense 0..n
+        // ordering and the rest of the queue code expects one.
+        "INSERT INTO saved_queue_v4 (position, track_id)
+            SELECT ROW_NUMBER() OVER (ORDER BY sq.position ASC) - 1, sq.track_id
+            FROM saved_queue sq
+            JOIN tracks t ON t.id = sq.track_id;",
+        "DROP TABLE saved_queue;",
+        "ALTER TABLE saved_queue_v4 RENAME TO saved_queue;",
+        "DROP TABLE IF EXISTS lyrics;",
+        "DROP TABLE IF EXISTS artwork;",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (4, strftime('%s', 'now'));",
+    ];
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V4 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+/// Test hook: apply V4 alone to a hand-built legacy schema.
+///
+/// `run_migrations` takes a database from zero to current, so the upgrade path
+/// — which has to carry real data across a table rebuild — would otherwise only
+/// be exercised on a user's machine.
+#[cfg(test)]
+pub(crate) fn apply_v4_for_test(conn: &mut Connection) -> Result<()> {
+    apply_v4(conn)
 }

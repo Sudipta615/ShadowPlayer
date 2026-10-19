@@ -867,14 +867,20 @@ impl QueueRepo {
         Self { db }
     }
 
-    pub fn save_queue(&self, tracks: &[(TrackId, PathBuf)]) -> Result<()> {
+    /// Replace the persisted queue.
+    ///
+    /// Only ids are stored: the queue is an ordered list of tracks, and every
+    /// other fact about a track (its path above all) belongs to the track row
+    /// that owns it. The column that duplicated the path was never read back and
+    /// went stale the moment a file was organized.
+    pub fn save_queue(&self, track_ids: &[TrackId]) -> Result<()> {
         self.db.with_conn(|conn| {
             let tx = conn.transaction()?;
             tx.execute("DELETE FROM saved_queue;", [])?;
-            for (pos, (id, path)) in tracks.iter().enumerate() {
+            for (pos, id) in track_ids.iter().enumerate() {
                 tx.execute(
-                    "INSERT INTO saved_queue (position, track_id, path) VALUES (?1, ?2, ?3);",
-                    params![pos as i64, id.to_string(), path.to_string_lossy()],
+                    "INSERT INTO saved_queue (position, track_id) VALUES (?1, ?2);",
+                    params![pos as i64, id.to_string()],
                 )?;
             }
             tx.commit()?;
@@ -905,12 +911,17 @@ impl QueueRepo {
         })
     }
 
-    /// Drops persisted queue entries inside `prefix`.
+    /// Drops persisted queue entries whose track lives inside `prefix`.
+    ///
+    /// The prefix is matched against the track's own path, which is the only
+    /// copy of it: the queue table stores ids, and a queued track that is
+    /// deleted takes its queue row with it through the foreign key.
     pub fn purge_path_prefix(&self, prefix: &Path) -> Result<usize> {
         let like = like_prefix(prefix);
         self.db.with_conn(|conn| {
             let n = conn.execute(
-                "DELETE FROM saved_queue WHERE path LIKE ?1 ESCAPE '\\';",
+                "DELETE FROM saved_queue
+                 WHERE track_id IN (SELECT id FROM tracks WHERE path LIKE ?1 ESCAPE '\\');",
                 params![like],
             )?;
             Ok(n)

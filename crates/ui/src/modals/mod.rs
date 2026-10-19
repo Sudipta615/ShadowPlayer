@@ -2,7 +2,6 @@ pub mod autoeq_modal;
 pub mod bit_perfect_modal;
 pub mod duplicates_modal;
 pub mod edit_track_modal;
-pub mod new_playlist_modal;
 pub mod organize_modal;
 pub mod playlist_editor_modal;
 pub mod smart_playlist_modal;
@@ -13,7 +12,6 @@ pub use duplicates_modal::{
     show_duplicates_modal, DuplicateGroup, DuplicatesActions, DuplicatesState,
 };
 pub use edit_track_modal::{show_edit_track_modal, EditTrackActions, EditTrackState};
-pub use new_playlist_modal::show_new_playlist_modal;
 pub use organize_modal::{show_organize_modal, OrganizeActions, OrganizePrefs, OrganizeState};
 pub use playlist_editor_modal::{
     show_playlist_editor, PlaylistEditorActions, PlaylistEditorState,

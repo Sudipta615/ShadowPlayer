@@ -6,6 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **CLAP plugin hosting**: load and process standard CLAP audio plugins inside the DSP graph, with a generic parameter rack, per-plugin bypass and state save/restore.
+- **Batch organizer**: build a rename/move plan from `{token}` patterns under a destination folder, review every entry (conflicts, duplicates, missing sources) before anything moves, and relink the library afterwards.
+- **Named DSP chain presets**: save and recall whole-chain presets (EQ, dynamics, filters, effects, plugin rack), stored with the settings.
+- **Lyrics from file tags**: embedded `USLT`/`SYLT` (and equivalents) are read and preferred over sidecar files, with a hardened sidecar lookup; timed `SYLT` lyrics render as synced LRC.
+- **Recently added view and quick-filter chips**: a "Recently Added" section, plus Lossless / Hi-Res / Favourites chips above the songs table, backed by the existing filters.
+- **Toast notifications**: every operation that fails (scan, import, organize, persistence, engine problems) reports it instead of logging into the void.
+- **Bass management**: subwoofer/LFE routing, crossover with selectable slope, and up/down-mix controls, all saved with the user's audio profile.
+- **Duplicate finder**: groups tracks by content fingerprint and offers keep-best/remove handling.
+- **DSP precision mode and runtime diagnostics**: selectable processing precision, plus a diagnostics card that reports the negotiated output path and why bit-perfect is (not) active.
+- **M3U import/export**: extended `.m3u`/`.m3u8` playlists, with relative paths, encoding tolerance and a portable export.
+- **Scan-root watching**: roots are watched while the app runs and changes are reconciled on startup, so the library tracks the disk without a manual rescan.
+- **ReplayGain tag writing**: an optional library scan that writes ReplayGain 2.0 tags (track and album) into supported files, with a dry-run mode.
+- **Root `README.md`, `LICENSE` (Apache-2.0) and a CI workflow** (`fmt`, `clippy -D warnings`, tests for the player workspace and the engine).
+
+### Fixed
+- **Playback and UI honesty** (audit milestone P1): clearing the queue also clears the current track; turning shuffle off restores the pre-shuffle order from a snapshot that is no longer overwritten; listening time is credited only for contiguous playback; repeat-one no longer reopens the file; persistence failures are logged; engine and output-device problems surface as toasts.
+- **Sorting** is a single enum again (domain `SortField` + `SortOrder`): the direction is selectable and persisted, favourites can be sorted, the `#` and heart headers sort, and album/track-number collation is fixed. The row menu opens, the never-reachable "Advanced Audio" modal is gone, crossfade is enabled only for the crossfade transition, the spatial radar drives real engine parameters, and the settings tab persists its own complete struct instead of a hand-maintained mirror.
+- **Bad data can no longer be lost silently** (audit milestone P0): metadata extraction no longer divides by zero on sub-second files; scans do not follow symlinks and do reconcile deletions; content fingerprints probe head, middle and tail; relinking requires the old file to be genuinely absent; `.cue`-covered album images are indexed as the sheet's tracks only; malformed ids are reported instead of reinvented; `ScanRoots` add is idempotent; absent settings fields fall back to defaults; SQLite pragmas are verified; the V3 migration is guarded against a lost migration row.
+- **Database correctness**: album year uses `MIN(year)`; full-text search builds a real FTS query from the tokenizer's own tokens (`AC/DC`, `don't`); playlist positions are compacted from an ordered read; smart-playlist rules that a field cannot express are repaired on load, and an unreadable rule blob matches nothing rather than everything.
+- **Library and sidecars**: organizing never overwrites a file that appeared after the plan was made and works across filesystems; `.m3u` files are decoded rather than assumed UTF-8, `file://` URIs percent-decode, relative paths survive a symlinked base directory, and unrepresentable paths are skipped instead of corrupting the playlist; the watcher coalesces event bursts, logs backend errors and ignores opens; LRC parsing understands metadata tags, `[offset:ms]` and multiple timestamps, and reads non-UTF-8 sidecars.
+
+---
+
 ## [0.4.0] - 2026-10-18
 
 ### Added

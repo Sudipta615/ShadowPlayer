@@ -554,11 +554,11 @@ impl PlaybackCoordinator {
     }
 
     fn persist_queue(&self) {
-        let entries: Vec<_> = self.queue.iter().map(|t| (t.id, t.path.clone())).collect();
+        let ids: Vec<_> = self.queue.iter().map(|t| t.id).collect();
         // A failure here means the queue will not survive a restart, which is
         // worth a log line: it used to fail completely silently.
-        if let Err(e) = self.queue_repo.save_queue(&entries) {
-            warn!("Could not persist the queue ({} entries): {e}", entries.len());
+        if let Err(e) = self.queue_repo.save_queue(&ids) {
+            warn!("Could not persist the queue ({} entries): {e}", ids.len());
         }
     }
 }

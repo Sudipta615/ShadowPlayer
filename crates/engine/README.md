@@ -50,19 +50,21 @@ It is built from the ground up for critical listening environments, professional
 
 ## 📚 Documentation Index
 
-For detailed guides and reference documentation, consult the canonical manuals:
+There is no `docs/` directory in this repository. An earlier revision of this
+table linked `docs/GETTING_STARTED.md`, `docs/ENGINE_SPEC.md`,
+`docs/OWNERS_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/SIGNAL_FLOW.md`,
+`docs/EMBEDDING.md`, `docs/LICENSES_AND_ATTRIBUTION.md`, `docs/HISTORY.md`,
+`AGENTS.md` and `CONTRIBUTING.md`; none of those files were ever committed, so
+every one of those links was a dead end. Rather than keep pointing at them, this
+is what actually documents the engine:
 
-| Document | Description |
+| Where | What it covers |
 | :--- | :--- |
-| **[Getting Started](docs/GETTING_STARTED.md)** | Step-by-step from-zero setup, toolchain requirements, ALSA permissions, and first playback |
-| **[Canonical Specification](docs/ENGINE_SPEC.md)** | Authoritative mathematical contracts, precision tiers, and architectural specs |
-| **[Owner's Guide](docs/OWNERS_GUIDE.md)** | 170+ KB deep dive into engine internals, subsystem interactions, and developer mechanics |
-| **[Architecture Guide](docs/ARCHITECTURE.md)** | Complete concurrency models, lock-free memory architecture, and thread boundaries |
-| **[Signal Flow](docs/SIGNAL_FLOW.md)** | Exact sample-level signal path, precision tiers, and hardware bypass routes |
-| **[Embedding Guide](docs/EMBEDDING.md)** | Comprehensive host integration guide for Rust applications and C-ABI clients |
-| **[Licences & Attribution](docs/LICENSES_AND_ATTRIBUTION.md)** | Formal algorithm citations, dependency inventory, and licensing disclosures |
-| **[AGENTS.md](AGENTS.md) & [Contributing](CONTRIBUTING.md)** | Developer workflow, lockstep versioning policies, and strict "no god files" modularity rules |
-| **[History](docs/HISTORY.md)** | Development evolution, historical phase roadmap, and architectural milestones |
+| This README | Overview, architecture, DSP chain, backends, quality gates, known limitations |
+| `cargo doc -p audio-engine --no-deps --open` | Per-module and per-item contracts, invariants and examples straight from the source |
+| The source itself (`src/**`) | The specification is in the module docs: precision tiers, real-time rules, ownership |
+| `tests/` and `benches/` | Executable contracts: fidelity, robustness, real-time allocation budget |
+| `../..` (repository root) | The desktop player built on this engine, its build steps and shortcuts |
 
 ---
 
@@ -243,6 +245,27 @@ Decoded Audio Frames
 
 ---
 
+## 🧩 Subsystems With No Desktop UI
+
+The engine exports more than the ShadowPlayer desktop app drives. That is
+deliberate — the crate is a library for embedders, appliances and DAWs — but it
+is worth stating plainly which parts have **no** caller in this repository, so
+nobody assumes a feature is wired up because the module exists:
+
+| Subsystem | Status for the desktop app |
+| :--- | :--- |
+| `network_audio` | AES67 / RTP receive and send. No UI; drive it from an embedding host. |
+| `mpris` (feature `mpris`) | **Not used by the app.** It is gated behind a feature the app does not enable. The desktop app implements MPRIS2 itself (`crates/ui/src/services/mpris_service.rs`) because transport state lives in the app's coordinator, not in the engine — exposing it from the engine would have two owners of the same D-Bus name. |
+| `profile` | AutoEq / headphone target analysis. The app's AutoEq path applies the resulting filters through the DSP chain instead. |
+| `eval`, `governance`, `standards` | Engineering-process suites: qualification runs, standards conformance, release gates. Used by the engine's own test binaries. |
+| `fx` | Modulation effects (chorus, flanger, phaser, delay, distortion). Built and tested, not yet surfaced in the app's DSP panel. |
+| `buffer`, `track_cache`, `state` | Internal building blocks used by other engine modules; not host-facing. |
+
+Anything in this table is engine-only until a host wires it up. Adding it to the
+UI is a feature, not a fix, and this file is the place to say so.
+
+---
+
 ## ⚠️ Known Limitations
 
 We state limitations clearly so no architectural contract is misunderstood:
@@ -413,7 +436,8 @@ int main(int argc, char** argv) {
 }
 ```
 
-*See [`docs/EMBEDDING.md`](docs/EMBEDDING.md) for full C prototypes and type signatures.*
+*The full C prototypes, ownership rules and lifecycle contracts are documented on
+`src/ffi.rs` and its re-exports — `cargo doc -p audio-engine --features c-ffi --no-deps --open`.*
 
 ---
 
@@ -556,7 +580,6 @@ would only ever test a moving target.
 │   ├── output/                      # Audio backends (ALSA, WASAPI, ASIO, CoreAudio, PipeWire, JACK, CPAL)
 │   └── bin/                         # audio-engine-cli, replaygain-scanner, release-qualification
 ├── benches/                         # Criterion benchmarks (DSP, pipeline, graph, spatial, budget)
-├── docs/                            # Deep engineering specifications and developer guides
 └── tests/                           # 100 test files (fidelity, robustness fuzzing, realtime allocation)
 ```
 
@@ -564,7 +587,8 @@ would only ever test a moving target.
 
 ## 🤝 Contributing & Engineering Rules
 
-Contributions are welcome. Before submitting PRs, review **[`CONTRIBUTING.md`](CONTRIBUTING.md)** and **[`AGENTS.md`](AGENTS.md)**:
+Contributions are welcome. There is no committed `CONTRIBUTING.md` or `AGENTS.md`
+yet, so the working rules are these:
 
 1. **Strict Versioning**: `engine`, `config`, `plugin-abi`, `plugin-test-echo`, and `engine-tui` move in lockstep.
 2. **No God Files**: Strictly maintain modularity. Decompose growing structs and split large impls by concern.
@@ -576,4 +600,7 @@ Contributions are welcome. Before submitting PRs, review **[`CONTRIBUTING.md`](C
 ## 📄 License
 
 Licensed under the **[Apache License, Version 2.0](LICENSE-APACHE)**.  
-See [`docs/LICENSES_AND_ATTRIBUTION.md`](docs/LICENSES_AND_ATTRIBUTION.md) for third-party citations and dependency licenses.
+Third-party dependency licences are enumerated by `cargo deny check licenses` (see
+`.github/workflows/ci.yml` in the repository root); the algorithm citations that a
+missing `docs/LICENSES_AND_ATTRIBUTION.md` promised are in the module docs of the
+code that implements them.

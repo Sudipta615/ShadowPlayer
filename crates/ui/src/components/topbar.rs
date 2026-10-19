@@ -9,13 +9,6 @@ pub struct WindowControlsResponse {
     pub theme_toggle_requested: bool,
 }
 
-pub struct TopBarResponse {
-    pub search_query_changed: bool,
-    pub close_requested: bool,
-    pub minimize_requested: bool,
-    pub maximize_requested: bool,
-}
-
 /// Renders the search bar that fills the top of the Center Column,
 /// perfectly aligning its left edge with the Now Playing card and Songs table.
 pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bool {
@@ -139,26 +132,4 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
     );
 
     resp
-}
-
-pub struct TopBar<'a> {
-    pub search_query: &'a mut String,
-    pub theme: &'a Theme,
-}
-
-impl<'a> TopBar<'a> {
-    pub fn new(search_query: &'a mut String, theme: &'a Theme) -> Self {
-        Self { search_query, theme }
-    }
-
-    pub fn show(self, ui: &mut Ui) -> TopBarResponse {
-        let changed = render_search_input(ui, self.search_query, self.theme);
-        let win = render_window_controls(ui, self.theme);
-        TopBarResponse {
-            search_query_changed: changed,
-            close_requested: win.close_requested,
-            minimize_requested: win.minimize_requested,
-            maximize_requested: win.maximize_requested,
-        }
-    }
 }

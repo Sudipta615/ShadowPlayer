@@ -31,8 +31,8 @@ pub struct AppState {
     pub frame_count: u32,
 
     // Modal dialogue states
-    pub new_playlist_modal_open: bool,
-    pub new_playlist_name: String,
+    /// A menu item asked for the playlist editor (create/manage playlists).
+    pub open_playlist_editor: bool,
     pub track_properties_track: Option<Track>,
     pub track_properties_open: bool,
     pub help_modal_open: bool,
@@ -66,8 +66,7 @@ impl Default for AppState {
             prev_volume: 0.60,
             frame_count: 0,
 
-            new_playlist_modal_open: false,
-            new_playlist_name: String::new(),
+            open_playlist_editor: false,
             track_properties_track: None,
             track_properties_open: false,
             help_modal_open: false,

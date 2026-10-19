@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(pl_tracks[1].id, t2.id);
 
         // Saved Queue persistence
-        let queue_entries = vec![(t1.id, t1.path.clone()), (t2.id, t2.path.clone())];
+        let queue_entries = vec![t1.id, t2.id];
         q_repo.save_queue(&queue_entries).unwrap();
 
         let loaded = q_repo.load_queue().unwrap();
@@ -130,6 +130,135 @@ mod tests {
 
         q_repo.clear().unwrap();
         assert_eq!(q_repo.load_queue().unwrap().len(), 0);
+    }
+
+    /// A queued track that leaves the library must leave the queue: the row is
+    /// a child of the track, and the queue used to keep a phantom entry that
+    /// `load_queue` silently dropped.
+    #[test]
+    fn deleting_a_track_removes_it_from_the_saved_queue() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let tracks = TrackRepo::new(db.clone());
+        let queue = QueueRepo::new(db.clone());
+
+        let keep = sample_track(TrackId::new(), "/music/keep.flac", "Keep", "X", "A");
+        let drop = sample_track(TrackId::new(), "/music/drop.flac", "Drop", "X", "A");
+        tracks.upsert(&keep).unwrap();
+        tracks.upsert(&drop).unwrap();
+        queue.save_queue(&[keep.id, drop.id]).unwrap();
+
+        tracks.delete(&drop.id).unwrap();
+
+        let loaded = queue.load_queue().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, keep.id);
+    }
+
+    /// The queue purge follows the track's own path, which is the only copy.
+    #[test]
+    fn queue_purge_uses_the_tracks_own_path() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let tracks = TrackRepo::new(db.clone());
+        let queue = QueueRepo::new(db.clone());
+
+        let inside = sample_track(TrackId::new(), "/music/demo/a.flac", "A", "X", "A");
+        let outside = sample_track(TrackId::new(), "/music/real/b.flac", "B", "X", "B");
+        tracks.upsert(&inside).unwrap();
+        tracks.upsert(&outside).unwrap();
+        queue.save_queue(&[inside.id, outside.id]).unwrap();
+
+        assert_eq!(queue.purge_path_prefix(PathBuf::from("/music/demo").as_path()).unwrap(), 1);
+        let loaded = queue.load_queue().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, outside.id);
+    }
+
+    /// V4 rebuilds the queue: real entries are carried over (in order), an
+    /// orphan is dropped, and the two unused tables are gone.
+    #[test]
+    fn migration_v4_rebuilds_the_queue_and_drops_the_dead_tables() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tracks (id TEXT PRIMARY KEY NOT NULL);
+             CREATE TABLE saved_queue (
+                 position INTEGER PRIMARY KEY NOT NULL,
+                 track_id TEXT NOT NULL,
+                 path TEXT NOT NULL
+             );
+             CREATE TABLE lyrics (track_id TEXT PRIMARY KEY NOT NULL, content_json TEXT NOT NULL);
+             CREATE TABLE artwork (id TEXT PRIMARY KEY NOT NULL, cache_path TEXT NOT NULL);
+             CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL);
+             INSERT INTO schema_migrations VALUES (3, 0);
+             INSERT INTO tracks (id) VALUES ('real-track'), ('second-track');
+             INSERT INTO saved_queue VALUES (0, 'real-track', '/music/real.flac');
+             INSERT INTO saved_queue VALUES (1, 'ghost', '/music/gone.flac');
+             INSERT INTO saved_queue VALUES (2, 'second-track', '/music/second.flac');",
+        )
+        .unwrap();
+
+        crate::schema::apply_v4_for_test(&mut conn).expect("V4 must apply");
+
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(saved_queue);").unwrap();
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            rows
+        };
+        assert_eq!(columns, vec!["position".to_string(), "track_id".to_string()]);
+        assert!(
+            columns.iter().all(|c| c != "path"),
+            "the write-only path column must be gone"
+        );
+
+        let queue: Vec<(i64, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT position, track_id FROM saved_queue ORDER BY position;")
+                .unwrap();
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            rows
+        };
+        assert_eq!(
+            queue,
+            vec![(0i64, "real-track".to_string()), (1, "second-track".to_string())],
+            "real entries in order, orphan dropped"
+        );
+
+        for table in ["lyrics", "artwork"] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1;",
+                    rusqlite::params![table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "{table} must be dropped");
+        }
+
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+    }
+
+    /// Once rebuilt, the queue refuses a row for a track that does not exist.
+    #[test]
+    fn the_rebuilt_queue_enforces_its_foreign_key() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let result = db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO saved_queue (position, track_id) VALUES (0, 'no-such-track');",
+                [],
+            )?;
+            Ok(())
+        });
+        assert!(result.is_err(), "an orphan queue row must be rejected");
     }
 
     #[test]

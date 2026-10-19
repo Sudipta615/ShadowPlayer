@@ -338,8 +338,8 @@ impl ShadowPlayerApp {
             self.app_state.playlist_editor.is_open = false;
         } else if self.app_state.track_properties_open {
             self.app_state.track_properties_open = false;
-        } else if self.app_state.new_playlist_modal_open {
-            self.app_state.new_playlist_modal_open = false;
+        } else if self.app_state.open_playlist_editor {
+            self.app_state.open_playlist_editor = false;
         } else if self.app_state.help_modal_open {
             self.app_state.help_modal_open = false;
         } else if self.dsp_state.clap_rack.is_open {
@@ -2070,7 +2070,7 @@ impl eframe::App for ShadowPlayerApp {
                 }
             }
             if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::N) {
-                self.app_state.new_playlist_modal_open = true;
+                self.app_state.open_playlist_editor = true;
             }
             if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::B) {
                 let cur_bp = self.session.bit_perfect();
@@ -2168,7 +2168,7 @@ impl eframe::App for ShadowPlayerApp {
             }
         }
         if create_playlist_req {
-            self.app_state.new_playlist_modal_open = true;
+            self.app_state.open_playlist_editor = true;
         }
         if create_smart_playlist_req {
             self.smart_playlist_editor.open_new();
@@ -2345,7 +2345,7 @@ impl eframe::App for ShadowPlayerApp {
                                         self.refresh_view();
                                     }
                                     if view_action.create_playlist {
-                                        self.app_state.new_playlist_modal_open = true;
+                                        self.app_state.open_playlist_editor = true;
                                     }
                                     if view_action.open_eq_panel {
                                         self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
@@ -2387,7 +2387,6 @@ impl eframe::App for ShadowPlayerApp {
                             right_w,
                             avail_h,
                             &mut self.app_state,
-                            &mut self.dsp_state,
                             &mut self.coordinator,
                             &self.session,
                             &mut self.artwork_service,
@@ -2511,8 +2510,8 @@ impl eframe::App for ShadowPlayerApp {
         }
 
         // Playlist manager: create / rename / delete / add songs.
-        if self.app_state.new_playlist_modal_open {
-            self.app_state.new_playlist_modal_open = false;
+        if self.app_state.open_playlist_editor {
+            self.app_state.open_playlist_editor = false;
             self.app_state.playlist_editor.open(None);
         }
         let pl_actions = show_playlist_editor(

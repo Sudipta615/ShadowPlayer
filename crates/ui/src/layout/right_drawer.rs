@@ -5,7 +5,7 @@ use playback::PlaybackCoordinator;
 
 use crate::components::right_panel::RightPanel;
 use crate::services::ArtworkService;
-use crate::state::{AppState, DspState};
+use crate::state::AppState;
 use crate::theme::Theme;
 
 /// Render right column drawer: window controls, Queue/Lyrics tabs, volume controls
@@ -15,7 +15,6 @@ pub fn render_right_drawer(
     right_w: f32,
     avail_h: f32,
     app_state: &mut AppState,
-    dsp_state: &mut DspState,
     coordinator: &mut PlaybackCoordinator,
     session: &AudioSession,
     artwork_service: &mut ArtworkService,
@@ -62,7 +61,6 @@ pub fn render_right_drawer(
                 volume: app_state.volume,
                 is_muted: app_state.is_muted,
                 artwork: artwork_service,
-                settings_state: &mut dsp_state.settings_tab,
                 theme,
             }
             .show(ui);
@@ -79,8 +77,6 @@ pub fn render_right_drawer(
             if right_action.clear_queue {
                 coordinator.clear_queue();
             }
-
-            dsp_state.handle_settings_actions(session, &right_action.settings);
 
             if let Some(new_vol) = right_action.volume_changed {
                 app_state.volume = new_vol;

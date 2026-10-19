@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  player:
+    name: Player workspace (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The engine links ALSA on Linux, and eframe/winit need the X11 and
+      # Wayland client libraries even for a headless `cargo test`.
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      # Warnings are not allowed to accumulate: the audit that this CI encodes
+      # found several bugs that a warning would have caught.
+      - name: Clippy
+        run: cargo clippy --workspace --bins --lib --all-targets -- -D warnings
+
+      - name: Tests
+        run: >
+          cargo test -p domain -p database -p metadata -p lyrics -p library
+          -p playback -p search -p audio-session -p ui --lib
+          -- --test-threads=1
+
+  engine:
+    name: Engine workspace (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/engine
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test

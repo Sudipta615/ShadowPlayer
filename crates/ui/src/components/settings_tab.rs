@@ -516,14 +516,6 @@ pub struct SettingsExtraContext<'a> {
 // Main Entry Points
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub fn show_settings_tab(
-    ui: &mut egui::Ui,
-    state: &mut SettingsTabState,
-    theme: &Theme,
-) -> SettingsTabActions {
-    show_settings_tab_extended(ui, state, theme, &SettingsExtraContext::default())
-}
-
 pub fn show_settings_tab_extended(
     ui: &mut egui::Ui,
     state: &mut SettingsTabState,

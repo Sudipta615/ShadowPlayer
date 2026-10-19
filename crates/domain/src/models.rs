@@ -105,29 +105,10 @@ pub struct ScanRoot {
     pub last_scanned_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ArtworkRecord {
-    pub id: ArtworkId,
-    pub track_id: Option<TrackId>,
-    pub album_id: Option<AlbumId>,
-    pub cache_path: PathBuf,
-    pub mime_type: String,
-    pub width: u32,
-    pub height: u32,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncedLyricLine {
     pub start_time_secs: f32,
     pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LyricsRecord {
-    pub track_id: TrackId,
-    pub is_synced: bool,
-    pub lines: Vec<SyncedLyricLine>,
-    pub plain_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
