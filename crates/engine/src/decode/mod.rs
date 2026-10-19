@@ -45,7 +45,8 @@ pub use scanner::{
 };
 pub use shared_pcm::{SharedPcm, SharedPcmDecoder};
 pub use symphonia_decoder::{
-    extract_loudness_metadata_symphonia, DecodeError, DecodeInfo, DecodedChunk, SymphoniaDecoder,
+    extract_loudness_metadata_symphonia, probe_metadata as probe_metadata_symphonia, DecodeError,
+    DecodeInfo, DecodedChunk, ProbedMetadata, SymphoniaDecoder,
 };
 #[cfg(feature = "tag-write")]
 pub use tags::write_loudness_tags;
@@ -118,6 +119,24 @@ pub fn extract_loudness_metadata(path: &Path) -> crate::dsp::LoudnessMetadata {
         return opus::extract_loudness_metadata(path);
     }
     symphonia_decoder::extract_loudness_metadata_symphonia(path)
+}
+
+/// Read everything a single probe can tell us about a file: editorial tags,
+/// loudness tags, the stream format and embedded artwork.
+///
+/// One open, one probe, never a decode. Routes `.opus` to the Opus reader
+/// (OpusTags cannot be read by Symphonia's probe) and everything else to the
+/// Symphonia probe. The desktop scanner is the main caller; it used to open
+/// each file three times.
+pub fn probe_metadata(path: &Path) -> ProbedMetadata {
+    #[cfg(feature = "codec-opus")]
+    if is_opus_path(path) {
+        return ProbedMetadata::from_tags_and_loudness(
+            opus::extract_track_metadata(path),
+            opus::extract_loudness_metadata(path),
+        );
+    }
+    symphonia_decoder::probe_metadata(path)
 }
 
 /// The URI schemes this engine can turn into a local path.

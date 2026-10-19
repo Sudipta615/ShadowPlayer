@@ -477,6 +477,7 @@ mod tests {
             r128_loudness_lufs: None,
             file_size_bytes: 1,
             mtime_unix_secs: 1,
+            mtime_nanos: 0,
             content_hash: Some(format!("hash-{id_seed}")),
             is_favorite: false,
             play_count: 0,

@@ -69,6 +69,7 @@ impl LibraryScanner {
         // permission problem must not look like a deletion.
         let mut seen: HashSet<PathBuf> = HashSet::new();
         let mut walk_errors = 0usize;
+        let mut skipped_count = 0usize;
 
         // `follow_links(false)`: following symlinks let a scan index files
         // outside the chosen root (and index them twice through an alias).
@@ -122,20 +123,46 @@ impl LibraryScanner {
 
             scanned_count += 1;
 
-            // Check if file is already indexed and unchanged
-            if let Ok(metadata) = path.metadata() {
-                let mtime = metadata
+            // Everything from here needs the file's metadata. Failing to get
+            // it used to skip the file *silently*: not indexed, not counted,
+            // not logged.
+            let metadata = match path.metadata() {
+                Ok(metadata) => metadata,
+                Err(e) => {
+                    skipped_count += 1;
+                    warn!("Skipping {}: cannot read its metadata: {e}", path.display());
+                    continue;
+                }
+            };
+
+            {
+                let (mtime_secs, mtime_nanos) = metadata
                     .modified()
-                    .map(|t| {
-                        t.duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs() as i64
-                    })
-                    .unwrap_or(0);
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| (d.as_secs() as i64, d.subsec_nanos()))
+                    .unwrap_or((0, 0));
                 let size = metadata.len();
 
                 if let Ok(Some(existing)) = repo.get_by_path(path) {
-                    if existing.mtime_unix_secs == mtime && existing.file_size_bytes == size {
+                    // A row written before `mtime_nanos` existed carries no
+                    // sub-second part; accept the second-granularity match once
+                    // (and record the finer value) instead of forcing a full
+                    // re-decode of the library after the upgrade.
+                    let same_subsecond =
+                        existing.mtime_nanos == mtime_nanos || existing.mtime_nanos == 0;
+                    if existing.mtime_unix_secs == mtime_secs
+                        && existing.file_size_bytes == size
+                        && same_subsecond
+                    {
+                        if existing.mtime_nanos == 0 && mtime_nanos != 0 {
+                            if let Err(e) = repo.set_mtime_nanos(&existing.id, mtime_nanos) {
+                                warn!(
+                                    "Could not record the finer mtime for {}: {e}",
+                                    path.display()
+                                );
+                            }
+                        }
                         // File unchanged, skip decoding — but backfill the
                         // content fingerprint for rows indexed before V3 so a
                         // later move can still be recognised.
@@ -221,6 +248,7 @@ impl LibraryScanner {
                     }
                     Err(e) => {
                         // Corrupt or unsupported file does not abort scan
+                        skipped_count += 1;
                         warn!("Skipping unreadable audio file {}: {}", path.display(), e);
                     }
                 }
@@ -272,14 +300,22 @@ impl LibraryScanner {
         let total_tracks = repo.count().unwrap_or(0);
 
         info!(
-            "Scan completed: {} scanned, {} added, {} updated, {} removed in {}ms. Total library: {} tracks",
-            scanned_count, added_count, updated_count, removed_count, elapsed, total_tracks
+            "Scan completed: {} scanned, {} added, {} updated, {} removed, {} skipped in {}ms. \
+             Total library: {} tracks",
+            scanned_count,
+            added_count,
+            updated_count,
+            removed_count,
+            skipped_count,
+            elapsed,
+            total_tracks
         );
 
         if let Some(ref tx) = event_sender {
             let _ = tx.send(LibraryScanEvent::Completed {
                 total_tracks,
                 elapsed_ms: elapsed,
+                skipped: skipped_count,
             });
         }
     }

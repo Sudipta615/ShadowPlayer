@@ -1,6 +1,7 @@
 use crate::db::Database;
 use domain::ids::*;
 use domain::models::*;
+use domain::paths::{decode_path_key, encode_path_key};
 use domain::smart::*;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, OptionalExtension, Result, Row};
@@ -77,7 +78,9 @@ fn fts_query(input: &str) -> Option<String> {
 /// the same text (`/music/rock` matched `/music/rockabilly`), and any `%`, `_`
 /// or `\` inside the path acted as a wildcard instead of a literal.
 fn like_prefix(prefix: &Path) -> String {
-    let mut literal = prefix.to_string_lossy().into_owned();
+    // `LIKE` runs against the stored path keys, so the prefix has to be
+    // encoded the same way the paths were.
+    let mut literal = encode_path_key(prefix);
     if literal.is_empty() {
         return "%".to_string();
     }
@@ -91,15 +94,41 @@ fn like_prefix(prefix: &Path) -> String {
     format!("{escaped}%")
 }
 
+/// `LIKE` pattern that finds `needle` anywhere in a value.
+///
+/// The text comes straight from the search box, so its `%`, `_` and `\` have to
+/// be escaped: typing `100%` must search for the percent sign, not for "one
+/// followed by anything".
+/// The ceiling a smart playlist's own limit is clamped to.
+///
+/// A rule list is a saved query that runs on every view; a limit of "however
+/// many rows there are" is how a UI ends up rendering a hundred thousand rows.
+const MAX_SMART_PLAYLIST_LIMIT: u32 = 100_000;
+
+fn like_substring(needle: &str) -> String {
+    let mut out = String::with_capacity(needle.len() + 2);
+    out.push('%');
+    for ch in needle.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.push('%');
+    out
+}
+
 fn map_track(row: &Row<'_>) -> Result<Track> {
     let id_str: String = row.get("id")?;
+    // The stored key is the lossless form; the real path is what the app
+    // opens, plays and displays.
     let path_str: String = row.get("path")?;
     let is_fav_int: i32 = row.get("is_favorite")?;
     let is_lossless_int: i32 = row.get("is_lossless")?;
 
     Ok(Track {
         id: parse_id(&id_str, "tracks.id")?,
-        path: PathBuf::from(path_str),
+        path: decode_path_key(&path_str),
         title: row.get("title")?,
         artist: row.get("artist")?,
         album: row.get("album")?,
@@ -118,6 +147,7 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         r128_loudness_lufs: row.get("r128_loudness_lufs")?,
         file_size_bytes: row.get("file_size_bytes")?,
         mtime_unix_secs: row.get("mtime_unix_secs")?,
+        mtime_nanos: row.get::<_, Option<i64>>("mtime_nanos")?.unwrap_or(0) as u32,
         content_hash: row.get("content_hash")?,
         is_favorite: is_fav_int != 0,
         play_count: row.get("play_count")?,
@@ -142,9 +172,9 @@ impl TrackRepo {
                     id, path, title, artist, album, genre, year, track_number, disc_number,
                     duration_secs, sample_rate, channels, format, bitrate_kbps, is_lossless,
                     replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
-                    file_size_bytes, mtime_unix_secs, content_hash,
+                    file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash,
                     is_favorite, play_count, last_played_at, added_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
                 ON CONFLICT(path) DO UPDATE SET
                     title = excluded.title,
                     artist = excluded.artist,
@@ -164,10 +194,11 @@ impl TrackRepo {
                     r128_loudness_lufs = excluded.r128_loudness_lufs,
                     file_size_bytes = excluded.file_size_bytes,
                     mtime_unix_secs = excluded.mtime_unix_secs,
+                    mtime_nanos = excluded.mtime_nanos,
                     content_hash = excluded.content_hash",
                 params![
                     track.id.to_string(),
-                    track.path.to_string_lossy(),
+                    encode_path_key(&track.path),
                     track.title,
                     track.artist,
                     track.album,
@@ -186,6 +217,7 @@ impl TrackRepo {
                     track.r128_loudness_lufs,
                     track.file_size_bytes,
                     track.mtime_unix_secs,
+                    track.mtime_nanos,
                     track.content_hash,
                     if track.is_favorite { 1 } else { 0 },
                     track.play_count,
@@ -203,6 +235,22 @@ impl TrackRepo {
         })
     }
 
+    /// Record a file's sub-second modification time.
+    ///
+    /// Used by the scanner when it accepts a second-granularity match from a row
+    /// written before the column existed: the file is not re-decoded, but the
+    /// next scan compares the finer value. Touches no indexed column, so it does
+    /// not rewrite the search index.
+    pub fn set_mtime_nanos(&self, id: &TrackId, nanos: u32) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE tracks SET mtime_nanos = ?1 WHERE id = ?2;",
+                params![nanos as i64, id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn get_by_id(&self, id: &TrackId) -> Result<Option<Track>> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE id = ?1;")?;
@@ -213,7 +261,7 @@ impl TrackRepo {
     pub fn get_by_path(&self, path: &Path) -> Result<Option<Track>> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE path = ?1;")?;
-            stmt.query_row(params![path.to_string_lossy()], map_track).optional()
+            stmt.query_row(params![encode_path_key(path)], map_track).optional()
         })
     }
 
@@ -230,7 +278,7 @@ impl TrackRepo {
             while let Some(row) = rows.next()? {
                 let id: String = row.get(0)?;
                 let path: String = row.get(1)?;
-                found.push((parse_id(&id, "tracks.id")?, PathBuf::from(path)));
+                found.push((parse_id(&id, "tracks.id")?, decode_path_key(&path)));
             }
             Ok(if found.len() == 1 { found.pop() } else { None })
         })
@@ -248,7 +296,7 @@ impl TrackRepo {
         self.db.with_conn(|conn| {
             let changed = conn.execute(
                 "UPDATE tracks SET path = ?1, content_hash = ?2 WHERE id = ?3;",
-                params![new_path.to_string_lossy(), content_hash, id.to_string()],
+                params![encode_path_key(new_path), content_hash, id.to_string()],
             )?;
             Ok(changed > 0)
         })
@@ -272,27 +320,40 @@ impl TrackRepo {
     /// file names. Groups are ordered by size (largest first).
     pub fn find_duplicates(&self) -> Result<Vec<Vec<Track>>> {
         self.db.with_conn(|conn| {
+            // One query for the whole census. The old shape listed the hashes
+            // first and then ran a full-track `SELECT` per hash — N+1 queries
+            // over a table that can hold a whole library.
             let mut stmt = conn.prepare(
-                "SELECT content_hash FROM tracks
-                 WHERE content_hash IS NOT NULL AND content_hash <> ''
-                 GROUP BY content_hash HAVING COUNT(*) > 1
-                 ORDER BY COUNT(*) DESC, content_hash;",
+                "SELECT * FROM tracks
+                 WHERE content_hash IN (
+                     SELECT content_hash FROM tracks
+                     WHERE content_hash IS NOT NULL AND content_hash <> ''
+                     GROUP BY content_hash HAVING COUNT(*) > 1
+                 )
+                 ORDER BY content_hash, id;",
             )?;
-            let hashes: Vec<String> = stmt
-                .query_map([], |r| r.get::<_, String>(0))?
-                .collect::<Result<_, _>>()?;
-            drop(stmt);
+            let tracks: Vec<Track> =
+                stmt.query_map([], map_track)?.collect::<Result<_, _>>()?;
 
-            let mut groups = Vec::new();
-            for hash in hashes {
-                let mut s =
-                    conn.prepare("SELECT * FROM tracks WHERE content_hash = ?1 ORDER BY id;")?;
-                let tracks: Vec<Track> =
-                    s.query_map(params![hash], map_track)?.collect::<Result<_, _>>()?;
-                if tracks.len() > 1 {
-                    groups.push(tracks);
+            // The rows arrive grouped: start a new group whenever the hash
+            // changes.
+            let mut groups: Vec<Vec<Track>> = Vec::new();
+            for track in tracks {
+                match groups.last_mut() {
+                    Some(group) if group[0].content_hash == track.content_hash => {
+                        group.push(track);
+                    }
+                    _ => groups.push(vec![track]),
                 }
             }
+
+            // Largest groups first (as documented), then by hash so the order is
+            // deterministic between runs.
+            groups.sort_by(|a, b| {
+                b.len()
+                    .cmp(&a.len())
+                    .then_with(|| a[0].content_hash.cmp(&b[0].content_hash))
+            });
             Ok(groups)
         })
     }
@@ -390,7 +451,7 @@ impl TrackRepo {
             let iter = stmt.query_map([], |row| {
                 let id: String = row.get(0)?;
                 let path: String = row.get(1)?;
-                Ok((parse_id(&id, "tracks.id")?, PathBuf::from(path)))
+                Ok((parse_id(&id, "tracks.id")?, decode_path_key(&path)))
             })?;
             let mut out = Vec::new();
             for r in iter {
@@ -468,7 +529,7 @@ impl TrackRepo {
             let iter = stmt.query_map(params![like], |row| {
                 let id: String = row.get(0)?;
                 let path: String = row.get(1)?;
-                Ok((parse_id(&id, "tracks.id")?, PathBuf::from(path)))
+                Ok((parse_id(&id, "tracks.id")?, decode_path_key(&path)))
             })?;
             let mut out = Vec::new();
             for r in iter {
@@ -548,6 +609,39 @@ impl PlaylistRepo {
                 created_at: now,
                 updated_at: now,
             })
+        })
+    }
+
+    /// Playlists whose name matches `query`.
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Playlist>> {
+        let like = like_substring(query);
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+                        COUNT(pt.track_id) as track_count
+                 FROM playlists p
+                 LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+                 WHERE p.name LIKE ?1 ESCAPE '\\'
+                 GROUP BY p.id
+                 ORDER BY p.name COLLATE NOCASE
+                 LIMIT ?2;",
+            )?;
+            let iter = stmt.query_map(params![like, limit as i64], |row| {
+                let id_str: String = row.get(0)?;
+                Ok(Playlist {
+                    id: parse_id(&id_str, "playlists.id")?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    track_count: row.get(5)?,
+                })
+            })?;
+            let mut playlists = Vec::new();
+            for p in iter {
+                playlists.push(p?);
+            }
+            Ok(playlists)
         })
     }
 
@@ -1028,7 +1122,7 @@ impl ScanRootsRepo {
                 let watch_int: i32 = row.get(2)?;
                 Ok(ScanRoot {
                     id: parse_id(&id_str, "scan_roots.id")?,
-                    path: PathBuf::from(path_str),
+                    path: decode_path_key(&path_str),
                     watch_enabled: watch_int != 0,
                     last_scanned_at: row.get(3)?,
                 })
@@ -1054,19 +1148,19 @@ impl ScanRootsRepo {
                 "INSERT INTO scan_roots (id, path, watch_enabled, last_scanned_at)
                  VALUES (?1, ?2, 1, NULL)
                  ON CONFLICT(path) DO NOTHING;",
-                params![id.to_string(), path.to_string_lossy()],
+                params![id.to_string(), encode_path_key(path)],
             )?;
 
             let stored = conn.query_row(
                 "SELECT id, path, watch_enabled, last_scanned_at FROM scan_roots WHERE path = ?1;",
-                params![path.to_string_lossy()],
+                params![encode_path_key(path)],
                 |row| {
                     let id_str: String = row.get(0)?;
                     let path_str: String = row.get(1)?;
                     let watch_int: i32 = row.get(2)?;
                     Ok(ScanRoot {
                         id: parse_id(&id_str, "scan_roots.id")?,
-                        path: PathBuf::from(path_str),
+                        path: decode_path_key(&path_str),
                         watch_enabled: watch_int != 0,
                         last_scanned_at: row.get(3)?,
                     })
@@ -1138,6 +1232,32 @@ impl AlbumRepo {
         })
     }
 
+    /// Albums whose title matches `query`, most tracks first.
+    ///
+    /// Same reason as `ArtistRepo::search`: albums were derived from the
+    /// truncated track page and quietly missed everything past the limit. The
+    /// old shape also deduplicated titles (two artists can share an album
+    /// name), so the grouping keeps that.
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<String>> {
+        let like = like_substring(query);
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT album, COUNT(*) as cnt
+                 FROM tracks
+                 WHERE album IS NOT NULL AND album != '' AND album LIKE ?1 ESCAPE '\\'
+                 GROUP BY album
+                 ORDER BY cnt DESC, album COLLATE NOCASE ASC
+                 LIMIT ?2;",
+            )?;
+            let iter = stmt.query_map(params![like, limit as i64], |row| row.get::<_, String>(0))?;
+            let mut albums = Vec::new();
+            for a in iter {
+                albums.push(a?);
+            }
+            Ok(albums)
+        })
+    }
+
     pub fn get_tracks_by_album(&self, title: &str, artist: &str) -> Result<Vec<Track>> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
@@ -1162,6 +1282,30 @@ pub struct ArtistRepo {
 impl ArtistRepo {
     pub fn new(db: Database) -> Self {
         Self { db }
+    }
+
+    /// Artists whose name matches `query`, most-tracks first.
+    ///
+    /// The search box used to derive artists from the already-truncated track
+    /// page, so an artist whose tracks ranked past the limit never appeared.
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<String>> {
+        let like = like_substring(query);
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT artist, COUNT(*) as trk_cnt
+                 FROM tracks
+                 WHERE artist IS NOT NULL AND artist != '' AND artist LIKE ?1 ESCAPE '\\'
+                 GROUP BY artist
+                 ORDER BY trk_cnt DESC, artist COLLATE NOCASE ASC
+                 LIMIT ?2;",
+            )?;
+            let iter = stmt.query_map(params![like, limit as i64], |row| row.get::<_, String>(0))?;
+            let mut artists = Vec::new();
+            for a in iter {
+                artists.push(a?);
+            }
+            Ok(artists)
+        })
     }
 
     pub fn list(&self) -> Result<Vec<Artist>> {
@@ -1434,7 +1578,7 @@ fn build_smart_query(sp: &SmartPlaylist) -> (String, Vec<SqlValue>) {
 
     if let Some(n) = sp.limit_count {
         if n > 0 {
-            sql.push_str(&format!(" LIMIT {}", n.min(100_000)));
+            sql.push_str(&format!(" LIMIT {}", n.min(MAX_SMART_PLAYLIST_LIMIT)));
         }
     }
 

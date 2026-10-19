@@ -1,12 +1,7 @@
 use domain::ids::TrackId;
 use domain::models::Track;
-use engine::decode::{extract_loudness_metadata, extract_track_metadata};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::{MetadataOptions, StandardTag};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -24,16 +19,33 @@ pub struct ExtractedMetadata {
 
 pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError> {
     let file = File::open(path)?;
-    let file_size_bytes = file.metadata()?.len();
-    let mtime_unix_secs = file
-        .metadata()?
+    let metadata = file.metadata()?;
+    let file_size_bytes = metadata.len();
+    // Both parts of the modification time, from the handle that is already
+    // open: the scanner compares them to decide whether a file changed, and
+    // whole seconds cannot tell an unchanged file from one rewritten within the
+    // same second as the last scan.
+    let (mtime_unix_secs, mtime_nanos) = metadata
         .modified()
-        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
-        .unwrap_or(0);
+        .map(|t| match t.duration_since(std::time::UNIX_EPOCH) {
+            Ok(since_epoch) => (since_epoch.as_secs() as i64, since_epoch.subsec_nanos()),
+            // A file dated in the future has no meaningful timestamp.
+            Err(_) => (0, 0),
+        })
+        .unwrap_or((0, 0));
 
-    // 1. Leverage engine's built-in extraction (handles all codecs + Opus routing)
-    let tags = extract_track_metadata(path);
-    let loudness = extract_loudness_metadata(path);
+    // One probe for everything cheap: editorial tags, loudness tags, the
+    // stream format and the cover art. This used to be two engine calls plus a
+    // third `symphonia` probe of the same file in this crate — three opens and
+    // three tag parses per scanned file.
+    let engine::decode::ProbedMetadata {
+        tags,
+        loudness,
+        sample_rate,
+        channels,
+        bits_per_sample,
+        artwork,
+    } = engine::decode::probe_metadata(path);
 
     let format_name = path
         .extension()
@@ -46,97 +58,29 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         "FLAC" | "WAV" | "AIFF" | "ALAC" | "APE" | "WV" | "TTA" | "DSF" | "DFF"
     );
 
-    let mut title = tags.title;
-    let mut artist = tags.artist;
-    let mut album = tags.album;
+    let title = tags.title;
+    let artist = tags.artist;
+    let album = tags.album;
     let duration_secs = tags.duration_secs as f32;
-    let mut genre: Option<String> = if !tags.genre.is_empty() { Some(tags.genre) } else { None };
-    let mut year: Option<u32> = tags.date.parse().ok();
-    let mut track_number: Option<u32> = if tags.track_number > 0 { Some(tags.track_number) } else { None };
-    let mut disc_number: Option<u32> = if tags.disc_number > 0 { Some(tags.disc_number) } else { None };
-    let mut sample_rate = 44100u32;
-    let mut channels = 2usize;
-    let mut bitrate_kbps: Option<u32> = None;
-    let mut embedded_artwork: Option<(Vec<u8>, String)> = None;
-
-    // 2. Extra tag and artwork pass using Symphonia probe
-    if let Ok(file) = File::open(path) {
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-        let mut hint = Hint::new();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            hint.with_extension(ext);
+    let genre: Option<String> = (!tags.genre.is_empty()).then_some(tags.genre);
+    // A date tag is `1973` or `1973-05-01`; the year is its first four digits.
+    let year: Option<u32> = tags.date.chars().take(4).collect::<String>().parse().ok();
+    let track_number: Option<u32> = (tags.track_number > 0).then_some(tags.track_number);
+    let disc_number: Option<u32> = (tags.disc_number > 0).then_some(tags.disc_number);
+    // A container that says nothing about the stream keeps the house defaults.
+    let sample_rate = sample_rate.unwrap_or(44100);
+    let channels = channels.unwrap_or(2);
+    let bitrate_kbps: Option<u32> = bits_per_sample.map(|bits| {
+        if duration_secs > 0.0 {
+            // Computed in `f64`: a sub-second file keeps its fractional
+            // duration (the old integer form truncated it to 0 and divided by
+            // zero).
+            (file_size_bytes as f64 * 8.0 / (duration_secs as f64 * 1000.0)) as u32
+        } else {
+            (sample_rate * channels as u32 * bits) / 1000
         }
-
-        let meta_opts = MetadataOptions::default();
-        let fmt_opts = FormatOptions::default();
-
-        if let Ok(mut format_reader) =
-            symphonia::default::get_probe().probe(&hint, mss, fmt_opts, meta_opts)
-        {
-            if let Some(t) = format_reader.tracks().first() {
-                if let Some(audio) = t.codec_params.as_ref().and_then(|cp| cp.audio()) {
-                    if let Some(sr) = audio.sample_rate {
-                        sample_rate = sr;
-                    }
-                    if let Some(ch) = &audio.channels {
-                        channels = ch.count();
-                    }
-                    if let Some(bits) = audio.bits_per_sample {
-                        // Computed in `f64`: a sub-second file keeps its
-                        // fractional duration (the old integer form truncated it
-                        // to 0 and divided by zero).
-                        bitrate_kbps = if duration_secs > 0.0 {
-                            Some(
-                                (file_size_bytes as f64 * 8.0
-                                    / (duration_secs as f64 * 1000.0))
-                                    as u32,
-                            )
-                        } else {
-                            Some((sample_rate * channels as u32 * bits) / 1000)
-                        };
-                    }
-                }
-            }
-
-            if let Some(current) = format_reader.metadata().current() {
-                for tag in &current.media.tags {
-                    if let Some(std) = &tag.std {
-                        match std {
-                            StandardTag::TrackTitle(v) if !v.is_empty() => title = v.to_string(),
-                            StandardTag::Artist(v) if !v.is_empty() => artist = v.to_string(),
-                            StandardTag::Album(v) if !v.is_empty() => album = v.to_string(),
-                            StandardTag::Genre(v) if !v.is_empty() => genre = Some(v.to_string()),
-                            StandardTag::TrackNumber(v) => track_number = Some(*v as u32),
-                            StandardTag::DiscNumber(v) => disc_number = Some(*v as u32),
-                            _ => {}
-                        }
-                    } else {
-                        let key = tag.raw.key.to_lowercase();
-                        let val = tag.raw.value.to_string();
-                        if !val.is_empty() {
-                            if key == "genre" && genre.is_none() {
-                                genre = Some(val);
-                            } else if (key == "date" || key == "year") && year.is_none() {
-                                if let Ok(y) =
-                                    val.chars().take(4).collect::<String>().parse::<u32>()
-                                {
-                                    year = Some(y);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if let Some(visual) = current.media.visuals.first() {
-                    let mime = visual
-                        .media_type
-                        .clone()
-                        .unwrap_or_else(|| "image/jpeg".to_string());
-                    embedded_artwork = Some((visual.data.to_vec(), mime));
-                }
-            }
-        }
-    }
+    });
+    let embedded_artwork = artwork;
 
     let track_id = TrackId::from_canonical_path(path);
     let now = std::time::SystemTime::now()
@@ -165,6 +109,7 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         r128_loudness_lufs: loudness.ebu_r128_loudness,
         file_size_bytes,
         mtime_unix_secs,
+        mtime_nanos,
         // Filled in by the scanner, which knows the on-disk file.
         content_hash: None,
         is_favorite: false,
@@ -272,6 +217,7 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             r128_loudness_lufs: None,
             file_size_bytes: audio_meta.track.file_size_bytes,
             mtime_unix_secs: audio_meta.track.mtime_unix_secs,
+            mtime_nanos: audio_meta.track.mtime_nanos,
             // CUE virtual tracks share one file, so they are never fingerprinted.
             content_hash: None,
             is_favorite: false,
@@ -287,4 +233,104 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sp_meta_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// A minimal 16-bit stereo PCM WAV, 0.1 s at 44.1 kHz.
+    fn write_wav(path: &Path) {
+        let sr = 44_100u32;
+        let frames = sr / 10;
+        let mut data = Vec::with_capacity(frames as usize * 4);
+        for i in 0..frames {
+            let t = i as f32 / sr as f32;
+            let sample = ((2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.3 * i16::MAX as f32)
+                as i16;
+            data.extend_from_slice(&sample.to_le_bytes());
+            data.extend_from_slice(&sample.to_le_bytes());
+        }
+        let data_len = data.len() as u32;
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data_len).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&sr.to_le_bytes());
+        out.extend_from_slice(&(sr * 4).to_le_bytes());
+        out.extend_from_slice(&4u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data_len.to_le_bytes());
+        out.extend_from_slice(&data);
+        std::fs::write(path, out).expect("write wav");
+    }
+
+    /// The stream facts come from the container, the title from the file name,
+    /// and the bitrate is derived — all from one probe.
+    #[test]
+    fn a_tagless_wav_is_described_by_its_container() {
+        let dir = temp_dir("wav");
+        let path = dir.join("test_tone.wav");
+        write_wav(&path);
+
+        let extracted = extract_metadata(&path).expect("extract");
+
+        assert_eq!(extracted.track.sample_rate, 44_100);
+        assert_eq!(extracted.track.channels, 2);
+        assert_eq!(extracted.track.title, "test_tone", "falls back to the stem");
+        assert!(
+            (extracted.track.duration_secs - 0.1).abs() < 0.01,
+            "duration came from the header: {}",
+            extracted.track.duration_secs
+        );
+        assert!(extracted.track.bitrate_kbps.is_some());
+        assert!(extracted.track.is_lossless);
+        assert!(extracted.embedded_artwork.is_none());
+        assert!(!extracted.track.id.to_string().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The size and both mtime parts are recorded for the scanner's
+    /// unchanged-file check, and every scan says the same thing twice.
+    #[test]
+    fn file_facts_are_stable_across_probes() {
+        let dir = temp_dir("stable");
+        let path = dir.join("song.wav");
+        write_wav(&path);
+
+        let first = extract_metadata(&path).expect("extract");
+        let second = extract_metadata(&path).expect("extract again");
+
+        assert_eq!(first.track.file_size_bytes, second.track.file_size_bytes);
+        assert_eq!(first.track.mtime_unix_secs, second.track.mtime_unix_secs);
+        assert_eq!(first.track.mtime_nanos, second.track.mtime_nanos);
+        assert!(first.track.mtime_nanos > 0, "sub-second component recorded");
+        assert_eq!(first.track.id, second.track.id, "id is a function of the path");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error_not_a_fabrication() {
+        let error = extract_metadata(Path::new("/nonexistent/definitely-not-here.flac"));
+        assert!(matches!(error, Err(MetadataError::Io(_))));
+    }
 }

@@ -101,6 +101,7 @@ pub struct ShadowPlayerApp {
     /// which frame that was.
     clap_refresh_frames: u32,
     /// `SHADOWPLAYER_EVAL_CLAP`'s script, when that hook is in use.
+    #[cfg(feature = "eval-tools")]
     clap_eval: Option<ClapEval>,
     /// Transient user-facing notifications.
     toasts: crate::components::toasts::ToastState,
@@ -118,7 +119,9 @@ const CLAP_STARTUP_REFRESHES: u32 = 5;
 /// The engine answers on its own thread, so the script cannot be a straight
 /// line: each step asserts on what the previous one asked for and then asks for
 /// the next thing. Publishing the steps rather than sleeping keeps the eval
-/// honest about what the UI actually observes.
+/// honest about what the UI actually observes. Development only: see the
+/// `eval-tools` feature.
+#[cfg(feature = "eval-tools")]
 struct ClapEval {
     mode: String,
     library: String,
@@ -205,6 +208,7 @@ impl ShadowPlayerApp {
             organize: OrganizeState::default(),
             watch_suppress_until: None,
             clap_refresh_frames: 0,
+            #[cfg(feature = "eval-tools")]
             clap_eval: None,
             toasts: crate::components::toasts::ToastState::default(),
             window_size: (1280.0, 800.0),
@@ -489,7 +493,9 @@ impl ShadowPlayerApp {
         // 2. Save EQ Settings
         let eq_persisted = crate::components::eq_panel::PersistentEqState::from(&self.dsp_state.eq_panel);
         if let Ok(json) = serde_json::to_string(&eq_persisted) {
-            let _ = self.settings_repo.set_value("eq_settings", &json);
+            if let Err(e) = self.settings_repo.set_value("eq_settings", &json) {
+                log::warn!("Could not save the EQ settings: {e}");
+            }
         }
 
         // 3. Save DSP & Settings Tab State
@@ -504,12 +510,16 @@ impl ShadowPlayerApp {
 
         // 4. Save imported-file directory list
         if let Ok(json) = serde_json::to_string(&self.app_state.imported_dirs) {
-            let _ = self.settings_repo.set_value("imported_file_dirs", &json);
+            if let Err(e) = self.settings_repo.set_value("imported_file_dirs", &json) {
+                log::warn!("Could not save the imported-file list: {e}");
+            }
         }
 
         // 5. Save whole-chain DSP presets
         if let Ok(json) = serde_json::to_string(&self.dsp_state.settings_tab.chain_presets) {
-            let _ = self.settings_repo.set_value("chain_presets", &json);
+            if let Err(e) = self.settings_repo.set_value("chain_presets", &json) {
+                log::warn!("Could not save the chain presets: {e}");
+            }
         }
 
         // 6. Save batch-organizer preferences
@@ -518,7 +528,9 @@ impl ShadowPlayerApp {
             destination: self.organize.destination.clone(),
         };
         if let Ok(json) = serde_json::to_string(&organize_prefs) {
-            let _ = self.settings_repo.set_value("organize_prefs", &json);
+            if let Err(e) = self.settings_repo.set_value("organize_prefs", &json) {
+                log::warn!("Could not save the organizer preferences: {e}");
+            }
         }
 
         // 7. Save CLAP rack presets
@@ -527,7 +539,9 @@ impl ShadowPlayerApp {
             last_library: self.dsp_state.clap_rack.last_library.clone(),
         };
         if let Ok(json) = serde_json::to_string(&clap_prefs) {
-            let _ = self.settings_repo.set_value("clap_rack", &json);
+            if let Err(e) = self.settings_repo.set_value("clap_rack", &json) {
+                log::warn!("Could not save the CLAP rack presets: {e}");
+            }
         }
     }
 
@@ -676,6 +690,7 @@ impl ShadowPlayerApp {
     ///
     /// The library defaults to the in-repo fixture plugin, which is the only
     /// CLAP plugin this machine has. `SHADOWPLAYER_EVAL_CLAP_LIB` names another.
+    #[cfg(feature = "eval-tools")]
     fn drive_clap_eval(&mut self) {
         if self.clap_eval.is_none() {
             let Ok(mode) = std::env::var("SHADOWPLAYER_EVAL_CLAP") else {
@@ -970,6 +985,7 @@ impl ShadowPlayerApp {
 
     /// Move the eval script along. A separate method so the steps above read as
     /// a sequence rather than as borrow-juggling.
+    #[cfg(feature = "eval-tools")]
     fn clap_eval_advance(&mut self, step: u8) {
         if let Some(eval) = self.clap_eval.as_mut() {
             eval.step = step;
@@ -1295,8 +1311,16 @@ impl ShadowPlayerApp {
     }
 
     pub fn start_scan(&mut self, path: PathBuf) {
-        let _ = self.scan_roots_repo.add(&path);
-        self.library_state.scan_roots = self.scan_roots_repo.list().unwrap_or_default();
+        if let Err(e) = self.scan_roots_repo.add(&path) {
+            log::warn!("Could not add the scan root {}: {e}", path.display());
+        }
+        self.library_state.scan_roots = match self.scan_roots_repo.list() {
+            Ok(roots) => roots,
+            Err(e) => {
+                log::warn!("Could not list the scan roots: {e}");
+                Vec::new()
+            }
+        };
         // Watch the new root from now on, and scan it once the scanner is free.
         self.rebuild_watchers();
         if !self.scan_queue.contains(&path) {
@@ -1564,8 +1588,14 @@ impl eframe::App for ShadowPlayerApp {
         self.toasts.prune();
         self.toasts.show(&ctx, &self.theme);
 
-        // 4. Automated Evaluation Screenshot Hook (SHADOWPLAYER_EVAL only)
+        // 4. Automated Evaluation Screenshot Hook.
+        //
+        // Development only: the whole block (and the CLAP eval script it
+        // drives) is compiled out unless the `eval-tools` feature is on, so a
+        // shipped binary has no `process::exit` reachable from an environment
+        // variable.
         self.app_state.frame_count += 1;
+        #[cfg(feature = "eval-tools")]
         if std::env::var("SHADOWPLAYER_EVAL").is_ok() {
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_SETTINGS").is_ok() {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Settings;
@@ -1731,6 +1761,7 @@ impl eframe::App for ShadowPlayerApp {
                             r128_loudness_lufs: None,
                             file_size_bytes: 18,
                             mtime_unix_secs: 1,
+                            mtime_nanos: 0,
                             content_hash: Some(format!("eval-hash-{i}")),
                             is_favorite: false,
                             play_count: 0,
@@ -1998,7 +2029,9 @@ impl eframe::App for ShadowPlayerApp {
                     if is_cue {
                         if let Ok(cue_tracks) = metadata::extract_cue_metadata(path) {
                             for meta in &cue_tracks {
-                                let _ = self.track_repo.upsert(&meta.track);
+                                if let Err(e) = self.track_repo.upsert(&meta.track) {
+                                    log::warn!("Could not import {}: {e}", meta.track.path.display());
+                                }
                             }
                             if let Some(first) = cue_tracks.first().map(|m| m.track.clone()) {
                                 let all_t = cue_tracks.into_iter().map(|m| m.track).collect();
@@ -2007,7 +2040,9 @@ impl eframe::App for ShadowPlayerApp {
                             self.reload_library();
                         }
                     } else if let Ok(meta) = metadata::extract_metadata(path) {
-                        let _ = self.track_repo.upsert(&meta.track);
+                        if let Err(e) = self.track_repo.upsert(&meta.track) {
+                            log::warn!("Could not import {}: {e}", meta.track.path.display());
+                        }
                         self.coordinator.play_track(meta.track.clone(), None);
                         self.reload_library();
                     }
@@ -2485,7 +2520,9 @@ impl eframe::App for ShadowPlayerApp {
             }
         }
         if let Some(id) = sp_actions.delete {
-            let _ = self.smart_playlist_repo.delete(&id);
+            if let Err(e) = self.smart_playlist_repo.delete(&id) {
+                log::warn!("Could not delete the smart playlist: {e}");
+            }
             if self.app_state.active_nav == NavItem::SmartPlaylist(id) {
                 self.app_state.active_nav = NavItem::Home;
             }
@@ -2530,11 +2567,15 @@ impl eframe::App for ShadowPlayerApp {
             }
         }
         if let Some((id, name)) = pl_actions.rename {
-            let _ = self.playlist_repo.rename(&id, &name);
+            if let Err(e) = self.playlist_repo.rename(&id, &name) {
+                log::warn!("Could not rename the playlist: {e}");
+            }
             pl_changed = true;
         }
         if let Some(id) = pl_actions.delete {
-            let _ = self.playlist_repo.delete(&id);
+            if let Err(e) = self.playlist_repo.delete(&id) {
+                log::warn!("Could not delete the playlist: {e}");
+            }
             if self.app_state.playlist_editor.selected == Some(id) {
                 self.app_state.playlist_editor.selected = None;
             }
@@ -2542,17 +2583,21 @@ impl eframe::App for ShadowPlayerApp {
             pl_changed = true;
         }
         if let Some((pl, tr)) = pl_actions.add_track {
-            let _ = self.playlist_repo.add_track(&pl, &tr);
-            self.playlist_editor_tracks = self.playlist_repo.get_tracks(&pl).unwrap_or_default();
+            if let Err(e) = self.playlist_repo.add_track(&pl, &tr) {
+                log::warn!("Could not add the track to the playlist: {e}");
+            }
+            self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &pl);
             pl_changed = true;
         }
         if let Some((pl, tr)) = pl_actions.remove_track {
-            let _ = self.playlist_repo.remove_track(&pl, &tr);
-            self.playlist_editor_tracks = self.playlist_repo.get_tracks(&pl).unwrap_or_default();
+            if let Err(e) = self.playlist_repo.remove_track(&pl, &tr) {
+                log::warn!("Could not remove the track from the playlist: {e}");
+            }
+            self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &pl);
             pl_changed = true;
         }
         if let Some(id) = pl_actions.select_changed {
-            self.playlist_editor_tracks = self.playlist_repo.get_tracks(&id).unwrap_or_default();
+            self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &id);
         }
         if pl_actions.export_m3u {
             if let Some(id) = self.app_state.playlist_editor.selected {
@@ -2635,15 +2680,48 @@ impl eframe::App for ShadowPlayerApp {
         }
 
         // 11. Event-driven & periodic settings persistence across sessions
-        if std::env::var("SHADOWPLAYER_EVAL").is_err() && (self.settings_dirty || (self.app_state.frame_count % 120 == 0)) {
+        if !eval_holds_persistence()
+            && (self.settings_dirty || (self.app_state.frame_count % 120 == 0))
+        {
             self.save_persisted_settings();
             self.settings_dirty = false;
         }
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        if std::env::var("SHADOWPLAYER_EVAL").is_err() {
+        if !eval_holds_persistence() {
             self.save_persisted_settings();
+        }
+    }
+}
+
+/// `true` while the eval harness is driving the UI: it must not write the real
+/// settings file from a screenshot run. In a normal build this is a constant
+/// `false` and the environment variable is never read.
+fn eval_holds_persistence() -> bool {
+    #[cfg(feature = "eval-tools")]
+    {
+        std::env::var("SHADOWPLAYER_EVAL").is_ok()
+    }
+    #[cfg(not(feature = "eval-tools"))]
+    {
+        false
+    }
+}
+
+/// Load a playlist's tracks for the editor.
+///
+/// `unwrap_or_default()` made a failed read look like an empty playlist, which
+/// reads as "this playlist has no songs" rather than "the database refused".
+fn load_playlist_tracks(
+    repo: &PlaylistRepo,
+    id: &domain::ids::PlaylistId,
+) -> Vec<domain::models::Track> {
+    match repo.get_tracks(id) {
+        Ok(tracks) => tracks,
+        Err(e) => {
+            log::warn!("Could not load the playlist's tracks: {e}");
+            Vec::new()
         }
     }
 }

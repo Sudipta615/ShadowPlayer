@@ -93,3 +93,153 @@ pub fn resolve_identity(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use database::{Database, TrackRepo};
+    use domain::models::Track;
+    use std::path::{Path, PathBuf};
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sp_identity_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// Fingerprints do not need real audio, but they do need the bytes.
+    fn write_content(path: &Path, seed: u8) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let bytes: Vec<u8> = (0..64 * 1024u32)
+            .map(|i| (i as u8).wrapping_mul(seed).wrapping_add(seed))
+            .collect();
+        std::fs::write(path, bytes).expect("write content");
+    }
+
+    fn sample_track(id: TrackId, path: &Path) -> Track {
+        Track {
+            id,
+            path: path.to_path_buf(),
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            genre: None,
+            year: None,
+            track_number: None,
+            disc_number: None,
+            duration_secs: 60.0,
+            sample_rate: 44100,
+            channels: 2,
+            format: "FLAC".to_string(),
+            bitrate_kbps: None,
+            is_lossless: true,
+            replaygain_track_db: None,
+            replaygain_track_peak: None,
+            r128_loudness_lufs: None,
+            file_size_bytes: 64 * 1024,
+            mtime_unix_secs: 1_700_000_000,
+            mtime_nanos: 0,
+            content_hash: None,
+            is_favorite: true,
+            play_count: 7,
+            last_played_at: None,
+            added_at: 1_700_000_000,
+        }
+    }
+
+    /// The file was moved: the fingerprint matches and the old path is gone, so
+    /// the row is relinked rather than duplicated.
+    #[test]
+    fn a_moved_file_keeps_its_id() {
+        let root = temp_root("moved");
+        let old_path = root.join("old.flac");
+        let new_path = root.join("new.flac");
+        write_content(&old_path, 3);
+
+        let db = Database::in_memory().unwrap();
+        let repo = TrackRepo::new(db);
+        let old_id = TrackId::new();
+        let mut track = sample_track(old_id, &old_path);
+        let hash = Fingerprint::compute(&old_path).unwrap();
+        track.content_hash = Some(hash.as_str().to_string());
+        repo.upsert(&track).unwrap();
+
+        std::fs::rename(&old_path, &new_path).unwrap();
+        let derived = TrackId::from_canonical_path(&new_path);
+        let mut content_hash = None;
+
+        let resolved = resolve_identity(&repo, &new_path, derived, false, &mut content_hash);
+
+        assert_eq!(resolved, Some(old_id), "the move is recognised");
+        assert_eq!(content_hash.as_deref(), Some(hash.as_str()));
+        // And the scanner stores the row under the old id at the new path.
+        assert!(repo.relink_path(&old_id, &new_path, content_hash.as_deref()).unwrap());
+        let stored = repo.get_by_path(&new_path).unwrap().unwrap();
+        assert_eq!(stored.id, old_id);
+        assert_eq!(stored.play_count, 7, "play counts survive the move");
+        assert!(stored.is_favorite);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The same bytes still exist where they were: this is a copy, not a move,
+    /// and it must be indexed as its own track.
+    #[test]
+    fn a_copy_does_not_steal_identity() {
+        let root = temp_root("copy");
+        let original = root.join("original.flac");
+        let copy = root.join("copy.flac");
+        write_content(&original, 5);
+        std::fs::copy(&original, &copy).unwrap();
+
+        let db = Database::in_memory().unwrap();
+        let repo = TrackRepo::new(db);
+        let original_id = TrackId::new();
+        let mut track = sample_track(original_id, &original);
+        track.content_hash = Some(Fingerprint::compute(&original).unwrap().as_str().to_string());
+        repo.upsert(&track).unwrap();
+
+        let derived = TrackId::from_canonical_path(&copy);
+        let mut content_hash = None;
+        let resolved = resolve_identity(&repo, &copy, derived, false, &mut content_hash);
+
+        assert_eq!(resolved, None, "a copy keeps its own id");
+        assert_eq!(content_hash.as_deref(), Some(track.content_hash.as_deref().unwrap()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A row indexed before fingerprints existed gets one, so the next move can
+    /// still be recognised.
+    #[test]
+    fn backfill_stores_the_fingerprint() {
+        let root = temp_root("backfill");
+        let path = root.join("song.flac");
+        write_content(&path, 7);
+
+        let db = Database::in_memory().unwrap();
+        let repo = TrackRepo::new(db);
+        let id = TrackId::new();
+        repo.upsert(&sample_track(id, &path)).unwrap();
+        assert!(repo.get_by_id(&id).unwrap().unwrap().content_hash.is_none());
+
+        backfill_fingerprint(&repo, &path, &id);
+
+        let expected = Fingerprint::compute(&path).unwrap();
+        assert_eq!(
+            repo.get_by_id(&id).unwrap().unwrap().content_hash.as_deref(),
+            Some(expected.as_str())
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

@@ -122,6 +122,30 @@ cd crates/engine && cargo test
 CI runs `cargo fmt --check`, `clippy -D warnings`, the test suite above and the
 engine's suite on every push; see `.github/workflows/ci.yml`.
 
+### Development-only automation
+
+`cargo run -p shadowplayer --features eval-tools` compiles the
+`SHADOWPLAYER_EVAL*` hooks: they drive the UI to a chosen state, take a
+screenshot and exit. The feature is off by default, so those hooks — and the
+`process::exit` they can reach from an environment variable — are not part of a
+normal build, and neither are the CLAP eval script or the ~500 lines of
+scaffolding behind them.
+
+### Releasing
+
+The player and the engine are versioned separately — the engine carries its own
+version (`crates/engine`, currently `1.x`) because it is a standalone library
+with its own workspace and tests — but they are released together. To cut a
+release:
+
+1. Bump `version` in `crates/*/Cargo.toml` (the player workspace) and, when the
+   engine changed, `crates/engine/Cargo.toml` too.
+2. Move the `[Unreleased]` section of `CHANGELOG.md` under the new version and
+   date, and check the MSRV badge in `crates/engine/README.md`.
+3. `cargo run` prints both versions at startup from `engine::VERSION` and
+   `engine::NAME`; the log is the source of truth if a build ever reports the
+   wrong pair.
+
 ---
 
 ## Known limitations

@@ -29,12 +29,179 @@ mod tests {
             r128_loudness_lufs: Some(-16.0),
             file_size_bytes: 25_000_000,
             mtime_unix_secs: 1700000000,
+            mtime_nanos: 0,
             content_hash: None,
             is_favorite: false,
             play_count: 0,
             last_played_at: None,
             added_at: 1700000000,
         }
+    }
+
+    /// Two files whose names differ only in bytes that are not valid UTF-8 must
+    /// be two rows, each reachable by its own path. `to_string_lossy()` used to
+    /// turn both into the same U+FFFD text, so the second upsert overwrote the
+    /// first and the file simply never appeared.
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_paths_are_distinct_rows() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let raw_path = |bytes: &[u8]| PathBuf::from(std::ffi::OsStr::from_bytes(bytes));
+
+        let a_path = raw_path(b"/music/song-\x8a.flac");
+        let b_path = raw_path(b"/music/song-\x8b.flac");
+        let a = Track {
+            path: a_path.clone(),
+            ..sample_track(TrackId::new(), "/unused", "A", "Artist", "Album")
+        };
+        let b = Track {
+            path: b_path.clone(),
+            ..sample_track(TrackId::new(), "/unused", "B", "Artist", "Album")
+        };
+
+        repo.upsert(&a).expect("first upsert");
+        repo.upsert(&b).expect("second upsert");
+        assert_eq!(repo.count().unwrap(), 2, "both rows survive");
+
+        // The exact bytes come back out of the database.
+        assert_eq!(repo.get_by_path(&a_path).unwrap().unwrap().path, a_path);
+        assert_eq!(repo.get_by_path(&b_path).unwrap().unwrap().path, b_path);
+
+        // The lossy text they share is not a key for either of them.
+        assert!(repo
+            .get_by_path(&PathBuf::from("/music/song-\u{fffd}.flac"))
+            .unwrap()
+            .is_none());
+
+        // Renaming is also lossless.
+        let renamed = raw_path(b"/music/renamed-\x8a.flac");
+        assert!(repo.relink_path(&a.id, &renamed, None).unwrap());
+        assert_eq!(repo.get_by_path(&renamed).unwrap().unwrap().path, renamed);
+    }
+
+    /// Paths that are ordinary text keep their key: a row indexed by an older
+    /// build is still found by `get_by_path` after the upgrade.
+    #[test]
+    fn ordinary_paths_keep_their_key() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        for path in ["/music/100% real.flac", "/music/song%20name.flac"] {
+            let track = sample_track(TrackId::new(), path, "T", "A", "B");
+            repo.upsert(&track).unwrap();
+            assert_eq!(repo.get_by_path(std::path::Path::new(path)).unwrap().unwrap().id, track.id);
+        }
+    }
+
+    /// V5 adds the sub-second mtime column, the indexes the hot queries need,
+    /// and replaces the blanket FTS trigger with one scoped to the indexed
+    /// columns. It must also survive a lost migration row.
+    #[test]
+    fn migration_v5_adds_mtimes_indexes_and_scopes_the_fts_trigger() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tracks (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 title TEXT NOT NULL,
+                 artist TEXT NOT NULL,
+                 album TEXT NOT NULL,
+                 genre TEXT,
+                 path TEXT NOT NULL,
+                 play_count INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE tracks_fts (
+                 track_id TEXT, title TEXT, artist TEXT, album TEXT, genre TEXT, path TEXT
+             );
+             CREATE TABLE play_history (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT NOT NULL
+             );
+             CREATE TABLE playlist_tracks (
+                 playlist_id TEXT NOT NULL, track_id TEXT NOT NULL, position INTEGER NOT NULL
+             );
+             CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL);
+             INSERT INTO schema_migrations VALUES (4, 0);
+             -- The old trigger fired for *any* UPDATE, including play counts.
+             CREATE TRIGGER tracks_au AFTER UPDATE ON tracks BEGIN
+                 DELETE FROM tracks_fts WHERE track_id = old.id;
+                 INSERT INTO tracks_fts(track_id, title, artist, album, genre, path)
+                 VALUES (new.id, new.title, new.artist, new.album, coalesce(new.genre, ''), new.path);
+             END;
+             INSERT INTO tracks (id, title, artist, album, path) VALUES ('t1', 'Real Title', 'A', 'B', '/music/a.flac');
+             -- A sentinel standing in for the indexed row: only the trigger can
+             -- change it, so watching it shows whether the trigger fired.
+             INSERT INTO tracks_fts VALUES ('t1', 'sentinel', 'A', 'B', '', '/music/a.flac');",
+        )
+        .unwrap();
+
+        crate::schema::apply_v5_for_test(&mut conn).expect("V5 must apply");
+
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(tracks);").unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        assert!(columns.iter().any(|c| c == "mtime_nanos"), "column added");
+
+        let index_names: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name;")
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        for wanted in [
+            "idx_history_track",
+            "idx_playlist_tracks_track",
+            "idx_tracks_genre",
+            "idx_tracks_album_artist",
+        ] {
+            assert!(
+                index_names.iter().any(|name| name == wanted),
+                "{wanted} must exist; found {index_names:?}"
+            );
+        }
+
+        let trigger: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'tracks_au';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            trigger.contains("UPDATE OF title, artist, album, genre, path"),
+            "the trigger must be scoped to the indexed columns: {trigger}"
+        );
+
+        // Play counts update on the hot path; the search index must not care.
+        conn.execute("UPDATE tracks SET play_count = play_count + 1 WHERE id = 't1';", [])
+            .unwrap();
+        let title: String = conn
+            .query_row("SELECT title FROM tracks_fts WHERE track_id = 't1';", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "sentinel", "a play-count update must not rebuild the index");
+
+        // A real editorial change still does.
+        conn.execute("UPDATE tracks SET title = 'New Title' WHERE id = 't1';", [])
+            .unwrap();
+        let title: String = conn
+            .query_row("SELECT title FROM tracks_fts WHERE track_id = 't1';", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "New Title");
+
+        // A lost migration row must not make the ALTER run twice.
+        conn.execute("DELETE FROM schema_migrations WHERE version = 5;", [])
+            .unwrap();
+        crate::schema::apply_v5_for_test(&mut conn)
+            .expect("re-applying V5 with the column present must be safe");
     }
 
     #[test]
@@ -567,6 +734,35 @@ mod tests {
         assert_eq!(groups[0].len(), 2);
         let ids: Vec<TrackId> = groups[0].iter().map(|t| t.id).collect();
         assert!(ids.contains(&a) && ids.contains(&b));
+    }
+
+    /// Groups are ordered largest first, whatever order the query returned.
+    #[test]
+    fn duplicate_groups_come_back_largest_first() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let mut tracks = Vec::new();
+        for (i, hash) in ["two", "two", "three", "three", "three", "solo"]
+            .iter()
+            .enumerate()
+        {
+            let mut t = sample_track(
+                TrackId::new(),
+                &format!("/music/dup/{i}.flac"),
+                &format!("Track {i}"),
+                "X",
+                "A",
+            );
+            t.content_hash = Some((*hash).to_string());
+            repo.upsert(&t).unwrap();
+            tracks.push(t);
+        }
+
+        let groups = repo.find_duplicates().unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].len(), 3, "the largest group leads");
+        assert_eq!(groups[1].len(), 2);
     }
 
     /// Deleting a folder must not touch a sibling whose name merely starts with

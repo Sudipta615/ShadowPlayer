@@ -105,7 +105,10 @@ mod metadata;
 mod source;
 
 pub use metadata::ExtractedTags;
-pub use metadata::{extract_loudness_metadata_symphonia, extract_track_metadata, format_duration};
+pub use metadata::{
+    extract_loudness_metadata_symphonia, extract_track_metadata, format_duration,
+    probe_metadata, ProbedMetadata,
+};
 
 impl SymphoniaDecoder {
     pub fn gapless_info(&self) -> &GaplessInfo {

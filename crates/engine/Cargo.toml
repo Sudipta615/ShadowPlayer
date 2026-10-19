@@ -376,6 +376,13 @@ windows = { version = "0.59", features = [
 criterion = "0.8.2"
 approx = "0.5.1"
 plugin-abi = { path = "crates/plugin-abi", version = "1.2.1", default-features = false }
+# `decode::codecs`'s manifest test parses this Cargo.toml, and the WavPack
+# dispatch test encodes a `.wv` in memory (`wavicle`'s `encode` feature). Both
+# were used by tests but never declared, so the test build did not compile.
+toml = "0.8"
+wavicle = { version = "0.1", features = ["encode"] }
+# The Opus round-trip test encodes a stream to feed the decoder.
+rusty-opus = "0.9"
 
 [profile.release]
 overflow-checks = true

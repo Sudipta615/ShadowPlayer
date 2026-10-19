@@ -1,5 +1,11 @@
 use domain::ids::TrackId;
 use image::ImageReader;
+
+/// Longest edge of a cached thumbnail, in pixels.
+///
+/// 160px is plenty for the 36px list rows and the 140px grid cards, and keeps
+/// both the on-disk cache and the GPU texture memory small.
+const THUMBNAIL_MAX_EDGE: u32 = 160;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -26,11 +32,9 @@ impl ArtworkManager {
             .ok()?;
         let img = reader.decode().ok()?;
 
-        // Resize down to 160x160 preserving aspect ratio. 160px is plenty for
-        // the 36px list rows and 140px grid cards, and keeps both the on-disk
-        // cache and the GPU texture memory small. `thumbnail` is a fast box
-        // filter; Lanczos3 would cost far more CPU for no visible gain here.
-        let thumb = img.thumbnail(160, 160);
+        // `thumbnail` is a fast box filter; Lanczos3 would cost far more CPU
+        // for no visible gain at this size.
+        let thumb = img.thumbnail(THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE);
         let out_path = self.get_cached_thumbnail_path(track_id);
 
         if let Ok(mut file) = fs::File::create(&out_path) {
@@ -64,5 +68,83 @@ impl ArtworkManager {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sp_artwork_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn png_of(width: u32, height: u32) -> Vec<u8> {
+        let img = image::RgbImage::from_fn(width, height, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 0x80])
+        });
+        let mut bytes = Vec::new();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("encode png");
+        bytes
+    }
+
+    #[test]
+    fn thumbnails_are_bounded_and_keep_their_aspect_ratio() {
+        let dir = temp_dir("thumb");
+        let manager = ArtworkManager::new(&dir);
+        let id = TrackId::new();
+
+        let wide = png_of(400, 100);
+        let path = manager
+            .save_thumbnail(&id, &wide)
+            .expect("a valid PNG produces a thumbnail");
+        assert_eq!(path, manager.get_cached_thumbnail_path(&id));
+
+        let thumb = image::open(&path).expect("the thumbnail decodes");
+        assert!(thumb.width() <= 160 && thumb.height() <= 160, "bounded");
+        assert_eq!(thumb.width(), 160);
+        assert_eq!(thumb.height(), 40, "aspect ratio is preserved");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bytes_that_are_not_an_image_are_refused() {
+        let dir = temp_dir("garbage");
+        let manager = ArtworkManager::new(&dir);
+        let id = TrackId::new();
+
+        assert!(manager.save_thumbnail(&id, b"this is not a picture").is_none());
+        assert!(!manager.get_cached_thumbnail_path(&id).exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn folder_artwork_is_found_beside_the_song() {
+        let dir = temp_dir("folder");
+        let manager = ArtworkManager::new(dir.join("cache"));
+        let album = dir.join("album");
+        std::fs::create_dir_all(&album).unwrap();
+        let song = album.join("01 song.flac");
+
+        assert!(manager.find_folder_artwork(&song).is_none());
+        std::fs::write(album.join("cover.jpg"), b"jpeg-ish").unwrap();
+        assert_eq!(manager.find_folder_artwork(&song), Some(album.join("cover.jpg")));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

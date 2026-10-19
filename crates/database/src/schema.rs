@@ -58,6 +58,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v4(conn)?;
     }
 
+    if current_version < 5 {
+        apply_v5(conn)?;
+    }
+
     Ok(())
 }
 
@@ -214,7 +218,7 @@ fn apply_v1(conn: &mut Connection) -> Result<()> {
 
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
-            eprintln!("Error executing statement: {}\nStmt: {}", e, stmt);
+            log::error!("Migration statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }
@@ -244,7 +248,7 @@ fn apply_v2(conn: &mut Connection) -> Result<()> {
 
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
-            eprintln!("Error executing statement: {}\nStmt: {}", e, stmt);
+            log::error!("Migration statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }
@@ -290,7 +294,7 @@ fn apply_v3(conn: &mut Connection) -> Result<()> {
 
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
-            eprintln!("Error executing statement: {}\nStmt: {}", e, stmt);
+            log::error!("Migration statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }
@@ -358,4 +362,72 @@ fn apply_v4(conn: &mut Connection) -> Result<()> {
 #[cfg(test)]
 pub(crate) fn apply_v4_for_test(conn: &mut Connection) -> Result<()> {
     apply_v4(conn)
+}
+
+/// Test-only entry point for V5, for the same reason as [`apply_v4_for_test`].
+#[cfg(test)]
+pub(crate) fn apply_v5_for_test(conn: &mut Connection) -> Result<()> {
+    apply_v5(conn)
+}
+
+/// V5: sub-second modification times, the indexes the hot queries need, and an
+/// FTS trigger that only fires when an indexed column changes.
+fn apply_v5(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V5 (mtimes, indexes, scoped FTS trigger)");
+    let tx = conn.transaction()?;
+
+    // Same guard as V3: `ALTER TABLE ADD COLUMN` has no `IF NOT EXISTS`, and a
+    // lost migration row must not make the database refuse to open.
+    let has_mtime_nanos: bool = {
+        let mut stmt = tx.prepare("PRAGMA table_info(tracks);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for name in names {
+            if name? == "mtime_nanos" {
+                found = true;
+            }
+        }
+        found
+    };
+
+    let mut statements: Vec<&str> = Vec::new();
+
+    if !has_mtime_nanos {
+        statements.push("ALTER TABLE tracks ADD COLUMN mtime_nanos INTEGER NOT NULL DEFAULT 0;");
+    }
+
+    statements.extend([
+        // `list_most_played` groups by track and the foreign key cascade has to
+        // find the children; neither had an index.
+        "CREATE INDEX IF NOT EXISTS idx_history_track ON play_history(track_id);",
+        // Same for playlist membership: deleting a track cascades through
+        // `playlist_tracks`, which was a full scan per deletion.
+        "CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track ON playlist_tracks(track_id);",
+        // The genre chips and the Genres view filter on this column.
+        "CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre);",
+        // `idx_tracks_album` covers `album` alone; the album view asks for
+        // `WHERE album = ? AND artist = ?` and could not use it.
+        "CREATE INDEX IF NOT EXISTS idx_tracks_album_artist ON tracks(album, artist);",
+        // Favourites and play stats update on the playback hot path. The old
+        // trigger deleted and reinserted an FTS row for *any* column, so every
+        // play-count increment rewrote the search index. `UPDATE OF` limits it
+        // to the columns the index actually contains.
+        "DROP TRIGGER IF EXISTS tracks_au;",
+        "CREATE TRIGGER tracks_au AFTER UPDATE OF title, artist, album, genre, path ON tracks BEGIN
+            DELETE FROM tracks_fts WHERE track_id = old.id;
+            INSERT INTO tracks_fts(track_id, title, artist, album, genre, path)
+            VALUES (new.id, new.title, new.artist, new.album, coalesce(new.genre, ''), new.path);
+        END;",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (5, strftime('%s', 'now'));",
+    ]);
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V5 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
 }

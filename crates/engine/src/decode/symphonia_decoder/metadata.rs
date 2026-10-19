@@ -121,12 +121,74 @@ fn parse_position(value: &str) -> (u32, u32) {
     }
 }
 
-/// Extract editorial tags and duration from a Symphonia-probeable file.
-pub fn extract_track_metadata(path: &Path) -> ExtractedTags {
-    let mut tags = ExtractedTags::unknown_for(path);
+/// Everything one probe of a file can say without decoding any audio.
+///
+/// The scanner used to open every file three times: once for editorial tags,
+/// once for loudness tags, and once more in the desktop crate for the stream
+/// format and the cover art. All of it comes out of a single `probe()` call,
+/// so it is read together. The wrappers below keep their old signatures for
+/// callers that want just one part.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProbedMetadata {
+    /// Editorial tags plus duration (the [`ExtractedTags`] contract, including
+    /// its "Unknown …" placeholders).
+    pub tags: ExtractedTags,
+    /// ReplayGain / EBU R128 values read from the file's tags.
+    pub loudness: crate::dsp::LoudnessMetadata,
+    /// Stream sample rate, when the container reports it.
+    pub sample_rate: Option<u32>,
+    /// Channel count, when the container reports it.
+    pub channels: Option<usize>,
+    /// Bits per sample, when the container reports it.
+    pub bits_per_sample: Option<u32>,
+    /// The first embedded picture: its bytes and its MIME type.
+    pub artwork: Option<(Vec<u8>, String)>,
+}
+
+impl ProbedMetadata {
+    /// What a file that cannot be probed looks like: placeholders, no format,
+    /// no artwork.
+    pub fn unreadable(path: &Path) -> Self {
+        Self {
+            tags: ExtractedTags::unknown_for(path),
+            loudness: crate::dsp::LoudnessMetadata::default(),
+            sample_rate: None,
+            channels: None,
+            bits_per_sample: None,
+            artwork: None,
+        }
+    }
+
+    /// A result with only tags and loudness.
+    ///
+    /// The Opus reader supplies those from OpusTags, which Symphonia cannot
+    /// read; it has nothing to say about the stream format, and that absence
+    /// must not be mistaken for a failed probe.
+    pub fn from_tags_and_loudness(
+        tags: ExtractedTags,
+        loudness: crate::dsp::LoudnessMetadata,
+    ) -> Self {
+        Self {
+            tags,
+            loudness,
+            sample_rate: None,
+            channels: None,
+            bits_per_sample: None,
+            artwork: None,
+        }
+    }
+}
+
+/// Read everything a single probe can tell us about `path`.
+///
+/// Never decodes audio: it opens the container, reads the metadata and the
+/// codec parameters, and returns. This is the one place that does so — the
+/// convenience wrappers below and the desktop scanner all come through here.
+pub fn probe_metadata(path: &Path) -> ProbedMetadata {
+    let mut probed = ProbedMetadata::unreadable(path);
 
     let Ok(file) = File::open(path) else {
-        return tags;
+        return probed;
     };
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -140,14 +202,19 @@ pub fn extract_track_metadata(path: &Path) -> ExtractedTags {
     let Ok(mut format_reader) =
         symphonia::default::get_probe().probe(&hint, mss, format_opts, metadata_opts)
     else {
-        return tags;
+        return probed;
     };
 
     if let Some(track) = format_reader.tracks().first() {
+        if let Some(audio) = track.codec_params.as_ref().and_then(|cp| cp.audio()) {
+            probed.sample_rate = audio.sample_rate;
+            probed.channels = audio.channels.as_ref().map(|channels| channels.count());
+            probed.bits_per_sample = audio.bits_per_sample;
+        }
         if let Some(tb) = track.time_base {
             if let Some(n_frames) = track.num_frames {
                 if let Some(time) = tb.calc_time(Timestamp::new(n_frames as i64)) {
-                    tags.duration_secs = time.as_secs_f64();
+                    probed.tags.duration_secs = time.as_secs_f64();
                 }
             }
         }
@@ -158,11 +225,26 @@ pub fn extract_track_metadata(path: &Path) -> ExtractedTags {
     // the borrow of its inner reference is still live.
     if let Some(current) = format_reader.metadata().current() {
         for tag in &current.media.tags {
-            apply_tag(&mut tags, tag);
+            // One pass feeds both parsers: the editorial fields and the
+            // loudness fields live in the same tags.
+            apply_tag(&mut probed.tags, tag);
+            apply_loudness_tag(&mut probed.loudness, tag);
+        }
+        if let Some(visual) = current.media.visuals.first() {
+            let mime = visual
+                .media_type
+                .clone()
+                .unwrap_or_else(|| "image/jpeg".to_string());
+            probed.artwork = Some((visual.data.to_vec(), mime));
         }
     }
 
-    tags
+    probed
+}
+
+/// Extract editorial tags and duration from a Symphonia-probeable file.
+pub fn extract_track_metadata(path: &Path) -> ExtractedTags {
+    probe_metadata(path).tags
 }
 
 /// Fold one tag into `tags`.
@@ -259,10 +341,16 @@ fn apply_tag(tags: &mut ExtractedTags, tag: &symphonia::core::meta::Tag) {
 /// `decode::extract_loudness_metadata` (OpusTags cannot be read by
 /// Symphonia's probe), which dispatches here for everything else.
 pub fn extract_loudness_metadata_symphonia(path: &Path) -> crate::dsp::LoudnessMetadata {
-    use crate::dsp::LoudnessMetadata;
+    probe_metadata(path).loudness
+}
 
-    let mut meta = LoudnessMetadata::default();
-
+/// Fold one loudness tag into `meta`.
+///
+/// Split out of the probe so a single pass over a file's tags can feed both
+/// the editorial and the loudness parsers. Unlike the editorial parser this
+/// does *not* stop at a standard tag: a file can carry a standard ReplayGain
+/// tag and a raw R128 tag at once, and both are read.
+fn apply_loudness_tag(meta: &mut crate::dsp::LoudnessMetadata, tag: &symphonia::core::meta::Tag) {
     let parse_f32 = |s: &str| -> Option<f32> {
         // Tags often look like "-6.34 dB" — strip non-numeric prefix/suffix.
         let trimmed: String = s
@@ -294,68 +382,47 @@ pub fn extract_loudness_metadata_symphonia(path: &Path) -> crate::dsp::LoudnessM
         None
     };
 
-    if let Ok(file) = File::open(path) {
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-        let mut hint = Hint::new();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            hint.with_extension(ext);
-        }
-        let metadata_opts = MetadataOptions::default();
-        let format_opts = FormatOptions::default();
-
-        if let Ok(mut format_reader) =
-            symphonia::default::get_probe().probe(&hint, mss, format_opts, metadata_opts)
-        {
-            if let Some(current) = format_reader.metadata().current() {
-                for tag in &current.media.tags {
-                    if let Some(std) = &tag.std {
-                        match std {
-                            StandardTag::ReplayGainTrackGain(v) => {
-                                meta.replaygain_track_db = parse_f32(v);
-                            }
-                            StandardTag::ReplayGainAlbumGain(v) => {
-                                meta.replaygain_album_db = parse_f32(v);
-                            }
-                            StandardTag::ReplayGainTrackPeak(v) => {
-                                meta.replaygain_track_peak = parse_f32(v);
-                            }
-                            StandardTag::ReplayGainAlbumPeak(v) => {
-                                meta.replaygain_album_peak = parse_f32(v);
-                            }
-                            _ => {}
-                        }
-                    }
-                    let key = tag.raw.key.to_lowercase();
-                    let value = tag.raw.value.to_string();
-                    if value.is_empty() {
-                        continue;
-                    }
-                    if key == "replaygain_track_gain" && meta.replaygain_track_db.is_none() {
-                        meta.replaygain_track_db = parse_f32(&value);
-                    } else if key == "replaygain_album_gain" && meta.replaygain_album_db.is_none() {
-                        meta.replaygain_album_db = parse_f32(&value);
-                    } else if key == "replaygain_track_peak" && meta.replaygain_track_peak.is_none()
-                    {
-                        meta.replaygain_track_peak = parse_f32(&value);
-                    } else if key == "replaygain_album_peak" && meta.replaygain_album_peak.is_none()
-                    {
-                        meta.replaygain_album_peak = parse_f32(&value);
-                    } else if key == "r128_track_gain" {
-                        meta.ebu_r128_loudness = parse_r128(&value);
-                    } else if key == "r128_album_gain" {
-                        // Reuse the same field — AlbumReplayGain mode reads
-                        // replaygain_album_db, but if only R128 tags are
-                        // present we treat them as the track loudness.
-                        if meta.ebu_r128_loudness.is_none() {
-                            meta.ebu_r128_loudness = parse_r128(&value);
-                        }
-                    }
-                }
+    if let Some(std) = &tag.std {
+        match std {
+            StandardTag::ReplayGainTrackGain(v) => {
+                meta.replaygain_track_db = parse_f32(v);
             }
+            StandardTag::ReplayGainAlbumGain(v) => {
+                meta.replaygain_album_db = parse_f32(v);
+            }
+            StandardTag::ReplayGainTrackPeak(v) => {
+                meta.replaygain_track_peak = parse_f32(v);
+            }
+            StandardTag::ReplayGainAlbumPeak(v) => {
+                meta.replaygain_album_peak = parse_f32(v);
+            }
+            _ => {}
         }
     }
 
-    meta
+    let key = tag.raw.key.to_lowercase();
+    let value = tag.raw.value.to_string();
+    if value.is_empty() {
+        return;
+    }
+    if key == "replaygain_track_gain" && meta.replaygain_track_db.is_none() {
+        meta.replaygain_track_db = parse_f32(&value);
+    } else if key == "replaygain_album_gain" && meta.replaygain_album_db.is_none() {
+        meta.replaygain_album_db = parse_f32(&value);
+    } else if key == "replaygain_track_peak" && meta.replaygain_track_peak.is_none() {
+        meta.replaygain_track_peak = parse_f32(&value);
+    } else if key == "replaygain_album_peak" && meta.replaygain_album_peak.is_none() {
+        meta.replaygain_album_peak = parse_f32(&value);
+    } else if key == "r128_track_gain" {
+        meta.ebu_r128_loudness = parse_r128(&value);
+    } else if key == "r128_album_gain" {
+        // Reuse the same field — AlbumReplayGain mode reads
+        // replaygain_album_db, but if only R128 tags are present we treat them
+        // as the track loudness.
+        if meta.ebu_r128_loudness.is_none() {
+            meta.ebu_r128_loudness = parse_r128(&value);
+        }
+    }
 }
 
 #[cfg(test)]

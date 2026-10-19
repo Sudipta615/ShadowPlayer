@@ -16,6 +16,13 @@ const PLAY_THRESHOLD_SECS: f32 = 20.0;
 /// listening total; a normal frame is two orders of magnitude smaller.
 const MAX_CREDITED_STEP_SECS: f32 = 2.0;
 
+/// Pressing *previous* this far into a track restarts it instead of moving on.
+const RESTART_SEEK_THRESHOLD_SECS: f32 = 3.0;
+
+/// The `.cue` names to look for beside an album image, after one named for the
+/// image itself. These are the two conventions the rippers actually use.
+const SIBLING_CUE_NAMES: [&str; 2] = ["album.cue", "CDImage.cue"];
+
 pub struct PlaybackCoordinator {
     session: Arc<AudioSession>,
     _db: Database,
@@ -241,8 +248,9 @@ impl PlaybackCoordinator {
             return;
         }
 
-        // If played > 3 seconds into track, seek back to beginning
-        if self.session.position_secs_compensated() > 3.0 {
+        // Already into the track: restart it rather than moving to the
+        // previous one.
+        if self.session.position_secs_compensated() > RESTART_SEEK_THRESHOLD_SECS {
             self.session.seek(0.0);
             return;
         }
@@ -604,7 +612,7 @@ fn sibling_cue_candidates(real_path: &std::path::Path) -> [std::path::PathBuf; 3
     let parent = real_path.parent().unwrap_or(std::path::Path::new("."));
     [
         parent.join(format!("{}.cue", stem)),
-        parent.join("album.cue"),
-        parent.join("CDImage.cue"),
+        parent.join(SIBLING_CUE_NAMES[0]),
+        parent.join(SIBLING_CUE_NAMES[1]),
     ]
 }

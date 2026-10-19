@@ -25,7 +25,9 @@ fn purge_legacy_demo_data(db: &Database, data_dir: &std::path::Path) {
         Err(e) => log::warn!("Could not purge legacy demo tracks: {}", e),
         _ => {}
     }
-    let _ = QueueRepo::new(db.clone()).purge_path_prefix(&demo_dir);
+    if let Err(e) = QueueRepo::new(db.clone()).purge_path_prefix(&demo_dir) {
+        log::warn!("Could not purge legacy demo queue entries: {e}");
+    }
 
     if demo_dir.exists() {
         match std::fs::remove_dir_all(&demo_dir) {
@@ -34,8 +36,17 @@ fn purge_legacy_demo_data(db: &Database, data_dir: &std::path::Path) {
         }
     }
 
-    let _ = settings.set_value(KEY, "1");
+    // Record that the purge ran, so later launches do not repeat it. Failing
+    // to record it only means trying again next time.
+    if let Err(e) = settings.set_value(KEY, "1") {
+        log::warn!("Could not record the legacy demo purge: {e}");
+    }
 }
+
+/// The smallest window that still fits the layout: sidebar, table columns and
+/// the right drawer.
+const MIN_WINDOW_WIDTH: f32 = 1024.0;
+const MIN_WINDOW_HEIGHT: f32 = 682.0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
@@ -78,10 +89,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("ShadowPlayer")
             .with_inner_size(Vec2::new(
-                saved_settings.window_width.max(1024.0),
-                saved_settings.window_height.max(682.0),
+                saved_settings.window_width.max(MIN_WINDOW_WIDTH),
+                saved_settings.window_height.max(MIN_WINDOW_HEIGHT),
             ))
-            .with_min_inner_size(Vec2::new(1024.0, 682.0))
+            .with_min_inner_size(Vec2::new(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT))
             .with_decorations(true)
             .with_transparent(false),
         ..Default::default()
@@ -99,4 +110,82 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_track(id: domain::ids::TrackId, path: &std::path::Path) -> domain::models::Track {
+        domain::models::Track {
+            id,
+            path: path.to_path_buf(),
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            genre: None,
+            year: None,
+            track_number: None,
+            disc_number: None,
+            duration_secs: 60.0,
+            sample_rate: 44_100,
+            channels: 2,
+            format: "FLAC".to_string(),
+            bitrate_kbps: None,
+            is_lossless: true,
+            replaygain_track_db: None,
+            replaygain_track_peak: None,
+            r128_loudness_lufs: None,
+            file_size_bytes: 1_000,
+            mtime_unix_secs: 1_700_000_000,
+            mtime_nanos: 0,
+            content_hash: None,
+            is_favorite: false,
+            play_count: 0,
+            last_played_at: None,
+            added_at: 1_700_000_000,
+        }
+    }
+
+    /// The purge removes what it claims to remove and nothing else: only rows
+    /// under the demo directory, and it runs once.
+    #[test]
+    fn the_legacy_demo_purge_removes_only_the_demo_library() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "sp_app_purge_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let demo_dir = data_dir.join("demo_sample_music");
+        std::fs::create_dir_all(&demo_dir).unwrap();
+        std::fs::write(demo_dir.join("demo.flac"), b"demo").unwrap();
+
+        let db = Database::in_memory().unwrap();
+        let tracks = TrackRepo::new(db.clone());
+        let demo_id = domain::ids::TrackId::new();
+        tracks
+            .upsert(&sample_track(demo_id, &demo_dir.join("demo.flac")))
+            .unwrap();
+        let real_id = domain::ids::TrackId::new();
+        let real_path = data_dir.join("my music").join("real.flac");
+        std::fs::create_dir_all(real_path.parent().unwrap()).unwrap();
+        tracks
+            .upsert(&sample_track(real_id, &real_path))
+            .unwrap();
+
+        purge_legacy_demo_data(&db, &data_dir);
+
+        assert!(tracks.get_by_id(&demo_id).unwrap().is_none(), "demo row gone");
+        assert!(tracks.get_by_id(&real_id).unwrap().is_some(), "real row kept");
+        assert!(!demo_dir.exists(), "demo directory removed");
+
+        // A second run is a no-op rather than a second attempt.
+        purge_legacy_demo_data(&db, &data_dir);
+        assert!(tracks.get_by_id(&real_id).unwrap().is_some());
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
 }

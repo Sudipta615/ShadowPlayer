@@ -68,8 +68,11 @@ static ARTIST_NAMESPACE: Uuid = Uuid::from_u128(0x9b2d5e14_6c73_4a08_b2d9_07f4e1
 
 impl TrackId {
     pub fn from_canonical_path(path: &std::path::Path) -> Self {
-        let path_str = path.to_string_lossy();
-        Self::from_name_and_seed(&PATH_NAMESPACE, &path_str)
+        // The key is lossless (see `crate::paths`): two files whose names
+        // differ only in bytes that are not valid UTF-8 used to lose those
+        // bytes here and ended up with the same id.
+        let path_key = crate::paths::encode_path_key(path);
+        Self::from_name_and_seed(&PATH_NAMESPACE, &path_key)
     }
 }
 

@@ -27,3 +27,10 @@ serde_json = "1.0"
 rfd = "0.15"
 # MPRIS2 desktop integration (Linux). zbus is already in the tree via `ashpd`.
 zbus = "5"
+
+[features]
+# Development-only automation hooks: `SHADOWPLAYER_EVAL*` drives the UI to a
+# chosen state, takes a screenshot and exits. They are compiled out of release
+# builds: a shipped player has no `process::exit` reachable from an environment
+# variable, and ~500 lines of test scaffolding stay out of the binary.
+eval-tools = []

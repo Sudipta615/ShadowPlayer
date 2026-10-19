@@ -5,7 +5,7 @@ pub use engine::playback_info::{BitPerfectCause, PlaybackInfo, PlaybackState};
 pub use engine::playlist::RepeatMode;
 pub use engine::engine::cue_split::PregapPolicy;
 pub use engine::{AudioEngine, AudioSource, EngineCommand, EngineConfig, EngineHandle};
-use log::info;
+use log::{info, warn};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -361,42 +361,62 @@ impl AudioSession {
 
         self.handle.set_resampler_quality(cfg.resampler_quality);
         self.handle.set_dither_enabled(cfg.dither_enabled);
-        let _ = self.handle.send_command(EngineCommand::SetPrecisionMode(cfg.precision_mode));
+        self.send(EngineCommand::SetPrecisionMode(cfg.precision_mode));
         self.handle.set_eq_enabled(cfg.eq.enabled);
         self.handle.set_crossfeed_enabled(cfg.crossfeed.enabled);
-        let _ = self.handle.send_command(EngineCommand::SetLimiterEnabled(cfg.limiter.enabled));
-        let _ = self.handle.send_command(EngineCommand::SetCompressorEnabled(cfg.multiband_compressor.enabled));
+        self.send(EngineCommand::SetLimiterEnabled(cfg.limiter.enabled));
+        self.send(EngineCommand::SetCompressorEnabled(cfg.multiband_compressor.enabled));
         self.handle.set_spatial_enabled(cfg.spatial.enabled);
     }
 
     // ── Advanced Audio Controls ─────────────────────────────────────────
 
-    pub fn set_output_device(&self, device: Option<String>) {
-        self.handle.set_output_device(device);
+    /// Send a command to the engine thread.
+    ///
+    /// Returns `false` when the channel is closed: the engine thread is gone and
+    /// playback has stopped for good. Every one of these calls used to be
+    /// written `let _ = ...`, so a dead engine was indistinguishable from a live
+    /// one and a UI toggle could look applied while nothing received it.
+    fn send(&self, command: EngineCommand) -> bool {
+        match self.handle.send_command(command) {
+            Ok(()) => true,
+            Err(_) => {
+                warn!("The engine command channel is closed; the command was dropped");
+                false
+            }
+        }
+    }
+
+    /// Select the output device (`None` = system default).
+    ///
+    /// Returns `false` when the engine did not receive the command.
+    pub fn set_output_device(&self, device: Option<String>) -> bool {
+        self.send(EngineCommand::SetOutputDevice(device))
     }
 
     pub fn available_devices(&self) -> Vec<String> {
         self.handle.available_devices()
     }
 
-    pub fn set_output_backend(&self, backend: config::AudioBackend) {
-        self.handle.set_output_backend(backend);
+    /// Returns `false` when the engine did not receive the command.
+    pub fn set_output_backend(&self, backend: config::AudioBackend) -> bool {
+        self.send(EngineCommand::SetOutputBackend(backend))
     }
 
     pub fn set_sample_rate_policy(&self, policy: config::SampleRatePolicy) {
-        self.handle.set_sample_rate_policy(policy);
+        self.send(EngineCommand::SetSampleRatePolicy(policy));
     }
 
     pub fn set_volume_mode(&self, mode: config::VolumeMode) {
-        self.handle.set_volume_mode(mode);
+        self.send(EngineCommand::SetVolumeMode(mode));
     }
 
     pub fn set_bit_perfect(&self, enabled: bool) {
-        self.handle.set_bit_perfect(enabled);
+        self.send(EngineCommand::SetBitPerfect(enabled));
     }
 
     pub fn set_dither_enabled(&self, enabled: bool) {
-        self.handle.set_dither_enabled(enabled);
+        self.send(EngineCommand::SetDitherEnabled(enabled));
     }
 
     pub fn set_resampler_quality(&self, quality: config::ResamplerQuality) {
@@ -404,7 +424,7 @@ impl AudioSession {
     }
 
     pub fn set_precision_mode(&self, mode: engine::dsp::pipeline::PrecisionMode) {
-        let _ = self.handle.send_command(EngineCommand::SetPrecisionMode(mode));
+        self.send(EngineCommand::SetPrecisionMode(mode));
     }
 
     /// Round-trip output latency reported by the backend, in milliseconds.
@@ -449,11 +469,11 @@ impl AudioSession {
     }
 
     pub fn set_bass_shelf(&self, db: f32) {
-        let _ = self.handle.send_command(EngineCommand::SetBassShelf(db));
+        self.send(EngineCommand::SetBassShelf(db));
     }
 
     pub fn set_treble_shelf(&self, db: f32) {
-        let _ = self.handle.send_command(EngineCommand::SetTrebleShelf(db));
+        self.send(EngineCommand::SetTrebleShelf(db));
     }
 
     pub fn set_stereo_width(&self, width: f32) {
@@ -473,11 +493,11 @@ impl AudioSession {
     }
 
     pub fn set_compressor_enabled(&self, enabled: bool) {
-        let _ = self.handle.send_command(EngineCommand::SetCompressorEnabled(enabled));
+        self.send(EngineCommand::SetCompressorEnabled(enabled));
     }
 
     pub fn set_limiter_enabled(&self, enabled: bool) {
-        let _ = self.handle.send_command(EngineCommand::SetLimiterEnabled(enabled));
+        self.send(EngineCommand::SetLimiterEnabled(enabled));
     }
 
     pub fn set_spatial_enabled(&self, enabled: bool) {
@@ -513,17 +533,17 @@ impl AudioSession {
 
     /// Set the full crossfade configuration (duration, curve, etc.).
     pub fn set_crossfade_config(&self, config: config::CrossfadeConfig) {
-        let _ = self.handle.send_command(EngineCommand::SetCrossfadeConfig(config));
+        self.send(EngineCommand::SetCrossfadeConfig(config));
     }
 
     /// Set the crossfade curve shape (e.g. EqualPower, Linear, SCurve).
     pub fn set_crossfade_curve(&self, curve: config::CrossfadeCurve) {
-        let _ = self.handle.send_command(EngineCommand::SetCrossfadeCurve(curve));
+        self.send(EngineCommand::SetCrossfadeCurve(curve));
     }
 
     /// Set the track-to-track transition mode (Gapless, Crossfade, Fade, Stop).
     pub fn set_transition_mode(&self, mode: config::TransitionMode) {
-        let _ = self.handle.send_command(EngineCommand::SetTransitionMode(mode));
+        self.send(EngineCommand::SetTransitionMode(mode));
     }
 
     /// Set custom crossfeed filter parameters (frequency, Q, ITD delay in ms).
@@ -581,7 +601,7 @@ impl AudioSession {
         release_ms: f32,
         makeup_gain_db: f32,
     ) {
-        let _ = self.handle.send_command(EngineCommand::SetCompressorBandParams {
+        self.send(EngineCommand::SetCompressorBandParams {
             band,
             threshold_db,
             ratio,
@@ -647,7 +667,7 @@ impl AudioSession {
         filter_type: engine::dsp::equalizer::EqFilterType,
         enabled: bool,
     ) {
-        let _ = self.handle.send_command(EngineCommand::SetEqBandParams {
+        self.send(EngineCommand::SetEqBandParams {
             index,
             frequency,
             gain_db,
@@ -660,17 +680,17 @@ impl AudioSession {
     /// Enable or disable automatic EQ headroom management.
     /// When enabled, the engine reserves the curve's peak boost as pre-EQ attenuation.
     pub fn set_eq_auto_headroom(&self, enabled: bool) {
-        let _ = self.handle.send_command(EngineCommand::SetEqAutoHeadroom(enabled));
+        self.send(EngineCommand::SetEqAutoHeadroom(enabled));
     }
 
     /// Set the graphic EQ preamp gain in dB.
     pub fn set_graphic_eq_preamp(&self, gain_db: f32) {
-        let _ = self.handle.send_command(EngineCommand::SetGraphicEqPreamp(gain_db));
+        self.send(EngineCommand::SetGraphicEqPreamp(gain_db));
     }
 
     /// Enable or disable Mid/Side EQ mode.
     pub fn set_midside_eq(&self, enabled: bool) {
-        let _ = self.handle.send_command(EngineCommand::SetMidsideEq(enabled));
+        self.send(EngineCommand::SetMidsideEq(enabled));
     }
 
     // ── Playback Queue ───────────────────────────────────────────────────
@@ -684,32 +704,32 @@ impl AudioSession {
 
     /// Add an audio source as an independent mix-bus lane (playing alongside primary stream).
     pub fn add_track(&self, source: engine::AudioSource) {
-        let _ = self.handle.send_command(EngineCommand::AddTrack(source));
+        self.send(EngineCommand::AddTrack(source));
     }
 
     /// Remove the lane on the given mix-bus slot and silence it.
     pub fn remove_track(&self, slot: u8) {
-        let _ = self.handle.send_command(EngineCommand::RemoveTrack(slot));
+        self.send(EngineCommand::RemoveTrack(slot));
     }
 
     /// Set a lane's linear gain [0.0, 1.0].
     pub fn set_track_gain(&self, slot: u8, gain: f32) {
-        let _ = self.handle.send_command(EngineCommand::SetTrackGain { slot, gain });
+        self.send(EngineCommand::SetTrackGain { slot, gain });
     }
 
     /// Set a lane's pan [-1.0 (Left), 1.0 (Right)].
     pub fn set_track_pan(&self, slot: u8, pan: f32) {
-        let _ = self.handle.send_command(EngineCommand::SetTrackPan { slot, pan });
+        self.send(EngineCommand::SetTrackPan { slot, pan });
     }
 
     /// Set a lane's post-fader master-send gain [0.0, 1.0].
     pub fn set_track_master_gain(&self, slot: u8, gain: f32) {
-        let _ = self.handle.send_command(EngineCommand::SetTrackMasterGain { slot, gain });
+        self.send(EngineCommand::SetTrackMasterGain { slot, gain });
     }
 
     /// Set a lane's post-fader aux-send gain [0.0, 1.0].
     pub fn set_track_send(&self, slot: u8, gain: f32) {
-        let _ = self.handle.send_command(EngineCommand::SetTrackSend { slot, gain });
+        self.send(EngineCommand::SetTrackSend { slot, gain });
     }
 
     /// Configure program-gated ducking across lanes.
@@ -724,7 +744,7 @@ impl AudioSession {
         attack_ms: f32,
         release_ms: f32,
     ) {
-        let _ = self.handle.send_command(EngineCommand::DuckTracks {
+        self.send(EngineCommand::DuckTracks {
             source_slot,
             targets,
             threshold_db,
@@ -784,17 +804,17 @@ impl AudioSession {
 
     /// Set fallback policy for exclusive-mode failures (Strict vs Allow).
     pub fn set_fallback_policy(&self, policy: config::FallbackPolicy) {
-        let _ = self.handle.send_command(EngineCommand::SetFallbackPolicy(policy));
+        self.send(EngineCommand::SetFallbackPolicy(policy));
     }
 
     /// Install a per-output profile and apply it to the active device.
     pub fn set_output_profile(&self, profile: engine::output::OutputProfile) {
-        let _ = self.handle.send_command(EngineCommand::SetOutputProfile(profile));
+        self.send(EngineCommand::SetOutputProfile(profile));
     }
 
     /// Remove the explicit output profile and resume auto-selection.
     pub fn clear_output_profile(&self) {
-        let _ = self.handle.send_command(EngineCommand::ClearOutputProfile);
+        self.send(EngineCommand::ClearOutputProfile);
     }
 
     /// Open the active ASIO driver's manufacturer settings dialog.
@@ -981,7 +1001,7 @@ impl AudioSession {
 
     /// Request manual stream recovery after a device disconnection or error.
     pub fn recover_stream(&self) {
-        let _ = self.handle.send_command(EngineCommand::RecoverStream);
+        self.send(EngineCommand::RecoverStream);
     }
 
     // ── CLAP Plugin Rack ──────────────────────────────────────────────────

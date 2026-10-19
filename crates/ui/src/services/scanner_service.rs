@@ -79,10 +79,19 @@ impl ScannerService {
                     LibraryScanEvent::Completed {
                         total_tracks,
                         elapsed_ms,
+                        skipped,
                     } => {
                         self.is_scanning = false;
-                        self.scan_progress_text =
-                            format!("Scan complete: {} tracks ({}ms)", total_tracks, elapsed_ms);
+                        self.scan_progress_text = if skipped == 0 {
+                            format!("Scan complete: {} tracks ({}ms)", total_tracks, elapsed_ms)
+                        } else {
+                            // A file that cannot be indexed is still a fact the
+                            // user should hear about; the log has the details.
+                            format!(
+                                "Scan complete: {} tracks ({}ms), {} file(s) skipped — see the log",
+                                total_tracks, elapsed_ms, skipped
+                            )
+                        };
                         scan_completed = true;
                     }
                     LibraryScanEvent::Failed { error } => {

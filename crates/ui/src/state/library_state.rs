@@ -201,10 +201,20 @@ impl LibraryState {
                     .filter(|t| self.favorite_ids.contains(&t.id))
                     .cloned()
                     .collect(),
-                NavItem::RecentlyPlayed => {
-                    history_repo.list_recently_played(100).unwrap_or_default()
-                }
-                NavItem::MostPlayed => history_repo.list_most_played(100).unwrap_or_default(),
+                NavItem::RecentlyPlayed => match history_repo.list_recently_played(100) {
+                    Ok(tracks) => tracks,
+                    Err(e) => {
+                        log::warn!("Could not load the recently played list: {e}");
+                        Vec::new()
+                    }
+                },
+                NavItem::MostPlayed => match history_repo.list_most_played(100) {
+                    Ok(tracks) => tracks,
+                    Err(e) => {
+                        log::warn!("Could not load the most played list: {e}");
+                        Vec::new()
+                    }
+                },
                 // Newest imports first. `all_tracks` is already in memory, so
                 // this is a sort rather than another query.
                 NavItem::RecentlyAdded => {
@@ -225,15 +235,26 @@ impl LibraryState {
                     .filter(|t| t.is_lossless)
                     .cloned()
                     .collect(),
-                NavItem::Playlist(pl_id) => {
-                    playlist_repo.get_tracks(&pl_id).unwrap_or_default()
+                NavItem::Playlist(pl_id) => match playlist_repo.get_tracks(&pl_id) {
+                    Ok(tracks) => tracks,
+                    Err(e) => {
+                        log::warn!("Could not load the playlist: {e}");
+                        Vec::new()
+                    }
+                },
+                NavItem::SmartPlaylist(sp_id) => {
+                    let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
+                    match playlist {
+                        Some(sp) => match smart_repo.evaluate(sp) {
+                            Ok(tracks) => tracks,
+                            Err(e) => {
+                                log::warn!("Could not run the smart playlist: {e}");
+                                Vec::new()
+                            }
+                        },
+                        None => Vec::new(),
+                    }
                 }
-                NavItem::SmartPlaylist(sp_id) => self
-                    .smart_playlists
-                    .iter()
-                    .find(|sp| sp.id == sp_id)
-                    .and_then(|sp| smart_repo.evaluate(sp).ok())
-                    .unwrap_or_default(),
                 _ => self.all_tracks.clone(),
             }
         };
@@ -411,6 +432,7 @@ mod sort_tests {
             r128_loudness_lufs: None,
             file_size_bytes: 0,
             mtime_unix_secs: 0,
+            mtime_nanos: 0,
             content_hash: None,
             is_favorite: favorite,
             play_count: 0,

@@ -24,6 +24,13 @@ pub struct Track {
     pub r128_loudness_lufs: Option<f32>,
     pub file_size_bytes: u64,
     pub mtime_unix_secs: i64,
+    /// Nanoseconds past `mtime_unix_secs`.
+    ///
+    /// Seconds are too coarse to tell an unchanged file from one that was
+    /// rewritten within the same second as the last scan, which the scanner
+    /// treated as "unchanged" and skipped. `0` means "unknown" (a row from
+    /// before this column existed).
+    pub mtime_nanos: u32,
     /// Cheap content fingerprint (size + head/tail hash). Used to recognise a
     /// file that was moved or renamed so its identity survives. `None` when the
     /// fingerprint could not be computed (e.g. CUE-sheet virtual tracks).

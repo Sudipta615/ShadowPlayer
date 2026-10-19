@@ -51,9 +51,13 @@ impl DspState {
         session.set_crossfade_curve(st.crossfade_curve);
         session.set_loudness_mode(st.loudness_mode);
         session.apply_profile(st.audio_profile);
-        session.set_output_backend(st.output_backend);
-        if !st.output_device.is_empty() {
-            session.set_output_device(Some(st.output_device.clone()));
+        if !session.set_output_backend(st.output_backend) {
+            log::warn!("The saved output backend could not be applied: the engine is not running");
+        }
+        if !st.output_device.is_empty()
+            && !session.set_output_device(Some(st.output_device.clone()))
+        {
+            log::warn!("The saved output device could not be selected: the engine is not running");
         }
         session.set_sample_rate_policy(st.sample_rate_policy.clone());
         session.set_volume_mode(st.volume_mode);
@@ -203,8 +207,17 @@ impl DspState {
         }
         if let Some(c) = s.crossfade_curve_changed { session.set_crossfade_curve(c); }
         if let Some(m) = s.loudness_mode_changed { session.set_loudness_mode(m); }
-        if let Some(b) = s.backend_changed { session.set_output_backend(b); }
-        if let Some(ref d) = s.device_changed { session.set_output_device(if d.is_empty() { None } else { Some(d.clone()) }); }
+        if let Some(b) = s.backend_changed {
+            if !session.set_output_backend(b) {
+                log::warn!("The output backend could not be changed: the engine is not running");
+            }
+        }
+        if let Some(ref d) = s.device_changed {
+            let device = if d.is_empty() { None } else { Some(d.clone()) };
+            if !session.set_output_device(device) {
+                log::warn!("The output device could not be changed: the engine is not running");
+            }
+        }
         if let Some(ref p) = s.sample_rate_policy_changed { session.set_sample_rate_policy(p.clone()); }
         if let Some(m) = s.volume_mode_changed { session.set_volume_mode(m); }
         if let Some(b) = s.bit_perfect_changed { session.set_bit_perfect(b); }

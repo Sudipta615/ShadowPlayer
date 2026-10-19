@@ -8,7 +8,6 @@ domain = { path = "../domain" }
 engine = { package = "audio-engine", path = "../engine" }
 log = "0.4"
 thiserror = "2.0"
-symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "flac", "ogg", "wav", "aac", "alac", "isomp4", "mkv"] }
 # Reads embedded lyrics. Symphonia's readers surface Vorbis comments but no
 # ID3, so anything MP3/WAV/MP4 needs a real tag library. Same crate+version the
 # engine already pulls in for tag write-back, so it costs no extra build.
