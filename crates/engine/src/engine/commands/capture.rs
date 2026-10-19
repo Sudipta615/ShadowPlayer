@@ -53,8 +53,12 @@ fn open_capture(
     // name a specific device (loopback names a render endpoint, not an input).
     #[cfg(all(target_os = "windows", feature = "wasapi-native"))]
     if kind == CaptureKind::SystemMix {
-        return crate::output::capture::WasapiLoopbackCapture::new(device, RING_FRAMES)
-            .map(|c| Box::new(c) as Box<dyn SystemCapture>);
+        // Through the `SystemCapture` impl, so the error type and the box
+        // match what the rest of this function returns.
+        return <crate::output::capture::WasapiLoopbackCapture as SystemCapture>::new(
+            device, RING_FRAMES,
+        )
+        .map(|c| Box::new(c) as Box<dyn SystemCapture>);
     }
     #[cfg(not(all(target_os = "windows", feature = "wasapi-native")))]
     if kind == CaptureKind::SystemMix && device.is_some() {

@@ -184,6 +184,33 @@ impl AsioDriver {
         Ok((min, max, preferred, gran))
     }
 
+    /// `IASIO::getChannelInfo` for one channel.
+    ///
+    /// The driver declares the *wire format* of each channel through this
+    /// call; ASIO hosts must convert their audio into what it reports, since a
+    /// host cannot request a type through `createBuffers`. The declaration can
+    /// change with the sample rate, so it is read after `setSampleRate` and
+    /// re-read on every rate change.
+    pub fn get_channel_info(
+        &self,
+        channel: i32,
+        is_input: bool,
+    ) -> Result<ASIOChannelInfo, OutputError> {
+        let mut info = ASIOChannelInfo {
+            channel,
+            is_input: if is_input { ASIO_TRUE } else { ASIO_FALSE },
+            ..ASIOChannelInfo::default()
+        };
+        let err: ASIOError =
+            unsafe { (self.vt().get_channel_info)(self.iface as *mut c_void, &mut info) }.into();
+        if !err.is_ok() {
+            return Err(OutputError::StreamOpen(format!(
+                "get_channel_info({channel}, input={is_input}): {err:?}"
+            )));
+        }
+        Ok(info)
+    }
+
     /// `IASIO::canSampleRate`.
     pub fn can_sample_rate(&self, rate: f64) -> Result<(), OutputError> {
         let err: ASIOError =

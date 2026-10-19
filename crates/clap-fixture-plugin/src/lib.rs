@@ -21,6 +21,10 @@ use clap_sys::events::{
     clap_event_param_value, clap_input_events, clap_output_events, CLAP_CORE_EVENT_SPACE_ID,
     CLAP_EVENT_PARAM_VALUE,
 };
+use clap_sys::ext::audio_ports::{
+    clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,
+    CLAP_PORT_STEREO,
+};
 use clap_sys::ext::params::{
     clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE,
     CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_ENUM, CLAP_PARAM_IS_STEPPED,
@@ -28,8 +32,11 @@ use clap_sys::ext::params::{
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
 use clap_sys::factory::plugin_factory::{clap_plugin_factory, CLAP_PLUGIN_FACTORY_ID};
 use clap_sys::host::clap_host;
+use clap_sys::id::CLAP_INVALID_ID;
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
-use clap_sys::process::{clap_process, clap_process_status, CLAP_PROCESS_CONTINUE};
+use clap_sys::process::{
+    clap_process, clap_process_status, CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR,
+};
 use clap_sys::stream::{clap_istream, clap_ostream};
 use clap_sys::version::CLAP_VERSION;
 
@@ -58,6 +65,7 @@ macro_rules! cstr {
 
 const GAIN_ID: &[u8] = cstr!("com.shadowplayer.fixture.gain");
 const TRIM_ID: &[u8] = cstr!("com.shadowplayer.fixture.trim");
+const FAULTY_ID: &[u8] = cstr!("com.shadowplayer.fixture.faulty");
 const VENDOR: &[u8] = cstr!("ShadowPlayer");
 const URL: &[u8] = cstr!("https://example.invalid/shadowplayer");
 const FIXTURE_VERSION: &[u8] = cstr!("1.0.0");
@@ -172,12 +180,25 @@ static TRIM_PARAMS: [ParamSpec; 3] = [
     },
 ];
 
+/// The failing plugin has one control: arm the failure.
+static FAULTY_PARAMS: [ParamSpec; 1] = [ParamSpec {
+    id: 0,
+    name: "Fail",
+    module: "main",
+    min: 0.0,
+    max: 1.0,
+    default: 0.0,
+    flags: CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED,
+    labels: &["Off", "On"],
+}];
+
 // ── Plugin identity ─────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Gain = 0,
     Trim = 1,
+    Faulty = 2,
 }
 
 impl Kind {
@@ -185,6 +206,7 @@ impl Kind {
         match self {
             Kind::Gain => &GAIN_PARAMS,
             Kind::Trim => &TRIM_PARAMS,
+            Kind::Faulty => &FAULTY_PARAMS,
         }
     }
 
@@ -192,6 +214,7 @@ impl Kind {
         match self {
             Kind::Gain => &GAIN_DESC,
             Kind::Trim => &TRIM_DESC,
+            Kind::Faulty => &FAULTY_DESC,
         }
     }
 
@@ -200,6 +223,8 @@ impl Kind {
             Some(Kind::Gain)
         } else if id == bare_text(TRIM_ID) {
             Some(Kind::Trim)
+        } else if id == bare_text(FAULTY_ID) {
+            Some(Kind::Faulty)
         } else {
             None
         }
@@ -209,6 +234,7 @@ impl Kind {
         match index {
             0 => Some(Kind::Gain),
             1 => Some(Kind::Trim),
+            2 => Some(Kind::Faulty),
             _ => None,
         }
     }
@@ -243,6 +269,20 @@ static TRIM_DESC: clap_plugin_descriptor = clap_plugin_descriptor {
     support_url: std::ptr::null(),
     version: FIXTURE_VERSION.as_ptr() as *const c_char,
     description: cstr!("A test fixture: input and output trim.")
+        .as_ptr() as *const c_char,
+    features: FEATURES.0.as_ptr(),
+};
+
+static FAULTY_DESC: clap_plugin_descriptor = clap_plugin_descriptor {
+    clap_version: CLAP_VERSION,
+    id: FAULTY_ID.as_ptr() as *const c_char,
+    name: cstr!("Fixture Faulty").as_ptr() as *const c_char,
+    vendor: VENDOR.as_ptr() as *const c_char,
+    url: URL.as_ptr() as *const c_char,
+    manual_url: std::ptr::null(),
+    support_url: std::ptr::null(),
+    version: FIXTURE_VERSION.as_ptr() as *const c_char,
+    description: cstr!("A test fixture: passes audio through until armed, then fails mid-block.")
         .as_ptr() as *const c_char,
     features: FEATURES.0.as_ptr(),
 };
@@ -321,6 +361,13 @@ fn coefficients(inst: &Instance) -> Coeffs {
         },
         Kind::Trim => Coeffs::Trim {
             gain: db_to_linear(inst.values[0] + inst.values[1]),
+        },
+        // Unarmed, the faulty plugin is a wire.
+        Kind::Faulty => Coeffs::Gain {
+            gain: 1.0,
+            mix: 1.0,
+            invert: false,
+            silent: false,
         },
     }
 }
@@ -485,6 +532,22 @@ unsafe extern "C" fn plugin_process(
         return CLAP_PROCESS_CONTINUE;
     }
 
+    if inst.kind == Kind::Faulty && inst.values[0] >= 0.5 {
+        // A half-processed block is what a plugin crash looks like from the
+        // host's side: write a sentinel over the buffers and fail. The host
+        // must discard this, not pass it through.
+        for channel in 0..out.channel_count as usize {
+            let destination = *out.data32.add(channel);
+            if destination.is_null() {
+                continue;
+            }
+            for frame in 0..frames {
+                *destination.add(frame) = 0.75;
+            }
+        }
+        return CLAP_PROCESS_ERROR;
+    }
+
     let coeffs = coefficients(inst);
 
     for channel in 0..out.channel_count as usize {
@@ -525,6 +588,43 @@ unsafe extern "C" fn plugin_process(
     CLAP_PROCESS_CONTINUE
 }
 
+// ── The `audio-ports` extension ─────────────────────────────────────────────
+
+unsafe extern "C" fn audio_port_count(_plugin: *const clap_plugin, _is_input: bool) -> u32 {
+    1
+}
+
+unsafe extern "C" fn audio_port_get(
+    plugin: *const clap_plugin,
+    index: u32,
+    is_input: bool,
+    info: *mut clap_audio_port_info,
+) -> bool {
+    if plugin.is_null() || info.is_null() || index != 0 {
+        return false;
+    }
+    let mut declared = std::mem::zeroed::<clap_audio_port_info>();
+    declared.id = if is_input { 1 } else { 2 };
+    declared.flags = CLAP_AUDIO_PORT_IS_MAIN;
+    declared.channel_count = 2;
+    declared.port_type = CLAP_PORT_STEREO.as_ptr();
+    // The Trim plugin reserved separate output buffers, which the
+    // `in_place_pair` field is how a plugin says: the host may not write into
+    // the input. The other two permit in-place processing.
+    declared.in_place_pair = if is_input || instance(plugin).kind == Kind::Trim {
+        CLAP_INVALID_ID
+    } else {
+        1
+    };
+    *info = declared;
+    true
+}
+
+static AUDIO_PORTS: Shared<clap_plugin_audio_ports> = Shared(clap_plugin_audio_ports {
+    count: Some(audio_port_count),
+    get: Some(audio_port_get),
+});
+
 unsafe extern "C" fn plugin_get_extension(
     _plugin: *const clap_plugin,
     id: *const c_char,
@@ -533,6 +633,9 @@ unsafe extern "C" fn plugin_get_extension(
         return std::ptr::null();
     }
     let id = CStr::from_ptr(id);
+    if id == CLAP_EXT_AUDIO_PORTS {
+        return &AUDIO_PORTS.0 as *const clap_plugin_audio_ports as *const c_void;
+    }
     if id == CLAP_EXT_PARAMS {
         return &PARAMS.0 as *const clap_plugin_params as *const c_void;
     }
@@ -753,7 +856,7 @@ static STATE: Shared<clap_plugin_state> = Shared(clap_plugin_state {
 
 // ── Factory and entry point ─────────────────────────────────────────────────
 
-const PLUGIN_COUNT: u32 = 2;
+const PLUGIN_COUNT: u32 = 3;
 
 unsafe extern "C" fn factory_count(_factory: *const clap_plugin_factory) -> u32 {
     PLUGIN_COUNT
@@ -831,11 +934,28 @@ unsafe extern "C" fn entry_init(_plugin_path: *const c_char) -> bool {
     true
 }
 
+/// Total `deinit` calls over this library's lifetime.
+///
+/// A host that unloads the library must have called `deinit` once per `init`;
+/// tests read this over the C ABI to prove the pairing happened. Monotone, so
+/// a check of "the count went up" can never fail for a concurrent host.
+static DEINIT_COUNT: AtomicU32 = AtomicU32::new(0);
+
 unsafe extern "C" fn entry_deinit() {
+    DEINIT_COUNT.fetch_add(1, Ordering::SeqCst);
     let previous = INIT_COUNT.load(Ordering::SeqCst);
     if previous > 0 {
         INIT_COUNT.store(previous - 1, Ordering::SeqCst);
     }
+}
+
+/// Test-only probe: how many times a host has called `entry.deinit()`.
+///
+/// # Safety
+/// Plain C ABI: no arguments, no aliasing concerns.
+#[no_mangle]
+pub extern "C" fn fixture_deinit_calls() -> u32 {
+    DEINIT_COUNT.load(Ordering::SeqCst)
 }
 
 unsafe extern "C" fn entry_get_factory(id: *const c_char) -> *const c_void {

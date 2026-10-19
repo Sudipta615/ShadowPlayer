@@ -296,14 +296,16 @@ impl LoudnessAnalyzer {
             -144.0
         };
 
-        // Gating diagnostics approximation from meter snapshots
+        // The real census: every 400 ms block the meter evaluated, which gate
+        // dropped it, and the mean the integrated value is built from.
+        let census = self.meter.integrated_census();
         let gating_diagnostics = GatingDiagnostics {
-            total_blocks: (self.frames_processed / ((0.100 * self.sample_rate) as u64)).max(1),
-            gated_below_absolute: 0,
-            gated_below_relative: 0,
-            ungated_blocks: 0,
-            ungated_mean_lufs: final_snap.integrated_lufs,
-            relative_threshold_lufs: (final_snap.integrated_lufs - 10.0).max(-70.0),
+            total_blocks: census.total_blocks,
+            gated_below_absolute: census.below_absolute,
+            gated_below_relative: census.below_relative,
+            ungated_blocks: census.integrated_blocks,
+            ungated_mean_lufs: census.gated_mean_lufs,
+            relative_threshold_lufs: census.relative_gate_lufs,
         };
 
         // Evaluate compliance
@@ -438,5 +440,89 @@ fn evaluate_compliance(
         max_momentary_compliant,
         lra_compliant,
         deviations,
+    }
+}
+
+#[cfg(test)]
+mod gating_diagnostics_tests {
+    use super::*;
+    use crate::standards::LoudnessStandard;
+
+    fn analyzer() -> LoudnessAnalyzer {
+        LoudnessAnalyzer::new(
+            48_000.0,
+            2,
+            LoudnessStandard::EbuR128,
+            AnalysisMode::Programme,
+            LoudnessComplianceProfile::EbuR128,
+        )
+    }
+
+    fn feed(analyzer: &mut LoudnessAnalyzer, seconds: f32, amplitude: f32) {
+        let frames = (48_000.0 * seconds) as usize;
+        let mut block = Vec::with_capacity(frames * 2);
+        for i in 0..frames {
+            let t = i as f32 / 48_000.0;
+            let s = amplitude * (2.0 * std::f32::consts::PI * 997.0 * t).sin();
+            block.push(s);
+            block.push(s);
+        }
+        analyzer.process_interleaved(&block, 2);
+    }
+
+    /// A programme followed by digital silence: the gate census must add up
+    /// and must show that the silent blocks were dropped by the absolute gate.
+    #[test]
+    fn the_census_counts_the_blocks_each_gate_dropped() {
+        let mut a = analyzer();
+        feed(&mut a, 1.0, 0.25);
+        feed(&mut a, 0.5, 0.0);
+        let result = a.finish();
+
+        let gating = &result.gating_diagnostics;
+        assert_eq!(
+            gating.gated_below_absolute + gating.gated_below_relative + gating.ungated_blocks,
+            gating.total_blocks,
+            "every block is accounted for: {gating:?}"
+        );
+        assert!(
+            gating.total_blocks >= 14,
+            "1.5 s at a 100 ms hop is 15 blocks: {gating:?}"
+        );
+        assert!(
+            gating.gated_below_absolute > 0,
+            "the silent half second is gated: {gating:?}"
+        );
+        assert!(
+            gating.gated_below_absolute < gating.total_blocks,
+            "the tone is not: {gating:?}"
+        );
+        assert!(gating.ungated_blocks > 0);
+        assert!(
+            gating.ungated_mean_lufs.is_finite(),
+            "the absolute-gated mean is a real measurement: {gating:?}"
+        );
+        assert!(
+            (gating.relative_threshold_lufs - (gating.ungated_mean_lufs - 10.0)).abs() < 0.01,
+            "the relative gate is the absolute-gated mean minus 10 LU: {gating:?}"
+        );
+    }
+
+    /// A steady tone keeps every absolute-gated block inside the relative
+    /// window, so nothing is dropped by the second gate.
+    #[test]
+    fn a_steady_programme_drops_nothing_to_the_relative_gate() {
+        let mut a = analyzer();
+        feed(&mut a, 2.0, 0.25);
+        let result = a.finish();
+
+        let gating = &result.gating_diagnostics;
+        assert_eq!(gating.gated_below_absolute, 0);
+        assert_eq!(gating.gated_below_relative, 0);
+        assert_eq!(gating.ungated_blocks, gating.total_blocks);
+        assert!(
+            (gating.ungated_mean_lufs - result.integrated_lufs).abs() < 0.05,
+            "with no relative gating the two means coincide"
+        );
     }
 }

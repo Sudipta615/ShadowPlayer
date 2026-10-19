@@ -60,6 +60,43 @@ fn live_handles() -> &'static Mutex<std::collections::HashSet<usize>> {
     LIVE.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
 
+/// Borrow the engine behind a raw handle, but only if this process still owns
+/// it.
+///
+/// The entry points used to do `handle.as_ref()` directly. That caught a null
+/// handle, but a handle already passed to [`engine_destroy`] — or one that
+/// never came from [`engine_create`] — was dereferenced as if it were live,
+/// which is undefined behaviour in the host's own process. Checking the
+/// registry first turns that into the documented [`EngineStatus::InvalidHandle`]
+/// (or the value-returning entry point's sentinel).
+///
+/// The lookup is a lifecycle-scale check: one uncontended mutex per host call,
+/// never on the audio path. [`engine_destroy`] removes the entry *before*
+/// freeing the box, so a handle that passes this check cannot be freed by the
+/// library while the caller holds the borrow.
+///
+/// Two things stay the host's contract. A raw pointer carries no information
+/// to check them with, so they are documented rather than enforced:
+///
+/// - not using a handle from another thread while it is being destroyed, and
+/// - not reusing a stale pointer after its address was recycled by a later
+///   [`engine_create`] (the address is live again, but for a different
+///   engine — a raw handle carries no generation).
+fn live_handle<'a>(handle: *const EngineHandleFFI) -> Option<&'a EngineHandleFFI> {
+    if handle.is_null() {
+        return None;
+    }
+    let live = live_handles().lock().ok()?;
+    if !live.contains(&(handle as usize)) {
+        return None;
+    }
+    // SAFETY: the address is registered as a live `Box<EngineHandleFFI>`, and
+    // the entry is only removed by `engine_destroy`, which does so before
+    // dropping the box — see the contract above for the two cases that remain
+    // with the caller.
+    Some(unsafe { &*handle })
+}
+
 /// Opaque handle to an audio engine instance.
 ///
 /// The engine itself is moved onto a dedicated background tick thread (see
@@ -196,9 +233,12 @@ pub mod backend_id {
     pub const EXCLUSIVE_CORE_AUDIO_HOG: u32 = 3;
     /// ASIO direct output.
     pub const EXCLUSIVE_ASIO: u32 = 4;
-    /// Native PipeWire pro-audio output.
+    /// Linux PipeWire pro-audio output. Declared for the settings format and
+    /// this ABI; the engine has no implementation and the selection is
+    /// refused under `FallbackPolicy::Strict` (see `config::AudioBackend`).
     pub const PIPEWIRE: u32 = 5;
-    /// Native JACK pro-audio output.
+    /// Linux JACK pro-audio output. Declared, not implemented — see
+    /// [`Self::PIPEWIRE`].
     pub const JACK: u32 = 6;
     /// Hardware-free sink: drains and discards, opening no OS device.
     pub const NULL: u32 = 7;
@@ -343,9 +383,8 @@ pub extern "C" fn engine_play(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_play_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.play();
     EngineStatus::Ok as i32
@@ -362,9 +401,8 @@ pub extern "C" fn engine_pause(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_pause_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.pause();
     EngineStatus::Ok as i32
@@ -381,9 +419,8 @@ pub extern "C" fn engine_stop(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_stop_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.stop();
     EngineStatus::Ok as i32
@@ -400,9 +437,8 @@ pub extern "C" fn engine_seek(handle: *mut EngineHandleFFI, position_secs: f32) 
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_seek_impl(handle: *mut EngineHandleFFI, position_secs: f32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.seek(position_secs);
     EngineStatus::Ok as i32
@@ -419,9 +455,8 @@ pub extern "C" fn engine_set_volume(handle: *mut EngineHandleFFI, volume: f32) -
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_volume_impl(handle: *mut EngineHandleFFI, volume: f32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.set_volume(volume);
     EngineStatus::Ok as i32
@@ -438,9 +473,8 @@ pub extern "C" fn engine_set_speed(handle: *mut EngineHandleFFI, speed: f32) -> 
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_speed_impl(handle: *mut EngineHandleFFI, speed: f32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.set_speed(speed);
     EngineStatus::Ok as i32
@@ -458,9 +492,8 @@ pub extern "C" fn engine_set_volume_db(handle: *mut EngineHandleFFI, db: f32) ->
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_volume_db_impl(handle: *mut EngineHandleFFI, db: f32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.set_volume_db(db);
     EngineStatus::Ok as i32
@@ -480,9 +513,8 @@ pub extern "C" fn engine_open_file(handle: *mut EngineHandleFFI, path: *const c_
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_open_file_impl(handle: *mut EngineHandleFFI, path: *const c_char) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if path.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -508,9 +540,8 @@ pub extern "C" fn engine_open_uri(handle: *mut EngineHandleFFI, uri: *const c_ch
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_open_uri_impl(handle: *mut EngineHandleFFI, uri: *const c_char) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if uri.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -536,9 +567,8 @@ pub extern "C" fn engine_enqueue_file(handle: *mut EngineHandleFFI, path: *const
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_enqueue_file_impl(handle: *mut EngineHandleFFI, path: *const c_char) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if path.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -564,9 +594,8 @@ pub extern "C" fn engine_next(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_next_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.next();
     EngineStatus::Ok as i32
@@ -584,9 +613,8 @@ pub extern "C" fn engine_previous(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_previous_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.previous();
     EngineStatus::Ok as i32
@@ -604,9 +632,8 @@ pub extern "C" fn engine_clear_playlist(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_clear_playlist_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.clear_playlist();
     EngineStatus::Ok as i32
@@ -626,9 +653,8 @@ pub extern "C" fn engine_position_secs(handle: *mut EngineHandleFFI) -> f32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_position_secs_impl(handle: *mut EngineHandleFFI) -> f32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1.0,
+    let Some(h) = live_handle(handle) else {
+        return -1.0;
     };
     h.handle.playback_info().position_secs
 }
@@ -645,9 +671,8 @@ pub extern "C" fn engine_duration_secs(handle: *mut EngineHandleFFI) -> f32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_duration_secs_impl(handle: *mut EngineHandleFFI) -> f32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1.0,
+    let Some(h) = live_handle(handle) else {
+        return -1.0;
     };
     h.handle.playback_info().duration_secs
 }
@@ -664,9 +689,8 @@ pub extern "C" fn engine_playback_state(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_playback_state_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     match h.handle.state() {
         crate::playback_info::PlaybackState::Stopped => 0,
@@ -688,9 +712,8 @@ pub extern "C" fn engine_playlist_len(handle: *mut EngineHandleFFI) -> i64 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_playlist_len_impl(handle: *mut EngineHandleFFI) -> i64 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
+    let Some(h) = live_handle(handle) else {
+        return -1;
     };
     h.handle.playlist_len() as i64
 }
@@ -716,9 +739,8 @@ pub extern "C" fn engine_set_aux_insert(
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_aux_insert_impl(handle: *mut EngineHandleFFI, enabled: i32, wet_mix: f32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if !wet_mix.is_finite() {
         return EngineStatus::InvalidArgument as i32;
@@ -749,9 +771,8 @@ fn engine_aux_insert_state_impl(
     enabled: *mut i32,
     wet_mix: *mut f32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if enabled.is_null() || wet_mix.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -779,9 +800,8 @@ pub extern "C" fn engine_set_correction_enabled(handle: *mut EngineHandleFFI, en
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_correction_enabled_impl(handle: *mut EngineHandleFFI, enabled: i32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.set_correction_enabled(enabled != 0);
     EngineStatus::Ok as i32
@@ -800,9 +820,8 @@ pub extern "C" fn engine_set_correction_depth(handle: *mut EngineHandleFFI, dept
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_correction_depth_impl(handle: *mut EngineHandleFFI, depth: f32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if !depth.is_finite() {
         return EngineStatus::InvalidArgument as i32;
@@ -829,9 +848,8 @@ pub extern "C" fn engine_load_correction_ir(
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_load_correction_ir_impl(handle: *mut EngineHandleFFI, path: *const c_char) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if path.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -886,9 +904,8 @@ fn engine_correction_info_impl(
     max_gain_db: *mut f32,
     phase_mode: *mut i32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if enabled.is_null()
         || depth.is_null()
@@ -975,9 +992,8 @@ fn engine_spatial_info_impl(
     rms_db_l: *mut f32,
     rms_db_r: *mut f32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if enabled.is_null()
         || voice_active.is_null()
@@ -1053,9 +1069,8 @@ fn engine_spatial_listener_pose_impl(
     pos_y: *mut f32,
     pos_z: *mut f32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     let info = h.handle.playback_info().spatial;
     let pose = info.unwrap_or_default();
@@ -1118,9 +1133,8 @@ fn engine_set_spatial_listener_pose_impl(
     py: f32,
     pz: f32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     use crate::spatial::math::{Quat, Vec3};
     let q = Quat::new(qx, qy, qz, qw);
@@ -1166,9 +1180,8 @@ fn engine_set_spatial_listener_tracking_impl(
     smoothing_ms: f32,
     max_angular_rate_deg_s: f32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if !smoothing_ms.is_finite() || smoothing_ms < 0.0 {
         return EngineStatus::InvalidArgument as i32;
@@ -1234,9 +1247,8 @@ fn engine_spatial_health_impl(
     direct_reflected_ratio_db: *mut f32,
     active_sources: *mut i32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     let health = h.handle.playback_info().spatial_health;
     let level_code = |l: crate::spatial::health::HealthLevel| -> i32 {
@@ -1333,9 +1345,8 @@ pub extern "C" fn engine_set_spatial_quality(handle: *mut EngineHandleFFI, quali
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_spatial_quality_impl(handle: *mut EngineHandleFFI, quality: i32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     let q = match quality {
         0 => config::SpatialQuality::Low,
@@ -1379,9 +1390,8 @@ fn engine_set_spatial_voice_impl(
     full_quality_capacity: i32,
     policy: i32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if capacity < 0 || full_quality_capacity < 0 {
         return EngineStatus::InvalidArgument as i32;
@@ -1445,9 +1455,8 @@ fn engine_set_spatial_automation_impl(
     points_count: i32,
     time_secs: f32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if object != 0 && object != 1 {
         return EngineStatus::InvalidArgument as i32;
@@ -1515,9 +1524,8 @@ pub extern "C" fn engine_set_spatial_automation_time(
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_set_spatial_automation_time_impl(handle: *mut EngineHandleFFI, seconds: f32) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.set_spatial_automation_time(seconds);
     EngineStatus::Ok as i32
@@ -1543,9 +1551,8 @@ fn engine_trigger_spatial_cue_impl(
     handle: *mut EngineHandleFFI,
     name: *const std::os::raw::c_char,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if name.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -1571,9 +1578,8 @@ pub extern "C" fn engine_stop_spatial_cue(handle: *mut EngineHandleFFI, target: 
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_stop_spatial_cue_impl(handle: *mut EngineHandleFFI, target: usize) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.stop_spatial_cue(target);
     EngineStatus::Ok as i32
@@ -1608,9 +1614,8 @@ fn engine_spatial_render_cost_impl(
     utilization: *mut f32,
     tail_blocks: *mut f32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     let info = h.handle.playback_info();
     let t = info.spatial.as_ref();
@@ -1640,9 +1645,8 @@ pub extern "C" fn engine_stop_all_spatial_cues(handle: *mut EngineHandleFFI) -> 
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_stop_all_spatial_cues_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.stop_all_spatial_cues();
     EngineStatus::Ok as i32
@@ -1693,9 +1697,8 @@ fn engine_upsert_endpoint_impl(
     enabled: i32,
     drift_correction: i32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if id.is_null() || !gain.is_finite() {
         return EngineStatus::InvalidArgument as i32;
@@ -1740,9 +1743,8 @@ pub extern "C" fn engine_remove_endpoint(handle: *mut EngineHandleFFI, id: *cons
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_remove_endpoint_impl(handle: *mut EngineHandleFFI, id: *const c_char) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if id.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -1768,9 +1770,8 @@ pub extern "C" fn engine_clear_endpoints(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_clear_endpoints_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     h.handle.clear_endpoints();
     EngineStatus::Ok as i32
@@ -1790,9 +1791,8 @@ pub extern "C" fn engine_endpoint_count(handle: *mut EngineHandleFFI) -> i32 {
 
 #[allow(clippy::not_unsafe_ptr_arg_deref, clippy::too_many_arguments)]
 fn engine_endpoint_count_impl(handle: *mut EngineHandleFFI) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return -1,
+    let Some(h) = live_handle(handle) else {
+        return -1;
     };
     h.handle.playback_info().endpoints.len() as i32
 }
@@ -1822,9 +1822,8 @@ fn engine_endpoint_id_impl(
     buf: *mut c_char,
     buf_len: usize,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if index < 0 || buf.is_null() {
         return EngineStatus::InvalidArgument as i32;
@@ -1895,9 +1894,8 @@ fn engine_endpoint_info_impl(
     available_frames: *mut usize,
     transport_error_count: *mut u64,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     if index < 0 {
         return EngineStatus::InvalidArgument as i32;
@@ -2017,9 +2015,8 @@ fn engine_diagnostics_info_impl(
     bit_perfect_cause: *mut i32,
     diagnostic_count: *mut i32,
 ) -> i32 {
-    let h = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return EngineStatus::InvalidHandle as i32,
+    let Some(h) = live_handle(handle) else {
+        return EngineStatus::InvalidHandle as i32;
     };
     let info = h.handle.playback_info();
 
@@ -2104,15 +2101,54 @@ mod tests {
             tick_thread,
         });
         let ptr = &mut *ffi as *mut EngineHandleFFI;
+        // Register exactly as `engine_create` does: every entry point consults
+        // the registry before it dereferences the pointer.
+        live_handles()
+            .lock()
+            .expect("registry")
+            .insert(ptr as usize);
         (ffi, ptr)
     }
 
-    /// Stop the tick thread deterministically before the box drops.
+    /// Stop the tick thread deterministically and drop the registry entry the
+    /// way `engine_destroy` would, before the caller's box drops.
     fn shutdown(ffi: &mut EngineHandleFFI) {
+        if let Ok(mut live) = live_handles().lock() {
+            live.remove(&(ffi as *const EngineHandleFFI as usize));
+        }
         ffi.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = ffi.tick_thread.take() {
             let _ = thread.join();
         }
+    }
+
+    /// Every entry point checks the registry before touching the pointer, so a
+    /// handle that has been destroyed is refused with `InvalidHandle` (or the
+    /// value-returning sentinel) instead of dereferencing freed memory.
+    #[test]
+    fn a_destroyed_handle_is_rejected_before_it_is_dereferenced() {
+        let handle = engine_create(backend_id::NULL);
+        assert!(!handle.is_null(), "null backend creates an engine");
+
+        // Live: the calls go through.
+        assert_eq!(engine_play(handle), EngineStatus::Ok as i32);
+        assert_eq!(engine_pause(handle), EngineStatus::Ok as i32);
+        assert!(engine_position_secs(handle) >= 0.0);
+        assert!(engine_playlist_len(handle) >= 0);
+
+        engine_destroy(handle);
+
+        // Destroyed, but the address is still the one the test holds: every
+        // entry point must refuse it before dereferencing anything.
+        assert_eq!(engine_play(handle), EngineStatus::InvalidHandle as i32);
+        assert_eq!(engine_pause(handle), EngineStatus::InvalidHandle as i32);
+        assert_eq!(engine_playback_state(handle), EngineStatus::InvalidHandle as i32);
+        assert_eq!(engine_position_secs(handle), -1.0);
+        assert_eq!(engine_playlist_len(handle), -1);
+        assert_eq!(engine_endpoint_count(handle), -1);
+
+        // And destroying it again stays the documented no-op.
+        engine_destroy(handle);
     }
 
     #[test]

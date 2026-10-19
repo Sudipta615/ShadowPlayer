@@ -18,6 +18,7 @@ use engine::dsp::graph2::prod::{ClapPluginHostNode, DspNode};
 
 const GAIN_ID: &str = "com.shadowplayer.fixture.gain";
 const TRIM_ID: &str = "com.shadowplayer.fixture.trim";
+const FAULTY_ID: &str = "com.shadowplayer.fixture.faulty";
 const SAMPLE_RATE: f32 = 48_000.0;
 
 /// Locate the built fixture library, building it if necessary.
@@ -98,7 +99,7 @@ fn process(node: &mut ClapPluginHostNode, left: &mut [f32], right: &mut [f32]) {
 fn discovery_lists_every_plugin_in_the_library_without_instantiating_one() {
     let found = ClapPluginHostNode::discover(&fixture_library()).expect("probe should succeed");
 
-    assert_eq!(found.len(), 2, "the fixture ships two plugins");
+    assert_eq!(found.len(), 3, "the fixture ships three plugins");
     assert_eq!(found[0].id, GAIN_ID);
     assert_eq!(found[0].name, "Fixture Gain");
     assert_eq!(found[0].vendor, "ShadowPlayer");
@@ -106,6 +107,8 @@ fn discovery_lists_every_plugin_in_the_library_without_instantiating_one() {
     assert!(!found[0].description.is_empty());
     assert_eq!(found[1].id, TRIM_ID);
     assert_eq!(found[1].name, "Fixture Trim");
+    assert_eq!(found[2].id, FAULTY_ID);
+    assert_eq!(found[2].name, "Fixture Faulty");
 }
 
 #[test]
@@ -330,4 +333,129 @@ fn the_node_degrades_to_a_pass_through_when_bypassed_by_the_host() {
 
     assert!((left[0] - 0.1).abs() < 1e-9, "a disabled host node is not in the chain");
     assert!(node.rack_report().bypassed);
+}
+
+#[test]
+fn a_64_bit_block_crosses_the_f32_plugin_abi_without_losing_its_gain() {
+    // The node declares F32 precision to the graph, but a graph that asks for
+    // a f64 block anyway must get the plugin's processing, not a silent copy.
+    let mut node = load(GAIN_ID);
+    node.set_param(0, 6.0);
+
+    let mut left = vec![1.0f64; 48];
+    let mut right = vec![-1.0f64; 48];
+    let mut planes = [&mut left[..], &mut right[..]];
+    node.process_block_f64(&mut planes);
+
+    let expected = 10f64.powf(6.0 / 20.0);
+    assert!(
+        (left[0] - expected).abs() < 1e-4,
+        "left {} should be {expected}",
+        left[0]
+    );
+    assert!(
+        (right[0] + expected).abs() < 1e-4,
+        "right {} should be {}",
+        right[0],
+        -expected
+    );
+}
+
+#[test]
+fn a_plugin_that_reserved_separate_buffers_is_not_processed_in_place() {
+    // The Trim fixture declares its main ports without an `in_place_pair`, so
+    // the host must stage the output instead of handing the input buffers back
+    // as outputs.
+    let mut node = load(TRIM_ID);
+    node.set_param(0, 6.0);
+
+    let mut left = vec![1.0f32; 32];
+    let mut right = vec![1.0f32; 32];
+    process(&mut node, &mut left, &mut right);
+
+    let expected = 10f32.powf(6.0 / 20.0);
+    assert!(
+        (left[0] - expected).abs() < 1e-4,
+        "the staged output must reach the graph, got {}",
+        left[0]
+    );
+}
+
+#[test]
+fn a_plugin_that_fails_mid_block_is_taken_out_of_the_chain() {
+    let mut node = load(FAULTY_ID);
+    node.set_param(0, 1.0); // arm the failure
+
+    let mut left = vec![0.25f32; 32];
+    let mut right = vec![0.25f32; 32];
+    process(&mut node, &mut left, &mut right);
+
+    // The plugin wrote its sentinel (0.75) over the block before returning
+    // CLAP_PROCESS_ERROR; the host must discard that, not pass it on.
+    assert!(
+        left.iter().all(|sample| *sample == 0.0),
+        "a failed block must be silenced, got {}",
+        left[0]
+    );
+    assert!(right.iter().all(|sample| *sample == 0.0));
+
+    let report = node.rack_report();
+    assert!(report.bypassed, "a failed plugin leaves the chain");
+    assert!(
+        report
+            .error
+            .as_deref()
+            .is_some_and(|text| text.contains("CLAP_PROCESS_ERROR")),
+        "the report must say what happened: {:?}",
+        report.error
+    );
+    assert!(!node.is_active());
+
+    // Once failed, the plugin is not called again: the dry signal passes.
+    node.set_param(0, 0.0);
+    let mut left = vec![0.25f32; 32];
+    let mut right = vec![-0.25f32; 32];
+    process(&mut node, &mut left, &mut right);
+    assert_eq!(left[0], 0.25, "a plugin out of the chain is a wire");
+    assert_eq!(right[0], -0.25);
+
+    // Re-enabling is the explicit retry; it clears the latch, and a plugin
+    // that fails again latches again.
+    node.set_enabled(true);
+    assert!(node.rack_report().error.is_none());
+
+    node.set_param(0, 1.0);
+    let mut left = vec![0.25f32; 32];
+    let mut right = vec![0.25f32; 32];
+    process(&mut node, &mut left, &mut right);
+    assert!(left.iter().all(|sample| *sample == 0.0));
+    assert!(!node.is_active(), "the latch comes back on the next failure");
+}
+
+#[test]
+fn dropping_a_node_deinitialises_the_library_it_unloaded() {
+    // `entry.deinit` pairs the `init` a load performs; a host that only ever
+    // unloads the library leaks the library's initialisation. The fixture
+    // counts its deinit calls, and the count is monotone, so a concurrent test
+    // can only make this check pass more easily — never fail spuriously.
+    let path = fixture_library();
+    let deinit_calls = |path: &PathBuf| -> u32 {
+        unsafe {
+            let library = libloading::Library::new(path).expect("fixture library");
+            let probe: libloading::Symbol<unsafe extern "C" fn() -> u32> = library
+                .get(b"fixture_deinit_calls\0")
+                .expect("deinit probe symbol");
+            probe()
+        }
+    };
+
+    let before = deinit_calls(&path);
+    {
+        let _node = load(GAIN_ID);
+    }
+    let after = deinit_calls(&path);
+    assert!(
+        after > before,
+        "dropping the node must call entry.deinit(), saw {before} then {after}"
+    );
 }

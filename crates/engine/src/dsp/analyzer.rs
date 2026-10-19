@@ -131,8 +131,43 @@ pub struct AudioAnalyzer {
     enabled: AtomicU32,
 }
 
+// SAFETY: `state` is only reached through `update`, which takes the
+// `processing` flag with an Acquire CAS and releases it with a Release store,
+// so there is one writer at a time and no reader runs concurrently with it.
+// `buffers` are handed between threads by the triple-buffer protocol: the
+// writer swaps the shared slot atomically and the reader holds `reader_slot`,
+// which is why a slot can be borrowed mutably without aliasing.
 unsafe impl Send for AudioAnalyzer {}
 unsafe impl Sync for AudioAnalyzer {}
+
+/// The [`AudioAnalyzer::processing`] entry flag, released when this drops.
+///
+/// The flag used to be cleared only by the final statement of `update`, so a
+/// panic anywhere in between left it set forever and every later `update`
+/// returned early — the meters froze for the life of the process. Dropping
+/// this guard runs during unwinding too.
+struct ProcessingGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> ProcessingGuard<'a> {
+    /// Take the flag, or `None` when another thread already holds it.
+    fn enter(flag: &'a AtomicBool) -> Option<Self> {
+        if flag
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return None;
+        }
+        Some(Self { flag })
+    }
+}
+
+impl Drop for ProcessingGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::Release);
+    }
+}
 
 impl AudioAnalyzer {
     /// Create an analyzer with the default 1024-point spectrum.
@@ -234,14 +269,12 @@ impl AudioAnalyzer {
             return;
         }
 
-        // Lock-free non-blocking entry: if another thread is currently updating, skip
-        if self
-            .processing
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
+        // Lock-free non-blocking entry: if another thread is currently
+        // updating, skip. The guard clears the flag on the way out, panics
+        // included.
+        let Some(_processing) = ProcessingGuard::enter(&self.processing) else {
             return;
-        }
+        };
 
         let st = unsafe { &mut *self.state.get() };
 
@@ -314,8 +347,6 @@ impl AudioAnalyzer {
             st.peak_win_r = 0.0;
             st.frames_in_window = 0;
         }
-
-        self.processing.store(false, Ordering::Release);
     }
 
     /// Current levels and spectrum. Cheap — reads from lock-free triple buffer
@@ -430,6 +461,28 @@ fn dbfs(bits: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A panic inside the guarded section must not leave the analyzer behind
+    /// a flag it can never clear: the meters would freeze for the life of the
+    /// process.
+    #[test]
+    fn a_panic_inside_update_releases_the_processing_flag() {
+        let analyzer = AudioAnalyzer::new_default();
+
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _entry = ProcessingGuard::enter(&analyzer.processing).expect("flag is free");
+            panic!("boom");
+        }));
+        assert!(unwound.is_err(), "the panic propagated");
+        assert!(
+            !analyzer.processing.load(Ordering::Acquire),
+            "the flag was released while unwinding"
+        );
+
+        // And the analyzer accepts work again.
+        analyzer.update(&[0.1; 128], 2);
+        assert!(!analyzer.processing.load(Ordering::Acquire));
+    }
 
     fn feed_sine(a: &AudioAnalyzer, rate: u32, freq: f32, amp: f32, seconds: f32) {
         let n = (rate as f32 * seconds) as usize;

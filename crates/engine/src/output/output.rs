@@ -345,6 +345,34 @@ pub trait Output: OutputVolume + Send {
     }
 }
 
+/// What to do about a declared backend this build has no implementation for.
+///
+/// `PipeWire` and `Jack` are part of the public backend list and are parsed
+/// from settings, but the engine has no PipeWire/JACK integration: there is
+/// nothing here that can open a pro-audio graph. The variants used to open a
+/// simulated device that accepted every call, reported success and discarded
+/// the audio. Refusing is the only honest answer; `FallbackPolicy::Allow`
+/// degrades to the platform shared output instead of failing, which is
+/// trustworthy only because [`OutputInfo::actual_backend`] reports what was
+/// actually negotiated.
+fn unimplemented_backend(
+    name: &str,
+    fallback_policy: config::FallbackPolicy,
+) -> Result<(), OutputError> {
+    match fallback_policy {
+        config::FallbackPolicy::Strict => Err(OutputError::StreamOpen(format!(
+            "the {name} backend has no implementation in this build"
+        ))),
+        config::FallbackPolicy::Allow => {
+            log::warn!(
+                "The {name} backend has no implementation in this build; \
+                 falling back to the platform shared output (cpal)"
+            );
+            Ok(())
+        }
+    }
+}
+
 /// Construct a concrete output for the requested backend.
 ///
 /// Dispatch rules:
@@ -364,6 +392,11 @@ pub fn create_output(
         return Ok(Box::new(super::null_output::NullOutput::new(
             buffer, 0, 0, 0,
         )?));
+    }
+    match backend {
+        config::AudioBackend::PipeWire => unimplemented_backend("PipeWire", fallback_policy)?,
+        config::AudioBackend::Jack => unimplemented_backend("JACK", fallback_policy)?,
+        _ => {}
     }
     if backend == config::AudioBackend::ExclusiveWasapi {
         match super::wasapi_output::WasapiOutput::new(buffer.clone(), backend, target_device) {
@@ -426,6 +459,11 @@ pub fn create_output(
             buffer, 0, 0, 0,
         )?));
     }
+    match backend {
+        config::AudioBackend::PipeWire => unimplemented_backend("PipeWire", fallback_policy)?,
+        config::AudioBackend::Jack => unimplemented_backend("JACK", fallback_policy)?,
+        _ => {}
+    }
     #[cfg(target_os = "linux")]
     if backend == config::AudioBackend::ExclusiveAlsa {
         match super::alsa_output::AlsaOutput::new(
@@ -443,30 +481,6 @@ pub fn create_output(
                     "Native ALSA exclusive backend unavailable ({e}); \
                      falling back to cpal ALSA (shared mode)"
                 );
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    if backend == config::AudioBackend::PipeWire {
-        match super::pipewire::PipeWireOutput::open(buffer.clone(), target_device) {
-            Ok(out) => {
-                log::info!("Audio output: using native PipeWire pro-audio backend");
-                return Ok(Box::new(out));
-            }
-            Err(e) => {
-                log::warn!("Native PipeWire backend unavailable ({e}); falling back to cpal");
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    if backend == config::AudioBackend::Jack {
-        match super::jack::JackOutput::open(buffer.clone(), target_device) {
-            Ok(out) => {
-                log::info!("Audio output: using native JACK pro-audio backend");
-                return Ok(Box::new(out));
-            }
-            Err(e) => {
-                log::warn!("Native JACK backend unavailable ({e}); falling back to cpal");
             }
         }
     }

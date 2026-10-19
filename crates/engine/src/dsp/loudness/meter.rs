@@ -487,6 +487,27 @@ pub fn bs1770_weights_for_layout(layout: &ChannelLayout) -> [f32; MAX_CHANNELS] 
 ///    integrated = mean of all blocks passing both gates.
 /// 7. LRA = 95th percentile − 10th percentile of the gated short-term
 ///    histogram (EBU Tech 3342).
+/// One pass over the integrated-loudness blocks: what the two gates did.
+///
+/// `total_blocks` is every 400 ms block the meter evaluated, and
+/// `below_absolute + below_relative + integrated_blocks == total_blocks`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct IntegratedCensus {
+    /// Every 400 ms block evaluated (100 ms hop).
+    pub total_blocks: u64,
+    /// Blocks dropped by the absolute gate (below −70 LUFS).
+    pub below_absolute: u64,
+    /// Blocks that passed the absolute gate but not the relative one.
+    pub below_relative: u64,
+    /// Blocks that passed both gates: the ones the integrated value is the
+    /// mean of.
+    pub integrated_blocks: u64,
+    /// Mean loudness of the absolute-gated blocks, before relative gating.
+    pub gated_mean_lufs: f32,
+    /// The relative gate (absolute-gated mean − 10 LU), in LUFS.
+    pub relative_gate_lufs: f32,
+}
+
 pub struct LoudnessMeter {
     sample_rate: f32,
 
@@ -497,6 +518,13 @@ pub struct LoudnessMeter {
     block_sum: f64,
     block_samples: u64,
     block_capacity: u64, // samples per 400ms block
+
+    /// Every 400 ms block the meter produced, gated or not. `block_history`
+    /// only holds the blocks above the absolute gate, so the blocks below it
+    /// are counted here instead; together they make the gating census add up.
+    blocks_evaluated: u64,
+    /// Blocks that fell below the absolute gate (−70 LUFS).
+    blocks_below_absolute: u64,
 
     // Hop counter: fires every 100 ms.
     hop_samples: u64,
@@ -568,6 +596,8 @@ impl LoudnessMeter {
             block_sum: 0.0,
             block_samples: 0,
             block_capacity,
+            blocks_evaluated: 0,
+            blocks_below_absolute: 0,
             hop_samples: 0,
             hop_capacity,
             momentary_ring: [(0.0, 0); 4],
@@ -670,8 +700,11 @@ impl LoudnessMeter {
         let momentary_lufs = Self::ms_to_lufs(momentary_ms);
 
         // Add momentary block to integrated history if above absolute gate (-70 LUFS)
+        self.blocks_evaluated += 1;
         if momentary_lufs > ABSOLUTE_GATE_LUFS {
             self.block_history.push(momentary_ms);
+        } else {
+            self.blocks_below_absolute += 1;
         }
 
         // Short-term loudness (3s sliding window)
@@ -781,6 +814,41 @@ impl LoudnessMeter {
         &self.true_peak_meters
     }
 
+    /// Count the blocks behind the integrated value, for a gating report.
+    ///
+    /// `GatingDiagnostics` used to be six zeroes and two placeholders taken
+    /// from whatever the snapshot said at the end; this walks the same history
+    /// `compute_integrated` does and reports what it actually did.
+    pub fn integrated_census(&self) -> IntegratedCensus {
+        let mut census = IntegratedCensus {
+            total_blocks: self.blocks_evaluated,
+            below_absolute: self.blocks_below_absolute,
+            below_relative: 0,
+            integrated_blocks: 0,
+            gated_mean_lufs: f32::NEG_INFINITY,
+            relative_gate_lufs: f32::NEG_INFINITY,
+        };
+        if self.block_history.is_empty() {
+            return census;
+        }
+
+        // Absolute-gated mean (the history already excludes sub-gate blocks).
+        let abs_mean: f64 = self.block_history.iter().map(|&ms| ms as f64).sum::<f64>()
+            / self.block_history.len() as f64;
+        census.gated_mean_lufs = Self::ms_to_lufs(abs_mean as f32);
+        // Relative gate = absolute-gated mean - 10 LU.
+        census.relative_gate_lufs = census.gated_mean_lufs + RELATIVE_GATE_OFFSET_LU;
+
+        let integrated = self
+            .block_history
+            .iter()
+            .filter(|&&ms| Self::ms_to_lufs(ms) > census.relative_gate_lufs)
+            .count() as u64;
+        census.integrated_blocks = integrated;
+        census.below_relative = self.block_history.len() as u64 - integrated;
+        census
+    }
+
     /// Compute integrated LUFS using dual-threshold gating (EBU R128 / BS.1770-5 §3.2).
     fn compute_integrated(&self) -> f32 {
         if self.block_history.is_empty() {
@@ -868,6 +936,8 @@ impl LoudnessMeter {
         self.momentary_idx = 0;
         self.momentary_filled = 0;
         self.block_history.clear();
+        self.blocks_evaluated = 0;
+        self.blocks_below_absolute = 0;
         self.short_term_ring.fill(f32::NEG_INFINITY);
         self.short_term_idx = 0;
         self.short_term_filled = 0;

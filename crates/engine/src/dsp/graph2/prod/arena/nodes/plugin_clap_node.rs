@@ -19,9 +19,14 @@ use crate::dsp::graph2::prod::arena::node::DspNode;
 use crate::dsp::pipeline::{DspStageCapability, StageChannelSupport, StagePrecision};
 
 #[cfg(feature = "clap-host")]
+use std::cell::Cell;
+#[cfg(feature = "clap-host")]
 use std::ffi::{c_char, c_void, CStr, CString};
 #[cfg(feature = "clap-host")]
 use std::path::Path;
+#[cfg(feature = "clap-host")]
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "clap-host")]
 use std::sync::Arc;
 
@@ -41,7 +46,20 @@ use clap_sys::ext::params::{
     CLAP_PARAM_IS_STEPPED,
 };
 #[cfg(feature = "clap-host")]
+use clap_sys::ext::audio_ports::{
+    clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,
+};
+#[cfg(feature = "clap-host")]
+use clap_sys::ext::log::{
+    clap_host_log, clap_log_severity, CLAP_EXT_LOG, CLAP_LOG_ERROR, CLAP_LOG_FATAL,
+    CLAP_LOG_HOST_MISBEHAVING, CLAP_LOG_INFO, CLAP_LOG_PLUGIN_MISBEHAVING, CLAP_LOG_WARNING,
+};
+#[cfg(feature = "clap-host")]
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
+#[cfg(feature = "clap-host")]
+use clap_sys::ext::thread_check::{clap_host_thread_check, CLAP_EXT_THREAD_CHECK};
+#[cfg(feature = "clap-host")]
+use clap_sys::id::CLAP_INVALID_ID;
 #[cfg(feature = "clap-host")]
 use clap_sys::string_sizes::{CLAP_NAME_SIZE, CLAP_PATH_SIZE};
 #[cfg(feature = "clap-host")]
@@ -51,7 +69,9 @@ use clap_sys::host::clap_host;
 #[cfg(feature = "clap-host")]
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 #[cfg(feature = "clap-host")]
-use clap_sys::process::clap_process;
+use clap_sys::process::{
+    clap_process, clap_process_status, CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR,
+};
 #[cfg(feature = "clap-host")]
 use clap_sys::stream::{clap_istream, clap_ostream};
 #[cfg(feature = "clap-host")]
@@ -71,6 +91,26 @@ unsafe impl Send for ClapLibrary {}
 #[cfg(feature = "clap-host")]
 unsafe impl Sync for ClapLibrary {}
 
+#[cfg(feature = "clap-host")]
+impl Drop for ClapLibrary {
+    fn drop(&mut self) {
+        if self._entry.is_null() {
+            return;
+        }
+        // Pair the `entry.init()` the load performed before the library is
+        // unloaded: a CLAP entry is initialised once per load, deinitialised
+        // once per unload, and a host that skips the second half leaves the
+        // library's global state believing a session is still live. The
+        // instance that owns this `Arc` is dropped before the library is, so
+        // no plugin is alive when this runs.
+        unsafe {
+            if let Some(deinit) = (*self._entry).deinit {
+                deinit();
+            }
+        }
+    }
+}
+
 /// An instantiated CLAP plugin instance.
 #[cfg(feature = "clap-host")]
 struct ClapInstance {
@@ -83,8 +123,13 @@ struct ClapInstance {
     processing: bool,
     _sample_rate: f64,
     _max_frames: usize,
-    in_channel_data: [*mut f32; 2],
-    out_channel_data: [*mut f32; 2],
+    /// Channels the plugin's main ports declare; what `process` is told.
+    channels: usize,
+    /// Whether the plugin paired its main ports for in-place processing. When
+    /// it did not, the host must hand it separate output buffers.
+    in_place: bool,
+    /// Preallocated output staging for a plugin that reserved its own buffers.
+    out_scratch: [Vec<f32>; 2],
     params_ext: *const clap_plugin_params,
     state_ext: *const clap_plugin_state,
     pending_param_events: Vec<clap_event_param_value>,
@@ -219,36 +264,360 @@ pub struct ClapPluginHostNode {
     latency_samples: u32,
     /// The library this instance came from, for display and for re-loading.
     source_path: Option<String>,
+    /// How many times the plugin returned `CLAP_PROCESS_ERROR`.
+    ///
+    /// Nonzero means the plugin failed mid-stream: the node leaves the chain
+    /// (see `is_active`) and the rack report carries the reason. Cleared by a
+    /// successful load, or by an explicit re-enable (a retry).
+    process_errors: AtomicU32,
     #[cfg(feature = "clap-host")]
     instance: Option<ClapInstance>,
     #[cfg(feature = "clap-host")]
     host_descriptor: Box<clap_host>,
+    /// The context `host_descriptor.host_data` points at.
+    ///
+    /// Kept for its address, not for reading: declared after the descriptor so
+    /// it outlives every callback a plugin can still make (and prefixed to say
+    /// so).
+    #[cfg(feature = "clap-host")]
+    _host_context: Option<Box<HostContext>>,
+    /// f64 → f32 staging for [`DspNode::process_block_f64`]. Allocated here,
+    /// never on the audio thread.
+    #[cfg(feature = "clap-host")]
+    f64_scratch: [Vec<f32>; 2],
 }
 
 // Safety: The host node is moved to the audio thread during graph generation swaps.
 // The CLAP instance audio processing is exclusively invoked on the realtime audio thread.
 unsafe impl Send for ClapPluginHostNode {}
 
+/// State the host extension callbacks reach through `clap_host.host_data`.
+///
+/// The node owns the box; its address is stable, and the descriptor that
+/// points at it outlives every plugin instance the library hands out.
 #[cfg(feature = "clap-host")]
-#[allow(dead_code)]
+struct HostContext {
+    /// The thread that created the node — the engine's control thread, which
+    /// CLAP designates as the host's main thread.
+    main_thread: std::thread::ThreadId,
+}
+
+// Whether the current thread is inside one of this host's `process` calls.
+//
+// The `clap.thread-check` answer has to reflect the thread the callback is
+// actually running on, and the engine processes audio on whichever thread
+// drives the graph — so the truth is tracked per thread, not stored once.
+#[cfg(feature = "clap-host")]
+thread_local! {
+    static IN_CLAP_PROCESS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Once-per-process latches for the host requests this node cannot honour.
+///
+/// A plugin may ask every block; the downgrade is worth one log line, not a
+/// flood.
+#[cfg(feature = "clap-host")]
+static RESTART_REQUEST_LOGGED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "clap-host")]
+static PROCESS_REQUEST_LOGGED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "clap-host")]
+static CALLBACK_REQUEST_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// The `clap.log` extension table: one function, no per-host state.
+#[cfg(feature = "clap-host")]
+static HOST_LOG_EXTENSION: clap_host_log = clap_host_log {
+    log: Some(clap_host_log_callback),
+};
+
+/// The `clap.thread-check` extension table.
+#[cfg(feature = "clap-host")]
+static HOST_THREAD_CHECK_EXTENSION: clap_host_thread_check = clap_host_thread_check {
+    is_main_thread: Some(clap_host_is_main_thread),
+    is_audio_thread: Some(clap_host_is_audio_thread),
+};
+
+/// The host context a callback was handed, or `None` for a null/foreign host.
+#[cfg(feature = "clap-host")]
+unsafe fn host_context<'a>(host: *const clap_host) -> Option<&'a HostContext> {
+    if host.is_null() {
+        return None;
+    }
+    let data = (*host).host_data;
+    if data.is_null() {
+        return None;
+    }
+    Some(&*(data as *const HostContext))
+}
+
+/// `clap_host::get_extension`.
+///
+/// Only extensions this host actually implements are returned: a table of
+/// no-op callbacks degrades a plugin as silently as a null answer. A miss is
+/// written to the debug log, where a plugin that is limping can be explained
+/// without a debugger.
+#[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_get_extension(
     _host: *const clap_host,
-    _extension_id: *const c_char,
+    extension_id: *const c_char,
 ) -> *const c_void {
+    if extension_id.is_null() {
+        return std::ptr::null();
+    }
+    let id = CStr::from_ptr(extension_id);
+    if id == CLAP_EXT_LOG {
+        return (&HOST_LOG_EXTENSION as *const clap_host_log).cast::<c_void>();
+    }
+    if id == CLAP_EXT_THREAD_CHECK {
+        return (&HOST_THREAD_CHECK_EXTENSION as *const clap_host_thread_check).cast::<c_void>();
+    }
+    log::debug!("CLAP plugin asked for host extension {id:?}; this host does not implement it");
     std::ptr::null()
 }
 
+/// `clap.log`: forward plugin messages to the host's logger.
 #[cfg(feature = "clap-host")]
-#[allow(dead_code)]
-unsafe extern "C" fn clap_host_request_restart(_host: *const clap_host) {}
+unsafe extern "C" fn clap_host_log_callback(
+    _host: *const clap_host,
+    severity: clap_log_severity,
+    msg: *const c_char,
+) {
+    // A plugin may log from its audio thread, and the host must not take a
+    // logging backend's lock there; a message that arrives mid-process is
+    // dropped rather than blocking the callback it came from.
+    if IN_CLAP_PROCESS.with(Cell::get) {
+        return;
+    }
+    let text = cstr_to_string(msg).unwrap_or_default();
+    match severity {
+        CLAP_LOG_FATAL | CLAP_LOG_ERROR => log::error!("CLAP plugin: {text}"),
+        CLAP_LOG_WARNING => log::warn!("CLAP plugin: {text}"),
+        CLAP_LOG_INFO => log::info!("CLAP plugin: {text}"),
+        CLAP_LOG_HOST_MISBEHAVING => {
+            log::error!("CLAP plugin reports the host misbehaving: {text}")
+        }
+        CLAP_LOG_PLUGIN_MISBEHAVING => {
+            log::warn!("CLAP plugin reports itself misbehaving: {text}")
+        }
+        _ => log::debug!("CLAP plugin: {text}"),
+    }
+}
 
 #[cfg(feature = "clap-host")]
-#[allow(dead_code)]
-unsafe extern "C" fn clap_host_request_process(_host: *const clap_host) {}
+unsafe extern "C" fn clap_host_is_main_thread(host: *const clap_host) -> bool {
+    host_context(host).is_some_and(|context| context.main_thread == std::thread::current().id())
+}
 
 #[cfg(feature = "clap-host")]
-#[allow(dead_code)]
-unsafe extern "C" fn clap_host_request_callback(_host: *const clap_host) {}
+unsafe extern "C" fn clap_host_is_audio_thread(_host: *const clap_host) -> bool {
+    IN_CLAP_PROCESS.with(Cell::get)
+}
+
+/// `clap_host::request_restart`.
+///
+/// A live restart means re-creating the plugin's buffers and re-reading its
+/// parameter table while the graph holds the node — machinery this host does
+/// not have. The request is not swallowed: it is logged once (a plugin may ask
+/// every block) so the degradation is visible instead of mysterious.
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_request_restart(_host: *const clap_host) {
+    if !RESTART_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
+        log::warn!(
+            "CLAP plugin requested a restart; this host does not restart live plugins — \
+             reload the plugin for the change to take effect"
+        );
+    }
+}
+
+/// `clap_host::request_process`.
+///
+/// The host runs a block-driven graph: every block is processed on schedule,
+/// so an immediate-process request needs no action. Logged once, at debug, for
+/// the record.
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_request_process(_host: *const clap_host) {
+    if !PROCESS_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
+        log::debug!(
+            "CLAP plugin requested an immediate process; this host processes every block on \
+             its own schedule"
+        );
+    }
+}
+
+/// `clap_host::request_callback`.
+///
+/// That callback is the mechanism behind the timer and POSIX-fd extensions,
+/// and this host provides neither, so no callback will arrive. Saying so once
+/// beats a plugin waiting forever.
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_request_callback(_host: *const clap_host) {
+    if !CALLBACK_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
+        log::warn!(
+            "CLAP plugin requested a main-thread callback; this host provides no timer or \
+             fd extension, so the callback cannot be delivered"
+        );
+    }
+}
+
+/// What a plugin's own `clap.audio-ports` declaration says about its main bus.
+#[cfg(feature = "clap-host")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MainPortDeclaration {
+    /// Channel count of the main input port.
+    input_channels: u32,
+    /// Channel count of the main output port.
+    output_channels: u32,
+    /// The output port's `in_place_pair` names the input port, so the host may
+    /// pass one buffer as both.
+    in_place: bool,
+}
+
+/// Read the plugin's main audio-port declaration.
+///
+/// `None` when the plugin does not implement `clap.audio-ports` — the
+/// extension is optional, so "the plugin did not say" is a valid answer, and
+/// the caller falls back to the graph's own stereo layout. A plugin that *did*
+/// say something is held to it: sizing the bus from the declaration is the
+/// difference between hosting the plugin and hoping its assumptions match.
+#[cfg(feature = "clap-host")]
+unsafe fn probe_main_ports(plugin: *const clap_plugin) -> Option<MainPortDeclaration> {
+    unsafe {
+        if plugin.is_null() {
+            return None;
+        }
+        let get_extension = (*plugin).get_extension?;
+        let extension = get_extension(plugin, CLAP_EXT_AUDIO_PORTS.as_ptr());
+        if extension.is_null() {
+            return None;
+        }
+        let ports = &*(extension as *const clap_plugin_audio_ports);
+        let count = ports.count?;
+        let get = ports.get?;
+
+        let main_port = |is_input: bool| -> Option<clap_audio_port_info> {
+            let port_count = count(plugin, is_input);
+            let mut first = None;
+            for index in 0..port_count {
+                let mut info = std::mem::zeroed::<clap_audio_port_info>();
+                if !get(plugin, index, is_input, &mut info) {
+                    continue;
+                }
+                if info.flags & CLAP_AUDIO_PORT_IS_MAIN != 0 {
+                    return Some(info);
+                }
+                first = first.or(Some(info));
+            }
+            first
+        };
+
+        let input = main_port(true)?;
+        let output = main_port(false)?;
+        Some(MainPortDeclaration {
+            input_channels: input.channel_count,
+            output_channels: output.channel_count,
+            in_place: output.in_place_pair != CLAP_INVALID_ID && output.in_place_pair == input.id,
+        })
+    }
+}
+
+/// Drive one `clap_plugin.process` call over the node's own planes.
+///
+/// Both precision entry points funnel through here (`process_block_f64`
+/// converts first). The channel count and the in-place permission are the
+/// plugin's declaration, read at load: the host never tells a plugin its bus
+/// is wider than it is, and only hands it the input buffers for output when
+/// the ports are paired.
+#[cfg(feature = "clap-host")]
+fn run_clap_process(inst: &mut ClapInstance, planes: &mut [&mut [f32]]) -> clap_process_status {
+    let frames = planes[0]
+        .len()
+        .min(planes[1].len())
+        .min(MAX_AUDIO_BLOCK_FRAMES);
+    let channels = inst.channels.min(planes.len()).min(2);
+
+    let mut in_ptrs = [std::ptr::null_mut::<f32>(); 2];
+    for (index, plane) in planes.iter_mut().take(channels).enumerate() {
+        in_ptrs[index] = plane.as_mut_ptr();
+    }
+
+    // Only an `in_place_pair` lets the host share the buffers; without one the
+    // plugin writes into the node's staging and the result is copied back.
+    let mut out_ptrs = in_ptrs;
+    if !inst.in_place {
+        let [stage_left, stage_right] = &mut inst.out_scratch;
+        out_ptrs[0] = stage_left.as_mut_ptr();
+        out_ptrs[1] = stage_right.as_mut_ptr();
+    }
+
+    let in_audio = clap_audio_buffer {
+        data32: in_ptrs.as_mut_ptr(),
+        data64: std::ptr::null_mut(),
+        channel_count: channels as u32,
+        latency: 0,
+        constant_mask: 0,
+    };
+    let mut out_audio = clap_audio_buffer {
+        data32: out_ptrs.as_mut_ptr(),
+        data64: std::ptr::null_mut(),
+        channel_count: channels as u32,
+        latency: 0,
+        constant_mask: 0,
+    };
+
+    let has_events = !inst.pending_param_events.is_empty();
+    let in_events = if has_events {
+        clap_input_events {
+            ctx: &inst.pending_param_events as *const _ as *mut c_void,
+            size: Some(in_events_size),
+            get: Some(in_events_get),
+        }
+    } else {
+        clap_input_events {
+            ctx: std::ptr::null_mut(),
+            size: None,
+            get: None,
+        }
+    };
+
+    let process_data = clap_process {
+        steady_time: -1,
+        frames_count: frames as u32,
+        transport: std::ptr::null(),
+        audio_inputs: &in_audio as *const _,
+        audio_outputs: &mut out_audio as *mut _,
+        audio_inputs_count: 1,
+        audio_outputs_count: 1,
+        in_events: if has_events {
+            &in_events as *const _
+        } else {
+            std::ptr::null()
+        },
+        out_events: std::ptr::null(),
+    };
+
+    let mut status = CLAP_PROCESS_CONTINUE;
+    unsafe {
+        let plugin = &*inst.plugin;
+        if let Some(process) = plugin.process {
+            // The flag is what makes `clap.thread-check` answer truthfully if
+            // the plugin asks while it is being processed.
+            IN_CLAP_PROCESS.with(|flag| flag.set(true));
+            status = process(inst.plugin, &process_data);
+            IN_CLAP_PROCESS.with(|flag| flag.set(false));
+        }
+    }
+
+    if has_events {
+        inst.pending_param_events.clear();
+    }
+
+    if !inst.in_place && status != CLAP_PROCESS_ERROR {
+        for (index, plane) in planes.iter_mut().take(channels).enumerate() {
+            plane[..frames].copy_from_slice(&inst.out_scratch[index][..frames]);
+        }
+    }
+
+    status
+}
 
 #[allow(dead_code)]
 impl ClapPluginHostNode {
@@ -256,9 +625,14 @@ impl ClapPluginHostNode {
     pub fn new(sample_rate: f32) -> Self {
         #[cfg(feature = "clap-host")]
         {
+            // The extension callbacks read the node's thread identity through
+            // `host_data`; the box's address is what must stay stable.
+            let host_context = Box::new(HostContext {
+                main_thread: std::thread::current().id(),
+            });
             let host_descriptor = Box::new(clap_host {
                 clap_version: CLAP_VERSION,
-                host_data: std::ptr::null_mut(),
+                host_data: Box::as_ref(&host_context) as *const HostContext as *mut c_void,
                 name: c"audio-engine".as_ptr(),
                 vendor: c"Sudipta615".as_ptr(),
                 url: c"https://github.com/Sudipta615/audio_engine".as_ptr(),
@@ -274,8 +648,14 @@ impl ClapPluginHostNode {
                 enabled: true,
                 latency_samples: 0,
                 source_path: None,
+                process_errors: AtomicU32::new(0),
                 instance: None,
                 host_descriptor,
+                _host_context: Some(host_context),
+                f64_scratch: [
+                    vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
+                    vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
+                ],
             }
         }
 
@@ -286,6 +666,7 @@ impl ClapPluginHostNode {
                 enabled: true,
                 latency_samples: 0,
                 source_path: None,
+                process_errors: AtomicU32::new(0),
             }
         }
     }
@@ -402,6 +783,51 @@ impl ClapPluginHostNode {
             return Err("Plugin init() returned false".to_string());
         }
 
+        // What the plugin's own port declaration says about the bus it needs.
+        // This node feeds exactly two channels and processes in place when the
+        // plugin permits it; a wider or asymmetric declaration cannot be
+        // honored, and pretending otherwise would hand the plugin pointers it
+        // was told not to expect.
+        let (channels, in_place) = match unsafe { probe_main_ports(plugin_ptr) } {
+            Some(declaration) if declaration.input_channels > 2 || declaration.output_channels > 2 => {
+                unsafe {
+                    if let Some(destroy) = plugin.destroy {
+                        destroy(plugin_ptr);
+                    }
+                }
+                return Err(format!(
+                    "the plugin's main ports are {} in / {} out; this host feeds a stereo bus",
+                    declaration.input_channels, declaration.output_channels
+                ));
+            }
+            Some(declaration) if declaration.input_channels != declaration.output_channels => {
+                unsafe {
+                    if let Some(destroy) = plugin.destroy {
+                        destroy(plugin_ptr);
+                    }
+                }
+                return Err(format!(
+                    "the plugin maps {} input channel(s) to {} output channel(s); this host \
+                     processes in place and needs matching ports",
+                    declaration.input_channels, declaration.output_channels
+                ));
+            }
+            Some(declaration) if declaration.input_channels == 1 => {
+                log::warn!(
+                    "CLAP plugin's main ports are mono; only channel 0 is processed and \
+                     channel 1 passes through untouched"
+                );
+                (1usize, declaration.in_place)
+            }
+            Some(declaration) => (declaration.input_channels as usize, declaration.in_place),
+            None => {
+                // `clap.audio-ports` is optional; without a declaration the
+                // only honest answer left is the stereo, in-place bus the
+                // graph provides.
+                (2usize, true)
+            }
+        };
+
         let activated = unsafe {
             if let Some(activate) = plugin.activate {
                 activate(
@@ -467,6 +893,10 @@ impl ClapPluginHostNode {
 
         self.source_path = Some(path.to_string_lossy().to_string());
 
+        // A fresh instance is a fresh start: a failure latch from the plugin
+        // that was loaded before it does not carry over.
+        self.process_errors.store(0, Ordering::Relaxed);
+
         self.instance = Some(ClapInstance {
             _library: lib_arc,
             plugin: plugin_ptr,
@@ -474,8 +904,16 @@ impl ClapPluginHostNode {
             processing: true,
             _sample_rate: self.sample_rate as f64,
             _max_frames: MAX_AUDIO_BLOCK_FRAMES,
-            in_channel_data: [std::ptr::null_mut(); 2],
-            out_channel_data: [std::ptr::null_mut(); 2],
+            channels,
+            in_place,
+            out_scratch: if in_place {
+                [Vec::new(), Vec::new()]
+            } else {
+                [
+                    vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
+                    vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
+                ]
+            },
             params_ext,
             state_ext,
             pending_param_events: Vec::with_capacity(32),
@@ -489,9 +927,16 @@ impl ClapPluginHostNode {
     }
 
     /// Control path: toggle bypass.
+    ///
+    /// Re-enabling is also the explicit retry for a plugin that failed
+    /// mid-stream: it clears the failure latch so the plugin gets another
+    /// chance to process (and latches again if it fails again).
     #[allow(dead_code)]
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+        if enabled {
+            self.process_errors.store(0, Ordering::Relaxed);
+        }
     }
 
     /// Whether a plugin is currently instantiated.
@@ -670,15 +1115,28 @@ impl ClapPluginHostNode {
     }
 
     /// Everything a host needs to draw the plugin rack.
+    ///
+    /// A plugin that failed mid-stream is reported here rather than on the
+    /// audio thread: the block it failed was already discarded, and this is
+    /// where the control path looks for what happened.
     pub fn rack_report(&self) -> ClapRackReport {
+        let process_errors = self.process_errors.load(Ordering::Relaxed);
         ClapRackReport {
             plugin: self.describe(),
             params: self.param_infos(),
             path: self.source_path.clone(),
-            bypassed: !self.enabled,
+            bypassed: !self.enabled || process_errors > 0,
             has_state: self.has_state(),
             latency_samples: self.latency_samples,
-            error: None,
+            error: if process_errors > 0 {
+                Some(format!(
+                    "the plugin returned CLAP_PROCESS_ERROR {process_errors} time{}; it is out \
+                     of the chain — reload it (or re-enable) to retry",
+                    if process_errors == 1 { "" } else { "s" }
+                ))
+            } else {
+                None
+            },
         }
     }
 
@@ -961,7 +1419,13 @@ impl DspNode for ClapPluginHostNode {
     fn is_active(&self) -> bool {
         #[cfg(feature = "clap-host")]
         {
-            self.enabled && self.instance.is_some()
+            // A plugin that returned `CLAP_PROCESS_ERROR` is out of the chain:
+            // CLAP says the host should stop processing it, and the rack
+            // report plays back why. Reloading (or an explicit re-enable)
+            // clears the latch.
+            self.enabled
+                && self.instance.is_some()
+                && self.process_errors.load(Ordering::Relaxed) == 0
         }
         #[cfg(not(feature = "clap-host"))]
         {
@@ -1034,80 +1498,29 @@ impl DspNode for ClapPluginHostNode {
             if !self.is_active() || planes.len() < 2 {
                 return;
             }
+            let frames = planes[0]
+                .len()
+                .min(planes[1].len())
+                .min(MAX_AUDIO_BLOCK_FRAMES);
+            if frames == 0 {
+                return;
+            }
 
-            if let Some(ref mut inst) = self.instance {
-                let frames = planes[0].len().min(planes[1].len());
-                if frames == 0 {
-                    return;
+            let Some(inst) = self.instance.as_mut() else {
+                return;
+            };
+            let status = run_clap_process(inst, planes);
+            if status == CLAP_PROCESS_ERROR {
+                // The plugin failed mid-block. What is in the buffers is part
+                // input and part its half-written output — an in-place plugin
+                // leaves no pristine copy to fall back to — so the block is
+                // silenced rather than passed through. The failure latches
+                // (the node leaves the chain; see `is_active`) and the rack
+                // report carries the news to the control thread.
+                for plane in planes.iter_mut() {
+                    plane[..frames].fill(0.0);
                 }
-
-                // Split borrow to obtain pointers to L and R channels
-                let (first, rest) = planes.split_at_mut(1);
-                let in_l = first[0].as_mut_ptr();
-                let in_r = rest[0].as_mut_ptr();
-
-                inst.in_channel_data[0] = in_l;
-                inst.in_channel_data[1] = in_r;
-                inst.out_channel_data[0] = in_l;
-                inst.out_channel_data[1] = in_r;
-
-                let in_audio = clap_audio_buffer {
-                    data32: inst.in_channel_data.as_mut_ptr(),
-                    data64: std::ptr::null_mut(),
-                    channel_count: 2,
-                    latency: 0,
-                    constant_mask: 0,
-                };
-
-                let mut out_audio = clap_audio_buffer {
-                    data32: inst.out_channel_data.as_mut_ptr(),
-                    data64: std::ptr::null_mut(),
-                    channel_count: 2,
-                    latency: 0,
-                    constant_mask: 0,
-                };
-
-                let has_events = !inst.pending_param_events.is_empty();
-                let in_events = if has_events {
-                    clap_input_events {
-                        ctx: &inst.pending_param_events as *const _ as *mut c_void,
-                        size: Some(in_events_size),
-                        get: Some(in_events_get),
-                    }
-                } else {
-                    clap_input_events {
-                        ctx: std::ptr::null_mut(),
-                        size: None,
-                        get: None,
-                    }
-                };
-
-                let process_data = clap_process {
-                    steady_time: -1,
-                    frames_count: frames as u32,
-                    transport: std::ptr::null(),
-                    audio_inputs: &in_audio as *const _,
-                    audio_outputs: &mut out_audio as *mut _,
-                    audio_inputs_count: 1,
-                    audio_outputs_count: 1,
-                    in_events: if has_events {
-                        &in_events as *const _
-                    } else {
-                        std::ptr::null()
-                    },
-                    out_events: std::ptr::null(),
-                };
-
-                unsafe {
-                    let p = &*inst.plugin;
-                    if let Some(process_fn) = p.process {
-                        let _status = process_fn(inst.plugin, &process_data);
-                    }
-                }
-
-                if has_events {
-                    inst.pending_param_events.clear();
-                }
+                self.process_errors.fetch_add(1, Ordering::Relaxed);
             }
         }
         #[cfg(not(feature = "clap-host"))]
@@ -1116,8 +1529,68 @@ impl DspNode for ClapPluginHostNode {
         }
     }
 
-    fn process_block_f64(&mut self, _planes: &mut [&mut [f64]]) {
-        // CLAP processing is f32 in this implementation
+    fn process_block_f64(&mut self, planes: &mut [&mut [f64]]) {
+        #[cfg(feature = "clap-host")]
+        {
+            if !self.is_active() || planes.len() < 2 {
+                return;
+            }
+            let frames = planes[0]
+                .len()
+                .min(planes[1].len())
+                .min(MAX_AUDIO_BLOCK_FRAMES);
+            if frames == 0 {
+                return;
+            }
+
+            // CLAP is an f32 ABI here (this node does not negotiate the
+            // 64-bit port flag), so the block is converted through the
+            // preallocated scratch, processed, and converted back. Nothing
+            // below allocates: the scratch was sized at construction.
+            let status = {
+                let Self {
+                    instance,
+                    f64_scratch,
+                    ..
+                } = self;
+                let Some(inst) = instance.as_mut() else {
+                    return;
+                };
+                let channels = inst.channels.min(planes.len()).min(2);
+                let [scratch_left, scratch_right] = f64_scratch;
+                let mut f32_planes: [&mut [f32]; 2] =
+                    [&mut scratch_left[..frames], &mut scratch_right[..frames]];
+                for (index, plane) in planes.iter().take(channels).enumerate() {
+                    for (destination, source) in f32_planes[index].iter_mut().zip(plane.iter()) {
+                        *destination = *source as f32;
+                    }
+                }
+
+                let status = run_clap_process(inst, &mut f32_planes);
+
+                // On error the staging holds undefined output; the caller
+                // silences the block, so there is nothing worth copying back.
+                if status != CLAP_PROCESS_ERROR {
+                    for (index, plane) in planes.iter_mut().take(channels).enumerate() {
+                        for (destination, source) in plane.iter_mut().zip(f32_planes[index].iter()) {
+                            *destination = *source as f64;
+                        }
+                    }
+                }
+                status
+            };
+
+            if status == CLAP_PROCESS_ERROR {
+                for plane in planes.iter_mut() {
+                    plane[..frames].fill(0.0);
+                }
+                self.process_errors.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            let _ = planes;
+        }
     }
 }
 
@@ -1140,6 +1613,171 @@ mod tests {
         // Verification of pass-through behavior
         assert_eq!(l[0], 1.0);
         assert_eq!(r[0], 2.0);
+    }
+
+    #[cfg(feature = "clap-host")]
+    mod host_extensions {
+        use super::*;
+
+        #[test]
+        fn the_host_advertises_only_the_extensions_it_implements() {
+            let id = |text: &str| CString::new(text).unwrap();
+            let log = id("clap.log");
+            let thread_check = id("clap.thread-check");
+            let params = id("clap.params");
+            unsafe {
+                assert!(
+                    !clap_host_get_extension(std::ptr::null(), log.as_ptr()).is_null(),
+                    "clap.log is implemented and must be offered"
+                );
+                assert!(
+                    !clap_host_get_extension(std::ptr::null(), thread_check.as_ptr()).is_null(),
+                    "clap.thread-check is implemented and must be offered"
+                );
+                assert!(
+                    clap_host_get_extension(std::ptr::null(), params.as_ptr()).is_null(),
+                    "an unimplemented extension must not be faked with an empty table"
+                );
+                assert!(clap_host_get_extension(std::ptr::null(), std::ptr::null()).is_null());
+            }
+        }
+
+        #[test]
+        fn the_thread_check_answers_about_the_thread_it_is_asked_from() {
+            let context = Box::new(HostContext {
+                main_thread: std::thread::current().id(),
+            });
+            let host = clap_host {
+                clap_version: CLAP_VERSION,
+                host_data: Box::as_ref(&context) as *const HostContext as *mut c_void,
+                name: std::ptr::null(),
+                vendor: std::ptr::null(),
+                url: std::ptr::null(),
+                version: std::ptr::null(),
+                get_extension: None,
+                request_restart: None,
+                request_process: None,
+                request_callback: None,
+            };
+
+            unsafe {
+                assert!(clap_host_is_main_thread(&host));
+                assert!(!clap_host_is_audio_thread(&host));
+                IN_CLAP_PROCESS.with(|flag| flag.set(true));
+                assert!(clap_host_is_audio_thread(&host));
+                IN_CLAP_PROCESS.with(|flag| flag.set(false));
+                assert!(!clap_host_is_audio_thread(&host));
+
+                // A callback that is handed nothing must not guess.
+                assert!(!clap_host_is_main_thread(std::ptr::null()));
+            }
+        }
+    }
+
+    /// A synthetic plugin that declares its main audio ports, so the probe can
+    /// be exercised without a library on disk.
+    #[cfg(feature = "clap-host")]
+    mod port_declaration {
+        use super::*;
+
+        static CHANNELS: AtomicU32 = AtomicU32::new(2);
+        static IN_PLACE: AtomicBool = AtomicBool::new(true);
+
+        unsafe extern "C" fn count(_plugin: *const clap_plugin, _is_input: bool) -> u32 {
+            1
+        }
+
+        unsafe extern "C" fn get(
+            _plugin: *const clap_plugin,
+            _index: u32,
+            is_input: bool,
+            info: *mut clap_audio_port_info,
+        ) -> bool {
+            if info.is_null() {
+                return false;
+            }
+            let mut declared = std::mem::zeroed::<clap_audio_port_info>();
+            declared.id = if is_input { 1 } else { 2 };
+            declared.flags = CLAP_AUDIO_PORT_IS_MAIN;
+            declared.channel_count = CHANNELS.load(Ordering::Relaxed);
+            declared.in_place_pair = if is_input || !IN_PLACE.load(Ordering::Relaxed) {
+                CLAP_INVALID_ID
+            } else {
+                1
+            };
+            *info = declared;
+            true
+        }
+
+        static PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports {
+            count: Some(count),
+            get: Some(get),
+        };
+
+        unsafe extern "C" fn get_extension(
+            _plugin: *const clap_plugin,
+            id: *const c_char,
+        ) -> *const c_void {
+            if id.is_null() {
+                return std::ptr::null();
+            }
+            if CStr::from_ptr(id) == CLAP_EXT_AUDIO_PORTS {
+                return &PORTS as *const clap_plugin_audio_ports as *const c_void;
+            }
+            std::ptr::null()
+        }
+
+        fn plugin() -> clap_plugin {
+            let mut plugin = unsafe { std::mem::zeroed::<clap_plugin>() };
+            plugin.get_extension = Some(get_extension);
+            plugin
+        }
+
+        fn declaration(input: u32, output: u32, in_place: bool) -> MainPortDeclaration {
+            MainPortDeclaration {
+                input_channels: input,
+                output_channels: output,
+                in_place,
+            }
+        }
+
+        #[test]
+        fn the_main_bus_is_read_from_the_declaration_not_assumed() {
+            let plugin = plugin();
+
+            CHANNELS.store(2, Ordering::Relaxed);
+            IN_PLACE.store(true, Ordering::Relaxed);
+            assert_eq!(
+                unsafe { probe_main_ports(&plugin) },
+                Some(declaration(2, 2, true))
+            );
+
+            CHANNELS.store(1, Ordering::Relaxed);
+            assert_eq!(
+                unsafe { probe_main_ports(&plugin) },
+                Some(declaration(1, 1, true))
+            );
+
+            CHANNELS.store(4, Ordering::Relaxed);
+            assert_eq!(
+                unsafe { probe_main_ports(&plugin) },
+                Some(declaration(4, 4, true))
+            );
+
+            CHANNELS.store(2, Ordering::Relaxed);
+            IN_PLACE.store(false, Ordering::Relaxed);
+            assert_eq!(
+                unsafe { probe_main_ports(&plugin) },
+                Some(declaration(2, 2, false))
+            );
+        }
+
+        #[test]
+        fn a_plugin_without_the_audio_ports_extension_declares_nothing() {
+            let mut plugin = unsafe { std::mem::zeroed::<clap_plugin>() };
+            plugin.get_extension = None;
+            assert_eq!(unsafe { probe_main_ports(&plugin) }, None);
+        }
     }
 }
 

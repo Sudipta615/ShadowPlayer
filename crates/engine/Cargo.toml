@@ -96,8 +96,6 @@ default = ["audio-output", "resample", "all-codecs", "sofa-import"]
 # correction and the engine requires `output::endpoint`, so `audio-output`
 # implies `resample`.
 audio-output = ["cpal", "thread-priority", "resample"]
-pipewire = ["audio-output"]
-jack = ["audio-output"]
 # Dynamic plugin library loading (dlopen / LoadLibrary). The
 # static-registry path (`static:<uid>` sources) works without this
 # feature; enabling it adds the libloading-based loader.

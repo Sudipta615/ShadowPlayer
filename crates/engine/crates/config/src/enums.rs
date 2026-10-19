@@ -20,9 +20,17 @@ pub enum AudioBackend {
     ExclusiveCoreAudioHog,
     /// ASIO direct output when the optional ASIO feature is compiled in.
     ExclusiveAsio,
-    /// Native Linux PipeWire pro-audio output backend.
+    /// Linux PipeWire pro-audio output.
+    ///
+    /// **Declared, not implemented.** The engine has no PipeWire
+    /// integration: selecting this requests a backend no build can open.
+    /// `FallbackPolicy::Allow` degrades to the platform shared output with a
+    /// warning; `FallbackPolicy::Strict` refuses to start. The variant is
+    /// kept because it is part of the persisted settings format and of the
+    /// FFI backend ids.
     PipeWire,
-    /// Native Linux JACK pro-audio output backend.
+    /// Linux JACK pro-audio output. **Declared, not implemented** — see
+    /// [`Self::PipeWire`].
     Jack,
     /// Hardware-free sink. Drains the master ring on a real-time-shaped
     /// schedule and discards the audio, opening no OS device — for headless

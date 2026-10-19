@@ -131,9 +131,21 @@ pub struct ConvolutionEngine {
     ifft_workspace_output_right_f64: Vec<f64>,
 
     ir_loaded: bool,
+    /// The rate the loaded partitions are valid for. It is the stream rate at
+    /// load time: samples handed to [`Self::load_ir_from_samples`] are already
+    /// at that rate, and [`Self::load_ir_from_file`] resamples a file that is
+    /// not, so the partitions are never played at the wrong rate.
     ir_loaded_sample_rate: Option<f32>,
+    /// The sample rate the impulse response *file* declared, when the response
+    /// came from a file. Kept for diagnostics: it is what was read from the
+    /// file, not a copy of the stream rate, so a host can see that the
+    /// response was resampled.
+    ir_source_sample_rate: Option<f32>,
     ir_needs_reload: bool,
     dropped_frames: u64,
+    /// One log line per engine for an FFT that fails every block, not one per
+    /// block: a line per block on the audio thread costs more than the block.
+    fft_failure_logged: bool,
 
     // Legacy fields maintained for test inspection / API compatibility
     pub overlap_left: Vec<f32>,
@@ -240,8 +252,10 @@ impl ConvolutionEngine {
 
             ir_loaded: false,
             ir_loaded_sample_rate: None,
+            ir_source_sample_rate: None,
             ir_needs_reload: false,
             dropped_frames: 0,
+            fft_failure_logged: false,
 
             overlap_left: vec![0.0; fft_size * 2],
             overlap_right: vec![0.0; fft_size * 2],
@@ -341,6 +355,9 @@ impl ConvolutionEngine {
 
         self.ir_loaded = true;
         self.ir_loaded_sample_rate = Some(self.sample_rate);
+        // Caller-supplied samples are at the stream rate by contract; a file
+        // load overwrites this with the rate it read from the file.
+        self.ir_source_sample_rate = None;
         self.ir_needs_reload = false;
         self.reset();
         Ok(())
@@ -436,15 +453,104 @@ impl ConvolutionEngine {
 
         self.ir_loaded = true;
         self.ir_loaded_sample_rate = Some(self.sample_rate);
+        self.ir_source_sample_rate = None;
         self.ir_needs_reload = false;
         self.reset();
         Ok(())
     }
 
+    /// Account for a block whose FFT failed.
+    ///
+    /// The block is emitted as silence — a failed FFT leaves the *previous*
+    /// block's spectrum or time signal in its workspace, and convolving that
+    /// would emit audio that was never played — and the affected output frames
+    /// are counted in [`Self::dropped_frames`], which used to be a field
+    /// nothing ever wrote to. The failure is logged once per engine: an FFT
+    /// that fails in the block loop fails every block, and one log line per
+    /// block on the audio thread costs more than the block does.
+    fn note_fft_failure(&mut self, stage: &str, error: &dyn std::fmt::Display) {
+        if !self.fft_failure_logged {
+            self.fft_failure_logged = true;
+            log::error!(
+                "Convolution {stage} FFT failed; affected blocks are emitted as silence \
+                 (further failures are counted in dropped_frames()): {error}"
+            );
+        }
+        self.dropped_frames += self.block_size as u64;
+    }
+
+    /// Resample an impulse response from `from` to the stream rate.
+    ///
+    /// Runs once, off the audio path. The resampler's group delay is trimmed
+    /// from the front of the result: the response's energy has to keep the
+    /// timing it was recorded with, and a filter-shaped delay would move the
+    /// whole response — direct sound included — later by the group delay.
+    fn resample_ir(
+        &self,
+        samples: &[(f32, f32)],
+        from: f32,
+    ) -> Result<Vec<(f32, f32)>, ConvolutionError> {
+        use crate::dsp::resampler::AudioResampler;
+
+        let mut resampler = AudioResampler::<f32>::new(
+            config::ResamplerQuality::HighQuality,
+            from,
+            self.sample_rate,
+        )
+        .map_err(|e| {
+            ConvolutionError::FileLoad(format!(
+                "cannot resample the impulse response from {from:.0} Hz to {:.0} Hz: {e}",
+                self.sample_rate
+            ))
+        })?;
+
+        let expected =
+            (samples.len() as f64 * self.sample_rate as f64 / from as f64).ceil() as usize + 1024;
+        let mut out: Vec<(f32, f32)> = Vec::with_capacity(expected);
+        for &(l, r) in samples {
+            resampler.feed(l, r);
+            while let Some(frame) = resampler.read() {
+                out.push(frame);
+            }
+        }
+        resampler.flush();
+        while let Some(frame) = resampler.read() {
+            out.push(frame);
+        }
+
+        // The filter's group delay, not `latency_samples_exact()`: the
+        // latter also counts input and output buffering, which delays *when*
+        // samples appear in a live stream but does not shift a stream that
+        // is flushed and read from the front the way this one is. Measured
+        // against a delta, this is the shift of the response's origin.
+        let delay = resampler.latency_samples();
+        if delay > 0 && delay < out.len() {
+            out.drain(..delay);
+        }
+        // The flush leaves the filter's ring-out after the last input frame.
+        // The response is as long as its input, resampled.
+        let expected_frames =
+            (samples.len() as f64 * self.sample_rate as f64 / from as f64).round() as usize;
+        out.truncate(expected_frames.max(1));
+        Ok(out)
+    }
+
     /// Load an impulse response from a WAV or FLAC file using symphonia.
+    ///
+    /// The file's own sample rate is honoured: when it differs from the
+    /// engine's stream rate the samples are resampled, so a 44.1 kHz response
+    /// on a 48 kHz stream is neither pitched ~8.8% off nor mis-timed. The rate
+    /// read from the file is recorded in [`Self::ir_source_sample_rate`].
+    ///
+    /// A decode failure or a truncated file is an error, not a shorter
+    /// response: the loop below used to skip every packet that failed to
+    /// decode (`if let Ok(..)`) and stop at the first read error
+    /// (`while let Ok(Some(..))`), so a half-written response loaded as
+    /// whatever prefix happened to decode.
     pub fn load_ir_from_file(&mut self, path: &Path) -> Result<(), ConvolutionError> {
         use symphonia::core::{
             codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO},
+            errors::Error as SymphoniaError,
             formats::{probe::Hint, FormatOptions},
             io::MediaSourceStream,
             meta::MetadataOptions,
@@ -488,35 +594,73 @@ impl ConvolutionEngine {
                 ConvolutionError::FileLoad("No audio codec parameters found".to_string())
             })?;
 
+        // Copied before the packet loop: the `Track` borrows the format
+        // reader, and the reader is mutated below.
+        let file_sample_rate = audio_params.sample_rate;
+
         let mut decoder = symphonia::default::get_codecs()
             .make_audio_decoder(audio_params, &decoder_opts)
             .map_err(|e| ConvolutionError::FileLoad(format!("Cannot create decoder: {}", e)))?;
 
         let mut ir_samples: Vec<(f32, f32)> = Vec::new();
         let mut temp_interleaved: Vec<f32> = Vec::new();
+        let mut truncated_at_cap = false;
 
-        while let Ok(Some(packet)) = format_reader.next_packet() {
+        loop {
+            let packet = match format_reader.next_packet() {
+                Ok(Some(p)) => p,
+                Ok(None) => break,
+                // A clean end of stream is `Ok(None)`; `UnexpectedEof` means
+                // the file stopped in the middle of a packet. For an impulse
+                // response that is a truncated file, and loading the prefix
+                // would silently apply a response that is missing its tail.
+                Err(SymphoniaError::IoError(ref e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    return Err(ConvolutionError::FileLoad(format!(
+                        "IR file ends mid-packet after {} sample pairs (truncated?)",
+                        ir_samples.len()
+                    )));
+                }
+                Err(SymphoniaError::ResetRequired) => {
+                    return Err(ConvolutionError::FileLoad(
+                        "IR file requires a format reset; refusing a partial response"
+                            .to_string(),
+                    ));
+                }
+                Err(e) => {
+                    return Err(ConvolutionError::FileLoad(format!(
+                        "IR read failed after {} sample pairs: {e}",
+                        ir_samples.len()
+                    )));
+                }
+            };
             if packet.track_id != track_id {
                 continue;
             }
 
-            if let Ok(decoded) = decoder.decode(&packet) {
-                let planes = decoded.num_planes();
-                temp_interleaved.clear();
-                decoded.copy_to_vec_interleaved(&mut temp_interleaved);
-                if planes == 1 {
-                    for &s in &temp_interleaved {
-                        ir_samples.push((s, s));
-                    }
-                } else if planes >= 2 {
-                    for chunk in temp_interleaved.chunks_exact(planes) {
-                        ir_samples.push((chunk[0], chunk[1]));
-                    }
+            let decoded = decoder.decode(&packet).map_err(|e| {
+                ConvolutionError::FileLoad(format!(
+                    "IR decode failed after {} sample pairs: {e}",
+                    ir_samples.len()
+                ))
+            })?;
+            let planes = decoded.num_planes();
+            temp_interleaved.clear();
+            decoded.copy_to_vec_interleaved(&mut temp_interleaved);
+            if planes == 1 {
+                for &s in &temp_interleaved {
+                    ir_samples.push((s, s));
+                }
+            } else if planes >= 2 {
+                for chunk in temp_interleaved.chunks_exact(planes) {
+                    ir_samples.push((chunk[0], chunk[1]));
                 }
             }
 
             if ir_samples.len() > self.max_ir_length {
                 ir_samples.truncate(self.max_ir_length);
+                truncated_at_cap = true;
                 break;
             }
         }
@@ -526,8 +670,40 @@ impl ConvolutionEngine {
                 "IR file contains no samples".to_string(),
             ));
         }
+        if truncated_at_cap {
+            log::warn!(
+                "Impulse response {} is longer than the {} sample limit; the tail is not applied",
+                path.display(),
+                self.max_ir_length
+            );
+        }
 
-        self.load_ir_from_samples(&ir_samples)
+        // Honour the rate the file declares instead of assuming the stream's.
+        let source_rate = file_sample_rate.map(|r| r as f32);
+        if let Some(file_rate) = source_rate {
+            if (file_rate - self.sample_rate).abs() > 0.01 {
+                log::info!(
+                    "Resampling impulse response {} from {file_rate:.0} Hz to {:.0} Hz",
+                    path.display(),
+                    self.sample_rate
+                );
+                ir_samples = self.resample_ir(&ir_samples, file_rate)?;
+            }
+        } else {
+            log::warn!(
+                "Impulse response {} declares no sample rate; assuming the stream rate \
+                 ({:.0} Hz)",
+                path.display(),
+                self.sample_rate
+            );
+        }
+
+        self.load_ir_from_samples(&ir_samples)?;
+        // Provenance is recorded only once the response is actually in: the
+        // samples were resampled to the stream rate, which the partitions
+        // record separately in `ir_loaded_sample_rate`.
+        self.ir_source_sample_rate = source_rate;
+        Ok(())
     }
 
     fn forward_fft(&self, input: &[f32]) -> Result<Vec<Complex<f32>>, ConvolutionError> {
@@ -639,20 +815,38 @@ impl ConvolutionEngine {
         self.fft_workspace_input_right[bs..fft_size].fill(0.0);
 
         let fft_forward = self.fft_forward.as_ref();
-        let _ = fft_forward.process(
+        let forward_left = fft_forward.process(
             &mut self.fft_workspace_input_left,
             &mut self.fft_workspace_output_left,
         );
-        let _ = fft_forward.process(
+        let forward_right = fft_forward.process(
             &mut self.fft_workspace_input_right,
             &mut self.fft_workspace_output_right,
         );
 
         let cur_idx = self.input_spectrum_idx;
-        self.input_spectra_left[cur_idx][..spec_len]
-            .copy_from_slice(&self.fft_workspace_output_left[..spec_len]);
-        self.input_spectra_right[cur_idx][..spec_len]
-            .copy_from_slice(&self.fft_workspace_output_right[..spec_len]);
+        match (forward_left, forward_right) {
+            (Ok(()), Ok(())) => {
+                self.input_spectra_left[cur_idx][..spec_len]
+                    .copy_from_slice(&self.fft_workspace_output_left[..spec_len]);
+                self.input_spectra_right[cur_idx][..spec_len]
+                    .copy_from_slice(&self.fft_workspace_output_right[..spec_len]);
+            }
+            (left, right) => {
+                // `process` failing leaves the previous block's spectrum in
+                // the workspace. Convolving that would emit audio that was
+                // never played; silence for this block keeps the timeline
+                // honest, and `dropped_frames()` says that it happened.
+                self.input_spectra_left[cur_idx][..spec_len].fill(Complex::new(0.0, 0.0));
+                self.input_spectra_right[cur_idx][..spec_len].fill(Complex::new(0.0, 0.0));
+                let error = left
+                    .err()
+                    .or(right.err())
+                    .map(|e| e.to_string())
+                    .unwrap_or_default();
+                self.note_fft_failure("forward", &error);
+            }
+        }
 
         self.acc_spectrum_left.fill(Complex::new(0.0, 0.0));
         self.acc_spectrum_right.fill(Complex::new(0.0, 0.0));
@@ -731,30 +925,49 @@ impl ConvolutionEngine {
         self.ifft_workspace_spectrum_right[..copy_len]
             .copy_from_slice(&self.acc_spectrum_right[..copy_len]);
 
-        let _ = fft_inverse.process(
+        let inverse_left = fft_inverse.process(
             &mut self.ifft_workspace_spectrum_left,
             &mut self.ifft_workspace_output_left,
         );
-        let _ = fft_inverse.process(
+        let inverse_right = fft_inverse.process(
             &mut self.ifft_workspace_spectrum_right,
             &mut self.ifft_workspace_output_right,
         );
 
-        let scale = 1.0 / fft_size as f32;
-        for s in self.ifft_workspace_output_left.iter_mut() {
-            *s *= scale;
-        }
-        for s in self.ifft_workspace_output_right.iter_mut() {
-            *s *= scale;
-        }
+        match (inverse_left, inverse_right) {
+            (Ok(()), Ok(())) => {
+                let scale = 1.0 / fft_size as f32;
+                for s in self.ifft_workspace_output_left.iter_mut() {
+                    *s *= scale;
+                }
+                for s in self.ifft_workspace_output_right.iter_mut() {
+                    *s *= scale;
+                }
 
-        for i in 0..bs {
-            let out_l = self.ifft_workspace_output_left[i] + self.tail_left[i];
-            let out_r = self.ifft_workspace_output_right[i] + self.tail_right[i];
-            self.output_fifo_left[i] = out_l;
-            self.output_fifo_right[i] = out_r;
-            self.tail_left[i] = self.ifft_workspace_output_left[bs + i];
-            self.tail_right[i] = self.ifft_workspace_output_right[bs + i];
+                for i in 0..bs {
+                    let out_l = self.ifft_workspace_output_left[i] + self.tail_left[i];
+                    let out_r = self.ifft_workspace_output_right[i] + self.tail_right[i];
+                    self.output_fifo_left[i] = out_l;
+                    self.output_fifo_right[i] = out_r;
+                    self.tail_left[i] = self.ifft_workspace_output_left[bs + i];
+                    self.tail_right[i] = self.ifft_workspace_output_right[bs + i];
+                }
+            }
+            (left, right) => {
+                // No time-domain block to overlap-add: emit silence rather
+                // than adding the previous block's stale signal into the
+                // output, and count the frames.
+                self.output_fifo_left[..bs].fill(0.0);
+                self.output_fifo_right[..bs].fill(0.0);
+                self.tail_left[..bs].fill(0.0);
+                self.tail_right[..bs].fill(0.0);
+                let error = left
+                    .err()
+                    .or(right.err())
+                    .map(|e| e.to_string())
+                    .unwrap_or_default();
+                self.note_fft_failure("inverse", &error);
+            }
         }
 
         self.output_read_pos = 0;
@@ -778,20 +991,36 @@ impl ConvolutionEngine {
         self.fft_workspace_input_right_f64[bs..fft_size].fill(0.0);
 
         let fft_forward = self.fft_forward_f64.as_ref();
-        let _ = fft_forward.process(
+        let forward_left = fft_forward.process(
             &mut self.fft_workspace_input_left_f64,
             &mut self.fft_workspace_output_left_f64,
         );
-        let _ = fft_forward.process(
+        let forward_right = fft_forward.process(
             &mut self.fft_workspace_input_right_f64,
             &mut self.fft_workspace_output_right_f64,
         );
 
         let cur_idx = self.input_spectrum_idx_f64;
-        self.input_spectra_left_f64[cur_idx][..spec_len]
-            .copy_from_slice(&self.fft_workspace_output_left_f64[..spec_len]);
-        self.input_spectra_right_f64[cur_idx][..spec_len]
-            .copy_from_slice(&self.fft_workspace_output_right_f64[..spec_len]);
+        match (forward_left, forward_right) {
+            (Ok(()), Ok(())) => {
+                self.input_spectra_left_f64[cur_idx][..spec_len]
+                    .copy_from_slice(&self.fft_workspace_output_left_f64[..spec_len]);
+                self.input_spectra_right_f64[cur_idx][..spec_len]
+                    .copy_from_slice(&self.fft_workspace_output_right_f64[..spec_len]);
+            }
+            (left, right) => {
+                self.input_spectra_left_f64[cur_idx][..spec_len]
+                    .fill(Complex::new(0.0f64, 0.0f64));
+                self.input_spectra_right_f64[cur_idx][..spec_len]
+                    .fill(Complex::new(0.0f64, 0.0f64));
+                let error = left
+                    .err()
+                    .or(right.err())
+                    .map(|e| e.to_string())
+                    .unwrap_or_default();
+                self.note_fft_failure("forward", &error);
+            }
+        }
 
         self.acc_spectrum_left_f64.fill(Complex::new(0.0, 0.0));
         self.acc_spectrum_right_f64.fill(Complex::new(0.0, 0.0));
@@ -829,30 +1058,46 @@ impl ConvolutionEngine {
         self.ifft_workspace_spectrum_right_f64[..copy_len]
             .copy_from_slice(&self.acc_spectrum_right_f64[..copy_len]);
 
-        let _ = fft_inverse.process(
+        let inverse_left = fft_inverse.process(
             &mut self.ifft_workspace_spectrum_left_f64,
             &mut self.ifft_workspace_output_left_f64,
         );
-        let _ = fft_inverse.process(
+        let inverse_right = fft_inverse.process(
             &mut self.ifft_workspace_spectrum_right_f64,
             &mut self.ifft_workspace_output_right_f64,
         );
 
-        let scale = 1.0 / fft_size as f64;
-        for s in self.ifft_workspace_output_left_f64.iter_mut() {
-            *s *= scale;
-        }
-        for s in self.ifft_workspace_output_right_f64.iter_mut() {
-            *s *= scale;
-        }
+        match (inverse_left, inverse_right) {
+            (Ok(()), Ok(())) => {
+                let scale = 1.0 / fft_size as f64;
+                for s in self.ifft_workspace_output_left_f64.iter_mut() {
+                    *s *= scale;
+                }
+                for s in self.ifft_workspace_output_right_f64.iter_mut() {
+                    *s *= scale;
+                }
 
-        for i in 0..bs {
-            let out_l = self.ifft_workspace_output_left_f64[i] + self.tail_left_f64[i];
-            let out_r = self.ifft_workspace_output_right_f64[i] + self.tail_right_f64[i];
-            self.output_fifo_left_f64[i] = out_l;
-            self.output_fifo_right_f64[i] = out_r;
-            self.tail_left_f64[i] = self.ifft_workspace_output_left_f64[bs + i];
-            self.tail_right_f64[i] = self.ifft_workspace_output_right_f64[bs + i];
+                for i in 0..bs {
+                    let out_l = self.ifft_workspace_output_left_f64[i] + self.tail_left_f64[i];
+                    let out_r = self.ifft_workspace_output_right_f64[i] + self.tail_right_f64[i];
+                    self.output_fifo_left_f64[i] = out_l;
+                    self.output_fifo_right_f64[i] = out_r;
+                    self.tail_left_f64[i] = self.ifft_workspace_output_left_f64[bs + i];
+                    self.tail_right_f64[i] = self.ifft_workspace_output_right_f64[bs + i];
+                }
+            }
+            (left, right) => {
+                self.output_fifo_left_f64[..bs].fill(0.0);
+                self.output_fifo_right_f64[..bs].fill(0.0);
+                self.tail_left_f64[..bs].fill(0.0);
+                self.tail_right_f64[..bs].fill(0.0);
+                let error = left
+                    .err()
+                    .or(right.err())
+                    .map(|e| e.to_string())
+                    .unwrap_or_default();
+                self.note_fft_failure("inverse", &error);
+            }
         }
 
         self.output_read_pos_f64 = 0;
@@ -1075,6 +1320,13 @@ impl ConvolutionEngine {
         self.dropped_frames
     }
 
+    /// The sample rate the impulse-response file declared, when one was
+    /// loaded. `None` until a file load happens; see [`Self::ir_loaded_sample_rate`]
+    /// for the rate the partitions are valid for.
+    pub fn ir_source_sample_rate(&self) -> Option<f32> {
+        self.ir_source_sample_rate
+    }
+
     /// Reset all processing state (keeps loaded IR).
     pub fn reset(&mut self) {
         self.input_count = 0;
@@ -1137,6 +1389,7 @@ impl ConvolutionEngine {
         self.ifft_workspace_output_right_f64.fill(0.0);
 
         self.dropped_frames = 0;
+        self.fft_failure_logged = false;
         self.current_wet_mix = self.wet_mix;
     }
 }
@@ -1249,5 +1502,178 @@ mod tests {
             assert!((l - 1.0).abs() < 1e-10, "Expected ~1.0, got {}", l);
             assert!((r - 1.0).abs() < 1e-10, "Expected ~1.0, got {}", r);
         }
+    }
+    // ── Impulse-response files ─────────────────────────────────────────────
+
+    /// Write a 16-bit mono PCM WAV file — the smallest thing symphonia's WAV
+    /// reader can be pointed at.
+    fn write_wav_ir(path: &Path, sample_rate: u32, samples: &[f32]) {
+        let data_len = (samples.len() * 2) as u32;
+        let mut bytes = Vec::with_capacity(44 + data_len as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // block align
+        bytes.extend_from_slice(&16u16.to_le_bytes()); // bits
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for &s in samples {
+            let v = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+        std::fs::write(path, bytes).expect("write WAV IR");
+    }
+
+    fn temp_ir_path(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "sp_convolution_ir_{tag}_{}_{}.wav",
+            std::process::id(),
+            n
+        ))
+    }
+
+    /// A response whose file rate differs from the stream rate is resampled to
+    /// the stream: 100 ms of response is 100 ms at either rate, the rate read
+    /// from the file is reported as such, and the prepared partitions are
+    /// valid for the stream rate until the stream itself changes.
+    #[test]
+    fn a_file_ir_is_resampled_to_the_stream_rate() {
+        let path = temp_ir_path("rate");
+        // 4410 samples at 44.1 kHz = 100 ms: a delta plus an echo 10 ms in.
+        let mut ir = vec![0.0f32; 4410];
+        ir[0] = 0.9;
+        ir[441] = 0.4;
+        write_wav_ir(&path, 44_100, &ir);
+
+        let mut engine = ConvolutionEngine::new(48_000.0, 8192);
+        engine
+            .load_ir_from_file(&path)
+            .expect("a 44.1 kHz IR loads into a 48 kHz engine");
+
+        assert_eq!(engine.ir_source_sample_rate(), Some(44_100.0));
+        assert!(
+            (engine.ir_length_samples() as f64 - 4800.0).abs() < 32.0,
+            "100 ms is 4800 samples at 48 kHz, got {}",
+            engine.ir_length_samples()
+        );
+        assert!(
+            engine.is_ir_loaded(),
+            "the partitions are valid for the stream rate"
+        );
+        assert!(
+            !engine.ir_needs_reload(),
+            "nothing to reload while the stream stays at 48 kHz"
+        );
+
+        // A stream-rate change does invalidate the prepared response.
+        engine.set_sample_rate(44_100.0);
+        assert!(engine.ir_needs_reload());
+        engine.set_sample_rate(48_000.0);
+        assert!(!engine.ir_needs_reload());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A response file that already matches the stream is loaded untouched.
+    #[test]
+    fn a_file_ir_at_the_stream_rate_is_not_resampled() {
+        let path = temp_ir_path("native");
+        let mut ir = vec![0.0f32; 512];
+        ir[0] = 1.0;
+        ir[100] = 0.5;
+        write_wav_ir(&path, 48_000, &ir);
+
+        let mut engine = ConvolutionEngine::new(48_000.0, 8192);
+        engine.load_ir_from_file(&path).unwrap();
+
+        assert_eq!(engine.ir_source_sample_rate(), Some(48_000.0));
+        assert_eq!(engine.ir_length_samples(), 512);
+        assert!(!engine.ir_needs_reload());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Resampling must keep the response's timing: the delta stays where it
+    /// was recorded, not behind the resampler's filter delay.
+    #[test]
+    fn resampling_the_ir_keeps_the_response_timing() {
+        let path = temp_ir_path("timing");
+        let mut ir = vec![0.0f32; 1024];
+        ir[0] = 0.9;
+        write_wav_ir(&path, 44_100, &ir);
+
+        let mut engine = ConvolutionEngine::new(48_000.0, 8192);
+        engine.load_ir_from_file(&path).unwrap();
+        engine.set_enabled(true);
+        engine.set_wet_mix(1.0);
+
+        // Feed a single impulse. The partitioned convolver emits a block's
+        // response one block late (that is its intrinsic latency), so the
+        // delta belongs at `block_size() - 1`; a resampler delay left in the
+        // response would push it later.
+        let mut peak = 0.0f32;
+        let mut peak_index = usize::MAX;
+        for i in 0..4096 {
+            let (l, _) = engine.process(if i == 0 { 1.0 } else { 0.0 }, 0.0);
+            if l.abs() > peak {
+                peak = l.abs();
+                peak_index = i;
+            }
+        }
+
+        let expected = engine.block_size() - 1;
+        assert!(peak > 0.5, "the response came through: peak {peak}");
+        assert!(
+            peak_index.abs_diff(expected) <= 3,
+            "the delta should sit at {expected}, found the peak at {peak_index}"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A file that ends before its declared length is an error, not a shorter
+    /// response: the old loop stopped silently at the first read failure.
+    #[test]
+    fn a_truncated_ir_file_is_rejected() {
+        let path = temp_ir_path("truncated");
+        let ir: Vec<f32> = (0..4810).map(|i| (i % 97) as f32 / 97.0).collect();
+        write_wav_ir(&path, 44_100, &ir);
+
+        // Chop off the tail without touching the declared sizes in the header.
+        let full = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &full[..full.len() - 2000]).unwrap();
+
+        let mut engine = ConvolutionEngine::new(48_000.0, 8192);
+        let result = engine.load_ir_from_file(&path);
+        assert!(
+            result.is_err(),
+            "a truncated response must not load as a prefix: {:?}",
+            result.is_ok()
+        );
+        assert!(!engine.is_ir_loaded());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Nothing loads from a path that is not an audio file at all.
+    #[test]
+    fn a_non_audio_ir_file_errors() {
+        let path = temp_ir_path("junk");
+        std::fs::write(&path, b"this is not a waveform").unwrap();
+
+        let mut engine = ConvolutionEngine::new(48_000.0, 8192);
+        assert!(engine.load_ir_from_file(&path).is_err());
+        assert!(!engine.is_ir_loaded());
+
+        let _ = std::fs::remove_file(&path);
     }
 }

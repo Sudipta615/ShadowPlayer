@@ -63,6 +63,7 @@
 //! sections, namespace prefixes beyond the common ones, or DTDs.
 
 use std::fmt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::source::AudioSource;
@@ -223,14 +224,40 @@ impl PlaylistFormat {
     }
 
     /// Write a playlist to `path`, with entries relative to its directory.
+    ///
+    /// The write is atomic: the rendered text goes to a sibling temp file
+    /// which is then `rename`d over the target. Writing straight to the target
+    /// meant a crash or a full disk mid-write destroyed the existing playlist
+    /// — the one file a user cannot recreate from memory. A stale `*.tmp` is
+    /// left behind if the write fails before the rename; removing it would
+    /// need another syscall that can itself fail, and the next successful save
+    /// overwrites it.
     pub fn write_to(self, path: &Path, playlist: &Playlist) -> Result<(), PlaylistIoError> {
         let base = path.parent();
         let entries = self.entries_for(playlist, base)?;
         let text = self.render_entries(&entries)?;
-        std::fs::write(path, text).map_err(|e| PlaylistIoError::Io {
+
+        let io_error = |e: std::io::Error| PlaylistIoError::Io {
             path: path.to_path_buf(),
             source: e,
-        })
+        };
+
+        // A sibling (not a system temp dir) so the `rename` stays within one
+        // filesystem, which is the condition under which it is atomic.
+        let tmp = path.with_extension(format!(
+            "{}.tmp",
+            path.extension().and_then(|e| e.to_str()).unwrap_or("m3u")
+        ));
+        {
+            let mut file = std::fs::File::create(&tmp).map_err(io_error)?;
+            file.write_all(text.as_bytes()).map_err(io_error)?;
+            // Flush to the OS before the rename. Without this the data can
+            // still be in the page cache when `rename` publishes the name, so
+            // a power loss right after a "successful" save could yield a
+            // correctly-named file containing nothing.
+            file.sync_all().map_err(io_error)?;
+        }
+        std::fs::rename(&tmp, path).map_err(io_error)
     }
 }
 
@@ -1397,5 +1424,72 @@ mod tests {
         assert_eq!(normalize(Path::new("/a/b/../..")), PathBuf::from("/"));
         // A leading `..` must survive: discarding it would change the file.
         assert_eq!(normalize(Path::new("../a")), PathBuf::from("../a"));
+    }
+    // ── Atomic writes ───────────────────────────────────────────────────────
+
+    fn temp_playlist_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sp_playlist_io_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// A successful save renames the temp file over the target, so nothing of
+    /// the temp file may survive next to it.
+    #[test]
+    fn a_successful_save_leaves_no_temp_file_behind() {
+        let dir = temp_playlist_dir("clean");
+        let path = dir.join("set.m3u");
+        let mut playlist = Playlist::new();
+        playlist.enqueue(src("/music/a.flac"));
+        playlist.enqueue(src("/music/b.flac"));
+
+        PlaylistFormat::M3u.write_to(&path, &playlist).unwrap();
+
+        assert!(path.exists());
+        let leftover: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(leftover.is_empty(), "temp files left behind: {leftover:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// If the write cannot even start, the previous playlist is untouched.
+    #[test]
+    fn a_failed_save_leaves_the_previous_playlist_intact() {
+        let dir = temp_playlist_dir("atomic");
+        let path = dir.join("set.m3u");
+        let mut original = Playlist::new();
+        original.enqueue(src("/music/original.flac"));
+        PlaylistFormat::M3u.write_to(&path, &original).unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        // Occupy the temp path with a directory so `File::create` fails after
+        // the target has been rendered but before anything touches it.
+        let tmp = path.with_extension("m3u.tmp");
+        std::fs::create_dir(&tmp).unwrap();
+
+        let mut replacement = Playlist::new();
+        replacement.enqueue(src("/music/replacement.flac"));
+        let result = PlaylistFormat::M3u.write_to(&path, &replacement);
+        assert!(matches!(result, Err(PlaylistIoError::Io { .. })));
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "the old playlist must survive a failed save"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

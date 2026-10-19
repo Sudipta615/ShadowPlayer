@@ -117,6 +117,29 @@ fn build_buffer_ptr_sets(buffer_infos: &[ASIOBufferInfo]) -> [Vec<*mut std::ffi:
     std::array::from_fn(|half| buffer_infos.iter().map(|info| info.buffers[half]).collect())
 }
 
+/// The `SampleFormat` vocabulary (cpal's) for a wire type a driver declares.
+///
+/// cpal has no 24-bit variant: packed 24-bit (`Int24LSB`) and 24-in-32 both
+/// report as `I32`, the container the render path's conversion writes. An
+/// unknown declaration falls back to `F32` — the value the backend used to
+/// assume for every driver — and says so in the log.
+#[cfg(windows)]
+fn sample_format_for_asio(sample_type: ASIOSampleType) -> SampleFormat {
+    use ASIOSampleType::*;
+    match sample_type {
+        Int16LSB | Int16MSB => SampleFormat::I16,
+        Int24LSB | Int24MSB | Int32LSB | Int32MSB | Int32LSB16 | Int32LSB18 | Int32LSB20
+        | Int32LSB24 => SampleFormat::I32,
+        Float32LSB | Float32MSB => SampleFormat::F32,
+        Float64LSB | Float64MSB => SampleFormat::F64,
+        DSDInt8LSB1 | DSDInt8MSB1 | DSDInt8NER8 => SampleFormat::U8,
+        Unknown(raw) => {
+            log::warn!("ASIO: unknown wire sample type {raw}; reporting F32");
+            SampleFormat::F32
+        }
+    }
+}
+
 /// Global active callback state. Set before `create_buffers`, cleared after
 /// `dispose_buffers`. The `bufferSwitch` callback reads this on the driver's
 /// audio thread.
@@ -189,6 +212,17 @@ pub struct AsioOutput {
     channels: u16,
     sample_format: SampleFormat,
     buffer_size_frames: u32,
+    /// Rates the driver accepted via `canSampleRate` when the stream was
+    /// opened, ascending.
+    ///
+    /// ASIO has no capabilities enumeration: `canSampleRate` per candidate is
+    /// the only question the API answers, so this snapshot is what
+    /// [`Self::capabilities`] reports instead of a fixed catalogue.
+    supported_rates: Vec<u32>,
+    /// Output channels the driver advertised via `getChannels`, before the
+    /// engine clamps its own use to [`Self::channels`]. Reported by
+    /// [`Self::capabilities`].
+    driver_output_channels: u16,
     context: Arc<AsioRenderContext>,
     errors: StreamErrorState,
     driver_info: Option<AsioDriverInfo>,
@@ -312,6 +346,26 @@ impl AsioOutput {
         let actual_rate = driver.get_sample_rate()?;
         log::info!("ASIO: sample rate negotiated: {} Hz", actual_rate);
 
+        // ASIO has no capabilities enumeration; `canSampleRate` per candidate
+        // is the only question the API answers. Ask it once, here, instead of
+        // reporting a fixed catalogue from `capabilities()`.
+        let mut supported_rates = vec![actual_rate as u32];
+        for &candidate in crate::output::capabilities::STANDARD_RATES {
+            if candidate == actual_rate as u32 {
+                continue;
+            }
+            if driver.can_sample_rate(candidate as f64).is_ok() {
+                supported_rates.push(candidate);
+            }
+        }
+        supported_rates.sort_unstable();
+        supported_rates.dedup();
+        log::info!(
+            "ASIO: driver accepts {} of {} probed sample rates",
+            supported_rates.len(),
+            crate::output::capabilities::STANDARD_RATES.len()
+        );
+
         let (_min, _max, preferred, _gran) = driver.get_buffer_size()?;
         let buffer_size = (preferred.max(64) as u32).min(8192);
         log::info!(
@@ -320,12 +374,17 @@ impl AsioOutput {
         );
 
         // ── 5. Create render context ─────────────────────────────────────
-        let sample_format = SampleFormat::F32;
+        // The wire type is the driver's declaration, not ours: hosts convert
+        // into what `getChannelInfo` reports. Read after the rate is set,
+        // because the driver picks the type per rate.
+        let wire_type = Self::driver_pcm_sample_type(&driver, channels);
+        let sample_format = sample_format_for_asio(wire_type);
+        log::info!("ASIO: driver declares {wire_type:?} output buffers");
         let channel_map = Arc::new(arc_swap::ArcSwap::from_pointee(None::<Vec<u16>>));
         let mut context = AsioRenderContext::new(
             ring_buffer,
             channels as usize,
-            ASIOSampleType::Float32LSB,
+            wire_type,
             buffer_size as usize,
             driver.get_sample_rate()? as u32,
         );
@@ -388,6 +447,8 @@ impl AsioOutput {
             channels,
             sample_format,
             buffer_size_frames: buffer_size,
+            supported_rates,
+            driver_output_channels: num_outputs.clamp(1, u16::MAX as i32) as u16,
             context,
             errors: StreamErrorState::default(),
             driver_info: Some(driver_info),
@@ -496,6 +557,54 @@ impl AsioOutput {
         }
     }
 
+    /// The wire type the driver declares for its output channels.
+    ///
+    /// ASIO hosts convert into whatever `getChannelInfo` reports — a host
+    /// cannot request a type through `createBuffers` — and the driver may
+    /// change its declaration when the sample rate changes, so this is asked
+    /// after every `setSampleRate`. A driver that refuses to answer leaves the
+    /// old f32 assumption in place, with a warning: guessing f32 loudly is
+    /// better than writing silence.
+    ///
+    /// Output channels normally share one type; a driver that mixes them is
+    /// reported because the render path converts with a single target type.
+    #[cfg(windows)]
+    fn driver_pcm_sample_type(driver: &com::AsioDriver, channels: u16) -> ASIOSampleType {
+        let info = match driver.get_channel_info(0, false) {
+            Ok(info) => info,
+            Err(e) => {
+                log::warn!(
+                    "ASIO: could not read the driver's declared sample type ({e}); \
+                     assuming Float32LSB"
+                );
+                return ASIOSampleType::Float32LSB;
+            }
+        };
+        let declared = ASIOSampleType::from(info.sample_type);
+        if matches!(declared, ASIOSampleType::Unknown(_)) {
+            log::warn!(
+                "ASIO: driver declares unknown sample type {} for output channel 0; \
+                 assuming Float32LSB",
+                info.sample_type
+            );
+            return ASIOSampleType::Float32LSB;
+        }
+        for ch in 1..channels as i32 {
+            if let Ok(other) = driver.get_channel_info(ch, false) {
+                if other.sample_type != info.sample_type {
+                    log::warn!(
+                        "ASIO: output channel {ch} declares sample type {} but channel 0 \
+                         declares {}; converting for channel 0",
+                        other.sample_type,
+                        info.sample_type
+                    );
+                    break;
+                }
+            }
+        }
+        declared
+    }
+
     /// Dispose existing buffers and re-create them with `asio_type` at
     /// `rate` Hz for `channels` outputs. Updates `self.context`,
     /// `self.buffer_size_frames`, `self.sample_rate`, and the global
@@ -522,15 +631,19 @@ impl AsioOutput {
         let (_min, _max, preferred, _gran) = driver.get_buffer_size()?;
         let buf_size = (preferred.max(64) as u32).min(8192);
 
+        // DSD names its own wire type; PCM's is the driver's declaration,
+        // re-read here because a new rate can change it.
+        let wire_type = if dsd_mode {
+            asio_type
+        } else {
+            Self::driver_pcm_sample_type(driver, channels)
+        };
+
         // Build ring-backed context with DSD ring wired when in DSD mode.
         let mut ctx = AsioRenderContext::new(
             Arc::clone(&self.context.ring_buffer),
             channels as usize,
-            if dsd_mode {
-                asio_type
-            } else {
-                ASIOSampleType::Float32LSB
-            },
+            wire_type,
             buf_size as usize,
             actual as u32,
         );
@@ -576,6 +689,11 @@ impl AsioOutput {
         self.context = context;
         self.buffer_size_frames = buf_size;
         self.sample_rate = actual as u32;
+        if !dsd_mode {
+            // The driver may declare a different type for the new rate; keep
+            // `sample_format()` reporting what the callback converts into.
+            self.sample_format = sample_format_for_asio(wire_type);
+        }
         Ok(())
     }
 }
@@ -648,12 +766,16 @@ impl Output for AsioOutput {
             OutputAccessMode::Exclusive
         };
         OutputCapabilities {
-            sample_rates: vec![
-                44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000,
-            ],
-            hardware_ranges: vec![(44100, 768000)],
-            formats: vec![SampleFormat::F32, SampleFormat::I32, SampleFormat::I16],
-            channels: vec![2, 6, 8, 12, 16],
+            // What the driver answered when the stream was opened:
+            // `canSampleRate` for the standard candidates, `getChannels` for
+            // the channel count, `getChannelInfo` for the wire type. The API
+            // has no capabilities enumeration, so anything not asked there
+            // would be invented.
+            sample_rates: self.supported_rates.clone(),
+            // ASIO sample rates are discrete yes/no answers, not a range.
+            hardware_ranges: Vec::new(),
+            formats: vec![self.sample_format],
+            channels: vec![self.driver_output_channels],
             device_name: self.device_name.clone(),
             access_mode,
             access_state: OutputAccessState {
@@ -684,19 +806,33 @@ impl Output for AsioOutput {
             return Ok(self.sample_rate);
         }
         #[cfg(windows)]
-        if let Some(ref driver) = self.driver {
+        if self.driver.is_some() {
             let stopped = self.is_running;
             if stopped {
-                let _ = driver.stop();
+                if let Some(driver) = self.driver.as_ref() {
+                    let _ = driver.stop();
+                }
                 self.context.active.store(false, Ordering::Relaxed);
             }
-            driver.can_sample_rate(target_sample_rate as f64)?;
-            driver.set_sample_rate(target_sample_rate as f64)?;
-            let actual = driver.get_sample_rate()?;
-            self.sample_rate = actual as u32;
+            if let Some(driver) = self.driver.as_ref() {
+                driver.dispose_buffers();
+            }
+            // A rate change is a full renegotiation: the driver may declare a
+            // different wire type for the new rate, and the callback converts
+            // into whatever `getChannelInfo` says. Rebuilding the buffers
+            // re-reads the declaration, instead of running the old conversion
+            // into the new rate's buffers.
+            self.recreate_buffers(
+                target_sample_rate as f64,
+                self.channels,
+                ASIOSampleType::Float32LSB, // PCM: ignored, the driver decides
+                false,
+            )?;
             if stopped {
                 self.context.active.store(true, Ordering::Relaxed);
-                driver.start()?;
+                if let Some(driver) = self.driver.as_ref() {
+                    driver.start()?;
+                }
             }
             return Ok(self.sample_rate);
         }
@@ -709,8 +845,24 @@ impl Output for AsioOutput {
         target_sample_rate: u32,
         sample_format: SampleFormat,
     ) -> Result<u32, OutputError> {
-        self.sample_format = sample_format;
-        self.reconfigure_sample_rate(target_sample_rate)
+        // ASIO's wire type is the driver's call: a host cannot request one
+        // through `createBuffers`, it converts into what `getChannelInfo`
+        // declares. This override used to store the requested container and
+        // renegotiate only the rate, so `sample_format()` reported a container
+        // the driver had never agreed to — and a caller that verified the
+        // negotiated container as instructed saw a switch that had not
+        // happened. Fall back to rate-only (the trait's documented behaviour
+        // for a fixed container) and keep reporting the driver's actual type.
+        let rate = self.reconfigure_sample_rate(target_sample_rate)?;
+        if sample_format != self.sample_format {
+            log::warn!(
+                "ASIO: the wire format is the driver's choice (currently {:?}); the requested \
+                 {:?} container was not applied at {rate} Hz",
+                self.sample_format,
+                sample_format
+            );
+        }
+        Ok(rate)
     }
 
     fn reset_buffer(&self) {
@@ -803,17 +955,23 @@ impl Output for AsioOutput {
                 if self.dsd_active {
                     if self.driver.is_some() {
                         if self.is_running {
-                            let _ = self.driver.as_ref().unwrap().stop();
+                            if let Some(driver) = self.driver.as_ref() {
+                                let _ = driver.stop();
+                            }
                         }
-                        self.driver.as_ref().unwrap().dispose_buffers();
+                        if let Some(driver) = self.driver.as_ref() {
+                            driver.dispose_buffers();
+                        }
                         self.recreate_buffers(
                             self.pcm_rate as f64,
                             self.pcm_channels,
-                            ASIOSampleType::Float32LSB,
+                            ASIOSampleType::Float32LSB, // PCM: the driver decides
                             false,
                         )?;
                         if self.is_running {
-                            self.driver.as_ref().unwrap().start()?;
+                            if let Some(driver) = self.driver.as_ref() {
+                                driver.start()?;
+                            }
                         }
                     }
                     self.context
@@ -865,9 +1023,13 @@ impl Output for AsioOutput {
 
                         let frame_rate = wire.frame_rate_hz(bit_rate) as f64;
                         if self.is_running {
-                            let _ = self.driver.as_ref().unwrap().stop();
+                            if let Some(driver) = self.driver.as_ref() {
+                                let _ = driver.stop();
+                            }
                         }
-                        self.driver.as_ref().unwrap().dispose_buffers();
+                        if let Some(driver) = self.driver.as_ref() {
+                            driver.dispose_buffers();
+                        }
 
                         // Save PCM state before switching to DSD.
                         self.pcm_rate = self.sample_rate;
@@ -886,7 +1048,9 @@ impl Output for AsioOutput {
                                     frame_rate
                                 );
                                 if self.is_running {
-                                    self.driver.as_ref().unwrap().start()?;
+                                    if let Some(driver) = self.driver.as_ref() {
+                                        driver.start()?;
+                                    }
                                 }
                                 self.context
                                     .active

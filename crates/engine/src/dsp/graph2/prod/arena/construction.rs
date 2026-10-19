@@ -551,7 +551,12 @@ impl GraphGeneration {
                 if let Some(ref ir_path) = config.convolution.ir_path {
                     let path = std::path::Path::new(ir_path);
                     if path.exists() {
-                        let _ = conv.engine.load_ir_from_file(path);
+                        if let Err(e) = conv.engine.load_ir_from_file(path) {
+                            log::error!(
+                                "Failed to load convolution impulse response {}: {e}",
+                                path.display()
+                            );
+                        }
                     }
                 }
             } else {

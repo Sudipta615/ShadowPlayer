@@ -18,7 +18,10 @@ pub enum DetectionMode {
     MeanSquare,
     /// ITU-R BS.1770-5 Annex 2 class 4× oversampled true-peak follower.
     TruePeak,
-    /// BS.1770 K-weighted energy filter before detection.
+    /// BS.1770 K-weighted energy: the mean-square of the K-weighted signal
+    /// (configure the K-weighting itself through `sidechain_filter`). Unlike
+    /// [`Self::Rms`] this is energy, not amplitude — 10·log10 of it is the
+    /// loudness-domain value.
     LufsEnergy,
     /// Band-limited energy detection around a center frequency.
     BandEnergy,
@@ -213,7 +216,15 @@ impl DynamicsDetector {
         // 3. Extract instantaneous detector energy/level based on mode
         let (mut level_l, mut level_r) = match self.config.detection_mode {
             DetectionMode::Peak | DetectionMode::TruePeak => (filtered_l.abs(), filtered_r.abs()),
-            DetectionMode::Rms => {
+            // All three integrate the same leaky mean-square energy; `Rms`
+            // returns its square root, the energy modes the value itself.
+            //
+            // `LufsEnergy` used to return `abs()` while `MeanSquare` returned
+            // the mean square, so a detector configured for loudness behaved
+            // like `Peak` underneath a K-weighting filter — 6 dB away from
+            // the energy the mode is named for. BS.1770 also defines loudness
+            // from *mean-square* K-weighted power, so the window belongs here.
+            DetectionMode::Rms | DetectionMode::MeanSquare | DetectionMode::LufsEnergy => {
                 let sq_l = filtered_l * filtered_l;
                 let sq_r = filtered_r * filtered_r;
                 self.mean_sq_l += self.rms_coeff * (sq_l - self.mean_sq_l);
@@ -224,28 +235,17 @@ impl DynamicsDetector {
                 if self.mean_sq_r < 1e-15 {
                     self.mean_sq_r = 0.0;
                 }
-                (
-                    self.mean_sq_l.max(0.0).sqrt(),
-                    self.mean_sq_r.max(0.0).sqrt(),
-                )
-            }
-            DetectionMode::MeanSquare => {
-                let sq_l = filtered_l * filtered_l;
-                let sq_r = filtered_r * filtered_r;
-                self.mean_sq_l += self.rms_coeff * (sq_l - self.mean_sq_l);
-                self.mean_sq_r += self.rms_coeff * (sq_r - self.mean_sq_r);
-                if self.mean_sq_l < 1e-15 {
-                    self.mean_sq_l = 0.0;
+                if self.config.detection_mode == DetectionMode::Rms {
+                    (
+                        self.mean_sq_l.max(0.0).sqrt(),
+                        self.mean_sq_r.max(0.0).sqrt(),
+                    )
+                } else {
+                    (self.mean_sq_l, self.mean_sq_r)
                 }
-                if self.mean_sq_r < 1e-15 {
-                    self.mean_sq_r = 0.0;
-                }
-                (self.mean_sq_l, self.mean_sq_r)
             }
-            DetectionMode::LufsEnergy => {
-                // High-pass + high-shelf K-weighting pre-filter approximation
-                (filtered_l.abs(), filtered_r.abs())
-            }
+            // Band-limited *magnitudes*: a de-esser wants the instantaneous
+            // level of its band, not an energy average.
             DetectionMode::BandEnergy | DetectionMode::SpectralEnergy => {
                 (filtered_l.abs(), filtered_r.abs())
             }
@@ -346,6 +346,74 @@ mod tests {
         assert_eq!(p_l, p_r);
         assert!(r_l > 0.0 && r_l <= 1.0);
         assert_eq!(r_l, r_r);
+    }
+
+    /// Energy modes report energy: a full-scale sine averages a mean square
+    /// of 0.5, while the RMS and peak modes report amplitude. The LUFS mode
+    /// must land in the same domain as `MeanSquare` rather than behaving like
+    /// `Peak`.
+    #[test]
+    fn energy_modes_report_energy_and_amplitude_modes_report_amplitude() {
+        let sample_rate = 48_000.0;
+        let base = DetectorConfig {
+            attack_ms: 1.0,
+            release_ms: 1.0,
+            rms_window_ms: 20.0,
+            ..Default::default()
+        };
+
+        // A 1 kHz full-scale sine: mean square 0.5, RMS 0.707, peak 1.0.
+        let mut peak = DynamicsDetector::new(sample_rate, base.clone());
+        let mut rms = DynamicsDetector::new(
+            sample_rate,
+            DetectorConfig {
+                detection_mode: DetectionMode::Rms,
+                ..base.clone()
+            },
+        );
+        let mut mean_sq = DynamicsDetector::new(
+            sample_rate,
+            DetectorConfig {
+                detection_mode: DetectionMode::MeanSquare,
+                ..base.clone()
+            },
+        );
+        let mut lufs = DynamicsDetector::new(
+            sample_rate,
+            DetectorConfig {
+                detection_mode: DetectionMode::LufsEnergy,
+                ..base.clone()
+            },
+        );
+
+        let last = |det: &mut DynamicsDetector| {
+            let mut out = (0.0, 0.0);
+            for i in 0..sample_rate as usize {
+                let t = i as f32 / sample_rate;
+                let s = (2.0 * std::f32::consts::PI * 1000.0 * t).sin();
+                out = det.process_frame(s, s, None);
+            }
+            out.0
+        };
+
+        let peak_level = last(&mut peak);
+        let rms_level = last(&mut rms);
+        let energy_level = last(&mut mean_sq);
+        let lufs_level = last(&mut lufs);
+
+        assert!(peak_level > 0.6, "peak tracks the waveform: {peak_level}");
+        assert!(
+            (rms_level - 0.5f32.sqrt()).abs() < 0.05,
+            "rms is the square root of the mean square: {rms_level}"
+        );
+        assert!(
+            (energy_level - 0.5).abs() < 0.05,
+            "mean square is 0.5 for a full-scale sine: {energy_level}"
+        );
+        assert!(
+            (lufs_level - energy_level).abs() < 0.01,
+            "lufs energy must be in the same domain as mean square, not peak:              {lufs_level} vs {energy_level}"
+        );
     }
 
     #[test]

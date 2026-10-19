@@ -34,45 +34,108 @@
 //! decoder was removed to avoid maintaining two implementations of the same
 //! codec; Symphonia's is the only ALAC path.
 
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
+use std::io::{Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::audio_io::AudioByteSource;
 
-/// Buffer a seekable byte source to a temporary file, then invoke `op` with
+/// A scheduler-independent random `u64`.
+///
+/// `RandomState` is seeded by the standard library from the OS (address-space
+/// layout, clock, thread id) exactly once per process and is the only
+/// randomness in `std` that does not need a crate. The counter breaks ties
+/// within a process, and the nano clock across runs.
+fn random_suffix() -> u64 {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut hasher = RandomState::new().build_hasher();
+    hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
+    hasher.finish()
+}
+
+/// A decoder-bridge temp file that deletes itself when dropped.
+struct BridgeTempFile {
+    path: PathBuf,
+}
+
+impl BridgeTempFile {
+    /// Create a unique temp file carrying `extension`.
+    ///
+    /// The file is created with `create_new` — `O_CREAT | O_EXCL`, so an
+    /// object already sitting at the path (most importantly a symlink planted
+    /// in a shared temp directory) makes creation fail rather than being
+    /// followed and clobbered, and two decodes in flight at once can never
+    /// land on the same name. The old name was
+    /// `playtune_decoder_bridge_{pid}_{len}.{ext}`: predictable from outside
+    /// the process and repeated for every file of the same size.
+    fn create(extension: &str) -> Result<(Self, std::fs::File), DecodeError> {
+        for _ in 0..16 {
+            let path = std::env::temp_dir().join(format!(
+                "playtune_decoder_bridge_{}_{:016x}.{}",
+                std::process::id(),
+                random_suffix(),
+                extension
+            ));
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => return Ok((Self { path }, file)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(DecodeError::FileOpen(format!("temp file: {e}"))),
+            }
+        }
+        Err(DecodeError::FileOpen(
+            "could not create a unique decoder bridge temp file".to_string(),
+        ))
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for BridgeTempFile {
+    fn drop(&mut self) {
+        // Runs on the way out of `op` whether it returned or unwound, so a
+        // panic in a third-party decoder still cleans up.
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Stream a seekable byte source to a temporary file, then invoke `op` with
 /// the resulting file path. Returns the closure's result and cleans up the
-/// temp file (even on error). Used as a fallback bridge for codec backends
-/// (APE, Opus, WavPack, TTA) whose third-party crates require a concrete
-/// reader type that cannot be satisfied by a trait object.
+/// temp file (even on error or panic). Used as a fallback bridge for codec
+/// backends (APE, Opus, WavPack, TTA) whose third-party crates require a
+/// concrete reader type that cannot be satisfied by a trait object.
+///
+/// The source is copied in fixed-size windows rather than read into a `Vec`
+/// first: buffering the whole file used to add its size in RAM on top of the
+/// same bytes on disk, which for a large lossless file is the difference
+/// between opening and swapping.
 fn buf_and_open_file<T>(
     mut source: Box<dyn AudioByteSource>,
     op: impl FnOnce(&Path) -> Result<T, DecodeError>,
 ) -> Result<T, DecodeError> {
     let _ = source.seek(SeekFrom::Start(0));
-    let mut buf = Vec::new();
-    source
-        .read_to_end(&mut buf)
-        .map_err(|e| DecodeError::FileOpen(format!("reading byte source: {}", e)))?;
 
-    let ext = source.extension().to_string();
-    let dir = std::env::temp_dir();
-    let path = dir.join(format!(
-        "playtune_decoder_bridge_{}_{}.{}",
-        std::process::id(),
-        buf.len(),
-        ext
-    ));
+    let extension = source.extension().to_string();
+    let (temp, mut file) = BridgeTempFile::create(&extension)?;
+    std::io::copy(&mut *source, &mut file)
+        .map_err(|e| DecodeError::FileOpen(format!("writing temp file: {e}")))?;
+    file.flush()
+        .map_err(|e| DecodeError::FileOpen(format!("flushing temp file: {e}")))?;
 
-    {
-        let mut file = std::fs::File::create(&path)
-            .map_err(|e| DecodeError::FileOpen(format!("temp file: {}", e)))?;
-        file.write_all(&buf)
-            .map_err(|e| DecodeError::FileOpen(format!("writing temp file: {}", e)))?;
-    }
-
-    let result = op(&path);
-    let _ = std::fs::remove_file(&path);
-    result
+    op(temp.path())
 }
 
 use crate::decode::aes67_source::Aes67Decoder;
@@ -735,5 +798,86 @@ mod tests {
             other => panic!("expected UnsupportedFormat for .wv, got: {:?}", other.err()),
         }
         let _ = std::fs::remove_file(&path);
+    }
+    // ── Decoder bridge temp files ──────────────────────────────────────────
+
+    fn bridge_source(payload: &[u8], extension: &str) -> Box<dyn crate::audio_io::AudioByteSource> {
+        let src = temp_path(extension);
+        std::fs::write(&src, payload).expect("write source");
+        Box::new(crate::audio_io::FileByteSource::open(&src).expect("open source"))
+    }
+
+    /// The bridge file is temporary, and temporary means it goes away even
+    /// when the decoder rejects the file: cleanup used to run only after `op`
+    /// returned normally.
+    #[test]
+    fn the_bridge_temp_file_is_removed_on_every_path() {
+        for fail in [false, true] {
+            let source = bridge_source(&vec![0xABu8; 64 * 1024], "ape");
+            let seen = std::cell::RefCell::new(None);
+
+            let result: Result<(), DecodeError> = buf_and_open_file(source, |path| {
+                assert!(path.exists(), "the bridge file is there for the opener");
+                assert_eq!(
+                    std::fs::read(path).expect("read bridge").len(),
+                    64 * 1024,
+                    "every source byte was copied"
+                );
+                *seen.borrow_mut() = Some(path.to_path_buf());
+                if fail {
+                    Err(DecodeError::FileOpen("the decoder said no".into()))
+                } else {
+                    Ok(())
+                }
+            });
+
+            assert_eq!(result.is_err(), fail);
+            let bridge = seen.borrow().clone().expect("the opener ran");
+            assert!(
+                !bridge.exists(),
+                "the bridge temp file is removed (fail={fail})"
+            );
+        }
+    }
+
+    /// A panic in a third-party decoder unwinds through the guard's `Drop`,
+    /// so nothing is left in the temp directory either.
+    #[test]
+    fn the_bridge_temp_file_is_removed_when_the_decoder_panics() {
+        let seen = std::cell::RefCell::new(None);
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let source = bridge_source(b"payload", "wv");
+            let _: Result<(), DecodeError> = buf_and_open_file(source, |path| {
+                *seen.borrow_mut() = Some(path.to_path_buf());
+                panic!("the decoder exploded");
+            });
+        }));
+
+        assert!(unwound.is_err(), "the panic propagated");
+        let bridge = seen.borrow().clone().expect("the opener ran");
+        assert!(!bridge.exists(), "unwinding cleaned the temp file up");
+    }
+
+    /// Every bridge gets a fresh name: the old scheme embedded the process id
+    /// and the byte length and no randomness, so the same file opened twice
+    /// produced the same path.
+    #[test]
+    fn bridge_temp_files_are_uniquely_named() {
+        let mut paths = Vec::new();
+        for _ in 0..8 {
+            let source = bridge_source(b"same length every time", "tta");
+            buf_and_open_file(source, |path| {
+                paths.push(path.to_path_buf());
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        let unique: std::collections::HashSet<_> = paths.iter().collect();
+        assert_eq!(
+            unique.len(),
+            paths.len(),
+            "each bridge gets its own name: {paths:?}"
+        );
     }
 }

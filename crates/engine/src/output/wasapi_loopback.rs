@@ -58,6 +58,7 @@ use windows::Win32::{
 };
 
 use crate::buffer::{FixedFrameBuffer, MAX_CHANNELS};
+use crate::output::capture::{CaptureError, SystemCapture};
 use crate::output::cpal_output::OutputError;
 
 use super::wasapi_output::client::select_device;
@@ -93,13 +94,6 @@ enum MixSampleFormat {
 }
 
 impl MixSampleFormat {
-    /// Bytes one sample of this format occupies on the wire.
-    fn bytes_per_sample(self) -> usize {
-        match self {
-            MixSampleFormat::Float32 => 4,
-            MixSampleFormat::Int(bits) => (bits as usize).div_ceil(8).max(1),
-        }
-    }
 
     /// Decode one packet's worth of samples into `scratch` (interleaved f32).
     ///
@@ -155,7 +149,11 @@ impl MixSampleFormat {
 impl WasapiLoopbackCapture {
     /// Open a loopback client on the given render endpoint (`None` = the
     /// system default). Does not start capturing.
-    pub fn new(
+    ///
+    /// The [`SystemCapture`] impl supplies the trait-shaped `new`, so this
+    /// keeps the backend's own error type under a distinct name instead of
+    /// leaving two same-shaped `new`s to resolution order.
+    pub fn open(
         target_device: Option<&str>,
         ring_capacity_frames: usize,
     ) -> Result<Self, OutputError> {
@@ -334,6 +332,59 @@ impl WasapiLoopbackCapture {
     /// Drop buffered audio and reset counters.
     pub fn reset(&self) {
         self.buffer.reset();
+    }
+}
+
+impl SystemCapture for WasapiLoopbackCapture {
+    fn new(device: Option<&str>, ring_capacity_frames: usize) -> Result<Self, CaptureError> {
+        // Opening is the `Open` case even when the failure comes from the
+        // stream setup below it: nothing has started yet.
+        Self::open(device, ring_capacity_frames).map_err(|e| match e {
+            OutputError::StreamOpen(msg) => CaptureError::Open(msg),
+            other => CaptureError::Start(other.to_string()),
+        })
+    }
+
+    fn buffer(&self) -> Arc<FixedFrameBuffer> {
+        Arc::clone(&self.buffer)
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn device_name(&self) -> String {
+        self.device_name.clone()
+    }
+
+    fn start(&mut self) -> Result<(), CaptureError> {
+        // The typed binding pins the inherent method: a call through `self`
+        // would also match this trait method, and a silent recursion is not a
+        // failure mode worth leaving to method-resolution rules.
+        let start: fn(&mut WasapiLoopbackCapture) -> Result<(), OutputError> =
+            WasapiLoopbackCapture::start;
+        start(self).map_err(|e| CaptureError::Start(e.to_string()))
+    }
+
+    fn stop(&mut self) {
+        let stop: fn(&mut WasapiLoopbackCapture) = WasapiLoopbackCapture::stop;
+        stop(self);
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+
+    fn take_overflows(&self) -> u32 {
+        self.overflow_count.swap(0, Ordering::Relaxed)
+    }
+
+    fn take_blocks(&self) -> u32 {
+        self.packet_count.swap(0, Ordering::Relaxed)
     }
 }
 

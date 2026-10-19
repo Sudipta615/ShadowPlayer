@@ -319,7 +319,13 @@ impl AudioEngine {
         #[cfg(not(feature = "clap-host"))]
         let mut report = crate::dsp::clap_rack::ClapRackReport::default();
 
-        report.error = error;
+        // A command that failed brings its own message, which replaces anything
+        // the node reported. A command that succeeded passes `None` and must
+        // not wipe the node's own runtime error (a failed `process`) that
+        // `rack_report` just published.
+        if error.is_some() {
+            report.error = error;
+        }
 
         // A probe result describes a library file, not the loaded plugin, so it
         // outlives any change to what is loaded.

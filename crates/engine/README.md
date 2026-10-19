@@ -499,8 +499,8 @@ let config = EngineConfig::from_preset(EnginePreset::Fidelity);
 | **WASAPI Exclusive** | `wasapi-native` | ❌ | Windows | `IAudioClient` exclusive event-driven mode, true bit-perfect bypass |
 | **Steinberg ASIO** | `asio-native` | ❌ | Windows | Pure-Rust `IASIO` COM interface (no C++ SDK), native DSD transport |
 | **CoreAudio Hog** | `audio-output` | ✅ | macOS | Hardware Hog-Mode, direct HAL IO render procedures, hardware sync |
-| **PipeWire Pro** | `pipewire` | ❌ | Linux | Direct low-latency sink discovery, dynamic quantum negotiation |
-| **JACK Pro-Audio** | `jack` | ❌ | Linux / Unix | Synchronous audio server callbacks, BBT transport sync, patchbay routing |
+| **PipeWire Pro** | — | ❌ | Linux | **Not implemented.** The `AudioBackend::PipeWire` variant is declared for the settings format; selecting it is refused under `FallbackPolicy::Strict` and degrades to shared output otherwise. No feature flag exists. |
+| **JACK Pro-Audio** | — | ❌ | Linux / Unix | **Not implemented.** See above. |
 
 ---
 
@@ -577,7 +577,7 @@ would only ever test a moving target.
 │   │   ├── resampler/               # Rubato-based high-performance sinc resampler
 │   │   └── safety.rs                # Inline NaN/Inf containment and denormal mitigation
 │   ├── spatial/                     # 3D spatial layer: VBAP, Ambisonics (HOA), Room, Binaural HRTF
-│   ├── output/                      # Audio backends (ALSA, WASAPI, ASIO, CoreAudio, PipeWire, JACK, CPAL)
+│   ├── output/                      # Audio backends (ALSA, WASAPI, ASIO, CoreAudio, CPAL)
 │   └── bin/                         # audio-engine-cli, replaygain-scanner, release-qualification
 ├── benches/                         # Criterion benchmarks (DSP, pipeline, graph, spatial, budget)
 └── tests/                           # 100 test files (fidelity, robustness fuzzing, realtime allocation)

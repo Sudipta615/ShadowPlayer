@@ -247,3 +247,67 @@ fn test_latency_provider_all_quality_tiers_and_rates() {
         }
     }
 }
+
+/// A normal conversion reads what it writes: the accounting stays at zero.
+#[test]
+fn a_drained_resampler_reports_no_dropped_frames() {
+    let mut resampler =
+        AudioResampler::<f32>::new(ResamplerQuality::Fast, 44100.0, 48000.0).unwrap();
+    let mut read = 0usize;
+    for i in 0..20_000 {
+        let s = ((i as f32 / 44100.0) * 440.0 * std::f32::consts::TAU).sin() * 0.5;
+        resampler.feed(s, s);
+        while resampler.read().is_some() {
+            read += 1;
+        }
+    }
+    resampler.flush();
+    while resampler.read().is_some() {
+        read += 1;
+    }
+    assert!(read > 20_000, "the output really was read: {read}");
+    assert_eq!(resampler.dropped_frames(), 0, "a drained stream drops nothing");
+}
+
+/// A consumer that stops reading must not take the incoming audio down with
+/// it, and the fact that something had to give must be visible: the resampler
+/// drops the oldest output (a backlog nobody heard) and counts it. It used to
+/// drop the whole incoming chunk, log it, and report nothing.
+#[test]
+fn a_stalled_consumer_loses_backlog_but_the_chunk_still_gets_processed() {
+    let mut resampler =
+        AudioResampler::<f32>::new(ResamplerQuality::Fast, 44100.0, 48000.0).unwrap();
+
+    for i in 0..200_000 {
+        let s = ((i as f32 / 44100.0) * 440.0 * std::f32::consts::TAU).sin() * 0.5;
+        resampler.feed(s, s);
+        // Deliberately never read.
+    }
+
+    assert!(
+        resampler.dropped_frames() > 0,
+        "the overflow is accounted for"
+    );
+    assert!(
+        resampler.available_output() > 0,
+        "and the newest audio is still waiting"
+    );
+}
+
+/// The passthrough path (equal rates) counts what it cannot queue as well.
+#[test]
+fn a_stalled_passthrough_consumer_is_counted() {
+    let mut resampler =
+        AudioResampler::<f32>::new(ResamplerQuality::Balanced, 48_000.0, 48_000.0).unwrap();
+    assert!(resampler.is_passthrough());
+
+    for i in 0..(crate::dsp::resampler::MAX_OUTPUT_BUFFER_FRAMES + 512) {
+        let s = ((i as f32 / 48_000.0) * 440.0 * std::f32::consts::TAU).sin() * 0.5;
+        resampler.feed(s, s);
+    }
+
+    assert!(
+        resampler.dropped_frames() > 0,
+        "past a full buffer the passthrough path had to drop, and says so"
+    );
+}

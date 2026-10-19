@@ -137,6 +137,11 @@ pub struct AudioResampler<T: rubato::Sample + Float + Default + Send + Sync + 's
     /// MAX_RATIO and `output_frames_max`). Using Vecs avoids large stack
     /// frames and handles extreme upsample ratios.
     scratch: [Vec<T>; CHANNELS],
+    /// Frames the resampler discarded, either because a chunk could not be
+    /// processed at all or because the consumer let the output backlog
+    /// overflow. Non-zero means the output is not a faithful resample of the
+    /// input, and it used to mean that silently.
+    dropped_frames: u64,
 }
 
 pub type AudioResamplerF32 = AudioResampler<f32>;
@@ -204,6 +209,7 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
             rebuilt_output_rate: out,
             rebuilt_quality,
             scratch: [Vec::new(), Vec::new()],
+            dropped_frames: 0,
         };
         resampler.allocate_buffers();
         Ok(resampler)
@@ -324,7 +330,12 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
     fn allocate_buffers(&mut self) {
         let input_frames = self.inner.input_frames_next();
         let input_capacity = input_frames.max(CHUNK_SIZE * 4);
-        let output_capacity = MAX_OUTPUT_BUFFER_FRAMES;
+        // The output buffer has to hold a *whole* chunk, and a long-filter
+        // tier reads 2048-frame chunks: at the worst supported ratio that is
+        // more than `MAX_OUTPUT_BUFFER_FRAMES`. Sizing to the per-chunk
+        // maximum keeps `process_chunk` from having to truncate a chunk it
+        // cannot fit.
+        let output_capacity = MAX_OUTPUT_BUFFER_FRAMES.max(self.inner.output_frames_max());
 
         for ch in 0..CHANNELS {
             self.input_buffers[ch].resize(input_frames, T::zero());
@@ -421,7 +432,9 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
     /// no heap allocation. Used by the disabled-resampler bypass path.
     #[inline]
     fn push_sample_direct(&mut self, left: T, right: T) {
-        let cap = MAX_OUTPUT_BUFFER_FRAMES;
+        // The buffer's own length is the authoritative capacity; it is at
+        // least `MAX_OUTPUT_BUFFER_FRAMES` (see `allocate_buffers`).
+        let cap = self.output_buffers[0].len().min(self.output_buffers[1].len());
         // When the consumer has drained the queue completely, the read cursor
         // may sit at the old end of the backing storage. Rewind it before the
         // next direct write; otherwise passthrough silently drops every sample
@@ -429,10 +442,11 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         if self.output_available == 0 {
             self.output_read_pos = 0;
         }
-        if self.output_buffers[0].len() < cap || self.output_buffers[1].len() < cap {
+        if cap < MAX_OUTPUT_BUFFER_FRAMES {
             log::error!(
                 "Resampler output buffers are under-allocated; dropping passthrough sample"
             );
+            self.dropped_frames += 1;
             return;
         }
         let write_start = self.output_read_pos + self.output_available;
@@ -457,6 +471,11 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
                 self.output_buffers[0][new_write_start] = left;
                 self.output_buffers[1][new_write_start] = right;
                 self.output_available += 1;
+            } else {
+                // The consumer has stalled for a whole buffer's worth of
+                // samples. The sample has to go somewhere; count it rather
+                // than dropping it without a trace.
+                self.dropped_frames += 1;
             }
         }
     }
@@ -465,12 +484,12 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
     ///
     /// Uses pre-allocated planar `scratch` Vecs (sized at construction time
     /// for the worst-case ratio and `output_frames_max`) to avoid any heap
-    /// allocation on this hot path. The scratch buffers are sized in
-    /// `allocate_buffers()` off the audio path; if they are somehow smaller
-    /// than this chunk's authoritative `output_frames_next()` requirement,
-    /// the chunk is bypassed (with an error log) rather than truncated, so a
-    /// buffer invariant violation is never silently converted into a partial
-    /// resampling operation.
+    /// allocation on this hot path. `allocate_buffers()` sizes every buffer
+    /// for a whole chunk off the audio path, so the guards below are
+    /// tripwires rather than routine paths; when one does fire, or when the
+    /// consumer has let the output backlog overflow, the frames involved are
+    /// counted in `dropped_frames()` rather than vanishing behind an error
+    /// log.
     fn process_chunk(&mut self) {
         let needed = self.inner.input_frames_next();
         if self.input_pos < needed {
@@ -488,26 +507,9 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
                 self.output_buffers[ch].copy_within(rpos..rpos + safe_avail, 0);
             }
             self.output_read_pos = 0;
+            self.output_available = safe_avail;
         } else if self.output_available == 0 {
             self.output_read_pos = 0;
-        }
-
-        let write_start = self.output_available;
-        let capacity = MAX_OUTPUT_BUFFER_FRAMES;
-        let space_available = capacity.saturating_sub(write_start);
-
-        for ch in 0..CHANNELS {
-            if self.output_buffers[ch].len() < capacity {
-                log::error!("Resampler output buffer is under-allocated; skipping chunk");
-                self.input_pos = 0;
-                return;
-            }
-        }
-
-        if space_available == 0 {
-            log::warn!("Resampler output buffer full before rubato call; skipping chunk");
-            self.input_pos = 0;
-            return;
         }
 
         // The exact number of output frames rubato will write for this chunk.
@@ -519,15 +521,38 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         // them from `output_frames_max()`, so `out_frames <= scratch.len()`
         // always holds; if it does not, the buffer invariant is broken and
         // the chunk is bypassed (never truncated, never partially written).
-        if self.scratch[0].len() < out_frames || self.scratch[1].len() < out_frames {
+        let capacity = self.output_buffers[0].len().min(self.output_buffers[1].len());
+        if capacity < out_frames || self.scratch[0].len() < out_frames || self.scratch[1].len() < out_frames
+        {
             log::error!(
-                "Resampler scratch under-allocated (need {out_frames}, have {}); \
-                 bypassing chunk",
+                "Resampler buffers are under-allocated for a {out_frames}-frame chunk \
+                 (output {capacity}, scratch {}); dropping the chunk",
                 self.scratch[0].len()
             );
+            self.dropped_frames += needed as u64;
             self.input_pos = 0;
             return;
         }
+
+        // Room for the whole chunk. When the consumer has not drained the
+        // buffer, the *oldest* output frames go: dropping the chunk that is
+        // being resampled now is an audible dropout, whereas dropping part of
+        // a backlog the consumer has not read is not heard as one.
+        let used = self.output_available;
+        if used + out_frames > capacity {
+            let excess = (used + out_frames - capacity).min(used);
+            log::warn!(
+                "Resampler output backlog: dropping {excess} oldest frames to make room \
+                 (the consumer is not draining)"
+            );
+            self.dropped_frames += excess as u64;
+            self.output_buffers[0].copy_within(excess..used, 0);
+            self.output_buffers[1].copy_within(excess..used, 0);
+            self.output_available = used - excess;
+        }
+
+        let write_start = self.output_available;
+        let space_available = capacity - write_start;
 
         let in_adapter = SequentialSliceOfVecs::new(&self.input_buffers[..], CHANNELS, needed)
             .expect("input buffers are sized in allocate_buffers");
@@ -542,6 +567,16 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         match result {
             Ok((_in_consumed, produced)) => {
                 let frames_to_add = produced.min(space_available);
+                if frames_to_add < produced {
+                    // Cannot happen while `capacity >= output_frames_max()`;
+                    // count it rather than letting the tail disappear.
+                    self.dropped_frames += (produced - frames_to_add) as u64;
+                    log::error!(
+                        "Resampler produced {produced} frames but only {space_available} fit; \
+                         {} counted as dropped",
+                        produced - frames_to_add
+                    );
+                }
                 if frames_to_add > 0 {
                     self.output_buffers[0][write_start..write_start + frames_to_add]
                         .copy_from_slice(&self.scratch[0][..frames_to_add]);
@@ -552,7 +587,10 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
             }
 
             Err(e) => {
-                log::warn!("Resampler process error: {}", e);
+                // No output was produced for this chunk's input; the frames
+                // are gone, so say so in the accounting.
+                self.dropped_frames += needed as u64;
+                log::warn!("Resampler process error ({} input frames dropped): {e}", needed);
             }
         }
 
@@ -775,6 +813,16 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         }
         self.disabled = false;
         self.rebuild_failures = 0;
+        self.dropped_frames = 0;
+    }
+
+    /// Frames this resampler has discarded since construction or the last
+    /// [`Self::reset`] — the input frames of chunks it could not process, plus
+    /// any output frames dropped to keep a stalled consumer's backlog within
+    /// the buffer. Non-zero means the last stretch of output is not a faithful
+    /// resample of the input.
+    pub fn dropped_frames(&self) -> u64 {
+        self.dropped_frames
     }
 
     /// Check if source and output rates match (passthrough possible)

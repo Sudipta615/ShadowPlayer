@@ -15,14 +15,18 @@
 //! The production graph does not use this module at all: the slot the arena
 //! builds is [`PluginHostNode`](super::plugin_host_node::PluginHostNode), whose
 //! only mitigation is the `catch_unwind` inside `PluginInstance::process`. The
-//! types here are reachable from the fidelity suites and from the
-//! `--plugin-worker` CLI path, and nothing else.
+//! types here are exercised by this module's own tests, and nothing in the
+//! product constructs them.
 //!
-//! `PluginProcessSandbox` additionally models an out-of-process worker. It is
-//! NOT a working isolation transport: `plugin_abi::PluginSandboxConfig::validate`
-//! rejects every isolated mode, and the crate that owns the policy says so
-//! explicitly (see `crates/plugin-abi/src/sandbox.rs`). Treat `plugin-dylib` as
-//! a trust decision, not a sandboxed one.
+//! `PluginProcessSandbox` models an out-of-process worker, and its peer half is
+//! **not implemented**: no binary in this product speaks the framing (there is
+//! deliberately no `--plugin-worker` flag, and no worker loop that could be
+//! mistaken for one), and `plugin_abi::PluginSandboxConfig::validate` rejects
+//! every isolated mode — the crate that owns the policy says so explicitly
+//! (see `crates/plugin-abi/src/sandbox.rs`). The IPC transport here is a model
+//! whose tests pair it with a plain child (e.g. `/bin/false`) to exercise
+//! dead-worker detection, not a working isolation path. Treat `plugin-dylib`
+//! as a trust decision, not a sandboxed one.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
@@ -285,18 +289,24 @@ impl SandboxedPluginInstance {
     }
 }
 
+/// Command bytes of the worker framing this model speaks.
+///
+/// Only the commands the sandbox itself sends exist here; there is no worker
+/// loop in the crate, so there is nothing to receive the others.
 pub const IPC_CMD_PREPARE: u8 = 1;
 pub const IPC_CMD_PARAM: u8 = 2;
 pub const IPC_CMD_PROCESS: u8 = 3;
-pub const IPC_CMD_RESET: u8 = 4;
-pub const IPC_CMD_HEARTBEAT: u8 = 5;
-pub const IPC_CMD_SHUTDOWN: u8 = 6;
 
 /// Out-of-process / isolated realtime worker sandbox for plugins (§12.1, Item 10).
 ///
-/// Wraps an isolated plugin process communicating via shared memory / lock-free IPC
-/// with heartbeat watchdog, instantaneous dry passthrough failover on crash,
+/// Models an isolated plugin process communicating over stdio pipes with a
+/// heartbeat watchdog, instantaneous dry passthrough failover on crash,
 /// exponential backoff restart, and parameter state replay.
+///
+/// This is a model, not a product path: out-of-process hosting is not
+/// implemented (see the module docs), so the class is never built into the
+/// graph. Its tests exercise the containment behaviour against ordinary child
+/// processes, including ones that do not speak the framing at all.
 #[allow(dead_code)]
 pub struct PluginProcessSandbox {
     config: PluginSandboxConfig,
@@ -335,7 +345,13 @@ impl PluginProcessSandbox {
         }
     }
 
-    /// Spawn a genuine child worker process communicating via anonymous stdio pipes.
+    /// Spawn a child process to talk the IPC framing with over stdio pipes.
+    ///
+    /// The peer must implement the framing itself; no worker that does ships
+    /// in this product (`--plugin-worker` is deliberately not a flag the app
+    /// understands). The model still spawns one — its tests point it at a
+    /// plain binary to prove the dead-worker path detects the loss — and the
+    /// first thing `process` does is treat an exited child as a crash.
     pub fn spawn_worker(&mut self, exe_path: &str) -> Result<(), std::io::Error> {
         let mut child = Command::new(exe_path)
             .arg("--plugin-worker")
@@ -621,64 +637,6 @@ impl PluginProcessSandbox {
         for (ch, plane) in planes[..num_channels].iter_mut().enumerate() {
             let dry_slice = &self.dry_scratch[ch][..num_frames];
             plane[..num_frames].copy_from_slice(dry_slice);
-        }
-    }
-}
-
-/// Standard input/output loop for the isolated plugin subprocess worker.
-pub fn run_plugin_worker_stdio() {
-    let mut stdin = std::io::stdin().lock();
-    let mut stdout = std::io::stdout().lock();
-    let mut cmd_buf = [0u8; 1];
-    let mut gain = 1.0f32;
-
-    while stdin.read_exact(&mut cmd_buf).is_ok() {
-        match cmd_buf[0] {
-            IPC_CMD_PREPARE => {
-                let mut buf = [0u8; 12];
-                if stdin.read_exact(&mut buf).is_err() {
-                    break;
-                }
-            }
-            IPC_CMD_PARAM => {
-                let mut buf = [0u8; 8];
-                if stdin.read_exact(&mut buf).is_err() {
-                    break;
-                }
-                let val_bits = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
-                gain = f32::from_bits(val_bits);
-            }
-            IPC_CMD_PROCESS => {
-                let mut hdr = [0u8; 8];
-                if stdin.read_exact(&mut hdr).is_err() {
-                    break;
-                }
-                let channels = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) as usize;
-                let frames = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]) as usize;
-                let total_floats = channels * frames;
-                let mut float_buf = [0u8; 4];
-                for _ in 0..total_floats {
-                    if stdin.read_exact(&mut float_buf).is_err() {
-                        return;
-                    }
-                    let bits = u32::from_le_bytes(float_buf);
-                    let val = f32::from_bits(bits) * gain;
-                    if stdout.write_all(&val.to_bits().to_le_bytes()).is_err() {
-                        return;
-                    }
-                }
-                if stdout.flush().is_err() {
-                    return;
-                }
-            }
-            IPC_CMD_RESET => {}
-            IPC_CMD_HEARTBEAT => {
-                if stdout.write_all(&[1u8]).is_err() || stdout.flush().is_err() {
-                    break;
-                }
-            }
-            IPC_CMD_SHUTDOWN => break,
-            _ => break,
         }
     }
 }

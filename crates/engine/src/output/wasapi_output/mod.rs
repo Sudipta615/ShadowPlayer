@@ -672,6 +672,13 @@ impl super::output::Output for WasapiOutput {
         WasapiOutput::device_name(self)
     }
 
+    fn device_id(&self) -> Option<String> {
+        // Without this delegation the trait's default (`None`) answered, and
+        // the endpoint id the backend had already resolved went unused — the
+        // inherent method was not reachable through `dyn Output`.
+        WasapiOutput::device_id(self)
+    }
+
     fn reconfigure_sample_rate(&mut self, target_sample_rate: u32) -> Result<u32, OutputError> {
         WasapiOutput::reconfigure_sample_rate(self, target_sample_rate)
     }

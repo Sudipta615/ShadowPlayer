@@ -69,7 +69,7 @@ mod process;
 mod topology;
 
 pub use arena::nodes::{
-    run_plugin_worker_stdio, AutomationPoint, AutomationTarget, AuxBusNode, BalanceNode,
+    AutomationPoint, AutomationTarget, AuxBusNode, BalanceNode,
     ClapPluginHostNode, ConvolutionNode, CorrectionNode, CorrectionNodeInfo, CrossfeedNode,
     DitherNode, DuckState, DynamicsNode, EqNode, GainNode, LimiterNode, LoudnessNode, MixBusNode,
     MixInput, MixInputCmd, MixTransitionCmd, PanLaw, PluginHostNode, PluginProcessSandbox,

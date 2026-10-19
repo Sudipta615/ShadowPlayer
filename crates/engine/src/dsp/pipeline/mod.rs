@@ -608,7 +608,12 @@ impl DspPipeline {
             if let Some(ref ir_path) = config.convolution.ir_path {
                 let path = std::path::Path::new(ir_path);
                 if path.exists() {
-                    let _ = self.convolution.load_ir_from_file(path);
+                    if let Err(e) = self.convolution.load_ir_from_file(path) {
+                        log::error!(
+                            "Failed to load convolution impulse response {}: {e}",
+                            path.display()
+                        );
+                    }
                 }
             }
         } else {

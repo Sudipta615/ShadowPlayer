@@ -10,8 +10,8 @@
 /// expensive than the one optional backend this crate ships.
 ///
 /// The feature is kept in `[features]` because it is the single switch for
-/// "build the cpal backend", and because `wasapi-native`, `pipewire`, `jack`
-/// and `asio-native` all compose through it.
+/// "build the cpal backend", and because `wasapi-native`, `asio-native` and
+/// the CoreAudio/ALSA backends all compose through it.
 ///
 /// Without this guard a `--no-default-features` build produced a dozen
 /// unrelated `unresolved import cpal` errors pointing at backend internals

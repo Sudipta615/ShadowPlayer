@@ -22,7 +22,6 @@ pub mod device_monitor;
 pub mod drift;
 pub mod endpoint;
 pub mod format_converter;
-pub mod jack;
 // Hardware-free sink ("null" backend). Cross-platform; needs no OS device, so
 // the headless suites can exercise the engine's output matrix end to end.
 pub mod null_output;
@@ -32,7 +31,6 @@ pub mod null_output;
 pub mod output;
 pub mod output_info;
 pub mod output_profile;
-pub mod pipewire;
 pub mod rate_policy;
 pub mod recovery;
 pub mod rt_thread;
@@ -61,9 +59,6 @@ pub use endpoint::{
     VirtualEndpoint,
 };
 pub use format_converter::{AudioFormatConverter, TargetFormat};
-pub use jack::{
-    JackAutoConnectPolicy, JackClientConfig, JackOutput, JackTimebaseInfo, JackTransportState,
-};
 pub use null_output::NullOutput;
 pub use output::{
     create_output, NativeDsdCapability, NativeDsdParams, Output, StreamErrorBatch,
@@ -121,6 +116,11 @@ mod available_backends_tests {
 
         // Never offered: no implementation exists for them on any platform.
         assert!(!backends.contains(&AudioBackend::Null));
+        // Declared for the settings format only; there is no PipeWire/JACK
+        // integration in any configuration, so the picker must not offer them
+        // even though selecting them is possible from a config file.
+        assert!(!backends.contains(&AudioBackend::PipeWire));
+        assert!(!backends.contains(&AudioBackend::Jack));
     }
 
     /// Backends gated on a native feature must not appear without it.
@@ -138,7 +138,6 @@ mod available_backends_tests {
 }
 pub use output_info::OutputInfo;
 pub use output_profile::{OutputProfile, OutputProfileLibrary};
-pub use pipewire::{PipeWireConfig, PipeWireOutput, PipeWireQuantumInfo, PipeWireStreamState};
 pub use rate_policy::SampleRatePolicy;
 pub use recovery::rescale_clock_frames;
 pub use rt_thread::{
