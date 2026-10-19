@@ -438,5 +438,119 @@ mod tests {
         let ids: Vec<TrackId> = groups[0].iter().map(|t| t.id).collect();
         assert!(ids.contains(&a) && ids.contains(&b));
     }
+
+    /// Deleting a folder must not touch a sibling whose name merely starts with
+    /// the same text.
+    #[test]
+    fn path_prefix_operations_stop_at_a_directory_boundary() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let rock = sample_track(TrackId::new(), "/music/rock/a.flac", "A", "X", "Rock");
+        let rockabilly = sample_track(TrackId::new(), "/music/rockabilly/b.flac", "B", "X", "Billy");
+        repo.upsert(&rock).unwrap();
+        repo.upsert(&rockabilly).unwrap();
+
+        // The folder listing is scoped to the folder itself.
+        let listed = repo.get_tracks_by_folder(&PathBuf::from("/music/rock")).unwrap();
+        assert_eq!(listed.len(), 1, "only the file inside /music/rock");
+        assert_eq!(listed[0].title, "A");
+
+        let removed = repo.delete_by_path_prefix(&PathBuf::from("/music/rock")).unwrap();
+        assert_eq!(removed, 1, "the sibling directory must survive");
+        assert_eq!(repo.count().unwrap(), 1);
+        assert_eq!(repo.get_by_path(&PathBuf::from("/music/rockabilly/b.flac")).unwrap().unwrap().title, "B");
+    }
+
+    /// `%` and `_` in a folder name are literals, not wildcards.
+    #[test]
+    fn path_prefix_operations_escape_like_wildcards() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let literal = sample_track(TrackId::new(), "/music/100% hits/a.flac", "A", "X", "Hits");
+        let other = sample_track(TrackId::new(), "/music/100X hits/b.flac", "B", "X", "Hits");
+        repo.upsert(&literal).unwrap();
+        repo.upsert(&other).unwrap();
+
+        let removed = repo
+            .delete_by_path_prefix(&PathBuf::from("/music/100% hits"))
+            .unwrap();
+        assert_eq!(removed, 1, "the % must not match another character");
+        assert_eq!(repo.count().unwrap(), 1);
+        assert_eq!(repo.list_paths_under_prefix(&PathBuf::from("/music/100% hits")).unwrap().len(), 0);
+    }
+
+    /// Re-registering a scan root must return the stored row, not a phantom id.
+    #[test]
+    fn scan_root_add_is_idempotent() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = ScanRootsRepo::new(db.clone());
+
+        let first = repo.add(&PathBuf::from("/music")).unwrap();
+        let second = repo.add(&PathBuf::from("/music")).unwrap();
+        assert_eq!(first.id, second.id, "the same path is one root");
+        assert_eq!(repo.list().unwrap().len(), 1);
+
+        // The returned id is real, so it can be updated.
+        repo.update_last_scanned(&second.id, 1_700_000_000).unwrap();
+        let roots = repo.list().unwrap();
+        assert_eq!(roots[0].last_scanned_at, Some(1_700_000_000));
+
+        repo.remove(&second.id).unwrap();
+        assert!(repo.list().unwrap().is_empty());
+    }
+
+    /// A corrupt id must surface as an error, not as a freshly minted UUID that
+    /// can never be matched back to its row.
+    #[test]
+    fn a_malformed_id_is_reported_rather_than_reinvented() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let good = sample_track(TrackId::new(), "/music/good.flac", "Good", "X", "A");
+        repo.upsert(&good).unwrap();
+
+        db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO tracks (id, path, title, artist, album, genre, year, track_number,
+                    disc_number, duration_secs, sample_rate, channels, format, bitrate_kbps,
+                    is_lossless, replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
+                    file_size_bytes, mtime_unix_secs, content_hash, is_favorite, play_count,
+                    last_played_at, added_at)
+                 VALUES ('not-a-uuid', '/music/bad.flac', 'Bad', 'X', 'A', NULL, NULL, NULL,
+                    NULL, 1.0, 44100, 2, 'FLAC', NULL, 1, NULL, NULL, NULL, 0, 0, NULL, 0, 0,
+                    NULL, 0);",
+                [],
+            )?;
+            Ok(())
+        })
+        .expect("fixture insert");
+
+        assert!(
+            repo.list(SortField::Title, SortOrder::Ascending).is_err(),
+            "a corrupt id must not be silently reinvented"
+        );
+    }
+
+    /// A settings blob written by a build with a different field set still
+    /// loads, so an upgrade never wipes the user's configuration.
+    #[test]
+    fn settings_from_an_older_build_load_instead_of_resetting() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = SettingsRepo::new(db.clone());
+
+        repo.set_value("app_settings", r#"{"theme_dark":false,"volume":0.25}"#)
+            .unwrap();
+
+        let loaded = repo.load().unwrap();
+        assert!(!loaded.theme_dark, "present fields are honoured");
+        assert!((loaded.volume - 0.25).abs() < f32::EPSILON);
+        assert_eq!(
+            loaded.sort_field,
+            AppSettings::default().sort_field,
+            "absent fields fall back to their defaults"
+        );
+    }
 }
 

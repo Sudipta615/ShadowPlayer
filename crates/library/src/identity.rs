@@ -14,6 +14,20 @@ use std::path::Path;
 
 use crate::fingerprint::Fingerprint;
 
+/// True only when the old file is *definitely* gone.
+///
+/// `Path::exists()` returns false for permission errors, stale NFS mounts and
+/// other I/O failures too, so a track whose volume was merely unreachable
+/// looked deleted — and its identity, with its play counts and playlist
+/// membership, could be handed to a different file. Only a genuine `NotFound`
+/// counts as gone.
+fn old_file_is_gone(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(_) => false,
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 /// Fingerprint the file at `path` for a caller that already knows the row at
 /// that path exists but may predate fingerprints. Best-effort.
 pub fn backfill_fingerprint(repo: &TrackRepo, path: &Path, id: &TrackId) {
@@ -52,7 +66,7 @@ pub fn resolve_identity(
 
     // An ambiguous fingerprint is never used, so we cannot steal the wrong row.
     let (old_id, old_path) = repo.find_by_content_hash(&hash).ok().flatten()?;
-    if old_path.as_path() == path || old_path.exists() {
+    if old_path.as_path() == path || !old_file_is_gone(&old_path) {
         return None;
     }
 

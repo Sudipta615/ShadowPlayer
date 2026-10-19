@@ -26,8 +26,25 @@ pub struct AudioSession {
     handle: EngineHandle,
     running: Arc<AtomicBool>,
     worker_thread: Option<std::thread::JoinHandle<()>>,
+    /// The threads that forward engine/output events onto the channels the UI
+    /// drains. Kept so `Drop` can join them.
+    forwarder_threads: Vec<std::thread::JoinHandle<()>>,
     event_rx: Receiver<EngineEvent>,
     output_event_rx: Receiver<OutputEvent>,
+}
+
+/// How long a forwarder waits for the consumer before dropping an event.
+const FORWARD_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Hand an event to the consumer, waiting briefly rather than dropping it.
+///
+/// The channels used to be drained with `try_send`, so a consumer that was one
+/// frame behind silently lost events — including `SourceFinished`, which is
+/// what advances the queue to the next track.
+fn forward<T>(tx: &crossbeam::channel::Sender<T>, event: T, kind: &str) {
+    if let Err(e) = tx.send_timeout(event, FORWARD_TIMEOUT) {
+        log::warn!("Dropped a {kind} event: {e}");
+    }
 }
 
 impl AudioSession {
@@ -63,29 +80,42 @@ impl AudioSession {
         let (out_tx, out_rx) = bounded(64);
 
         let fw_running = running.clone();
-        std::thread::Builder::new()
+        let forwarder = std::thread::Builder::new()
             .name("shadow-engine-events".into())
             .spawn(move || {
                 while fw_running.load(Ordering::Relaxed) {
                     let mut had_event = false;
                     while let Ok(ev) = engine_event_rx.try_recv() {
-                        let _ = event_tx.try_send(ev);
+                        forward(&event_tx, ev, "engine");
                         had_event = true;
                     }
                     while let Ok(out_ev) = output_event_rx.try_recv() {
-                        let _ = out_tx.try_send(out_ev);
+                        forward(&out_tx, out_ev, "output");
                         had_event = true;
                     }
                     if !had_event {
                         std::thread::sleep(Duration::from_millis(10));
                     }
                 }
-            })?;
+            });
+
+        let forwarder = match forwarder {
+            Ok(handle) => handle,
+            Err(e) => {
+                // The worker owns the engine and would run forever with nothing
+                // left able to stop it, so stop it before propagating the
+                // failure — `Drop` never runs when a constructor returns `Err`.
+                running.store(false, Ordering::Relaxed);
+                let _ = worker_thread.join();
+                return Err(e.into());
+            }
+        };
 
         Ok(Self {
             handle,
             running,
             worker_thread: Some(worker_thread),
+            forwarder_threads: vec![forwarder],
             event_rx,
             output_event_rx: out_rx,
         })
@@ -116,25 +146,35 @@ impl AudioSession {
         let (_out_tx, out_rx) = bounded(64);
 
         let fw_running = running.clone();
-        std::thread::Builder::new()
+        let forwarder = std::thread::Builder::new()
             .name("shadow-engine-sink-events".into())
             .spawn(move || {
                 while fw_running.load(Ordering::Relaxed) {
                     let mut had_event = false;
                     while let Ok(ev) = engine_event_rx.try_recv() {
-                        let _ = event_tx.try_send(ev);
+                        forward(&event_tx, ev, "engine");
                         had_event = true;
                     }
                     if !had_event {
                         std::thread::sleep(Duration::from_millis(10));
                     }
                 }
-            })?;
+            });
+
+        let forwarder = match forwarder {
+            Ok(handle) => handle,
+            Err(e) => {
+                running.store(false, Ordering::Relaxed);
+                let _ = worker_thread.join();
+                return Err(e.into());
+            }
+        };
 
         Ok(Self {
             handle,
             running,
             worker_thread: Some(worker_thread),
+            forwarder_threads: vec![forwarder],
             event_rx,
             output_event_rx: out_rx,
         })
@@ -1012,7 +1052,13 @@ impl AudioSession {
 impl Drop for AudioSession {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
+        // Shut the engine down first so the worker's blocking tick returns.
         self.handle.shutdown();
+        // Join the forwarders too: they touch engine receivers, so letting
+        // `Drop` return while they are still running is a use-after-free race.
+        for thread in self.forwarder_threads.drain(..) {
+            let _ = thread.join();
+        }
         if let Some(thread) = self.worker_thread.take() {
             let _ = thread.join();
         }

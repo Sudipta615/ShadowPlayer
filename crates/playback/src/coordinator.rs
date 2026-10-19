@@ -2,7 +2,7 @@ use audio_session::{AudioSession, EngineEvent, PlaybackState};
 use database::{Database, HistoryRepo, QueueRepo, TrackRepo};
 use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
-use log::info;
+use log::{info, warn};
 use rand::seq::SliceRandom;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -144,32 +144,37 @@ impl PlaybackCoordinator {
 
     fn open_and_play_track(&self, track: &Track) {
         let path_str = track.path.to_string_lossy();
-        if let Some((audio_path, cue_suffix)) = path_str.split_once("#cue:") {
-            if let Ok(track_num) = cue_suffix.parse::<u32>() {
-                let real_path = std::path::Path::new(audio_path);
-                let stem = real_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                let parent = real_path.parent().unwrap_or(std::path::Path::new("."));
-                let cue_candidates = [
-                    parent.join(format!("{}.cue", stem)),
-                    parent.join("album.cue"),
-                    parent.join("CDImage.cue"),
-                ];
-                let mut opened = false;
-                for cue_file in cue_candidates {
-                    if cue_file.exists() && self.session.open_cue_track(real_path, &cue_file, track_num) {
-                        opened = true;
-                        break;
-                    }
-                }
-                if !opened {
-                    self.session.open_file(real_path);
-                }
-            } else {
-                self.session.open_file(&track.path);
-            }
-        } else {
+        let Some(cue) = domain::cue::parse_cue_virtual_path(&path_str) else {
             self.session.open_file(&track.path);
+            self.session.play();
+            return;
+        };
+
+        let real_path = cue.audio_path();
+
+        // Prefer the sheet the row was indexed from. Guessing at the filename
+        // is only a fallback for rows written before it was recorded, and it
+        // used to fail silently by playing the whole image from 0:00.
+        let recorded = cue.sheet_path();
+        let mut candidates: Vec<std::path::PathBuf> = Vec::with_capacity(4);
+        if let Some(sheet) = &recorded {
+            candidates.push(sheet.clone());
         }
+        candidates.extend(sibling_cue_candidates(&real_path));
+
+        for sheet in candidates {
+            if sheet.exists() && self.session.open_cue_track(&real_path, &sheet, cue.track_number) {
+                self.session.play();
+                return;
+            }
+        }
+
+        warn!(
+            "No usable .cue sheet for {} (track {}); playing the whole album image",
+            real_path.display(),
+            cue.track_number
+        );
+        self.session.open_file(&real_path);
         self.session.play();
     }
 
@@ -473,4 +478,16 @@ impl PlaybackCoordinator {
         let entries: Vec<_> = self.queue.iter().map(|t| (t.id, t.path.clone())).collect();
         let _ = self.queue_repo.save_queue(&entries);
     }
+}
+
+/// The conventional `.cue` names to try beside an album image, for rows written
+/// before the sheet's own path was recorded.
+fn sibling_cue_candidates(real_path: &std::path::Path) -> [std::path::PathBuf; 3] {
+    let stem = real_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let parent = real_path.parent().unwrap_or(std::path::Path::new("."));
+    [
+        parent.join(format!("{}.cue", stem)),
+        parent.join("album.cue"),
+        parent.join("CDImage.cue"),
+    ]
 }

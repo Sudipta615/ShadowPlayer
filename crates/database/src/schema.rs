@@ -1,11 +1,30 @@
-use log::info;
+use log::{info, warn};
 use rusqlite::{Connection, Result};
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
-    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
-    let _ = conn.query_row("PRAGMA journal_mode = WAL;", [], |_| Ok(()));
-    let _ = conn.query_row("PRAGMA synchronous = NORMAL;", [], |_| Ok(()));
-    let _ = conn.query_row("PRAGMA foreign_keys = ON;", [], |_| Ok(()));
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+
+    // Confirm the pragmas rather than assuming them. `journal_mode` and
+    // `foreign_keys` can silently refuse to apply (network filesystems, a DB
+    // moved between machines), and with `foreign_keys` off every
+    // `ON DELETE CASCADE` quietly stops pruning favorites, playlist entries
+    // and play history.
+    match conn.query_row("PRAGMA journal_mode = WAL;", [], |r| r.get::<_, String>(0)) {
+        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
+        Ok(mode) => warn!("SQLite journal_mode is {mode}, not WAL; concurrency will suffer"),
+        Err(e) => warn!("Could not enable WAL journal mode: {e}"),
+    }
+    if let Err(e) = conn.execute_batch("PRAGMA synchronous = NORMAL;") {
+        warn!("Could not set PRAGMA synchronous: {e}");
+    }
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    let foreign_keys: i64 = conn.query_row("PRAGMA foreign_keys;", [], |r| r.get(0))?;
+    if foreign_keys != 1 {
+        warn!(
+            "SQLite foreign keys are OFF; deletes will not cascade and orphan \
+             rows will accumulate"
+        );
+    }
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -237,11 +256,33 @@ fn apply_v3(conn: &mut Connection) -> Result<()> {
     info!("Applying SQLite migration V3 (track content fingerprints)");
     let tx = conn.transaction()?;
 
-    let statements = [
-        "ALTER TABLE tracks ADD COLUMN content_hash TEXT;",
-        "CREATE INDEX IF NOT EXISTS idx_tracks_content_hash ON tracks(content_hash);",
-        "INSERT INTO schema_migrations (version, applied_at) VALUES (3, strftime('%s', 'now'));",
-    ];
+    // `ALTER TABLE ADD COLUMN` has no `IF NOT EXISTS`, so guard it explicitly:
+    // if the migration row is ever lost while the column survives, the
+    // unconditional ALTER would make the whole database refuse to open.
+    let has_content_hash: bool = {
+        let mut stmt = tx.prepare("PRAGMA table_info(tracks);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for name in names {
+            if name? == "content_hash" {
+                found = true;
+            }
+        }
+        found
+    };
+
+    let statements: Vec<&str> = if has_content_hash {
+        vec![
+            "CREATE INDEX IF NOT EXISTS idx_tracks_content_hash ON tracks(content_hash);",
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (3, strftime('%s', 'now'));",
+        ]
+    } else {
+        vec![
+            "ALTER TABLE tracks ADD COLUMN content_hash TEXT;",
+            "CREATE INDEX IF NOT EXISTS idx_tracks_content_hash ON tracks(content_hash);",
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (3, strftime('%s', 'now'));",
+        ]
+    };
 
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {

@@ -82,12 +82,18 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
                         channels = ch.count();
                     }
                     if let Some(bits) = audio.bits_per_sample {
-                        if duration_secs > 0.0 {
-                            bitrate_kbps =
-                                Some((file_size_bytes * 8 / (duration_secs as u64 * 1000)) as u32);
+                        // Computed in `f64`: a sub-second file keeps its
+                        // fractional duration (the old integer form truncated it
+                        // to 0 and divided by zero).
+                        bitrate_kbps = if duration_secs > 0.0 {
+                            Some(
+                                (file_size_bytes as f64 * 8.0
+                                    / (duration_secs as f64 * 1000.0))
+                                    as u32,
+                            )
                         } else {
-                            bitrate_kbps = Some((sample_rate * channels as u32 * bits) / 1000);
-                        }
+                            Some((sample_rate * channels as u32 * bits) / 1000)
+                        };
                     }
                 }
             }
@@ -176,38 +182,38 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
     })
 }
 
+/// The audio file a standalone `.cue` sheet indexes, if one can be resolved.
+///
+/// Prefers the sheet's own `FILE` reference and falls back to a sibling that
+/// shares the sheet's stem. The scanner uses this to index an album image
+/// *either* as CUE tracks *or* as one file, never as both.
+pub fn cue_referenced_audio(cue_path: &Path) -> Option<PathBuf> {
+    let sheet = engine::decode::cue::CueSheet::parse_file(cue_path).ok()?;
+    let parent_dir = cue_path.parent().unwrap_or(Path::new("."));
+
+    if let Some(name) = sheet.files.first() {
+        let candidate = parent_dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    let stem = cue_path.file_stem()?.to_str()?;
+    for ext in &["flac", "wav", "ape", "wv", "mp3", "m4a", "dsf", "dff"] {
+        let candidate = parent_dir.join(format!("{}.{}", stem, ext));
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// Extract tracks from a standalone .cue sheet and resolve boundaries to audio files
 pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, MetadataError> {
     let sheet = engine::decode::cue::CueSheet::parse_file(cue_path)
         .map_err(|_| MetadataError::ExtractionFailed)?;
 
-    let parent_dir = cue_path.parent().unwrap_or(Path::new("."));
-
-    // Find the referenced audio file
-    let audio_file_name = sheet.files.first()
-        .cloned()
-        .or_else(|| {
-            let stem = cue_path.file_stem()?.to_str()?;
-            for ext in &["flac", "wav", "ape", "wv", "mp3", "m4a", "dsf", "dff"] {
-                let candidate = parent_dir.join(format!("{}.{}", stem, ext));
-                if candidate.exists() {
-                    return Some(candidate.file_name()?.to_str()?.to_string());
-                }
-            }
-            None
-        });
-
-    let audio_path = match audio_file_name {
-        Some(name) => {
-            let p = parent_dir.join(&name);
-            if p.exists() {
-                p
-            } else {
-                return Err(MetadataError::ExtractionFailed);
-            }
-        }
-        None => return Err(MetadataError::ExtractionFailed),
-    };
+    let audio_path = cue_referenced_audio(cue_path).ok_or(MetadataError::ExtractionFailed)?;
 
     // Extract underlying audio file specs
     let audio_meta = extract_metadata(&audio_path)?;
@@ -230,7 +236,10 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
         };
         let duration = (end_sec - start_sec).max(0.0) as f32;
 
-        let virtual_path = format!("{}#cue:{}", audio_path.display(), cue_track.number);
+        // The sheet is part of the identity. Without it, playback can only
+        // guess at the `.cue` filename and silently falls back to playing the
+        // whole album image when the guess is wrong.
+        let virtual_path = domain::cue::format_cue_virtual_path(&audio_path, cue_track.number, cue_path);
         let track_id = TrackId::from_canonical_path(Path::new(&virtual_path));
 
         let title = cue_track.title.clone()

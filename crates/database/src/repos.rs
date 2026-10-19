@@ -7,6 +7,46 @@ use rusqlite::{params, params_from_iter, OptionalExtension, Result, Row};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+/// Decode a UUID column.
+///
+/// A malformed value is a hard error rather than a fabricated id: the old
+/// `unwrap_or_default()` produced a *fresh random* UUID for corrupt rows, so
+/// the resulting track could never be matched back to the database and any
+/// later update or delete silently did nothing.
+fn parse_id<T: FromStr>(text: &str, column: &str) -> Result<T> {
+    text.parse::<T>().map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("column `{column}` holds a malformed id: {text:?}"),
+            )),
+        )
+    })
+}
+
+/// Escape a path for use as a `LIKE` prefix under `ESCAPE '\'`.
+///
+/// Two things the naive `format!("{}%", path)` got wrong: a prefix with no
+/// trailing separator also matched sibling directories that merely start with
+/// the same text (`/music/rock` matched `/music/rockabilly`), and any `%`, `_`
+/// or `\` inside the path acted as a wildcard instead of a literal.
+fn like_prefix(prefix: &Path) -> String {
+    let mut literal = prefix.to_string_lossy().into_owned();
+    if literal.is_empty() {
+        return "%".to_string();
+    }
+    if !literal.ends_with(std::path::MAIN_SEPARATOR) {
+        literal.push(std::path::MAIN_SEPARATOR);
+    }
+    let escaped = literal
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("{escaped}%")
+}
+
 fn map_track(row: &Row<'_>) -> Result<Track> {
     let id_str: String = row.get("id")?;
     let path_str: String = row.get("path")?;
@@ -14,7 +54,7 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
     let is_lossless_int: i32 = row.get("is_lossless")?;
 
     Ok(Track {
-        id: TrackId::from_str(&id_str).unwrap_or_default(),
+        id: parse_id(&id_str, "tracks.id")?,
         path: PathBuf::from(path_str),
         title: row.get("title")?,
         artist: row.get("artist")?,
@@ -146,7 +186,7 @@ impl TrackRepo {
             while let Some(row) = rows.next()? {
                 let id: String = row.get(0)?;
                 let path: String = row.get(1)?;
-                found.push((TrackId::from_str(&id).unwrap_or_default(), PathBuf::from(path)));
+                found.push((parse_id(&id, "tracks.id")?, PathBuf::from(path)));
             }
             Ok(if found.len() == 1 { found.pop() } else { None })
         })
@@ -303,7 +343,7 @@ impl TrackRepo {
             let iter = stmt.query_map([], |row| {
                 let id: String = row.get(0)?;
                 let path: String = row.get(1)?;
-                Ok((TrackId::from_str(&id).unwrap_or_default(), PathBuf::from(path)))
+                Ok((parse_id(&id, "tracks.id")?, PathBuf::from(path)))
             })?;
             let mut out = Vec::new();
             for r in iter {
@@ -354,14 +394,40 @@ impl TrackRepo {
         })
     }
 
-    /// Deletes every track whose path starts with `prefix`. Returns the number
-    /// of rows removed. Foreign-key cascades clean up favorites, playlist
-    /// entries, play history and lyrics; the FTS delete trigger fires too.
+    /// Deletes every track *inside* `prefix`. Returns the number of rows
+    /// removed. Foreign-key cascades clean up favorites, playlist entries, play
+    /// history and lyrics; the FTS delete trigger fires too.
+    ///
+    /// The prefix is matched up to and including its trailing separator, so
+    /// deleting `/music/rock` leaves `/music/rockabilly` alone.
     pub fn delete_by_path_prefix(&self, prefix: &Path) -> Result<usize> {
-        let like = format!("{}%", prefix.to_string_lossy());
+        let like = like_prefix(prefix);
         self.db.with_conn(|conn| {
-            let n = conn.execute("DELETE FROM tracks WHERE path LIKE ?1;", params![like])?;
+            let n = conn.execute(
+                "DELETE FROM tracks WHERE path LIKE ?1 ESCAPE '\\';",
+                params![like],
+            )?;
             Ok(n)
+        })
+    }
+
+    /// Every (id, path) pair inside `prefix`, for reconciling a scan root with
+    /// what is actually on disk.
+    pub fn list_paths_under_prefix(&self, prefix: &Path) -> Result<Vec<(TrackId, PathBuf)>> {
+        let like = like_prefix(prefix);
+        self.db.with_conn(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT id, path FROM tracks WHERE path LIKE ?1 ESCAPE '\\';")?;
+            let iter = stmt.query_map(params![like], |row| {
+                let id: String = row.get(0)?;
+                let path: String = row.get(1)?;
+                Ok((parse_id(&id, "tracks.id")?, PathBuf::from(path)))
+            })?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            Ok(out)
         })
     }
 
@@ -397,10 +463,10 @@ impl TrackRepo {
     }
 
     pub fn get_tracks_by_folder(&self, folder_path: &Path) -> Result<Vec<Track>> {
-        let prefix = folder_path.to_string_lossy().to_string();
-        let search = format!("{}%", prefix);
+        let search = like_prefix(folder_path);
         self.db.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT * FROM tracks WHERE path LIKE ?1 ORDER BY path ASC;")?;
+            let mut stmt = conn
+                .prepare("SELECT * FROM tracks WHERE path LIKE ?1 ESCAPE '\\' ORDER BY path ASC;")?;
             let iter = stmt.query_map(params![search], map_track)?;
             let mut tracks = Vec::new();
             for t in iter {
@@ -457,7 +523,7 @@ impl PlaylistRepo {
             let iter = stmt.query_map([], |row| {
                 let id_str: String = row.get(0)?;
                 Ok(Playlist {
-                    id: PlaylistId::from_str(&id_str).unwrap_or_default(),
+                    id: parse_id(&id_str, "playlists.id")?,
                     name: row.get(1)?,
                     description: row.get(2)?,
                     created_at: row.get(3)?,
@@ -786,11 +852,14 @@ impl QueueRepo {
         })
     }
 
-    /// Drops persisted queue entries whose path starts with `prefix`.
+    /// Drops persisted queue entries inside `prefix`.
     pub fn purge_path_prefix(&self, prefix: &Path) -> Result<usize> {
-        let like = format!("{}%", prefix.to_string_lossy());
+        let like = like_prefix(prefix);
         self.db.with_conn(|conn| {
-            let n = conn.execute("DELETE FROM saved_queue WHERE path LIKE ?1;", params![like])?;
+            let n = conn.execute(
+                "DELETE FROM saved_queue WHERE path LIKE ?1 ESCAPE '\\';",
+                params![like],
+            )?;
             Ok(n)
         })
     }
@@ -815,17 +884,33 @@ impl SettingsRepo {
                 )
                 .optional()?;
 
-            if let Some(s) = json {
-                if let Ok(settings) = serde_json::from_str(&s) {
-                    return Ok(settings);
-                }
+            match json {
+                Some(s) => match serde_json::from_str(&s) {
+                    Ok(settings) => Ok(settings),
+                    Err(e) => {
+                        // Do not fail the launch over unreadable settings, but
+                        // make the loss visible: `AppSettings` carries
+                        // `#[serde(default)]`, so a payload written by an older
+                        // build with fewer fields still loads.
+                        log::warn!("Ignoring unreadable app settings, using defaults: {e}");
+                        Ok(AppSettings::default())
+                    }
+                },
+                None => Ok(AppSettings::default()),
             }
-            Ok(AppSettings::default())
         })
     }
 
     pub fn save(&self, settings: &AppSettings) -> Result<()> {
-        let json = serde_json::to_string(settings).unwrap_or_default();
+        // `unwrap_or_default()` here used to write an *empty string* when
+        // serialization failed, which the next load then treated as "no
+        // settings" — silently wiping the user's configuration.
+        let json = serde_json::to_string(settings).map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("could not serialize app settings: {e}"),
+            )))
+        })?;
         self.db.with_conn(|conn| {
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES ('app_settings', ?1)
@@ -878,7 +963,7 @@ impl ScanRootsRepo {
                 let path_str: String = row.get(1)?;
                 let watch_int: i32 = row.get(2)?;
                 Ok(ScanRoot {
-                    id: ScanRootId::from_str(&id_str).unwrap_or_default(),
+                    id: parse_id(&id_str, "scan_roots.id")?,
                     path: PathBuf::from(path_str),
                     watch_enabled: watch_int != 0,
                     last_scanned_at: row.get(3)?,
@@ -892,6 +977,12 @@ impl ScanRootsRepo {
         })
     }
 
+    /// Register `path` as a scan root and return the stored row.
+    ///
+    /// Idempotent: re-adding an existing path returns the row that is already
+    /// there (with its real id and last-scanned timestamp) rather than a newly
+    /// generated id that no row carries — which used to make a later
+    /// `update_last_scanned` or `remove` silently no-op.
     pub fn add(&self, path: &Path) -> Result<ScanRoot> {
         let id = ScanRootId::new();
         self.db.with_conn(|conn| {
@@ -901,12 +992,23 @@ impl ScanRootsRepo {
                  ON CONFLICT(path) DO NOTHING;",
                 params![id.to_string(), path.to_string_lossy()],
             )?;
-            Ok(ScanRoot {
-                id,
-                path: path.to_path_buf(),
-                watch_enabled: true,
-                last_scanned_at: None,
-            })
+
+            let stored = conn.query_row(
+                "SELECT id, path, watch_enabled, last_scanned_at FROM scan_roots WHERE path = ?1;",
+                params![path.to_string_lossy()],
+                |row| {
+                    let id_str: String = row.get(0)?;
+                    let path_str: String = row.get(1)?;
+                    let watch_int: i32 = row.get(2)?;
+                    Ok(ScanRoot {
+                        id: parse_id(&id_str, "scan_roots.id")?,
+                        path: PathBuf::from(path_str),
+                        watch_enabled: watch_int != 0,
+                        last_scanned_at: row.get(3)?,
+                    })
+                },
+            )?;
+            Ok(stored)
         })
     }
 
@@ -1101,7 +1203,7 @@ fn map_smart_playlist(row: &Row<'_>) -> Result<SmartPlaylist> {
     let limit: Option<i64> = row.get("limit_count")?;
 
     Ok(SmartPlaylist {
-        id: PlaylistId::from_str(&id_str).unwrap_or_default(),
+        id: parse_id(&id_str, "smart_playlists.id")?,
         name: row.get("name")?,
         match_all: row.get::<_, i32>("match_all")? != 0,
         rules: serde_json::from_str(&rules_json).unwrap_or_default(),

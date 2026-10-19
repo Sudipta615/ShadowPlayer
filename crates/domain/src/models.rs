@@ -184,7 +184,14 @@ pub enum RepeatModeChoice {
     One,
 }
 
+/// User preferences.
+///
+/// `#[serde(default)]` is load-bearing: settings are stored as a JSON blob, so
+/// without it a payload written by a build with fewer (or renamed) fields
+/// fails to deserialize and the whole configuration silently reverts to
+/// defaults on the next launch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppSettings {
     pub theme_dark: bool,
     pub volume: f32,

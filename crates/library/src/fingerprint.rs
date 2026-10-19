@@ -2,9 +2,11 @@
 //!
 //! The goal is *not* cryptographic integrity but a stable identity for a media
 //! file that survives a move or rename: we combine the file size with a fast
-//! FNV-1a hash of the first and last 64 KiB. That is enough to tell two
-//! different tracks apart while staying far cheaper than hashing a whole
-//! multi-hundred-megabyte FLAC during a library scan.
+//! FNV-1a hash of the first, middle and last 64 KiB. Three probes rather than
+//! two is deliberate — head and tail alone let two different files that share
+//! their opening and closing 64 KiB collide, and a collision here can hand one
+//! track's play counts, favourites and playlist membership to another file.
+//! It stays far cheaper than hashing a whole multi-hundred-megabyte FLAC.
 //!
 //! [`Fingerprint::compute`] returns `None` when the file cannot be read, in
 //! which case callers keep whatever identity they had.
@@ -13,7 +15,7 @@ use std::fmt::Write as _;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-/// How many bytes are sampled from each end of the file.
+/// How many bytes are sampled at each probe point.
 const SAMPLE_BYTES: u64 = 64 * 1024;
 
 /// A computed fingerprint, formatted as `"<size>-<hash>"`.
@@ -36,21 +38,24 @@ impl Fingerprint {
         };
         mix(&len.to_le_bytes());
 
-        let mut head = vec![0u8; SAMPLE_BYTES.min(len) as usize];
-        if file.read_exact(&mut head).is_ok() {
-            mix(&head);
-        }
+        // Probe points: head, middle, tail. A file short enough to fit in one
+        // sample is read once from the start.
+        let mut offsets: Vec<u64> = if len <= SAMPLE_BYTES {
+            vec![0]
+        } else {
+            let mut v = vec![0u64, (len - SAMPLE_BYTES) / 2, len - SAMPLE_BYTES];
+            v.dedup();
+            v
+        };
+        offsets.shrink_to_fit();
 
-        // Only read a separate tail block when the file is longer than one
-        // sample, so small files are not hashed twice.
-        if len > SAMPLE_BYTES {
-            let tail_start = len - SAMPLE_BYTES;
-            if file.seek(SeekFrom::Start(tail_start)).is_ok() {
-                let mut tail = vec![0u8; SAMPLE_BYTES as usize];
-                if file.read_exact(&mut tail).is_ok() {
-                    mix(&tail);
-                }
-            }
+        let mut buf = vec![0u8; SAMPLE_BYTES.min(len) as usize];
+        for offset in offsets {
+            // A file that cannot be read all the way through gets no
+            // fingerprint at all, so it can never be mistaken for another.
+            file.seek(SeekFrom::Start(offset)).ok()?;
+            file.read_exact(&mut buf).ok()?;
+            mix(&buf);
         }
 
         let mut s = format!("{len}-");
@@ -107,22 +112,37 @@ mod tests {
     }
 
     #[test]
-    fn large_files_compare_head_and_tail() {
+    fn large_files_compare_head_middle_and_tail() {
         let dir = temp_dir("large");
         let a = dir.join("a.bin");
         let b = dir.join("b.bin");
-        // 300 KiB of identical data except for one byte at the very end.
-        let mut data = vec![7u8; 300 * 1024];
+        let c = dir.join("c.bin");
+
+        // 300 KiB of identical data, then one byte changed at the very end
+        // (`b`) and one in the middle only (`c`). The middle probe exists
+        // precisely so `c` cannot collide with `a`.
+        let data = vec![7u8; 300 * 1024];
         std::fs::write(&a, &data).unwrap();
-        let last = data.len() - 1;
-        data[last] = 9;
-        std::fs::write(&b, &data).unwrap();
-        let head = data.len() / 2;
-        data[head] = 3;
+
+        let mut tail_changed = data.clone();
+        let last = tail_changed.len() - 1;
+        tail_changed[last] = 9;
+        std::fs::write(&b, &tail_changed).unwrap();
+
+        let mut middle_changed = data.clone();
+        let middle = middle_changed.len() / 2;
+        middle_changed[middle] = 3;
+        std::fs::write(&c, &middle_changed).unwrap();
 
         let fa = Fingerprint::compute(&a).expect("a");
         let fb = Fingerprint::compute(&b).expect("b");
+        let fc = Fingerprint::compute(&c).expect("c");
         assert_ne!(fa, fb, "a differing tail byte must change the fingerprint");
+        assert_ne!(
+            fa, fc,
+            "a differing middle byte must change the fingerprint"
+        );
+        assert_ne!(fb, fc);
 
         let missing = Fingerprint::compute(&dir.join("nope.bin"));
         assert!(missing.is_none());

@@ -5,7 +5,7 @@ use domain::events::LibraryScanEvent;
 use log::{info, warn};
 use metadata::extract_metadata;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -60,15 +60,43 @@ impl LibraryScanner {
 
         info!("Starting incremental library scan for: {:?}", root);
 
-        let walker = WalkDir::new(root).follow_links(true).into_iter();
+        // Album images referenced by a `.cue` sheet are indexed as that sheet's
+        // tracks, so they must not *also* be indexed as one long track.
+        let cue_covered = self.collect_cue_covered_audio(root, &cancel_flag);
 
-        for entry in walker.filter_map(|e| e.ok()) {
+        // Every path the walk reached, so a file that vanished can be pruned
+        // afterwards. Pruning is skipped if the walk hit errors, because a
+        // permission problem must not look like a deletion.
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        let mut walk_errors = 0usize;
+
+        // `follow_links(false)`: following symlinks let a scan index files
+        // outside the chosen root (and index them twice through an alias).
+        let walker = WalkDir::new(root).follow_links(false).into_iter();
+
+        for entry in walker {
             if cancel_flag.load(Ordering::Relaxed) {
                 info!("Library scan cancelled");
                 return;
             }
 
-            if !entry.file_type().is_file() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    walk_errors += 1;
+                    warn!("Skipping unreadable entry under {}: {}", root.display(), e);
+                    continue;
+                }
+            };
+
+            // Directories are not descended into when they are symlinks, but a
+            // symlink to a file is still a file worth indexing.
+            let is_file = entry.file_type().is_file()
+                || (entry.file_type().is_symlink()
+                    && std::fs::metadata(entry.path())
+                        .map(|m| m.is_file())
+                        .unwrap_or(false));
+            if !is_file {
                 continue;
             }
 
@@ -83,6 +111,12 @@ impl LibraryScanner {
                     continue;
                 }
             } else {
+                continue;
+            }
+
+            seen.insert(path.to_path_buf());
+
+            if cue_covered.contains(path) {
                 continue;
             }
 
@@ -203,12 +237,43 @@ impl LibraryScanner {
             }
         }
 
+        if cancel_flag.load(Ordering::Relaxed) {
+            info!("Library scan cancelled");
+            return;
+        }
+
+        // Reconcile: anything under this root that the walk no longer sees is
+        // gone from disk. Without this, deleted files stayed in the library
+        // forever (the watcher only ever adds and updates).
+        let mut removed_count = 0usize;
+        if walk_errors == 0 {
+            match repo.list_paths_under_prefix(root) {
+                Ok(rows) => {
+                    for (id, path) in rows {
+                        if !seen.contains(&cue_base_path(&path)) {
+                            match repo.delete(&id) {
+                                Ok(()) => removed_count += 1,
+                                Err(e) => warn!("Could not remove missing track {}: {}", path.display(), e),
+                            }
+                        }
+                    }
+                }
+                Err(e) => warn!("Could not reconcile removed files under {}: {}", root.display(), e),
+            }
+        } else {
+            warn!(
+                "Skipping removal reconciliation for {}: the walk reported {} error(s)",
+                root.display(),
+                walk_errors
+            );
+        }
+
         let elapsed = start_time.elapsed().as_millis() as u64;
         let total_tracks = repo.count().unwrap_or(0);
 
         info!(
-            "Scan completed: {} scanned, {} added, {} updated in {}ms. Total library: {} tracks",
-            scanned_count, added_count, updated_count, elapsed, total_tracks
+            "Scan completed: {} scanned, {} added, {} updated, {} removed in {}ms. Total library: {} tracks",
+            scanned_count, added_count, updated_count, removed_count, elapsed, total_tracks
         );
 
         if let Some(ref tx) = event_sender {
@@ -217,6 +282,47 @@ impl LibraryScanner {
                 elapsed_ms: elapsed,
             });
         }
+    }
+
+    /// The album images that a `.cue` sheet in `root` claims, so the walk can
+    /// index the sheet instead of the image.
+    fn collect_cue_covered_audio(
+        &self,
+        root: &Path,
+        cancel_flag: &AtomicBool,
+    ) -> HashSet<PathBuf> {
+        let mut covered = HashSet::new();
+        let walker = WalkDir::new(root).follow_links(false).into_iter();
+        for entry in walker.filter_map(|e| e.ok()) {
+            if cancel_flag.load(Ordering::Relaxed) {
+                return covered;
+            }
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let is_cue = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("cue"))
+                .unwrap_or(false);
+            if !is_cue {
+                continue;
+            }
+            if let Some(audio) = metadata::cue_referenced_audio(path) {
+                covered.insert(audio);
+            }
+        }
+        covered
+    }
+}
+
+/// The real file behind a path, undoing the CUE virtual-path suffix when there
+/// is one. Used to decide whether the file a row was indexed from still exists.
+fn cue_base_path(path: &Path) -> PathBuf {
+    match path.to_str().and_then(domain::cue::parse_cue_virtual_path) {
+        Some(virtual_path) => PathBuf::from(virtual_path.audio),
+        None => path.to_path_buf(),
     }
 }
 
@@ -336,6 +442,84 @@ mod tests {
                 .any(|t| t.id == before.id),
             "favourite must survive the move"
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A file shorter than a second used to divide by zero while deriving its
+    /// bitrate, which aborted the whole scan.
+    #[test]
+    fn sub_second_files_do_not_abort_the_scan() {
+        let root = temp_root("short");
+        write_wav(&root.join("jingle.wav"), 440.0, 0.5);
+
+        let db = Database::in_memory().expect("in-memory db");
+        let scanner = LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
+        let repo = TrackRepo::new(db.clone());
+
+        scan(&scanner, &root);
+
+        assert_eq!(repo.count().unwrap(), 1);
+        assert!(repo.list_paths_under_prefix(&root).unwrap()[0].1.ends_with("jingle.wav"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One album image plus its `.cue` sheet must produce the sheet's tracks
+    /// only — not the tracks *and* a full-length copy of the image.
+    #[test]
+    fn a_cue_album_is_indexed_once() {
+        let root = temp_root("cue");
+        write_wav(&root.join("image.wav"), 440.0, 2.0);
+        std::fs::write(
+            root.join("album.cue"),
+            "PERFORMER \"Someone\"\nTITLE \"An Album\"\nFILE \"image.wav\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"One\"\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    TITLE \"Two\"\n    INDEX 01 00:01:00\n",
+        )
+        .unwrap();
+
+        let db = Database::in_memory().expect("in-memory db");
+        let scanner = LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
+        let repo = TrackRepo::new(db.clone());
+
+        scan(&scanner, &root);
+
+        let rows = repo.list_paths_under_prefix(&root).unwrap();
+        assert_eq!(rows.len(), 2, "two CUE tracks, no separate album image");
+        for (_, path) in &rows {
+            let parsed = domain::cue::parse_cue_virtual_path(path.to_str().unwrap())
+                .expect("a CUE virtual path");
+            assert!(
+                parsed.sheet.is_some(),
+                "the sheet must be recorded so playback does not have to guess"
+            );
+        }
+
+        // A second scan must be stable (nothing new, nothing pruned).
+        scan(&scanner, &root);
+        assert_eq!(repo.count().unwrap(), 2);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Files removed from disk must leave the library on the next scan.
+    #[test]
+    fn files_deleted_from_disk_are_pruned() {
+        let root = temp_root("prune");
+        write_wav(&root.join("keep.wav"), 440.0, 1.0);
+        write_wav(&root.join("drop.wav"), 660.0, 1.0);
+
+        let db = Database::in_memory().expect("in-memory db");
+        let scanner = LibraryScanner::new(db.clone(), Arc::new(ArtworkManager::new(root.join("art"))));
+        let repo = TrackRepo::new(db.clone());
+
+        scan(&scanner, &root);
+        assert_eq!(repo.count().unwrap(), 2);
+
+        std::fs::remove_file(root.join("drop.wav")).unwrap();
+        scan(&scanner, &root);
+
+        assert_eq!(repo.count().unwrap(), 1, "the missing file is reconciled away");
+        assert!(repo.list_paths_under_prefix(&root).unwrap()[0].1.ends_with("keep.wav"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
