@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.5.0] - 2026-10-19
 
 ### Added
 - **CLAP plugin hosting**: load and process standard CLAP audio plugins inside the DSP graph, with a generic parameter rack, per-plugin bypass and state save/restore.
@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bad data can no longer be lost silently** (audit milestone P0): metadata extraction no longer divides by zero on sub-second files; scans do not follow symlinks and do reconcile deletions; content fingerprints probe head, middle and tail; relinking requires the old file to be genuinely absent; `.cue`-covered album images are indexed as the sheet's tracks only; malformed ids are reported instead of reinvented; `ScanRoots` add is idempotent; absent settings fields fall back to defaults; SQLite pragmas are verified; the V3 migration is guarded against a lost migration row.
 - **Database correctness**: album year uses `MIN(year)`; full-text search builds a real FTS query from the tokenizer's own tokens (`AC/DC`, `don't`); playlist positions are compacted from an ordered read; smart-playlist rules that a field cannot express are repaired on load, and an unreadable rule blob matches nothing rather than everything.
 - **Library and sidecars**: organizing never overwrites a file that appeared after the plan was made and works across filesystems; `.m3u` files are decoded rather than assumed UTF-8, `file://` URIs percent-decode, relative paths survive a symlinked base directory, and unrepresentable paths are skipped instead of corrupting the playlist; the watcher coalesces event bursts, logs backend errors and ignores opens; LRC parsing understands metadata tags, `[offset:ms]` and multiple timestamps, and reads non-UTF-8 sidecars.
+- **Failures are reported, and files are read once** (audit milestone P3): every engine-command send logs when the engine is gone, and the output device/backend setters report whether the command was delivered instead of letting a settings change appear applied; settings, scan-root, import and playlist writes surface their errors; a failed repository read logs instead of looking like an empty library. The metadata extractor switches to the engine's single `probe_metadata` pass, so a scan reads each file once (three opens and three tag parses became one), and the engine offers one probe API instead of two overlapping ones.
+- **Engine honesty** (engine audit items E1-E25): the simulated PipeWire/JACK backends are deleted — an unimplemented backend is refused by name instead of "opening" silence; ASIO reports the driver's own rates, formats and channels; ALSA reads back the period/buffer size it negotiated; WASAPI pauses on the stream's idle event instead of busy-waiting on the caller thread; the true-peak meter is documented as the BS.1770-5 Annex 2 *definition* measured with the engine's own filter (not the published 48-tap table); the Shibata dither warns when an off-design rate reuses its 48 kHz curves; out-of-grid HRTF directions are reported as coverage instead of an unstated fallback; ADM capacity overflow is an error; the codec registry is reachable through the C FFI; `.oga` files are routed by content; and queue entries keep the playlist file's own metadata.
+- **CI passes what it checks**: both workspaces are rustfmt- and clippy-clean under `-D warnings`, the engine's long-broken `channel_gains` doc example is fenced as a formula rather than compiled as a doctest, and the six crates whose `src/tests.rs` nested a same-named module no longer trip `module_inception`.
 
 ---
 
