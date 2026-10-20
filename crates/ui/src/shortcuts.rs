@@ -75,6 +75,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
         description: "Open the command palette",
     },
     Shortcut {
+        keys: "F",
+        description: "Full-screen Now Playing",
+    },
+    Shortcut {
         keys: "Ctrl + B",
         description: "Toggle bit-perfect Pure Direct mode",
     },

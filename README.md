@@ -105,6 +105,7 @@ files or write ReplayGain tags.
 | / | Jump to the search box |
 | Ctrl + F | Jump to the search box |
 | Ctrl + Space | Open the command palette |
+| F | Full-screen Now Playing |
 | Ctrl + B | Toggle bit-perfect Pure Direct mode |
 | Ctrl + P | Open Settings & DSP studio |
 | Ctrl + N | Open the playlist editor (create or manage playlists) |

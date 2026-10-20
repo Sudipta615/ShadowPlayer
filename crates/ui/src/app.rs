@@ -447,6 +447,12 @@ impl ShadowPlayerApp {
             }
 
             if i.key_pressed(egui::Key::Escape) {
+                // The full-screen Now Playing mode is the outermost surface:
+                // Escape leaves it, and only then does the chain below run.
+                if self.app_state.now_playing_full {
+                    self.set_now_playing_full(ctx, false);
+                    return;
+                }
                 // The info popup is the topmost transient surface, so it takes
                 // the press first: one Escape must not close it *and* the
                 // layer behind it.
@@ -473,6 +479,10 @@ impl ShadowPlayerApp {
             }
             if i.key_pressed(egui::Key::Slash) {
                 self.request_search_focus();
+            }
+            if i.key_pressed(egui::Key::F) {
+                let next = !self.app_state.now_playing_full;
+                self.set_now_playing_full(ctx, next);
             }
             if i.key_pressed(egui::Key::L) {
                 self.coordinator.next();
@@ -2072,6 +2082,34 @@ impl ShadowPlayerApp {
     /// Switch between the normal library shell and the compact mini player.
     /// The viewport resize itself is applied in the frame loop so it can be
     /// undone cleanly when the user restores the normal window.
+    /// Enter or leave the full-screen Now Playing mode.
+    ///
+    /// The window goes genuinely full screen: the mode is about looking at
+    /// the music, and a large window inside a desktop is not that.
+    fn set_now_playing_full(&mut self, ctx: &egui::Context, enabled: bool) {
+        if self.app_state.now_playing_full == enabled {
+            return;
+        }
+        self.app_state.now_playing_full = enabled;
+        // The two modes are exclusive: the mini player and the full-screen
+        // view are both the whole window. Leaving the mini player means
+        // putting the normal geometry back before going full screen.
+        if enabled && self.app_state.mini_player {
+            self.app_state.mini_player = false;
+            self.mini_applied = false;
+            let (w, h) = self.normal_window_size;
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(640.0, 360.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
+                w.max(640.0),
+                h.max(360.0),
+            )));
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                egui::WindowLevel::Normal,
+            ));
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(enabled));
+    }
+
     fn set_mini_player(&mut self, enabled: bool) {
         self.app_state.mini_player = enabled;
     }
@@ -2659,6 +2697,9 @@ impl eframe::App for ShadowPlayerApp {
                     self.reload_library();
                 }
             }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_FULL").is_ok() {
+                self.app_state.now_playing_full = true;
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_STATS").is_ok() {
                 self.open_library_stats();
             }
@@ -2876,6 +2917,60 @@ impl eframe::App for ShadowPlayerApp {
         let lyrics_source = current_track
             .as_ref()
             .and_then(|t| self.lyrics_service.source(&t.id));
+
+        // The full-screen Now Playing mode: the window gives itself over to
+        // the artwork, the visualiser and the lyrics.
+        if self.app_state.now_playing_full {
+            let art = current_track
+                .as_ref()
+                .and_then(|t| self.artwork_service.get_texture(&t.id))
+                .cloned();
+            let full_events = crate::components::now_playing_full::NowPlayingFull {
+                title: current_track
+                    .as_ref()
+                    .map(|t| t.title.as_str())
+                    .unwrap_or("Nothing playing"),
+                artist: current_track
+                    .as_ref()
+                    .map(|t| t.artist.as_str())
+                    .unwrap_or("ShadowPlayer"),
+                album: current_track
+                    .as_ref()
+                    .map(|t| t.album.as_str())
+                    .unwrap_or(""),
+                artwork: art.as_ref(),
+                is_playing,
+                position_secs: telemetry.position_secs,
+                duration_secs: telemetry.duration_secs,
+                spectrum_db: &telemetry.spectrum.spectrum_db,
+                lyrics_lines: &active_lyrics,
+                active_lyric: active_lyric_idx,
+                theme: &self.theme,
+            }
+            .show(ui);
+
+            if full_events.toggle_play {
+                self.coordinator.toggle_play_pause();
+            }
+            if full_events.previous {
+                self.coordinator.previous();
+            }
+            if full_events.next {
+                self.coordinator.next();
+            }
+            if let Some(seek) = full_events.seek_secs {
+                self.session.seek(seek as f32);
+            }
+            if full_events.close {
+                self.set_now_playing_full(&ctx, false);
+            }
+
+            if !eval_holds_persistence() && self.settings_dirty {
+                self.save_persisted_settings();
+                self.settings_dirty = false;
+            }
+            return;
+        }
 
         // Mini player: a dedicated 320x110 shell instead of squeezing the
         // library chrome into a window that cannot hold it.

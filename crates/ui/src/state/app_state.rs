@@ -41,6 +41,9 @@ pub struct AppState {
     pub command_palette: crate::components::command_palette::CommandPaletteState,
     /// Single-window compact player mode.
     pub mini_player: bool,
+    /// The full-screen Now Playing mode: the window gives itself over to the
+    /// artwork, the visualiser and the lyrics.
+    pub now_playing_full: bool,
     /// Keep the mini player above other windows (best-effort on Wayland).
     pub mini_always_on_top: bool,
 
@@ -86,6 +89,7 @@ impl Default for AppState {
             library_stats_modal: Default::default(),
             command_palette: Default::default(),
             mini_player: false,
+            now_playing_full: false,
             mini_always_on_top: true,
 
             volume: 0.60,
