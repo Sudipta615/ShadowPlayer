@@ -692,31 +692,59 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
 
                     ui.horizontal(|ui| {
                         ui.label("Bass Shelf (80 Hz):");
-                        ui.add(
+                        let resp = ui.add(
                             egui::Slider::new(&mut state.demo_shelf_gain, -12.0..=12.0)
                                 .suffix(" dB"),
                         );
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Slider,
+                                true,
+                                "Bass Shelf (80 Hz)",
+                            )
+                        });
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Mid Peak (1.5 kHz):");
-                        ui.add(
+                        let resp = ui.add(
                             egui::Slider::new(&mut state.demo_peak_gain, -12.0..=12.0)
                                 .suffix(" dB"),
                         );
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Slider,
+                                true,
+                                "Mid Peak (1.5 kHz)",
+                            )
+                        });
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Mid Peak Q (Width):");
-                        ui.add(egui::Slider::new(&mut state.demo_peak_q, 0.5..=5.0));
+                        let resp = ui.add(egui::Slider::new(&mut state.demo_peak_q, 0.5..=5.0));
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Slider,
+                                true,
+                                "Mid Peak Q (Width)",
+                            )
+                        });
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Treble Shelf (10 kHz):");
-                        ui.add(
+                        let resp = ui.add(
                             egui::Slider::new(&mut state.demo_treble_gain, -12.0..=12.0)
                                 .suffix(" dB"),
                         );
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Slider,
+                                true,
+                                "Treble Shelf (10 kHz)",
+                            )
+                        });
                     });
 
                     if ui.button("Reset Sandbox to Flat (0 dB)").clicked() {

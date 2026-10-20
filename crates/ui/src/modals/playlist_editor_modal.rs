@@ -65,6 +65,9 @@ pub fn show_playlist_editor(
 ) -> PlaylistEditorActions {
     let mut actions = PlaylistEditorActions::default();
     if !state.is_open {
+        // Reset the "was open" flag, so the next time the dialog opens it
+        // takes the keyboard focus again.
+        state.was_open = false;
         return actions;
     }
 
@@ -252,6 +255,13 @@ pub fn show_playlist_editor(
                                         Vec2::new(ui.available_width(), 34.0),
                                         egui::Sense::click(),
                                     );
+                                    resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            true,
+                                            format!("Playlist: {}", pl.name),
+                                        )
+                                    });
                                     let is_hovered = resp.hovered();
 
                                     let rename_rect = egui::Rect::from_center_size(
@@ -431,6 +441,13 @@ pub fn show_playlist_editor(
                                             Vec2::new(16.0, 18.0),
                                             Sense::click(),
                                         );
+                                        up_resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                idx > 0,
+                                                "Move up in the playlist",
+                                            )
+                                        });
                                         let up_col = if idx > 0 && up_resp.hovered() {
                                             theme.accent_highlight
                                         } else if idx > 0 {
@@ -456,6 +473,13 @@ pub fn show_playlist_editor(
                                             Vec2::new(16.0, 18.0),
                                             Sense::click(),
                                         );
+                                        down_resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                idx + 1 < playlist_tracks.len(),
+                                                "Move down in the playlist",
+                                            )
+                                        });
                                         let can_down = idx + 1 < playlist_tracks.len();
                                         let down_col = if can_down && down_resp.hovered() {
                                             theme.accent_highlight

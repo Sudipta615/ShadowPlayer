@@ -386,11 +386,14 @@ pub fn show_autoeq_modal(
                                 .font(crate::theme::font(12.0))
                                 .color(theme.text_secondary),
                         );
-                        ui.add(
+                        let resp = ui.add(
                             egui::Slider::new(&mut state.max_gain_db, 3.0..=15.0)
                                 .suffix(" dB")
                                 .step_by(1.0),
                         );
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::Slider, true, "Maximum boost")
+                        });
                     });
 
                     ui.separator();

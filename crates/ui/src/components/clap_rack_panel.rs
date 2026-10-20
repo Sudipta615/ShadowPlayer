@@ -28,6 +28,7 @@ pub fn show_clap_rack_panel(
     let mut actions = ClapRackActions::default();
 
     if !state.is_open {
+        state.was_open = false;
         return actions;
     }
 
@@ -83,6 +84,10 @@ pub fn show_clap_rack_panel(
         state.window_pos = Some([inner.response.rect.min.x, inner.response.rect.min.y]);
     }
 
+    // Remember that it was open, so the focus is moved into it once, on the
+    // frame it opens.
+    state.was_open = state.is_open;
+
     actions
 }
 
@@ -103,7 +108,13 @@ fn render_header(
         );
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if pill(ui, "Close", theme, false).clicked() {
+            let close_resp = pill(ui, "Close", theme, false);
+            // The rack takes the keyboard focus when it opens, so the
+            // keyboard works straight away.
+            if !state.was_open {
+                ui.ctx().memory_mut(|m| m.request_focus(close_resp.id));
+            }
+            if close_resp.clicked() {
                 actions.close = true;
             }
         });
@@ -429,6 +440,11 @@ fn render_parameters(
             Vec2::new(ui.available_width(), 18.0),
             slider.smart_aim(false),
         );
+        // Name the slider after the parameter it controls, so a screen reader
+        // says which one it is.
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::Slider, true, param.name.clone())
+        });
         if response.changed() {
             actions.set_param = Some((param.id, value));
         }

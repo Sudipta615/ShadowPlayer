@@ -281,6 +281,9 @@ impl ClapCardSummary {
 #[derive(Default)]
 pub struct ClapRackState {
     pub is_open: bool,
+    /// Whether the rack was open last frame, so the keyboard focus can be
+    /// moved into it exactly once, when it opens.
+    pub was_open: bool,
     pub window_pos: Option<[f32; 2]>,
     pub presets: Vec<ClapRackPreset>,
     pub preset_name: String,

@@ -149,6 +149,9 @@ impl<'a> SideBar<'a> {
             if self.rail {
                 let (plus_rect, plus_resp) =
                     ui.allocate_exact_size(Vec2::new(40.0, 30.0), Sense::click());
+                plus_resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, "New playlist")
+                });
                 let plus_color = if plus_resp.hovered() {
                     self.theme.text_primary
                 } else {
@@ -337,6 +340,9 @@ impl<'a> SideBar<'a> {
         let trash_resp = ui
             .interact(trash_rect, trash_id, Sense::click())
             .on_hover_text("Delete smart playlist");
+        trash_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::Button, true, "Delete smart playlist")
+        });
 
         if trash_resp.clicked() {
             (self.on_delete_smart_playlist)(playlist.id);
@@ -473,6 +479,8 @@ impl<'a> SideBar<'a> {
         let trash_resp = ui
             .interact(trash_rect, trash_id, Sense::click())
             .on_hover_text("Delete playlist");
+        trash_resp
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Delete playlist"));
 
         if trash_resp.clicked() {
             (self.on_delete_playlist)(playlist.id);

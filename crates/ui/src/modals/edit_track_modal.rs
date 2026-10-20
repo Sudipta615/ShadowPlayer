@@ -63,6 +63,9 @@ pub fn show_edit_track_modal(
 ) -> EditTrackActions {
     let mut actions = EditTrackActions::default();
     if !state.is_open {
+        // Reset the "was open" flag, so the next time the dialog opens it
+        // takes the keyboard focus again.
+        state.was_open = false;
         return actions;
     }
 

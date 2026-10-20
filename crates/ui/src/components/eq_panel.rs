@@ -160,6 +160,9 @@ impl Default for ParametricBand {
 
 pub struct EqPanelState {
     pub is_open: bool,
+    /// Whether the studio was open last frame, so the keyboard focus can be
+    /// moved into it exactly once, when it opens.
+    pub was_open: bool,
     pub active_tab: EqTab,
     pub show_more_menu: bool,
     pub selected_preset: EqPreset,
@@ -233,6 +236,7 @@ impl Default for EqPanelState {
 
         Self {
             is_open: false,
+            was_open: false,
             active_tab: EqTab::Graphic,
             show_more_menu: false,
             selected_preset: EqPreset::Flat,
@@ -521,6 +525,7 @@ pub fn show_eq_panel(
     let mut actions = EqPanelActions::default();
 
     if !state.is_open {
+        state.was_open = false;
         return actions;
     }
 
@@ -655,6 +660,7 @@ fn render_header(
     actions: &mut EqPanelActions,
     theme: &Theme,
 ) {
+    let ctx = ui.ctx().clone();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
 
@@ -688,6 +694,16 @@ fn render_header(
             // Close button (✕)
             let (close_rect, close_resp) =
                 ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
+            // The studio takes the keyboard focus when it opens, so the
+            // keyboard works straight away instead of staying wherever it
+            // was in the library behind.
+            if !state.was_open {
+                ctx.memory_mut(|m| m.request_focus(close_resp.id));
+            }
+            close_resp.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Button, true, "Close the DSP studio")
+            });
+            let _ = close_resp.clone().on_hover_text("Close the DSP studio");
             let cp = ui.painter_at(close_rect);
             let close_bg = if close_resp.hovered() {
                 Color32::from_rgba_premultiplied(239, 68, 68, 50)
@@ -713,6 +729,10 @@ fn render_header(
             }
         });
     });
+
+    // Remember that it was open, so the focus is moved into it once, on the
+    // frame it opens.
+    state.was_open = state.is_open;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2040,6 +2060,10 @@ fn render_footer_controls(
         // Tab-Specific Reset Button
         let (reset_rect, reset_resp) =
             ui.allocate_exact_size(Vec2::new(reset_btn_w, 58.0), Sense::click());
+        reset_resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::Button, true, "Reset this section")
+        });
+        let _ = reset_resp.clone().on_hover_text("Reset this section");
         let rp = ui.painter_at(reset_rect);
         let bg = if reset_resp.hovered() {
             theme.accent

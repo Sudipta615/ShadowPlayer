@@ -214,3 +214,54 @@ The engine is a huge, unusually well-documented crate (1291 tests; zero `todo!()
 ## 8. Feature-completeness verdict
 
 All 22 product features (MPRIS2, smart playlists, library-wide ReplayGain + tag write, multi-select/bulk, stable identity, rfd import, playlist manager, edit-song-info, sleep timer, play stats, virtualization/artwork LRU, M3U import/export, watch roots + startup reconcile, duplicate finder, batch organize/rename, CLAP rack, chain presets, tag/sidecar lyrics, recently-added + chips + toasts, bass/LFE/up-and-down-mix, DSP precision + runtime diagnostics) are **implemented end-to-end**. There are no stub features. The gaps are correctness, robustness, persistence and documentation drift, not missing functionality — with three exceptions: **sort direction** (B20/C1), the **unreachable Advanced Audio modal** (B12), and the **fake PipeWire/JACK backends** (E1–E3, currently unreachable from the UI). The engine advertises far more than the desktop app exposes (E25 / C5), so the standalone-library surface and the app surface should be reconciled deliberately rather than left to drift.
+
+---
+
+## 9. UI/UX audit (second pass) — findings and resolutions
+
+A separate review of `crates/ui` (27k LOC) covered the interface rather than
+the data and the engine. It found one P0 that made an advertised feature
+unusable, three P1s where implemented functionality had no way to be
+reached, and a set of P2s around contrast, accessible naming and layout
+consistency. All of them are resolved; the list is kept here because the
+reasoning matters more than the fixes.
+
+### P0 — the global keyboard shortcuts could never fire
+
+- [x] **U1 · The `!i.focused` guard inverted the intent.** `crates/ui/src/app.rs` guarded the transport shortcuts on `if !i.focused`. `InputState::focused` is the *native window* focus — whether the OS is delivering key presses to this window — not "a widget has focus" (egui `input_state/mod.rs:313-316`; set from winit's `WindowEvent::Focused`). The bindings therefore ran only while the window was in the background, where no key event is delivered at all. Space/K, J, L, M, S, R and the four arrows were dead code, while `README.md` and the in-app Help both advertised all of them. The guard now checks that no text field owns the keyboard, and the plain-letter bindings ignore modifier chords, so `Ctrl+M` and friends stay available to the OS. The handler also leaves Space alone when a widget holds focus, because egui synthesises a click for a focused widget on Space/Enter.
+- [x] **U2 · The system clipboard never reached the OS.** `crates/ui/Cargo.toml` used eframe with `default-features = false` and re-enabled `accesskit` but not `clipboard`, so egui-winit fell back to "a fallback clipboard that just works within the same app" (`egui-winit/src/clipboard.rs:3-5`). Ctrl+C/V in the search field, the folder path and the playlist name could not reach the system clipboard.
+
+### P1 — implemented but unreachable
+
+- [x] **U3 · The quick-filter chips were never rendered.** `QuickFilter::ALL` (`components/songs_table.rs:19-51`) was never drawn and `quick_filter_changed` was never set to `Some`, so the Lossless / Hi-Res / Favorites / Played filtering — complete and correct at `state/library_state.rs:239-248` — had no way to be reached, while the README claimed "quick-filter chips".
+- [x] **U4 · The Hi-Res and Lossless collections had no entry point.** `NavItem::HiRes` and `NavItem::Lossless` had full render paths and data paths, but the sidebar section that would have linked to them had been removed. **Resolution:** the collections are deleted, and the information moved onto the tracks themselves as a per-track `HI-RES` / `LOSSLESS` tag plus the quick-filter chips. `Track::is_hires` is now the single definition, shared by the tag, the chip and the library filters, so they cannot disagree.
+- [x] **U5 · `NavItem::RecentlyAdded` had no entry point** either. It is in the sidebar now, alongside Favorites / Recently Played / Most Played.
+- [x] **U6 · The album and artist grids never loaded artwork.** `components/albums_view.rs` painted `artwork_placeholder` and a disc glyph unconditionally, and `components/artists_view.rs` painted a permanent placeholder circle. Artwork is cached per *track* and the grids only knew the album or artist, so the detail view could show a cover the grid could not. `LibraryState` now keeps a representative track per album and per artist, rebuilt on reload, and the grids load through the same per-frame decode budget the song table uses.
+
+### P2 — honesty, contrast and consistency
+
+- [x] **U7 · The light theme failed WCAG AA.** `accent_highlight` was 3.74:1 and `text_dim` 2.97:1 against the page, and both are used for body text — album titles, artist names, the active sort header. The dark theme's `text_dim` failed too, at 3.53:1. All text tokens now clear 4.5:1 against every surface they can land on, in both themes, and a test asserts it.
+- [x] **U8 · A text input's boundary was 1.23:1.** WCAG 1.4.11 asks for 3:1 on anything a user has to be able to identify, and a text field's fill sits almost on top of the page's, so its border is the only thing that says "this is an input". There is a `border_input` token now, and the search field and the Help search box use it.
+- [x] **U9 · The README's accessibility claim was false.** It said accesskit "is not enabled in this build, so assistive technology sees a blank window", and that "keyboard operation is complete" — accesskit *was* enabled (`crates/ui/Cargo.toml:17` → `eframe/accesskit` → `accesskit_winit::init_accesskit`), and keyboard operation was neither complete nor, at the time, working at all. Both halves are corrected.
+- [x] **U10 · The dialogs were not modals.** All eight were `egui::Window`s, which leave the background live: a click behind a dialog still landed on the track table, and Tab walked straight out of it, because egui's focus ring is flat across every layer and nothing set a modal layer. They are `egui::Modal`s now, with a backdrop, a focus trap, and the app's own title bar. The focus moves into a dialog when it opens.
+- [x] **U11 · Controls that could not be reached by keyboard.** The queue/lyrics switcher, the queue reorder buttons and the row favourite hearts were hit-tested with `rect_contains_pointer` and `pointer.primary_clicked()`, so they never created a `Response` and were absent from the accessibility tree. They are real widgets now. Every interactive control carries an accessible name, a role and a tooltip.
+- [x] **U12 · The sort pill lied.** It drew a chevron-down and cycled through the seven sort fields one click at a time. It opens a menu now, and the active column shows the sort direction, which used to be signalled by colour alone.
+- [x] **U13 · The song table's header did not line up with its rows.** The header spent 8 px on each of its six gaps while the row budgeted 40 px in total, so the columns drifted apart and the header overflowed by 8 px. Both now share one column model. Artist, album and title were painted with `Painter::text`, which never truncates, so a long album name ran over the duration column; they are truncated now.
+- [x] **U14 · The songs table had no empty state.** An empty library, a search that matched nothing and an empty playlist were all a blank area under a header. They explain themselves now, and an empty library offers an "Add a music folder" button.
+- [x] **U15 · Three dialogs were larger than the app's own 640×360 minimum window**, with `resizable(false)`, so their contents fell outside the window with no way to reach them.
+- [x] **U16 · Escape closed two things at once** — the info popup and the layer behind it. The popup now owns the key.
+- [x] **U17 · There was no design system beyond colour.** 240 corner-radius calls across 16 literal values, 53 margin calls, 176 spacing overrides — and `ui.spacing()` was read zero times, so the spacing the theme set was dead. The same widget family used three radii in the sidebar alone. There is now one radius scale and one spacing scale, and the egui widget radius follows it.
+- [x] **U18 · The instrument panels ignored the theme.** The VU meters, the LUFS meter and the spatial radar hardcoded a dark navy that stayed dark in light mode, and the bit-perfect modal's signal-flow panel was near-black in both.
+- [x] **U19 · The app had no motion at all** — zero `animate*` calls. The queue/lyrics pill now slides, the grid/list toggle and the filter chips fade, and the navigation highlights fade in. egui's animation helpers are used, so a repaint is only requested while something is moving and the app settles back to zero idle cost.
+- [x] **U20 · The copy was inconsistent.** "Favorites" and "Favourites" appeared in the same interface, and the rest of the app is US English throughout. It is "Favorites" now, in the code and in the docs.
+- [x] **U21 · A debug hook was in the release path.** The song table read `SHADOWPLAYER_EVAL` from the environment for every row of every frame. It is behind the `eval-tools` feature now.
+
+### Also resolved
+
+- [x] **U22 · The unreachable help modal is gone.** `components/help_modal.rs` held a second copy of the shortcut table, and `help_modal_open` was only ever cleared, never set. The shortcut list now has one home, in `crates/ui/src/shortcuts.rs`, and a test fails the build if the README's table drifts from it.
+- [x] **U23 · The now-playing artwork jumped between three fixed sizes** instead of scaling with the card, and the transport row could overlap below about 250 px of width.
+- [x] **U24 · The song table's empty state did not fit** at the app's own minimum window height.
+
+### Verdict
+
+The interface was not missing features; it was *disagreeing with itself*. The visual layer was well made — a coherent identity, a real type scale, good dark-mode contrast, a sensible responsive shell — while the interaction layer advertised a keyboard interface that could not fire, a filter that could not be reached, and collections with no way in. Every finding above was a place where the app said one thing and did another, and each is now a place where they agree.

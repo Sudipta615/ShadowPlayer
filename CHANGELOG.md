@@ -6,6 +6,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Quick-filter chips**: All / Lossless / Hi-Res / Favorites / Played narrow the current view without leaving it. The filtering was fully implemented and simply had no way to be reached.
+- **Per-track quality tags**: every track carries a `HI-RES` or `LOSSLESS` tag in the song table, so the format of a file is visible at a glance. `Track::is_hires` is now the single definition of "Hi-Res", shared by the tag, the chip and the library filters.
+- **Recently Added** in the sidebar: the nav item had a render path and a data path but no entry point.
+- **Real cover art in the album and artist grids**: both painted a permanent placeholder, because artwork is cached per *track* and the grids only knew the album or artist. The library now keeps a representative track per album and per artist, and the grids load covers through the same per-frame decode budget the song table uses.
+- **Empty states**: the song table, the queue panel and the grid views explain an empty list and offer a way out. An empty library offers an "Add a music folder" button, and a search that matched nothing offers to clear the search.
+- **A real sort menu**: the sort pill draws a chevron, so it now opens a menu instead of cycling through the fields one click at a time. The active column also shows the sort direction, which used to be signalled by colour alone.
+- **Motion**: the queue/lyrics pill slides between the tabs, the grid/list toggle fades, the navigation and collection highlights fade in, and the quick-filter chips fade to their active state. egui's animation helpers are used, so a repaint is only requested while something is moving.
+- **`/` and `Ctrl+F`** jump to the search box, which could previously only be reached with the mouse.
+
+### Fixed
+- **The global keyboard shortcuts could never fire.** The guard read `if !i.focused`, but `InputState::focused` is the *native window* focus — whether the OS is delivering key presses here — not "a widget has focus". The bindings therefore only ran while the window was in the background, where no key event is delivered at all. Space/K, J, L, M, S, R and the four arrows were dead code, while the README and the in-app Help both advertised them. The guard now checks that a text field does not own the keyboard, and the plain-letter bindings ignore modifier chords so `Ctrl+M` and friends stay available to the OS.
+- **The system clipboard**: eframe's `clipboard` feature was not enabled, so egui fell back to an app-internal clipboard and Ctrl+C/V never reached the OS.
+- **The dialogs are real modals.** They were `egui::Window`s, which leave the library behind them live: a click behind a dialog still landed on the track table, and Tab walked straight out of it. They are `egui::Modal`s now, with a backdrop, a focus trap, and the app's own title bar. The keyboard focus moves into a dialog when it opens, so the user can start typing straight away.
+- **Light-mode contrast**: `accent_highlight` was 3.74:1 and `text_dim` 2.97:1 against the page, and both are used for body text. The dark theme's `text_dim` failed too, at 3.53:1. All text tokens now clear WCAG AA in both themes, and the search field's border clears the 3:1 bar for a text input's boundary. Tests assert this, so it cannot regress.
+- **The song table's header did not line up with its rows.** The header and the rows computed their positions separately, so the columns drifted apart and the header overflowed by 8 px. Both now share one column model, and artist, album and title are truncated instead of running over the duration column.
+- **Three dialogs were larger than the app's own minimum window**, with `resizable(false)`, so their contents fell outside it with no way to reach them.
+- **Escape closed two things at once** — the info popup and the layer behind it.
+- **The queue/lyrics switcher, the queue reorder buttons and the favourite hearts** were hit-tested with raw pointer maths, so they were absent from the accessibility tree and unreachable by keyboard. They are real widgets now, and every interactive control carries an accessible name, a role and a tooltip.
+- **The instrument panels ignored the theme.** The VU meters, the LUFS meter and the spatial radar hardcoded a dark navy that stayed dark in light mode.
+- **The now-playing artwork jumped between three fixed sizes** instead of scaling with the card, and the transport row could overlap below about 250 px.
+- **The song table read `SHADOWPLAYER_EVAL` from the environment** for every row of every frame, in release builds too. The check is behind the `eval-tools` feature now.
+- The copy was a mix of "Favorites" and "Favourites" in the same interface; it is "Favorites" throughout, matching the rest of the app's US English.
+
+### Changed
+- **The Hi-Res and Lossless collections are gone.** They were unreachable nav items whose only entry point was a sidebar section that had been removed. The engine still plays those formats; the information now lives on the tracks themselves, as a per-track tag and as a quick filter.
+- **One radius scale and one spacing scale.** The theme tokenised colour and nothing else: there were 240 corner-radius calls across 16 literal values, and 176 spacing overrides while `ui.spacing()` was read zero times. Every radius and every spacing now reads its value from the theme, and the egui widget radius follows the same scale.
+- **One card width and one gutter** across the album, artist, genre and song grids, so the columns line up from one view to the next.
+- The README's "Known limitations" no longer claims that screen-reader support is absent — accesskit was enabled all along, and the labelling is now much more complete.
+
+---
+
 ## [0.6.0] - 2026-10-20
 
 ### Added
