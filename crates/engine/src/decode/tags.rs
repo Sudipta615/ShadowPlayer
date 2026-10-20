@@ -124,6 +124,117 @@ pub fn write_loudness_tags(path: &Path, meta: &LoudnessMetadata) -> Result<(), T
     Ok(())
 }
 
+/// The editorial tags the player can write back into a file.
+///
+/// These are the fields a person edits in the "Edit Song Info" dialog. The
+/// file is the source of truth for a music library, so an edit that only
+/// lives in the database is lost the moment the file moves or the library is
+/// rebuilt from disk.
+#[cfg(feature = "tag-write")]
+#[derive(Debug, Clone, Default)]
+pub struct EditorialTags {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<u32>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+}
+
+#[cfg(feature = "tag-write")]
+impl EditorialTags {
+    fn is_empty(&self) -> bool {
+        self.title.is_none()
+            && self.artist.is_none()
+            && self.album.is_none()
+            && self.genre.is_none()
+            && self.year.is_none()
+            && self.track_number.is_none()
+            && self.disc_number.is_none()
+    }
+}
+
+/// Write editorial tags — title, artist, album, genre, year, track and disc
+/// numbers — into `path`'s tags.
+///
+/// Only the fields that are `Some` are written; the rest of the file's tags
+/// are left alone. A file whose container cannot carry tags (raw PCM, DSD)
+/// is left untouched with an explicit error, exactly as for the loudness
+/// writer.
+#[cfg(feature = "tag-write")]
+pub fn write_editorial_tags(path: &Path, tags: &EditorialTags) -> Result<(), TagWriteError> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+
+    // DSD: do not touch (block-aligned bitstream + an ID3v2 tag most players
+    // ignore; mutating it risks corrupting the layout).
+    if matches!(ext.to_ascii_lowercase().as_str(), "dsf" | "dff") {
+        return Err(TagWriteError::UnsupportedContainer(
+            "DSD (DSF/DFF) files are not tagged".to_string(),
+        ));
+    }
+
+    if tags.is_empty() {
+        return Ok(());
+    }
+
+    let tag_type = preferred_tag_type(ext)
+        .ok_or_else(|| TagWriteError::UnsupportedContainer(ext.to_string()))?;
+
+    let mut tagged = read_from_path(path).map_err(lofty_err)?;
+
+    {
+        let tag = match tagged.primary_tag_mut() {
+            Some(tag) => tag,
+            None => {
+                tagged.insert_tag(Tag::new(tag_type));
+                tagged
+                    .primary_tag_mut()
+                    .ok_or_else(|| TagWriteError::Lofty("tag insertion failed".to_string()))?
+            }
+        };
+        set_editorial(tag, tags);
+    }
+
+    tagged
+        .save_to_path(path, WriteOptions::default())
+        .map_err(lofty_err)?;
+    Ok(())
+}
+
+/// Write the editorial values into `tag` using container-agnostic keys.
+#[cfg(feature = "tag-write")]
+fn set_editorial(tag: &mut Tag, tags: &EditorialTags) {
+    if let Some(v) = &tags.title {
+        tag.insert_text(ItemKey::TrackTitle, v.clone());
+    }
+    if let Some(v) = &tags.artist {
+        tag.insert_text(ItemKey::TrackArtist, v.clone());
+    }
+    if let Some(v) = &tags.album {
+        tag.insert_text(ItemKey::AlbumTitle, v.clone());
+    }
+    if let Some(v) = &tags.genre {
+        tag.insert_text(ItemKey::Genre, v.clone());
+    }
+    if let Some(v) = tags.year {
+        // `RecordingDate` is the key every container supports: it maps to
+        // TDRC for ID3v2, DATE for Vorbis comments, and `©day` for MP4.
+        // `ItemKey::Year` is rejected outright by ID3v2 and MP4, so a year
+        // written with it silently vanished from every MP3 and M4A file.
+        tag.insert_text(ItemKey::RecordingDate, v.to_string());
+    }
+    if let Some(v) = tags.track_number {
+        tag.insert_text(ItemKey::TrackNumber, v.to_string());
+    }
+    if let Some(v) = tags.disc_number {
+        tag.insert_text(ItemKey::DiscNumber, v.to_string());
+    }
+}
+
 /// Write the loudness values into `tag` using container-agnostic keys.
 ///
 /// R128 keys are written in the EBU R128 integer form (`LUFS × 100`, e.g.
@@ -261,6 +372,54 @@ mod tests {
             Some("-4.00 dB")
         );
         assert!(tag.get_string(ItemKey::ReplayGainTrackPeak).is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writes_and_reads_back_editorial_tags() {
+        let dir = test_dir("editorial");
+        let path = dir.join("editorial.wav");
+        std::fs::write(&path, build_wav(4410)).unwrap();
+
+        let tags = EditorialTags {
+            title: Some("Weightless".into()),
+            artist: Some("Marconi Union".into()),
+            album: Some("Ambient Transmissions".into()),
+            genre: Some("Ambient".into()),
+            year: Some(2015),
+            track_number: Some(3),
+            disc_number: Some(1),
+        };
+        write_editorial_tags(&path, &tags).expect("write_editorial_tags failed");
+
+        let tagged = lofty::read_from_path(&path).expect("read_from_path failed");
+        let tag = tagged.primary_tag().expect("tag must exist");
+        assert_eq!(tag.get_string(ItemKey::TrackTitle), Some("Weightless"));
+        assert_eq!(tag.get_string(ItemKey::TrackArtist), Some("Marconi Union"));
+        assert_eq!(
+            tag.get_string(ItemKey::AlbumTitle),
+            Some("Ambient Transmissions")
+        );
+        assert_eq!(tag.get_string(ItemKey::Genre), Some("Ambient"));
+        assert_eq!(tag.get_string(ItemKey::RecordingDate), Some("2015"));
+        assert_eq!(tag.get_string(ItemKey::TrackNumber), Some("3"));
+        assert_eq!(tag.get_string(ItemKey::DiscNumber), Some("1"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_empty_editorial_write_is_a_no_op() {
+        let dir = test_dir("editorial_empty");
+        let path = dir.join("untouched.wav");
+        std::fs::write(&path, build_wav(4410)).unwrap();
+        let before = std::fs::metadata(&path).unwrap().len();
+
+        write_editorial_tags(&path, &EditorialTags::default()).expect("no-op write failed");
+
+        let after = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(before, after, "an empty write must not touch the file");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

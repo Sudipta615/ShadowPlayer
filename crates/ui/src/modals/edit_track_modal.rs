@@ -19,12 +19,21 @@ pub struct EditTrackState {
     year: String,
     track_number: String,
     disc_number: String,
+    /// Whether saving should also write the tags into the file.
+    ///
+    /// The file is the source of truth for a music library: an edit that only
+    /// lives in the database is lost the moment the file moves or the library
+    /// is rebuilt from disk.
+    write_to_file: bool,
 }
 
 impl EditTrackState {
     /// Open the dialog seeded with the given track's current tags.
     pub fn open_with(&mut self, track: &Track) {
         self.is_open = true;
+        // Writing the tags back is the default: the file is the source of
+        // truth for a music library.
+        self.write_to_file = true;
         self.editing = Some(track.clone());
         self.title = track.title.clone();
         self.artist = track.artist.clone();
@@ -43,6 +52,9 @@ impl EditTrackState {
 pub struct EditTrackActions {
     /// The edited track to persist.
     pub save: Option<Track>,
+    /// The user asked for the changes to be written into the file's own tags
+    /// as well as the library.
+    pub write_to_file: bool,
 }
 
 fn parse_opt_u32(s: &str) -> Option<u32> {
@@ -121,7 +133,26 @@ pub fn show_edit_track_modal(
             );
             field(ui, "Disc #", &mut state.disc_number, disc_number_field_id);
 
-            ui.add_space(4.0);
+            ui.add_space(2.0);
+            // The file is the source of truth. Writing the tags back is the
+            // default, because an edit that only lives in the database is
+            // lost the moment the file moves.
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                ui.add(egui::Checkbox::new(&mut state.write_to_file, ""));
+                ui.label(
+                    egui::RichText::new("Write the tags into the file too")
+                        .font(crate::theme::font(12.0))
+                        .color(theme.text_secondary),
+                );
+                let _ = ui.label(
+                    egui::RichText::new("— the file is the source of truth")
+                        .font(crate::theme::font(11.0))
+                        .color(theme.text_dim),
+                );
+            });
+
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let save_btn = egui::Button::new(egui::RichText::new("Save").color(Color32::WHITE))
                     .fill(theme.accent);
@@ -161,6 +192,7 @@ pub fn show_edit_track_modal(
             track.track_number = parse_opt_u32(&state.track_number);
             track.disc_number = parse_opt_u32(&state.disc_number);
             actions.save = Some(track);
+            actions.write_to_file = state.write_to_file;
         }
         is_open = false;
     } else if cancel {

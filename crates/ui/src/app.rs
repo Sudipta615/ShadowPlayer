@@ -2638,6 +2638,11 @@ impl eframe::App for ShadowPlayerApp {
                     self.reload_library();
                 }
             }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_EDIT").is_ok() {
+                if let Some(track) = self.library_state.all_tracks.first().cloned() {
+                    self.app_state.edit_track.open_with(&track);
+                }
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_PALETTE").is_ok()
             {
                 self.app_state.command_palette_open = true;
@@ -3602,6 +3607,33 @@ impl eframe::App for ShadowPlayerApp {
         if let Some(track) = edit_actions.save {
             if let Err(e) = self.track_repo.update_metadata(&track) {
                 log::warn!("Could not save track metadata: {}", e);
+            }
+            // The file is the source of truth: an edit that only lives in the
+            // database is lost the moment the file moves or the library is
+            // rebuilt from disk, so the tags are written back too.
+            if edit_actions.write_to_file {
+                let tags = engine::decode::EditorialTags {
+                    title: Some(track.title.clone()),
+                    artist: Some(track.artist.clone()),
+                    album: Some(track.album.clone()),
+                    genre: track.genre.clone(),
+                    year: track.year,
+                    track_number: track.track_number,
+                    disc_number: track.disc_number,
+                };
+                match engine::decode::write_editorial_tags(&track.path, &tags) {
+                    Ok(()) => self.toasts.success(format!(
+                        "Updated the tags in {}",
+                        track
+                            .path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| track.path.display().to_string())
+                    )),
+                    Err(e) => self.toasts.warning(format!(
+                        "Saved in the library, but the file's tags could not be written: {e}"
+                    )),
+                }
             }
             self.reload_library();
         }

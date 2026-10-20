@@ -49,8 +49,7 @@ pub use symphonia_decoder::{
     DecodeInfo, DecodedChunk, ProbedMetadata, SymphoniaDecoder,
 };
 #[cfg(feature = "tag-write")]
-pub use tags::write_loudness_tags;
-pub use tags::TagWriteError;
+pub use tags::{write_editorial_tags, write_loudness_tags, EditorialTags, TagWriteError};
 #[cfg(feature = "codec-tta")]
 pub use tta::TtaDecoder;
 #[cfg(feature = "codec-wavpack")]
