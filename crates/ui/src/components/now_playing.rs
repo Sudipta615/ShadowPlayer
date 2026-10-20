@@ -101,13 +101,11 @@ impl<'a> NowPlayingCard<'a> {
                 );
 
                 // 1. Album Artwork (Rounded Square)
-                let art_size = Vec2::splat(if dense {
-                    72.0
-                } else if compact {
-                    108.0
-                } else {
-                    170.0
-                });
+                //
+                // The artwork scales with the width the card has, instead of
+                // jumping between three fixed sizes, so the card keeps its
+                // proportions at every window size.
+                let art_size = Vec2::splat((ui.available_width() * 0.30).clamp(64.0, 170.0));
                 let (art_rect, _) = ui.allocate_exact_size(art_size, Sense::hover());
                 let painter = ui.painter_at(art_rect);
 
@@ -210,9 +208,9 @@ impl<'a> NowPlayingCard<'a> {
                                 self.is_favorite,
                             );
                             let _ = heart_resp.clone().on_hover_text(if self.is_favorite {
-                                "Remove from favourites"
+                                "Remove from favorites"
                             } else {
-                                "Add to favourites"
+                                "Add to favorites"
                             });
 
                             heart_resp.widget_info(|| {
@@ -394,11 +392,24 @@ impl<'a> NowPlayingCard<'a> {
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             let avail_w = ui.available_width();
-                            let center_group_w = 210.0;
-                            let left_pad = ((avail_w - center_group_w - 68.0) / 2.0).max(0.0);
+                            // The right-hand group (the EQ and sleep-timer
+                            // buttons) is a fixed 68 px; the transport group
+                            // takes what is left. The padding is what centres
+                            // the transport group in the space between the
+                            // artwork and the right-hand group, and it
+                            // shrinks rather than letting the row overlap.
+                            let right_group_w = 68.0;
+                            let transport_w = (avail_w - right_group_w).max(120.0);
+                            let left_pad = ((transport_w - 210.0) / 2.0).max(0.0);
                             ui.add_space(left_pad);
-                            ui.spacing_mut().item_spacing =
-                                Vec2::new(if compact { 12.0 } else { 20.0 }, 0.0);
+                            let gap = if avail_w < 380.0 {
+                                8.0
+                            } else if compact {
+                                12.0
+                            } else {
+                                20.0
+                            };
+                            ui.spacing_mut().item_spacing = Vec2::new(gap, 0.0);
 
                             // Shuffle Button
                             let (shuf_slot, shuf_resp) =
@@ -450,14 +461,9 @@ impl<'a> NowPlayingCard<'a> {
                                 events.prev_track = true;
                             }
 
-                            // Play/Pause Big Circular Button (48x48)
-                            let play_size = Vec2::splat(if dense {
-                                34.0
-                            } else if compact {
-                                44.0
-                            } else {
-                                48.0
-                            });
+                            // Play/Pause Big Circular Button, sized from the
+                            // artwork so the two stay in proportion.
+                            let play_size = Vec2::splat((art_size.x * 0.30).clamp(32.0, 48.0));
                             let (play_rect, play_resp) =
                                 ui.allocate_exact_size(play_size, Sense::click());
                             let painter = ui.painter_at(play_rect);

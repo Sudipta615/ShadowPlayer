@@ -265,7 +265,7 @@ impl<'a> RightPanel<'a> {
                         let artwork = &mut *self.artwork;
                         egui::ScrollArea::vertical()
                             .id_salt("queue_items_scroll")
-                            .max_height(370.0)
+                            .max_height((ui.available_height() - 40.0).clamp(120.0, 520.0))
                             .auto_shrink([false, false])
                             .show_rows(ui, item_height, display_len, |ui, row_range| {
                                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
@@ -553,7 +553,7 @@ impl<'a> RightPanel<'a> {
                             if let Some(plain) = self.plain_lyrics {
                                 egui::ScrollArea::vertical()
                                     .id_salt("plain_lyrics_scroll")
-                                    .max_height(360.0)
+                                    .max_height((ui.available_height() - 40.0).clamp(120.0, 520.0))
                                     .show(ui, |ui| {
                                         ui.spacing_mut().item_spacing =
                                             Vec2::new(0.0, self.theme.space_sm);
@@ -643,6 +643,10 @@ impl<'a> RightPanel<'a> {
             });
 
             // 2. Dedicated Bottom Volume Control below Card (speaker + full-width slider)
+            //
+            // Pinned to the bottom of the drawer. It used to be pushed down
+            // by whatever height the queue happened to have, so it drifted
+            // around as the queue grew and shrank.
             let space_to_bottom = (ui.available_height() - 24.0).max(8.0);
             ui.add_space(space_to_bottom);
             ui.horizontal(|ui| {

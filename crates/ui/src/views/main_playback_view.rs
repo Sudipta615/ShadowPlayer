@@ -17,7 +17,7 @@ pub struct MainViewAction {
     pub switch_nav: Option<NavItem>,
     pub create_playlist: bool,
     pub open_eq_panel: bool,
-    /// Some table action changed the visible dataset (sort/favourite/playlist);
+    /// Some table action changed the visible dataset (sort/favorite/playlist);
     /// rebuild the displayed list for the current tab.
     pub needs_reload: bool,
     /// A track was removed from the library; a full reload is required.

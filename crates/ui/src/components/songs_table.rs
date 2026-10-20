@@ -39,7 +39,7 @@ impl QuickFilter {
             QuickFilter::All => "All",
             QuickFilter::Lossless => "Lossless",
             QuickFilter::HiRes => "Hi-Res",
-            QuickFilter::Favorites => "Favourites",
+            QuickFilter::Favorites => "Favorites",
             QuickFilter::Played => "Played",
         }
     }
@@ -56,7 +56,7 @@ impl QuickFilter {
 const COL_NUM_W: f32 = 54.0;
 /// Width of the duration column.
 const COL_TIME_W: f32 = 52.0;
-/// Width of the favourite-heart column.
+/// Width of the favorite-heart column.
 const COL_FAV_W: f32 = 32.0;
 /// Width of the overflow-menu column.
 const COL_MENU_W: f32 = 26.0;
@@ -88,8 +88,8 @@ struct TableColumns {
     album_w: f32,
     /// Left edge of the duration column.
     duration_x: f32,
-    /// Left edge of the favourite-heart column.
-    favourite_x: f32,
+    /// Left edge of the favorite-heart column.
+    favorite_x: f32,
     /// Left edge of the overflow-menu column.
     menu_x: f32,
 }
@@ -118,7 +118,7 @@ impl TableColumns {
             album_x,
             album_w,
             duration_x: full_width - right_block,
-            favourite_x: full_width - COL_FAV_W - COL_MENU_W,
+            favorite_x: full_width - COL_FAV_W - COL_MENU_W,
             menu_x: full_width - COL_MENU_W,
         }
     }
@@ -186,27 +186,40 @@ fn render_empty_state(
             )
         };
 
-    ui.add_space((ui.available_height() * 0.16).max(12.0));
-    ui.vertical_centered(|ui| {
-        let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
-        crate::components::icons::draw_music_note(ui, icon_rect, theme.text_dim);
+    // In a short window the illustration and the explanation are dropped, so
+    // the message and its button still fit. The empty state used to be cut
+    // off at the app's own minimum window height.
+    let tight = ui.available_height() < 220.0;
 
-        ui.add_space(10.0);
+    let top_space = if tight {
+        2.0
+    } else {
+        (ui.available_height() * 0.16).clamp(6.0, 48.0)
+    };
+    ui.add_space(top_space);
+    ui.vertical_centered(|ui| {
+        if !tight {
+            let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+            crate::components::icons::draw_music_note(ui, icon_rect, theme.text_dim);
+            ui.add_space(10.0);
+        }
         ui.label(
             egui::RichText::new(headline)
                 .font(crate::theme::font(16.0))
                 .strong()
                 .color(theme.text_primary),
         );
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(body)
-                .font(crate::theme::font(12.5))
-                .color(theme.text_muted),
-        );
+        if !tight {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(body)
+                    .font(crate::theme::font(12.5))
+                    .color(theme.text_muted),
+            );
+        }
 
         if let Some((label, cta_action)) = cta {
-            ui.add_space(14.0);
+            ui.add_space(if tight { 8.0 } else { 14.0 });
             let resp = ui.add(
                 egui::Button::new(
                     egui::RichText::new(label)
@@ -238,7 +251,7 @@ const SORT_FIELDS: &[(SortField, &str)] = &[
     (SortField::Album, "Album"),
     (SortField::Duration, "Duration"),
     (SortField::DateAdded, "Added"),
-    (SortField::Favorite, "Favourites"),
+    (SortField::Favorite, "Favorites"),
 ];
 
 /// The short name of a sort field, as shown on the sort pill.
@@ -297,7 +310,7 @@ fn quick_filter_tooltip(filter: QuickFilter) -> &'static str {
         QuickFilter::All => "Show every track",
         QuickFilter::Lossless => "Show only lossless tracks (FLAC, ALAC, WAV, DSD…)",
         QuickFilter::HiRes => "Show only Hi-Res tracks (above 48 kHz or 1000 kbps)",
-        QuickFilter::Favorites => "Show only tracks you have favourited",
+        QuickFilter::Favorites => "Show only tracks you have favorited",
         QuickFilter::Played => "Show only tracks you have played before",
     }
 }
@@ -1009,17 +1022,17 @@ impl<'a> SongsTable<'a> {
                 action.sort_field_changed = Some(SortField::Duration);
             }
 
-            // Column 6: favourites.
-            let heart_resp = header_cell(ui, "hdr_fav", cols.favourite_x, COL_FAV_W);
+            // Column 6: favorites.
+            let heart_resp = header_cell(ui, "hdr_fav", cols.favorite_x, COL_FAV_W);
             let heart_icon_rect = Rect::from_center_size(
                 Pos2::new(
-                    header_rect.min.x + cols.favourite_x + COL_FAV_W * 0.5,
+                    header_rect.min.x + cols.favorite_x + COL_FAV_W * 0.5,
                     header_y,
                 ),
                 Vec2::new(14.0, 14.0),
             );
             crate::components::icons::draw_heart(ui, heart_icon_rect, theme.text_muted, false);
-            if heart_resp.on_hover_text("Sort by Favourites").clicked() {
+            if heart_resp.on_hover_text("Sort by Favorites").clicked() {
                 action.sort_field_changed = Some(SortField::Favorite);
             }
 
@@ -1056,8 +1069,15 @@ impl<'a> SongsTable<'a> {
                         let cy = vis_rect.center().y;
 
                         let painter = ui.painter_at(vis_rect);
+                        // The hover is suppressed during a screenshot run, so
+                        // a captured row is not half-highlighted. The check
+                        // used to read the environment on every row of every
+                        // frame, in a release build too.
+                        #[cfg(feature = "eval-tools")]
                         let is_hovered =
                             row_resp.hovered() && std::env::var("SHADOWPLAYER_EVAL").is_err();
+                        #[cfg(not(feature = "eval-tools"))]
+                        let is_hovered = row_resp.hovered();
 
                         if is_active {
                             painter.rect_filled(
@@ -1093,7 +1113,7 @@ impl<'a> SongsTable<'a> {
 
                         // Interaction zones that must NOT trigger playback.
                         let fav_rect = Rect::from_center_size(
-                            Pos2::new(vis_rect.min.x + cols.favourite_x + COL_FAV_W * 0.5, cy),
+                            Pos2::new(vis_rect.min.x + cols.favorite_x + COL_FAV_W * 0.5, cy),
                             Vec2::new(24.0, 24.0),
                         );
                         let menu_rect = Rect::from_center_size(
@@ -1362,16 +1382,16 @@ impl<'a> SongsTable<'a> {
                                 egui::Role::Button,
                                 true,
                                 if is_favorite {
-                                    "Remove from favourites"
+                                    "Remove from favorites"
                                 } else {
-                                    "Add to favourites"
+                                    "Add to favorites"
                                 },
                             )
                         });
                         let _ = fav_resp.on_hover_text(if is_favorite {
-                            "Remove from favourites"
+                            "Remove from favorites"
                         } else {
-                            "Add to favourites"
+                            "Add to favorites"
                         });
 
                         // Column 7: Overflow Menu "⋮"

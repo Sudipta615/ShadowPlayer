@@ -17,7 +17,7 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
   deletion reconciliation, so the library tracks the disk without a manual
   rescan.
 - Stable track identity: a file that is moved or renamed keeps its play count,
-  favourites, playlist membership and lyrics.
+  favorites, playlist membership and lyrics.
 - Songs table with sortable columns, quick-filter chips, multi-select and bulk
   actions; Albums, Artists, Genres and Folders views.
 - Standard playlists, smart (rule-based) playlists, duplicate finder, batch

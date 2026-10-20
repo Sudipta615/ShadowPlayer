@@ -261,16 +261,16 @@ impl<'a> AlbumsView<'a> {
                                 egui::Role::Button,
                                 true,
                                 if is_fav {
-                                    "Remove from favourites"
+                                    "Remove from favorites"
                                 } else {
-                                    "Add to favourites"
+                                    "Add to favorites"
                                 },
                             )
                         });
                         let _ = fav_resp.on_hover_text(if is_fav {
-                            "Remove from favourites"
+                            "Remove from favorites"
                         } else {
-                            "Add to favourites"
+                            "Add to favorites"
                         });
                     }
                 });

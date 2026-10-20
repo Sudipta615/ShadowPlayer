@@ -1392,7 +1392,12 @@ fn render_spatial_category(
                         ui.label("W:");
                         let mut w = state.room_width;
                         if ui
-                            .add(egui::DragValue::new(&mut w).speed(0.1).range(1.0..=30.0))
+                            .add(
+                                egui::DragValue::new(&mut w)
+                                    .speed(0.1)
+                                    .range(1.0..=30.0)
+                                    .min_size(Vec2::new(76.0, 24.0)),
+                            )
                             .changed()
                         {
                             state.room_width = w;
@@ -1401,7 +1406,12 @@ fn render_spatial_category(
                         ui.label("D:");
                         let mut d = state.room_depth;
                         if ui
-                            .add(egui::DragValue::new(&mut d).speed(0.1).range(1.0..=30.0))
+                            .add(
+                                egui::DragValue::new(&mut d)
+                                    .speed(0.1)
+                                    .range(1.0..=30.0)
+                                    .min_size(Vec2::new(76.0, 24.0)),
+                            )
                             .changed()
                         {
                             state.room_depth = d;
@@ -1410,7 +1420,12 @@ fn render_spatial_category(
                         ui.label("H:");
                         let mut h = state.room_height;
                         if ui
-                            .add(egui::DragValue::new(&mut h).speed(0.1).range(1.5..=10.0))
+                            .add(
+                                egui::DragValue::new(&mut h)
+                                    .speed(0.1)
+                                    .range(1.5..=10.0)
+                                    .min_size(Vec2::new(76.0, 24.0)),
+                            )
                             .changed()
                         {
                             state.room_height = h;
@@ -1658,7 +1673,11 @@ fn render_mixbus_category(
             |ui| {
                 let mut slot = state.track_slot as f32;
                 if ui
-                    .add(egui::DragValue::new(&mut slot).range(2.0..=16.0))
+                    .add(
+                        egui::DragValue::new(&mut slot)
+                            .range(2.0..=16.0)
+                            .min_size(Vec2::new(76.0, 24.0)),
+                    )
                     .changed()
                 {
                     state.track_slot = slot as u8;
@@ -1733,7 +1752,11 @@ fn render_mixbus_category(
             |ui| {
                 let mut slot = state.duck_source_slot as f32;
                 if ui
-                    .add(egui::DragValue::new(&mut slot).range(0.0..=15.0))
+                    .add(
+                        egui::DragValue::new(&mut slot)
+                            .range(0.0..=15.0)
+                            .min_size(Vec2::new(76.0, 24.0)),
+                    )
                     .changed()
                 {
                     state.duck_source_slot = slot as u8;
@@ -1756,7 +1779,8 @@ fn render_mixbus_category(
                         egui::DragValue::new(&mut t)
                             .speed(0.5)
                             .suffix(" dB")
-                            .range(-60.0..=0.0),
+                            .range(-60.0..=0.0)
+                            .min_size(Vec2::new(76.0, 24.0)),
                     )
                     .changed()
                 {
@@ -1769,7 +1793,8 @@ fn render_mixbus_category(
                         egui::DragValue::new(&mut d)
                             .speed(0.5)
                             .suffix(" dB")
-                            .range(0.0..=30.0),
+                            .range(0.0..=30.0)
+                            .min_size(Vec2::new(76.0, 24.0)),
                     )
                     .changed()
                 {
@@ -1791,7 +1816,8 @@ fn render_mixbus_category(
                         egui::DragValue::new(&mut a)
                             .speed(1.0)
                             .suffix(" ms")
-                            .range(1.0..=100.0),
+                            .range(1.0..=100.0)
+                            .min_size(Vec2::new(76.0, 24.0)),
                     )
                     .changed()
                 {
@@ -1804,7 +1830,8 @@ fn render_mixbus_category(
                         egui::DragValue::new(&mut r)
                             .speed(5.0)
                             .suffix(" ms")
-                            .range(10.0..=1000.0),
+                            .range(10.0..=1000.0)
+                            .min_size(Vec2::new(76.0, 24.0)),
                     )
                     .changed()
                 {

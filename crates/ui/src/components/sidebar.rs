@@ -4,6 +4,12 @@ use domain::models::Playlist;
 use domain::smart::SmartPlaylist;
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 
+/// The room the wordmark needs before it has to step its type down.
+///
+/// The sidebar is 208 px wide, and 200 px in the compact layout; after the
+/// panel's own margins that leaves 184 px and 176 px.
+const BRAND_FULL_WIDTH: f32 = 180.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavItem {
     Home,
@@ -87,10 +93,12 @@ impl<'a> SideBar<'a> {
                     self.theme.accent_warm,
                 );
             } else {
-                // The compact sidebar is 184px wide. At the full display size
-                // the wordmark is a few pixels too wide there, so step the
-                // brand type down instead of truncating "ShadowPla...".
-                let compact_brand = ui.available_width() < 180.0;
+                // The sidebar is 208 px wide, and 200 px in the compact
+                // layout; after its own margins that leaves 184 px and
+                // 176 px of room. At the full display size the wordmark is a
+                // few pixels too wide in the compact layout, so step the
+                // brand type down there instead of truncating "ShadowPla...".
+                let compact_brand = ui.available_width() < BRAND_FULL_WIDTH;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 

@@ -1194,7 +1194,7 @@ impl ShadowPlayerApp {
     }
 
     /// Import one audio file into the library, resolving stable identity so a
-    /// moved-but-already-known file keeps its id, play counts and favourites.
+    /// moved-but-already-known file keeps its id, play counts and favorites.
     /// Returns the track id on success.
     fn import_file(&mut self, path: &std::path::Path) -> Option<domain::ids::TrackId> {
         if !library::scanner::is_supported_audio_path(path) {

@@ -128,7 +128,7 @@ pub struct Theme {
     pub accent: Color32,
     /// Mint/teal highlight for icon strokes, selected labels and focus.
     pub accent_highlight: Color32,
-    /// Amber secondary: favourites, ratings, warm status accents.
+    /// Amber secondary: favorites, ratings, warm status accents.
     pub accent_warm: Color32,
     /// Informational blue.
     pub info: Color32,

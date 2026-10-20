@@ -320,7 +320,7 @@ impl LibraryState {
         self.smart_playlist_tracks = repo.evaluate(sp).unwrap_or_default();
     }
 
-    /// Mark a track as favourite (idempotent; used by bulk actions).
+    /// Mark a track as favorite (idempotent; used by bulk actions).
     pub fn add_favorite(&mut self, favorites_repo: &FavoritesRepo, track_id: TrackId) {
         if !self.favorite_ids.contains(&track_id) {
             let _ = favorites_repo.add(&track_id);
@@ -398,8 +398,8 @@ pub fn sort_tracks(tracks: &mut [Track], field: SortField, order: SortOrder) {
             )
         }),
         SortField::DateAdded => tracks.sort_by_key(|t| t.added_at),
-        // Favourites first regardless of direction: "sort by favourites" with
-        // the least-favourite track at the top would be a strange reading.
+        // Favorites first regardless of direction: "sort by favorites" with
+        // the least-favorite track at the top would be a strange reading.
         SortField::Favorite => {
             tracks.sort_by_key(|t| std::cmp::Reverse(t.is_favorite));
             return;
@@ -478,7 +478,7 @@ mod sort_tests {
     }
 
     #[test]
-    fn favourites_lead_in_both_directions() {
+    fn favorites_lead_in_both_directions() {
         let mut tracks = vec![
             track("one", "A", "A", false, 1.0),
             track("two", "A", "A", true, 1.0),
@@ -487,6 +487,6 @@ mod sort_tests {
         sort_tracks(&mut tracks, SortField::Favorite, SortOrder::Ascending);
         assert_eq!(tracks[0].title, "two");
         sort_tracks(&mut tracks, SortField::Favorite, SortOrder::Descending);
-        assert_eq!(tracks[0].title, "two", "a favourite is never last");
+        assert_eq!(tracks[0].title, "two", "a favorite is never last");
     }
 }

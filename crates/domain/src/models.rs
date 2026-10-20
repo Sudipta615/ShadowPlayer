@@ -152,7 +152,7 @@ pub enum SortField {
     Duration,
     TrackNumber,
     DateAdded,
-    /// Favourites first. There is no "unfavourite" ranking, so this is a
+    /// Favorites first. There is no "unfavorite" ranking, so this is a
     /// one-sided key rather than a text or numeric column.
     Favorite,
 }
@@ -166,7 +166,7 @@ impl std::fmt::Display for SortField {
             Self::Duration => write!(f, "Duration"),
             Self::TrackNumber => write!(f, "Track Number"),
             Self::DateAdded => write!(f, "Date Added"),
-            Self::Favorite => write!(f, "Favourites"),
+            Self::Favorite => write!(f, "Favorites"),
         }
     }
 }
