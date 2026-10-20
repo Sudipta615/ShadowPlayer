@@ -36,6 +36,40 @@ pub fn min_dialog_size() -> Vec2 {
     Vec2::new(320.0, 200.0)
 }
 
+/// Show a modal dialog with no title row.
+///
+/// A command palette is the case for this: the title bar of a modal is
+/// wasted space there, because the field is obviously what the dialog is
+/// for, and every convention for a palette is a bare field.
+pub fn show_modal_bare(
+    ctx: &egui::Context,
+    id: &str,
+    width: f32,
+    theme: &Theme,
+    body: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let response = egui::Modal::new(egui::Id::unique(id))
+        .frame(
+            egui::Frame::popup(&ctx.style_of(ctx.theme()))
+                .fill(theme.bg_card)
+                .stroke(Stroke::new(1.0, theme.border_card))
+                .corner_radius(CornerRadius::same(theme.radius_lg))
+                .inner_margin(egui::Margin::same(10)),
+        )
+        .backdrop_color(if theme.is_light {
+            Color32::from_black_alpha(56)
+        } else {
+            Color32::from_black_alpha(128)
+        })
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.set_max_width(width);
+            body(ui);
+        });
+    // A click on the backdrop dismisses the dialog.
+    response.backdrop_response.clicked()
+}
+
 /// Show a modal dialog in the app's own chrome.
 ///
 /// egui's `Window` brings a title bar that does not match the app's card

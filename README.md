@@ -104,6 +104,7 @@ files or write ReplayGain tags.
 | Down Arrow | Lower the master volume by 5 % |
 | / | Jump to the search box |
 | Ctrl + F | Jump to the search box |
+| Ctrl + Space | Open the command palette |
 | Ctrl + B | Toggle bit-perfect Pure Direct mode |
 | Ctrl + P | Open Settings & DSP studio |
 | Ctrl + N | Open the playlist editor (create or manage playlists) |

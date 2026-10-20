@@ -71,6 +71,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
         description: "Jump to the search box",
     },
     Shortcut {
+        keys: "Ctrl + Space",
+        description: "Open the command palette",
+    },
+    Shortcut {
         keys: "Ctrl + B",
         description: "Toggle bit-perfect Pure Direct mode",
     },

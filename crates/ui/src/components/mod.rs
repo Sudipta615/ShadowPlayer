@@ -2,6 +2,7 @@ pub mod albums_view;
 pub mod artists_view;
 pub mod backend_options;
 pub mod clap_rack_panel;
+pub mod command_palette;
 pub mod eq_panel;
 pub mod folders_view;
 pub mod genres_view;

@@ -31,6 +31,10 @@ pub struct AppState {
     /// Set by the `/` and `Ctrl+F` shortcuts: move the keyboard focus to the
     /// search field on the next frame.
     pub focus_search: bool,
+    /// The command palette is open.
+    pub command_palette_open: bool,
+    /// The command palette's own state: its query and the highlighted row.
+    pub command_palette: crate::components::command_palette::CommandPaletteState,
     /// Single-window compact player mode.
     pub mini_player: bool,
     /// Keep the mini player above other windows (best-effort on Wayland).
@@ -73,6 +77,8 @@ impl Default for AppState {
             right_panel_visible: true,
             right_overlay_open: false,
             focus_search: false,
+            command_palette_open: false,
+            command_palette: Default::default(),
             mini_player: false,
             mini_always_on_top: true,
 
