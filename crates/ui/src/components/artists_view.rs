@@ -1,7 +1,12 @@
+use crate::services::ArtworkService;
 use crate::theme::Theme;
 use domain::ids::TrackId;
 use domain::models::{Artist, Track};
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{
+    self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
+};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub struct ArtistsViewAction {
     pub play_artist: Option<String>,
@@ -17,6 +22,11 @@ pub struct ArtistsView<'a> {
     pub active_track_id: Option<TrackId>,
     pub is_playing: bool,
     pub favorite_track_ids: &'a std::collections::HashSet<TrackId>,
+    /// The track that stands in for each artist's cover art.
+    pub artist_covers: &'a HashMap<String, (TrackId, PathBuf)>,
+    /// The artwork service, so the grid can load the covers it is about to
+    /// show.
+    pub artwork: &'a mut ArtworkService,
     pub theme: &'a Theme,
 }
 
@@ -264,6 +274,10 @@ impl<'a> ArtistsView<'a> {
                         let card_w = 148.0;
                         let card_h = 160.0;
                         let avail_w = ui.available_width();
+                        // Bound the cover decoding per frame, exactly as the
+                        // songs table does.
+                        let ctx = ui.ctx().clone();
+                        let mut art_budget = 8usize;
                         let cols = ((avail_w + 14.0) / (card_w + 14.0)).floor().max(1.0) as usize;
 
                         egui::Grid::new("artists_grid")
@@ -289,20 +303,57 @@ impl<'a> ArtistsView<'a> {
                                         egui::StrokeKind::Inside,
                                     );
 
-                                    // Circular avatar
+                                    // Circular avatar. The grid used to paint a
+                                    // permanent placeholder circle, because it
+                                    // had no way to reach the artwork cache.
                                     let avatar_c = Pos2::new(rect.center().x, rect.min.y + 46.0);
-                                    p.circle_filled(avatar_c, 34.0, self.theme.artwork_placeholder);
+                                    let avatar_r = 34.0;
+                                    let avatar_rect = Rect::from_center_size(
+                                        avatar_c,
+                                        Vec2::splat(avatar_r * 2.0),
+                                    );
+                                    let cover = self.artist_covers.get(&artist.name);
+                                    let mut cover_tex: Option<TextureHandle> = None;
+                                    if let Some((cover_id, cover_path)) = cover {
+                                        if self.artwork.get_texture(cover_id).is_none()
+                                            && art_budget > 0
+                                            && !self.artwork.is_missing(cover_id)
+                                        {
+                                            art_budget -= 1;
+                                            self.artwork
+                                                .ensure_loaded_at(&ctx, *cover_id, cover_path);
+                                        }
+                                        cover_tex = self.artwork.get_texture(cover_id).cloned();
+                                        if cover_tex.is_some() {
+                                            self.artwork.touch(cover_id);
+                                        }
+                                    }
+
+                                    if let Some(tex) = cover_tex {
+                                        // A rounded square, matching the album
+                                        // grid's cover shape.
+                                        egui::Image::new(&tex)
+                                            .corner_radius(CornerRadius::same(12))
+                                            .fit_to_exact_size(Vec2::splat(avatar_r * 2.0))
+                                            .paint_at(ui, avatar_rect);
+                                    } else {
+                                        p.circle_filled(
+                                            avatar_c,
+                                            avatar_r,
+                                            self.theme.artwork_placeholder,
+                                        );
+                                        let icon_rect =
+                                            Rect::from_center_size(avatar_c, Vec2::new(26.0, 26.0));
+                                        crate::components::icons::draw_artist(
+                                            ui,
+                                            icon_rect,
+                                            self.theme.accent_warm,
+                                        );
+                                    }
                                     p.circle_stroke(
                                         avatar_c,
-                                        34.0,
+                                        avatar_r,
                                         Stroke::new(1.2_f32, self.theme.accent),
-                                    );
-                                    let icon_rect =
-                                        Rect::from_center_size(avatar_c, Vec2::new(26.0, 26.0));
-                                    crate::components::icons::draw_artist(
-                                        ui,
-                                        icon_rect,
-                                        self.theme.accent_warm,
                                     );
 
                                     // Artist Name

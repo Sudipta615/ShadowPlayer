@@ -45,6 +45,31 @@ impl Track {
     pub fn duration_formatted(&self) -> String {
         format_duration(self.duration_secs)
     }
+
+    /// Whether the track is high-resolution: above CD quality in either
+    /// sample rate or bitrate.
+    ///
+    /// This is the single definition of "Hi-Res" in the app — the per-track
+    /// tag, the quick-filter chip and the library filters all read it, so
+    /// they can never disagree about which tracks qualify.
+    pub fn is_hires(&self) -> bool {
+        self.sample_rate > 48_000 || self.bitrate_kbps.unwrap_or(0) > 1000
+    }
+
+    /// A short label for the track's quality tier, or `None` for a plain
+    /// lossy CD-quality file.
+    ///
+    /// A high-resolution *and* lossless file is reported as Hi-Res, because
+    /// that is the more interesting fact about it.
+    pub fn quality_tag(&self) -> Option<&'static str> {
+        if self.is_hires() {
+            Some("HI-RES")
+        } else if self.is_lossless {
+            Some("LOSSLESS")
+        } else {
+            None
+        }
+    }
 }
 
 pub fn format_duration(secs: f32) -> String {

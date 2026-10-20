@@ -4,6 +4,7 @@ use eframe::egui;
 use playback::PlaybackCoordinator;
 
 use crate::components::artists_view::ArtistsView;
+use crate::services::ArtworkService;
 use crate::state::LibraryState;
 use crate::theme::Theme;
 
@@ -12,6 +13,7 @@ pub fn render_artists_view(
     ui: &mut egui::Ui,
     library_state: &mut LibraryState,
     coordinator: &mut PlaybackCoordinator,
+    artwork_service: &mut ArtworkService,
     current_track: Option<&Track>,
     is_playing: bool,
     theme: &Theme,
@@ -25,6 +27,8 @@ pub fn render_artists_view(
         active_track_id: current_track.map(|t| t.id),
         is_playing,
         favorite_track_ids: &library_state.favorite_ids,
+        artist_covers: &library_state.artist_cover_tracks,
+        artwork: artwork_service,
         theme,
     }
     .show(ui);

@@ -50,6 +50,303 @@ impl QuickFilter {
     }
 }
 
+// ── Table geometry ──────────────────────────────────────────────────────────
+
+/// Width of the row-number column (checkbox + track number).
+const COL_NUM_W: f32 = 54.0;
+/// Width of the duration column.
+const COL_TIME_W: f32 = 52.0;
+/// Width of the favourite-heart column.
+const COL_FAV_W: f32 = 32.0;
+/// Width of the overflow-menu column.
+const COL_MENU_W: f32 = 26.0;
+/// Horizontal gap between two columns.
+const COL_GAP: f32 = 8.0;
+/// The artwork thumbnail plus the gap between it and the title text.
+const ART_INSET: f32 = 44.0;
+
+/// The horizontal layout of the songs table.
+///
+/// The header and the rows share this one model. They used to work out their
+/// positions separately and drifted apart: the header spent 8 px on each of
+/// its six gaps while the row budgeted 40 px in total, so the columns did not
+/// line up and the header overflowed the row by 8 px.
+struct TableColumns {
+    /// Left edge of the row-number column.
+    num_x: f32,
+    /// Left edge of the title column — where the artwork sits.
+    title_x: f32,
+    /// Left edge of the title *text*, past the artwork.
+    title_text_x: f32,
+    /// Width available for the title text.
+    title_text_w: f32,
+    /// Left edge and width of the artist column.
+    artist_x: f32,
+    artist_w: f32,
+    /// Left edge and width of the album column.
+    album_x: f32,
+    album_w: f32,
+    /// Left edge of the duration column.
+    duration_x: f32,
+    /// Left edge of the favourite-heart column.
+    favourite_x: f32,
+    /// Left edge of the overflow-menu column.
+    menu_x: f32,
+}
+
+impl TableColumns {
+    /// Lay the table out for a content area `full_width` wide.
+    fn new(full_width: f32) -> Self {
+        let right_block = COL_TIME_W + COL_FAV_W + COL_MENU_W;
+        let fixed = COL_NUM_W + right_block + COL_GAP * 3.0;
+        let flexible = (full_width - fixed).max(180.0);
+        let title_w = flexible * 0.38;
+        let artist_w = flexible * 0.31;
+        let album_w = flexible * 0.31;
+
+        let title_x = COL_NUM_W;
+        let artist_x = title_x + title_w + COL_GAP;
+        let album_x = artist_x + artist_w + COL_GAP;
+
+        Self {
+            num_x: 0.0,
+            title_x,
+            title_text_x: title_x + ART_INSET,
+            title_text_w: (title_w - ART_INSET).max(40.0),
+            artist_x,
+            artist_w,
+            album_x,
+            album_w,
+            duration_x: full_width - right_block,
+            favourite_x: full_width - COL_FAV_W - COL_MENU_W,
+            menu_x: full_width - COL_MENU_W,
+        }
+    }
+}
+
+/// Lay out a single line of text, truncating it with an ellipsis when it does
+/// not fit `max_width`.
+///
+/// The table used to paint artist, album and title with `Painter::text`,
+/// which never truncates — a long album name ran straight over the duration
+/// column.
+fn layout_truncated(
+    painter: &egui::Painter,
+    text: impl Into<String>,
+    font: egui::FontId,
+    color: egui::Color32,
+    max_width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.into(), font, color);
+    job.wrap.max_width = max_width;
+    job.wrap.break_anywhere = false;
+    job.wrap.overflow_character = Some('…');
+    painter.layout_job(job)
+}
+
+/// The call to action offered by the empty state.
+enum EmptyStateAction {
+    OpenFolders,
+    ClearSearch,
+}
+
+/// Explain an empty list and offer the next step.
+///
+/// The table used to render its header and then nothing at all, so an empty
+/// library, a search that matched nothing and an empty playlist were all
+/// indistinguishable from a broken app.
+fn render_empty_state(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    search_query: &str,
+    library_track_count: usize,
+    action: &mut SongsTableAction,
+) {
+    let (headline, body, cta): (&str, String, Option<(&str, EmptyStateAction)>) =
+        if library_track_count == 0 {
+            (
+                "Your library is empty",
+                "Add a music folder and ShadowPlayer will scan it, read the tags \
+                 and build your library."
+                    .to_string(),
+                Some(("Add a music folder", EmptyStateAction::OpenFolders)),
+            )
+        } else if !search_query.trim().is_empty() {
+            (
+                "Nothing matched your search",
+                format!("No tracks, albums, artists or playlists match “{search_query}”."),
+                Some(("Clear search", EmptyStateAction::ClearSearch)),
+            )
+        } else {
+            (
+                "No tracks here yet",
+                "This view is empty. Try another one, or add more music to your library."
+                    .to_string(),
+                None,
+            )
+        };
+
+    ui.add_space((ui.available_height() * 0.16).max(12.0));
+    ui.vertical_centered(|ui| {
+        let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+        crate::components::icons::draw_music_note(ui, icon_rect, theme.text_dim);
+
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(headline)
+                .font(crate::theme::font(16.0))
+                .strong()
+                .color(theme.text_primary),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(body)
+                .font(crate::theme::font(12.5))
+                .color(theme.text_muted),
+        );
+
+        if let Some((label, cta_action)) = cta {
+            ui.add_space(14.0);
+            let resp = ui.add(
+                egui::Button::new(
+                    egui::RichText::new(label)
+                        .font(crate::theme::font(13.0))
+                        .color(Color32::WHITE),
+                )
+                .fill(theme.accent)
+                .corner_radius(CornerRadius::same(8))
+                .min_size(Vec2::new(158.0, 32.0)),
+            );
+            resp.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
+            });
+            if resp.clicked() {
+                match cta_action {
+                    EmptyStateAction::OpenFolders => action.open_folders = true,
+                    EmptyStateAction::ClearSearch => action.clear_search = true,
+                }
+            }
+        }
+    });
+}
+
+/// The sort fields offered by the sort menu, in the order they are listed.
+const SORT_FIELDS: &[(SortField, &str)] = &[
+    (SortField::TrackNumber, "Track"),
+    (SortField::Title, "Title"),
+    (SortField::Artist, "Artist"),
+    (SortField::Album, "Album"),
+    (SortField::Duration, "Duration"),
+    (SortField::DateAdded, "Added"),
+    (SortField::Favorite, "Favourites"),
+];
+
+/// The short name of a sort field, as shown on the sort pill.
+fn sort_field_label(field: SortField) -> &'static str {
+    SORT_FIELDS
+        .iter()
+        .find(|(f, _)| *f == field)
+        .map(|(_, label)| *label)
+        .unwrap_or("Title")
+}
+
+/// Draw the sort-direction arrow next to the active column header.
+///
+/// The active column used to be signalled by colour alone, so the direction
+/// of the sort was invisible unless the user happened to find the separate
+/// direction button in the toolbar.
+fn paint_sort_arrow(
+    painter: &egui::Painter,
+    center: Pos2,
+    is_active: bool,
+    sort_order: SortOrder,
+    color: egui::Color32,
+) {
+    if !is_active {
+        return;
+    }
+    let ascending = sort_order == SortOrder::Ascending;
+    let stroke = Stroke::new(1.5, color);
+    let tip = if ascending {
+        center.y - 4.0
+    } else {
+        center.y + 4.0
+    };
+    let barbs = if ascending {
+        center.y + 1.0
+    } else {
+        center.y - 1.0
+    };
+    painter.add(egui::Shape::line(
+        vec![Pos2::new(center.x, tip), Pos2::new(center.x, barbs)],
+        stroke,
+    ));
+    painter.add(egui::Shape::line(
+        vec![
+            Pos2::new(center.x - 3.5, barbs),
+            Pos2::new(center.x, tip),
+            Pos2::new(center.x + 3.5, barbs),
+        ],
+        stroke,
+    ));
+}
+
+/// A one-line explanation of what a quick-filter chip does.
+fn quick_filter_tooltip(filter: QuickFilter) -> &'static str {
+    match filter {
+        QuickFilter::All => "Show every track",
+        QuickFilter::Lossless => "Show only lossless tracks (FLAC, ALAC, WAV, DSD…)",
+        QuickFilter::HiRes => "Show only Hi-Res tracks (above 48 kHz or 1000 kbps)",
+        QuickFilter::Favorites => "Show only tracks you have favourited",
+        QuickFilter::Played => "Show only tracks you have played before",
+    }
+}
+
+/// The width a quality tag needs, so the title can be truncated around it.
+fn quality_tag_width(painter: &egui::Painter, label: &str, theme: &Theme) -> f32 {
+    let galley = painter.layout_no_wrap(
+        label.to_owned(),
+        crate::theme::mono_font(9.0),
+        theme.text_primary,
+    );
+    galley.size().x + 14.0
+}
+
+/// Paint a small quality tag — `HI-RES` or `LOSSLESS` — and return its width.
+///
+/// The tag sits at the right-hand end of the title column, so a column of
+/// mixed formats still reads as a tidy column of badges.
+fn paint_quality_tag(
+    painter: &egui::Painter,
+    right_x: f32,
+    cy: f32,
+    label: &str,
+    theme: &Theme,
+) -> f32 {
+    let color = if label == "HI-RES" {
+        theme.bit_perfect_green
+    } else {
+        theme.info
+    };
+    let galley = painter.layout_no_wrap(label.to_owned(), crate::theme::mono_font(9.0), color);
+    let w = galley.size().x + 14.0;
+    let h = 15.0;
+    let rect = Rect::from_center_size(Pos2::new(right_x - w * 0.5, cy), Vec2::new(w, h));
+    painter.rect_filled(rect, CornerRadius::same(4), color.gamma_multiply(0.14));
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(4),
+        Stroke::new(1.0, color.gamma_multiply(0.55)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(
+        Pos2::new(rect.min.x + 7.0, cy - galley.size().y * 0.5),
+        galley,
+        color,
+    );
+    w
+}
+
 pub struct SongsTableAction {
     pub play_track: Option<TrackId>,
     pub queue_next_track: Option<TrackId>,
@@ -81,6 +378,10 @@ pub struct SongsTableAction {
     pub organize_selected: bool,
     pub remove_selected: bool,
     pub clear_selection: bool,
+    /// The empty state asked the user to add a music folder.
+    pub open_folders: bool,
+    /// The empty state asked the user to clear the search query.
+    pub clear_search: bool,
 }
 
 pub struct SongsTable<'a> {
@@ -105,6 +406,13 @@ pub struct SongsTable<'a> {
     /// Hide the large "Songs" title and toolbar in short windows, leaving the
     /// table header and rows. Sorting stays available from the header cells.
     pub show_header: bool,
+    /// The current search query, so the empty state can say what it found
+    /// nothing for.
+    pub search_query: &'a str,
+    /// How many tracks the library holds in total. Zero means the library
+    /// itself is empty, which is a different situation from a filtered view
+    /// that happens to be empty.
+    pub library_track_count: usize,
 }
 
 impl<'a> SongsTable<'a> {
@@ -131,6 +439,8 @@ impl<'a> SongsTable<'a> {
             organize_selected: false,
             remove_selected: false,
             clear_selection: false,
+            open_folders: false,
+            clear_search: false,
         };
 
         // Split the borrows so the scroll-area closures can mutably borrow
@@ -150,6 +460,8 @@ impl<'a> SongsTable<'a> {
             artwork,
             theme,
             show_header,
+            search_query,
+            library_track_count,
         } = self;
 
         let ctx = ui.ctx().clone();
@@ -237,16 +549,7 @@ impl<'a> SongsTable<'a> {
                     ui.add_space(6.0);
 
                     // Sort Dropdown Pill
-                    let sort_name = match current_sort {
-                        SortField::Artist => "Artist",
-                        SortField::Album => "Album",
-                        SortField::Duration => "Duration",
-                        SortField::DateAdded => "Added",
-                        SortField::Favorite => "Favourites",
-                        SortField::Title => "Title",
-                        SortField::TrackNumber => "Track",
-                    };
-                    let sort_label = format!("Sort by: {}", sort_name);
+                    let sort_label = format!("Sort by: {}", sort_field_label(current_sort));
 
                     let (sort_rect, sort_resp) =
                         ui.allocate_exact_size(Vec2::new(124.0, 30.0), Sense::click());
@@ -276,20 +579,62 @@ impl<'a> SongsTable<'a> {
                     );
                     crate::components::icons::draw_chevron_down(ui, chev_rect, theme.text_muted);
 
-                    if sort_resp.on_hover_text("Change the sort field").clicked() {
-                        // A deliberate cycle rather than a menu: one click walks
-                        // the fields, and the direction is a separate button so the
-                        // two never fight each other.
-                        let next = match current_sort {
-                            SortField::TrackNumber => SortField::Title,
-                            SortField::Title => SortField::Artist,
-                            SortField::Artist => SortField::Album,
-                            SortField::Album => SortField::Duration,
-                            SortField::Duration => SortField::DateAdded,
-                            SortField::DateAdded => SortField::Favorite,
-                            SortField::Favorite => SortField::TrackNumber,
-                        };
-                        action.sort_field_changed = Some(next);
+                    // The pill carries a chevron, so it has to open a menu.
+                    // It used to cycle through the fields one click at a
+                    // time, which read as a broken dropdown.
+                    let sort_menu_id = ui.make_persistent_id("sort_menu");
+                    let mut sort_menu_open: bool =
+                        ui.ctx().data(|d| d.get_temp(sort_menu_id).unwrap_or(false));
+                    if sort_resp
+                        .clone()
+                        .on_hover_text("Change the sort field")
+                        .clicked()
+                    {
+                        sort_menu_open = !sort_menu_open;
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(sort_menu_id, sort_menu_open));
+                    }
+                    if sort_menu_open {
+                        let popup_pos = sort_rect.left_bottom() + Vec2::new(0.0, 4.0);
+                        let mut close = false;
+                        let mut popup_rect: Option<Rect> = None;
+                        egui::Area::new(sort_menu_id.with("popup"))
+                            .order(egui::Order::Foreground)
+                            .fixed_pos(popup_pos)
+                            .show(ui.ctx(), |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                    ui.set_min_width(124.0);
+                                    for (field, name) in SORT_FIELDS {
+                                        let selected = current_sort == *field;
+                                        if ui
+                                            .selectable_label(
+                                                selected,
+                                                egui::RichText::new(*name)
+                                                    .font(crate::theme::font(12.5))
+                                                    .color(if selected {
+                                                        theme.accent_highlight
+                                                    } else {
+                                                        theme.text_secondary
+                                                    }),
+                                            )
+                                            .clicked()
+                                        {
+                                            action.sort_field_changed = Some(*field);
+                                            close = true;
+                                        }
+                                    }
+                                });
+                                popup_rect = Some(ui.min_rect());
+                            });
+
+                        let clicked_elsewhere = ui.input(|i| i.pointer.any_click())
+                            && !sort_resp.hovered()
+                            && !popup_rect
+                                .map(|r| ui.rect_contains_pointer(r))
+                                .unwrap_or(false);
+                        if close || clicked_elsewhere {
+                            ui.ctx().data_mut(|d| d.insert_temp(sort_menu_id, false));
+                        }
                     }
 
                     // Sort direction toggle
@@ -361,6 +706,54 @@ impl<'a> SongsTable<'a> {
                 });
             });
 
+            // Quick-filter chips. They narrow the list without leaving the
+            // view, so the user does not have to hunt for a collection view
+            // to find the lossless or Hi-Res tracks.
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                for filter in QuickFilter::ALL {
+                    let is_active = quick_filter == filter;
+                    let label = filter.label();
+                    let resp = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(label)
+                                .font(crate::theme::font(11.5))
+                                .color(if is_active {
+                                    Color32::WHITE
+                                } else {
+                                    theme.text_secondary
+                                }),
+                        )
+                        .fill(if is_active {
+                            theme.accent
+                        } else {
+                            theme.bg_pill
+                        })
+                        .stroke(Stroke::new(
+                            1.0,
+                            if is_active {
+                                theme.accent_highlight
+                            } else {
+                                theme.border_subtle
+                            },
+                        ))
+                        .corner_radius(CornerRadius::same(6))
+                        .min_size(Vec2::new(0.0, 24.0)),
+                    );
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::Button,
+                            ui.is_enabled(),
+                            is_active,
+                            format!("Filter: {label}"),
+                        )
+                    });
+                    if resp.on_hover_text(quick_filter_tooltip(filter)).clicked() {
+                        action.quick_filter_changed = Some(filter);
+                    }
+                }
+            });
+
             ui.add_space(6.0);
         }
 
@@ -368,6 +761,12 @@ impl<'a> SongsTable<'a> {
         if !selected_track_ids.is_empty() {
             render_bulk_bar(ui, selected_track_ids.len(), playlists, theme, &mut action);
             ui.add_space(6.0);
+        }
+
+        // An empty list gets an explanation and a way out, not a blank area.
+        if tracks.is_empty() {
+            render_empty_state(ui, theme, search_query, library_track_count, &mut action);
+            return action;
         }
 
         if is_grid_view {
@@ -418,149 +817,173 @@ impl<'a> SongsTable<'a> {
                 });
         } else {
             // ── List View (virtualized, renders only visible rows) ──────────
-            let col_num_w = 54.0;
-            let col_time_w = 52.0;
-            let col_fav_w = 32.0;
-            let col_menu_w = 26.0;
             let row_h = 48.0;
 
-            // Static column headers
+            // Static column headers, painted on the same column model the rows
+            // use, so the two can never drift apart.
             let full_width = ui.available_width();
-            let fixed_w = col_num_w + col_time_w + col_fav_w + col_menu_w + 40.0;
-            let remaining_w = (full_width - fixed_w).max(200.0);
-            let title_w = remaining_w * 0.38;
-            let artist_w = remaining_w * 0.31;
-            let album_w = remaining_w * 0.31;
+            let cols = TableColumns::new(full_width);
 
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+            let (header_rect, _) =
+                ui.allocate_exact_size(Vec2::new(full_width, 20.0), Sense::hover());
+            let hp = ui.painter_at(header_rect);
+            let header_y = header_rect.center().y;
 
-                let (num_h_rect, num_h_resp) =
-                    ui.allocate_exact_size(Vec2::new(col_num_w, 20.0), Sense::click());
-                // Select-all checkbox, independent of the column sort target.
-                let all_selected =
-                    !tracks.is_empty() && tracks.iter().all(|t| selected_track_ids.contains(&t.id));
-                let any_selected = tracks.iter().any(|t| selected_track_ids.contains(&t.id));
-                let h_painter = ui.painter_at(num_h_rect);
-                let cb = Rect::from_center_size(
-                    Pos2::new(num_h_rect.min.x + 16.0, num_h_rect.center().y),
-                    Vec2::new(15.0, 15.0),
+            let header_cell = |ui: &mut egui::Ui, salt: &str, x: f32, w: f32| -> egui::Response {
+                let rect = Rect::from_min_size(
+                    Pos2::new(header_rect.min.x + x, header_rect.min.y),
+                    Vec2::new(w, 20.0),
                 );
-                paint_checkbox(
-                    &h_painter,
-                    cb,
-                    all_selected,
-                    any_selected && !all_selected,
-                    theme,
-                );
-                h_painter.text(
-                    Pos2::new(num_h_rect.min.x + 42.0, num_h_rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    "#",
-                    crate::theme::font(11.8),
-                    theme.text_muted,
-                );
-                if num_h_resp
-                    .on_hover_text("Click the box to select all · click # to sort")
-                    .clicked()
-                {
-                    let pointer = ui.input(|i| i.pointer.interact_pos());
-                    let over_box = pointer
-                        .map(|p| p.x < num_h_rect.min.x + 30.0)
-                        .unwrap_or(false);
-                    if over_box {
-                        if all_selected {
-                            selected_track_ids.clear();
-                        } else {
-                            for t in tracks.iter() {
-                                selected_track_ids.insert(t.id);
-                            }
-                        }
-                        *last_clicked_index = None;
+                ui.interact(rect, ui.make_persistent_id(salt), Sense::click())
+            };
+
+            // Column 1: select-all checkbox + the row-number sort target.
+            let num_h_resp = header_cell(ui, "hdr_num", cols.num_x, COL_NUM_W);
+            let all_selected =
+                !tracks.is_empty() && tracks.iter().all(|t| selected_track_ids.contains(&t.id));
+            let any_selected = tracks.iter().any(|t| selected_track_ids.contains(&t.id));
+            let cb = Rect::from_center_size(
+                Pos2::new(header_rect.min.x + cols.num_x + 16.0, header_y),
+                Vec2::new(15.0, 15.0),
+            );
+            paint_checkbox(&hp, cb, all_selected, any_selected && !all_selected, theme);
+            hp.text(
+                Pos2::new(header_rect.min.x + cols.num_x + 42.0, header_y),
+                egui::Align2::LEFT_CENTER,
+                "#",
+                crate::theme::font(11.8),
+                theme.text_muted,
+            );
+            if num_h_resp
+                .on_hover_text("Click the box to select all · click # to sort")
+                .clicked()
+            {
+                let pointer = ui.input(|i| i.pointer.interact_pos());
+                let over_box = pointer
+                    .map(|p| p.x < header_rect.min.x + cols.num_x + 30.0)
+                    .unwrap_or(false);
+                if over_box {
+                    if all_selected {
+                        selected_track_ids.clear();
                     } else {
-                        action.sort_field_changed = Some(SortField::TrackNumber);
+                        for t in tracks.iter() {
+                            selected_track_ids.insert(t.id);
+                        }
                     }
-                }
-
-                let (title_h_rect, title_h_resp) =
-                    ui.allocate_exact_size(Vec2::new(title_w, 20.0), Sense::click());
-                let title_col = if current_sort == SortField::Title {
-                    theme.accent_highlight
+                    *last_clicked_index = None;
                 } else {
-                    theme.text_muted
-                };
-                ui.painter_at(title_h_rect).text(
-                    Pos2::new(title_h_rect.min.x + 40.0, title_h_rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    "TITLE",
-                    crate::theme::font(11.8),
-                    title_col,
-                );
-                if title_h_resp.on_hover_text("Sort by Title").clicked() {
-                    action.sort_field_changed = Some(SortField::Title);
+                    action.sort_field_changed = Some(SortField::TrackNumber);
                 }
+            }
 
-                let (artist_h_rect, artist_h_resp) =
-                    ui.allocate_exact_size(Vec2::new(artist_w, 20.0), Sense::click());
-                let artist_col = if current_sort == SortField::Artist {
-                    theme.accent_highlight
-                } else {
-                    theme.text_muted
-                };
-                ui.painter_at(artist_h_rect).text(
-                    artist_h_rect.left_center(),
-                    egui::Align2::LEFT_CENTER,
-                    "ARTIST",
-                    crate::theme::font(11.8),
-                    artist_col,
-                );
-                if artist_h_resp.on_hover_text("Sort by Artist").clicked() {
-                    action.sort_field_changed = Some(SortField::Artist);
-                }
+            // Column 2: title.
+            let title_h_resp =
+                header_cell(ui, "hdr_title", cols.title_x, cols.title_text_w + ART_INSET);
+            let title_col = if current_sort == SortField::Title {
+                theme.accent_highlight
+            } else {
+                theme.text_muted
+            };
+            hp.text(
+                Pos2::new(header_rect.min.x + cols.title_text_x, header_y),
+                egui::Align2::LEFT_CENTER,
+                "TITLE",
+                crate::theme::font(11.8),
+                title_col,
+            );
+            paint_sort_arrow(
+                &hp,
+                Pos2::new(header_rect.min.x + cols.title_text_x + 34.0, header_y),
+                current_sort == SortField::Title,
+                sort_order,
+                title_col,
+            );
+            if title_h_resp.on_hover_text("Sort by Title").clicked() {
+                action.sort_field_changed = Some(SortField::Title);
+            }
 
-                let (album_h_rect, album_h_resp) =
-                    ui.allocate_exact_size(Vec2::new(album_w, 20.0), Sense::click());
-                let album_col = if current_sort == SortField::Album {
-                    theme.accent_highlight
-                } else {
-                    theme.text_muted
-                };
-                ui.painter_at(album_h_rect).text(
-                    album_h_rect.left_center(),
-                    egui::Align2::LEFT_CENTER,
-                    "ALBUM",
-                    crate::theme::font(11.8),
-                    album_col,
-                );
-                if album_h_resp.on_hover_text("Sort by Album").clicked() {
-                    action.sort_field_changed = Some(SortField::Album);
-                }
+            // Column 3: artist.
+            let artist_h_resp = header_cell(ui, "hdr_artist", cols.artist_x, cols.artist_w);
+            let artist_col = if current_sort == SortField::Artist {
+                theme.accent_highlight
+            } else {
+                theme.text_muted
+            };
+            hp.text(
+                Pos2::new(header_rect.min.x + cols.artist_x, header_y),
+                egui::Align2::LEFT_CENTER,
+                "ARTIST",
+                crate::theme::font(11.8),
+                artist_col,
+            );
+            paint_sort_arrow(
+                &hp,
+                Pos2::new(header_rect.min.x + cols.artist_x + 44.0, header_y),
+                current_sort == SortField::Artist,
+                sort_order,
+                artist_col,
+            );
+            if artist_h_resp.on_hover_text("Sort by Artist").clicked() {
+                action.sort_field_changed = Some(SortField::Artist);
+            }
 
-                let (clock_rect, clock_resp) =
-                    ui.allocate_exact_size(Vec2::new(col_time_w, 20.0), Sense::click());
-                let clock_col = if current_sort == SortField::Duration {
-                    theme.accent_highlight
-                } else {
-                    theme.text_muted
-                };
-                let clock_icon_rect =
-                    Rect::from_center_size(clock_rect.center(), Vec2::new(14.0, 14.0));
-                crate::components::icons::draw_clock(ui, clock_icon_rect, clock_col);
-                if clock_resp.on_hover_text("Sort by Duration").clicked() {
-                    action.sort_field_changed = Some(SortField::Duration);
-                }
+            // Column 4: album.
+            let album_h_resp = header_cell(ui, "hdr_album", cols.album_x, cols.album_w);
+            let album_col = if current_sort == SortField::Album {
+                theme.accent_highlight
+            } else {
+                theme.text_muted
+            };
+            hp.text(
+                Pos2::new(header_rect.min.x + cols.album_x, header_y),
+                egui::Align2::LEFT_CENTER,
+                "ALBUM",
+                crate::theme::font(11.8),
+                album_col,
+            );
+            paint_sort_arrow(
+                &hp,
+                Pos2::new(header_rect.min.x + cols.album_x + 42.0, header_y),
+                current_sort == SortField::Album,
+                sort_order,
+                album_col,
+            );
+            if album_h_resp.on_hover_text("Sort by Album").clicked() {
+                action.sort_field_changed = Some(SortField::Album);
+            }
 
-                let (heart_rect, heart_resp) =
-                    ui.allocate_exact_size(Vec2::new(col_fav_w, 20.0), Sense::click());
-                let heart_icon_rect =
-                    Rect::from_center_size(heart_rect.center(), Vec2::new(14.0, 14.0));
-                crate::components::icons::draw_heart(ui, heart_icon_rect, theme.text_muted, false);
-                if heart_resp.on_hover_text("Sort by Favourites").clicked() {
-                    action.sort_field_changed = Some(SortField::Favorite);
-                }
+            // Column 5: duration.
+            let clock_resp = header_cell(ui, "hdr_duration", cols.duration_x, COL_TIME_W);
+            let clock_col = if current_sort == SortField::Duration {
+                theme.accent_highlight
+            } else {
+                theme.text_muted
+            };
+            let clock_icon_rect = Rect::from_center_size(
+                Pos2::new(
+                    header_rect.min.x + cols.duration_x + COL_TIME_W * 0.5,
+                    header_y,
+                ),
+                Vec2::new(14.0, 14.0),
+            );
+            crate::components::icons::draw_clock(ui, clock_icon_rect, clock_col);
+            if clock_resp.on_hover_text("Sort by Duration").clicked() {
+                action.sort_field_changed = Some(SortField::Duration);
+            }
 
-                ui.add_sized([col_menu_w, 20.0], egui::Label::new(""));
-            });
+            // Column 6: favourites.
+            let heart_resp = header_cell(ui, "hdr_fav", cols.favourite_x, COL_FAV_W);
+            let heart_icon_rect = Rect::from_center_size(
+                Pos2::new(
+                    header_rect.min.x + cols.favourite_x + COL_FAV_W * 0.5,
+                    header_y,
+                ),
+                Vec2::new(14.0, 14.0),
+            );
+            crate::components::icons::draw_heart(ui, heart_icon_rect, theme.text_muted, false);
+            if heart_resp.on_hover_text("Sort by Favourites").clicked() {
+                action.sort_field_changed = Some(SortField::Favorite);
+            }
 
             ui.add_space(4.0);
 
@@ -632,11 +1055,11 @@ impl<'a> SongsTable<'a> {
 
                         // Interaction zones that must NOT trigger playback.
                         let fav_rect = Rect::from_center_size(
-                            Pos2::new(vis_rect.max.x - col_menu_w - 16.0, cy),
+                            Pos2::new(vis_rect.min.x + cols.favourite_x + COL_FAV_W * 0.5, cy),
                             Vec2::new(24.0, 24.0),
                         );
                         let menu_rect = Rect::from_center_size(
-                            Pos2::new(vis_rect.max.x - 12.0, cy),
+                            Pos2::new(vis_rect.min.x + cols.menu_x + COL_MENU_W * 0.5, cy),
                             Vec2::new(20.0, 20.0),
                         );
                         // Selection checkbox lives in the first column.
@@ -720,7 +1143,7 @@ impl<'a> SongsTable<'a> {
 
                         // Column 2: Thumbnail + Title + Equalizer Indicator
                         let thumb_rect = Rect::from_min_size(
-                            Pos2::new(vis_rect.min.x + col_num_w, cy - 18.0),
+                            Pos2::new(vis_rect.min.x + cols.title_x, cy - 18.0),
                             Vec2::new(36.0, 36.0),
                         );
 
@@ -746,11 +1169,23 @@ impl<'a> SongsTable<'a> {
                         } else {
                             theme.text_primary
                         };
-                        let title_x = vis_rect.min.x + col_num_w + 44.0;
-                        let title_galley = painter.layout_no_wrap(
+                        let title_x = vis_rect.min.x + cols.title_text_x;
+
+                        // A quality tag — HI-RES or LOSSLESS — sits at the right
+                        // end of the title column. The title is truncated to
+                        // leave room for it, so the two can never collide.
+                        let quality_label = track.quality_tag();
+                        let tag_w = quality_label
+                            .map(|label| quality_tag_width(&painter, label, theme))
+                            .unwrap_or(0.0);
+                        let title_max_w = (cols.title_text_w - tag_w - 8.0).max(30.0);
+
+                        let title_galley = layout_truncated(
+                            &painter,
                             track.title.clone(),
                             crate::theme::font(13.8),
                             active_text,
+                            title_max_w,
                         );
                         let title_w_actual = title_galley.size().x;
                         painter.galley(
@@ -777,13 +1212,36 @@ impl<'a> SongsTable<'a> {
                             }
                         }
 
+                        // The quality tag itself, right-aligned in the title
+                        // column.
+                        if let Some(label) = quality_label {
+                            paint_quality_tag(
+                                &painter,
+                                vis_rect.min.x + cols.title_x + cols.title_text_w + ART_INSET - 4.0,
+                                cy,
+                                label,
+                                theme,
+                            );
+                        }
+
                         // Column 3: Artist
-                        let artist_x = vis_rect.min.x + col_num_w + title_w + 8.0;
-                        painter.text(
-                            Pos2::new(artist_x, cy),
-                            egui::Align2::LEFT_CENTER,
-                            &track.artist,
+                        let artist_galley = layout_truncated(
+                            &painter,
+                            track.artist.clone(),
                             crate::theme::font(12.8),
+                            if is_active {
+                                theme.text_primary
+                            } else {
+                                theme.text_secondary
+                            },
+                            cols.artist_w,
+                        );
+                        painter.galley(
+                            Pos2::new(
+                                vis_rect.min.x + cols.artist_x,
+                                cy - artist_galley.size().y * 0.5,
+                            ),
+                            artist_galley,
                             if is_active {
                                 theme.text_primary
                             } else {
@@ -792,16 +1250,27 @@ impl<'a> SongsTable<'a> {
                         );
 
                         // Column 4: Album
-                        let album_x = vis_rect.min.x + col_num_w + title_w + artist_w + 12.0;
-                        painter.text(
-                            Pos2::new(album_x, cy),
-                            egui::Align2::LEFT_CENTER,
+                        let album_galley = layout_truncated(
+                            &painter,
                             if track.album.is_empty() {
-                                "—"
+                                "—".to_string()
                             } else {
-                                &track.album
+                                track.album.clone()
                             },
                             crate::theme::font(12.5),
+                            if is_active {
+                                theme.text_secondary
+                            } else {
+                                theme.text_muted
+                            },
+                            cols.album_w,
+                        );
+                        painter.galley(
+                            Pos2::new(
+                                vis_rect.min.x + cols.album_x,
+                                cy - album_galley.size().y * 0.5,
+                            ),
+                            album_galley,
                             if is_active {
                                 theme.text_secondary
                             } else {
@@ -810,7 +1279,7 @@ impl<'a> SongsTable<'a> {
                         );
 
                         // Column 5: Duration
-                        let dur_x = vis_rect.max.x - col_menu_w - col_fav_w - col_time_w + 4.0;
+                        let dur_x = vis_rect.max.x - COL_MENU_W - COL_FAV_W - COL_TIME_W + 4.0;
                         let dur_str = format_duration(track.duration_secs as f64);
                         painter.text(
                             Pos2::new(dur_x, cy),

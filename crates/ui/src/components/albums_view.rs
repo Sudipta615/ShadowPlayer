@@ -1,3 +1,4 @@
+use crate::services::ArtworkService;
 use crate::theme::Theme;
 use domain::ids::TrackId;
 use domain::models::{Album, Track};
@@ -5,6 +6,7 @@ use eframe::egui::{
     self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
 };
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub struct AlbumsViewAction {
     pub play_album: Option<(String, String)>,
@@ -20,7 +22,11 @@ pub struct AlbumsView<'a> {
     pub active_track_id: Option<TrackId>,
     pub is_playing: bool,
     pub favorite_track_ids: &'a std::collections::HashSet<TrackId>,
-    pub artwork_map: &'a HashMap<TrackId, TextureHandle>,
+    /// The track that stands in for each album's cover art.
+    pub album_covers: &'a HashMap<(String, String), (TrackId, PathBuf)>,
+    /// The artwork service, so the grid can load the covers it is about to
+    /// show.
+    pub artwork: &'a mut ArtworkService,
     pub theme: &'a Theme,
 }
 
@@ -72,7 +78,7 @@ impl<'a> AlbumsView<'a> {
                     let first_track_art = self
                         .album_tracks
                         .first()
-                        .and_then(|t| self.artwork_map.get(&t.id));
+                        .and_then(|t| self.artwork.get_texture(&t.id));
                     if let Some(tex) = first_track_art {
                         egui::Image::new(tex)
                             .corner_radius(CornerRadius::same(10))
@@ -287,6 +293,11 @@ impl<'a> AlbumsView<'a> {
                         let card_w = 148.0;
                         let card_h = 196.0;
                         let avail_w = ui.available_width();
+                        // Bound the cover decoding per frame, exactly as the
+                        // songs table does, so a large library cannot spike a
+                        // frame.
+                        let ctx = ui.ctx().clone();
+                        let mut art_budget = 8usize;
                         let cols = ((avail_w + 14.0) / (card_w + 14.0)).floor().max(1.0) as usize;
 
                         egui::Grid::new("albums_grid")
@@ -318,16 +329,45 @@ impl<'a> AlbumsView<'a> {
                                         Vec2::new(card_w - 16.0, card_w - 16.0),
                                     );
 
-                                    p.rect_filled(
-                                        cover_rect,
-                                        CornerRadius::same(8),
-                                        self.theme.artwork_placeholder,
-                                    );
-                                    crate::components::icons::draw_disc(
-                                        ui,
-                                        cover_rect.shrink2(Vec2::new(32.0, 32.0)),
-                                        self.theme.accent_warm,
-                                    );
+                                    // The album's cover, taken from the first
+                                    // track of the album. The grid used to
+                                    // paint a permanent placeholder disc.
+                                    let cover = self
+                                        .album_covers
+                                        .get(&(album.title.clone(), album.artist.clone()));
+                                    let mut cover_tex: Option<TextureHandle> = None;
+                                    if let Some((cover_id, cover_path)) = cover {
+                                        if self.artwork.get_texture(cover_id).is_none()
+                                            && art_budget > 0
+                                            && !self.artwork.is_missing(cover_id)
+                                        {
+                                            art_budget -= 1;
+                                            self.artwork
+                                                .ensure_loaded_at(&ctx, *cover_id, cover_path);
+                                        }
+                                        cover_tex = self.artwork.get_texture(cover_id).cloned();
+                                        if cover_tex.is_some() {
+                                            self.artwork.touch(cover_id);
+                                        }
+                                    }
+
+                                    if let Some(tex) = cover_tex {
+                                        egui::Image::new(&tex)
+                                            .corner_radius(CornerRadius::same(8))
+                                            .fit_to_exact_size(cover_rect.size())
+                                            .paint_at(ui, cover_rect);
+                                    } else {
+                                        p.rect_filled(
+                                            cover_rect,
+                                            CornerRadius::same(8),
+                                            self.theme.artwork_placeholder,
+                                        );
+                                        crate::components::icons::draw_disc(
+                                            ui,
+                                            cover_rect.shrink2(Vec2::new(32.0, 32.0)),
+                                            self.theme.accent_warm,
+                                        );
+                                    }
 
                                     // Title & Artist
                                     let title_galley = p.layout_no_wrap(

@@ -206,44 +206,6 @@ pub fn render_main_playback_view(
 
     // Dynamic View Header
     match app_state.active_nav {
-        NavItem::HiRes => {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Hi-Res Studio Master Collection")
-                        .font(crate::theme::font(16.0))
-                        .strong()
-                        .color(theme.bit_perfect_green),
-                );
-                ui.label(
-                    egui::RichText::new(format!(
-                        "({} tracks >48kHz / >1000kbps)",
-                        library_state.displayed_tracks.len()
-                    ))
-                    .font(crate::theme::font(12.0))
-                    .color(theme.text_muted),
-                );
-            });
-            ui.add_space(4.0);
-        }
-        NavItem::Lossless => {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Pure Lossless Bit-Exact Collection")
-                        .font(crate::theme::font(16.0))
-                        .strong()
-                        .color(theme.info),
-                );
-                ui.label(
-                    egui::RichText::new(format!(
-                        "({} FLAC / ALAC / WAV / DSD tracks)",
-                        library_state.displayed_tracks.len()
-                    ))
-                    .font(crate::theme::font(12.0))
-                    .color(theme.text_muted),
-                );
-            });
-            ui.add_space(4.0);
-        }
         NavItem::Favorites => {
             ui.horizontal(|ui| {
                 ui.label(
@@ -373,8 +335,18 @@ pub fn render_main_playback_view(
         artwork: artwork_service,
         theme,
         show_header: ui.available_height() > 210.0,
+        search_query: &app_state.search_query,
+        library_track_count: library_state.all_tracks.len(),
     }
     .show(ui);
+
+    // The empty state's call to action.
+    if table_action.open_folders {
+        view_action.switch_nav = Some(NavItem::Folders);
+    }
+    if table_action.clear_search {
+        view_action.search_query = Some(String::new());
+    }
 
     if let Some(f) = table_action.quick_filter_changed {
         library_state.quick_filter = f;

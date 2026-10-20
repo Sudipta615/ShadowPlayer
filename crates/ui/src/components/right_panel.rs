@@ -167,6 +167,34 @@ impl<'a> RightPanel<'a> {
 
                         ui.add_space(6.0);
 
+                        // An empty queue gets an explanation rather than a
+                        // blank panel with a "Clear Queue" button under it.
+                        if display_len == 0 {
+                            ui.add_space(18.0);
+                            ui.vertical_centered(|ui| {
+                                ui.label(
+                                    egui::RichText::new(if qlen == 0 {
+                                        "Nothing queued"
+                                    } else {
+                                        "End of the queue"
+                                    })
+                                    .font(crate::theme::font(13.5))
+                                    .strong()
+                                    .color(self.theme.text_secondary),
+                                );
+                                ui.add_space(3.0);
+                                ui.label(
+                                    egui::RichText::new(if qlen == 0 {
+                                        "Play something and it will appear here."
+                                    } else {
+                                        "Add more tracks to keep listening."
+                                    })
+                                    .font(crate::theme::font(11.8))
+                                    .color(self.theme.text_dim),
+                                );
+                            });
+                        }
+
                         // List of Queue items — virtualized, only visible rows are
                         // built, and covers are fetched lazily for those rows.
                         let item_height = 46.0;
@@ -354,46 +382,49 @@ impl<'a> RightPanel<'a> {
                                 }
                             });
 
-                        // Clear Queue button INSIDE card at bottom (matching mockup)
-                        ui.add_space(8.0);
-                        ui.vertical_centered(|ui| {
-                            let clear_w = (ui.available_width() - 4.0).max(160.0);
-                            let (clear_rect, clear_resp) =
-                                ui.allocate_exact_size(Vec2::new(clear_w, 32.0), Sense::click());
-                            let p = ui.painter_at(clear_rect);
-                            let bg = if clear_resp.hovered() {
-                                self.theme.bg_card_hover
-                            } else {
-                                self.theme.bg_pill
-                            };
-                            p.rect_filled(clear_rect, CornerRadius::same(8), bg);
-                            p.rect_stroke(
-                                clear_rect,
-                                CornerRadius::same(8),
-                                Stroke::new(1.0_f32, self.theme.border_subtle),
-                                egui::StrokeKind::Inside,
-                            );
-                            let trash_rect = Rect::from_center_size(
-                                Pos2::new(clear_rect.center().x - 42.0, clear_rect.center().y),
-                                Vec2::new(16.0, 16.0),
-                            );
-                            crate::components::icons::draw_trash(
-                                ui,
-                                trash_rect,
-                                self.theme.text_secondary,
-                            );
-                            p.text(
-                                Pos2::new(clear_rect.center().x - 24.0, clear_rect.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                "Clear Queue",
-                                crate::theme::font(12.5),
-                                self.theme.text_secondary,
-                            );
+                        // Clear Queue button INSIDE card at bottom (matching mockup).
+                        // It is pointless while there is nothing to clear.
+                        if !self.queue_tracks.is_empty() {
+                            ui.add_space(8.0);
+                            ui.vertical_centered(|ui| {
+                                let clear_w = (ui.available_width() - 4.0).max(160.0);
+                                let (clear_rect, clear_resp) = ui
+                                    .allocate_exact_size(Vec2::new(clear_w, 32.0), Sense::click());
+                                let p = ui.painter_at(clear_rect);
+                                let bg = if clear_resp.hovered() {
+                                    self.theme.bg_card_hover
+                                } else {
+                                    self.theme.bg_pill
+                                };
+                                p.rect_filled(clear_rect, CornerRadius::same(8), bg);
+                                p.rect_stroke(
+                                    clear_rect,
+                                    CornerRadius::same(8),
+                                    Stroke::new(1.0_f32, self.theme.border_subtle),
+                                    egui::StrokeKind::Inside,
+                                );
+                                let trash_rect = Rect::from_center_size(
+                                    Pos2::new(clear_rect.center().x - 42.0, clear_rect.center().y),
+                                    Vec2::new(16.0, 16.0),
+                                );
+                                crate::components::icons::draw_trash(
+                                    ui,
+                                    trash_rect,
+                                    self.theme.text_secondary,
+                                );
+                                p.text(
+                                    Pos2::new(clear_rect.center().x - 24.0, clear_rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    "Clear Queue",
+                                    crate::theme::font(12.5),
+                                    self.theme.text_secondary,
+                                );
 
-                            if clear_resp.clicked() {
-                                action.clear_queue = true;
-                            }
-                        });
+                                if clear_resp.clicked() {
+                                    action.clear_queue = true;
+                                }
+                            });
+                        }
                     }
 
                     RightTab::Lyrics => {

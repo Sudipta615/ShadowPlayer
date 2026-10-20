@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use database::{
@@ -55,9 +55,48 @@ pub struct LibraryState {
     /// needless rebuilds (and the associated 10k-track clones) when the user
     /// bounces between tabs.
     displayed_key: Option<(NavItem, String, SortField, SortOrder, QuickFilter)>,
+
+    /// A representative track for each album, used to show the cover art in
+    /// the album grid. The grid used to paint a permanent placeholder disc,
+    /// because artwork is cached per *track* and the grid only knows the
+    /// album.
+    pub album_cover_tracks: HashMap<(String, String), (TrackId, PathBuf)>,
+    /// A representative track for each artist, used to show a cover in the
+    /// artist grid.
+    pub artist_cover_tracks: HashMap<String, (TrackId, PathBuf)>,
 }
 
 impl LibraryState {
+    /// Pick one track per album to stand in for its cover art.
+    ///
+    /// Artwork is cached per track, so the album grid needs to know which
+    /// track stands in for each album. The first track of an album wins, which
+    /// is the one the album's own detail view uses too.
+    fn rebuild_album_covers(&mut self) {
+        let mut covers: HashMap<(String, String), (TrackId, PathBuf)> =
+            HashMap::with_capacity(self.albums.len());
+        for track in &self.all_tracks {
+            if track.album.is_empty() {
+                continue;
+            }
+            let key = (track.album.clone(), track.artist.clone());
+            covers.entry(key).or_insert((track.id, track.path.clone()));
+        }
+        self.album_cover_tracks = covers;
+
+        let mut artist_covers: HashMap<String, (TrackId, PathBuf)> =
+            HashMap::with_capacity(self.artists.len());
+        for track in &self.all_tracks {
+            if track.artist.is_empty() {
+                continue;
+            }
+            artist_covers
+                .entry(track.artist.clone())
+                .or_insert((track.id, track.path.clone()));
+        }
+        self.artist_cover_tracks = artist_covers;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn reload(
         &mut self,
@@ -105,6 +144,10 @@ impl LibraryState {
             self.artists = arts;
         }
 
+        // The cover maps are built from the track list, but their capacity
+        // hints want the album and artist lists, so build them after those.
+        self.rebuild_album_covers();
+
         if let Ok(gnrs) = genre_repo.list() {
             self.genres = gnrs;
         }
@@ -115,6 +158,7 @@ impl LibraryState {
 
         // Force a rebuild: underlying data changed.
         self.displayed_key = None;
+        self.rebuild_album_covers();
 
         self.update_displayed_tracks(
             search_engine,
@@ -197,18 +241,6 @@ impl LibraryState {
                     recent.truncate(200);
                     recent
                 }
-                NavItem::HiRes => self
-                    .all_tracks
-                    .iter()
-                    .filter(|t| t.sample_rate > 48000 || t.bitrate_kbps.unwrap_or(0) > 1000)
-                    .cloned()
-                    .collect(),
-                NavItem::Lossless => self
-                    .all_tracks
-                    .iter()
-                    .filter(|t| t.is_lossless)
-                    .cloned()
-                    .collect(),
                 NavItem::Playlist(pl_id) => match playlist_repo.get_tracks(&pl_id) {
                     Ok(tracks) => tracks,
                     Err(e) => {
@@ -238,9 +270,7 @@ impl LibraryState {
         match self.quick_filter {
             QuickFilter::All => {}
             QuickFilter::Lossless => tracks.retain(|t| t.is_lossless),
-            QuickFilter::HiRes => {
-                tracks.retain(|t| t.sample_rate > 48000 || t.bitrate_kbps.unwrap_or(0) > 1000)
-            }
+            QuickFilter::HiRes => tracks.retain(|t| t.is_hires()),
             QuickFilter::Favorites => {
                 let favs = &self.favorite_ids;
                 tracks.retain(|t| favs.contains(&t.id));

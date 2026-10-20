@@ -98,24 +98,37 @@ impl ArtworkService {
     /// Ensure an artwork texture is loaded for the given track. Cheap no-op when
     /// already resident or known-missing. Returns true if a texture is available.
     pub fn ensure_loaded(&mut self, ctx: &egui::Context, track: &Track) -> bool {
-        if self.texture_cache.contains_key(&track.id) {
-            self.touch(&track.id);
+        self.ensure_loaded_at(ctx, track.id, &track.path)
+    }
+
+    /// Ensure an artwork texture is loaded for a track identified by its id and
+    /// file path.
+    ///
+    /// The album grid knows an album's cover by the *track* it came from, and
+    /// that is an id and a path — cloning whole `Track`s for every album in the
+    /// library would be wasteful.
+    pub fn ensure_loaded_at(
+        &mut self,
+        ctx: &egui::Context,
+        id: TrackId,
+        path: &std::path::Path,
+    ) -> bool {
+        if self.texture_cache.contains_key(&id) {
+            self.touch(&id);
             return true;
         }
-        if self.missing.contains(&track.id) {
+        if self.missing.contains(&id) {
             return false;
         }
 
-        let cached_thumb = self.manager.get_cached_thumbnail_path(&track.id);
-        let png_path = track.path.with_extension("png");
-        let jpg_path = track.path.with_extension("jpg");
-        let cover_path = track
-            .path
+        let cached_thumb = self.manager.get_cached_thumbnail_path(&id);
+        let png_path = path.with_extension("png");
+        let jpg_path = path.with_extension("jpg");
+        let cover_path = path
             .parent()
             .map(|p| p.join("cover.png"))
             .unwrap_or_default();
-        let cover_jpg = track
-            .path
+        let cover_jpg = path
             .parent()
             .map(|p| p.join("cover.jpg"))
             .unwrap_or_default();
@@ -135,12 +148,12 @@ impl ArtworkService {
         };
 
         let Some(art_file) = candidate else {
-            self.missing.insert(track.id);
+            self.missing.insert(id);
             return false;
         };
 
         let Ok(img) = image::open(&art_file) else {
-            self.missing.insert(track.id);
+            self.missing.insert(id);
             return false;
         };
 
@@ -156,12 +169,12 @@ impl ArtworkService {
         let size = [rgba.width() as usize, rgba.height() as usize];
         let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
         let texture = ctx.load_texture(
-            format!("art_{}", track.id),
+            format!("art_{id}"),
             color_image,
             egui::TextureOptions::LINEAR,
         );
 
-        self.insert(track.id, texture);
+        self.insert(id, texture);
         true
     }
 

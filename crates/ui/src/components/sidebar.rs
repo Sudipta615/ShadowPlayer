@@ -16,8 +16,6 @@ pub enum NavItem {
     MostPlayed,
     /// Newest additions to the library, by import time.
     RecentlyAdded,
-    HiRes,
-    Lossless,
     Playlist(PlaylistId),
     SmartPlaylist(PlaylistId),
     Settings,
@@ -234,6 +232,12 @@ impl<'a> SideBar<'a> {
                 NavItem::MostPlayed,
                 "Most Played",
                 self.theme.accent_warm,
+            );
+            self.render_playlist_badge_item(
+                ui,
+                NavItem::RecentlyAdded,
+                "Recently Added",
+                self.theme.info,
             );
 
             // Merged User Custom Playlists and Smart Playlists
@@ -600,6 +604,9 @@ impl<'a> SideBar<'a> {
             }
             NavItem::MostPlayed => {
                 crate::components::icons::draw_bar_chart(ui, icon_sub_rect, Color32::WHITE);
+            }
+            NavItem::RecentlyAdded => {
+                crate::components::icons::draw_trending_up(ui, icon_sub_rect, Color32::WHITE);
             }
             _ => {
                 painter.circle_filled(badge_rect.center(), 3.5, Color32::WHITE);

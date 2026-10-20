@@ -13,7 +13,7 @@ pub fn render_albums_view(
     ui: &mut egui::Ui,
     library_state: &mut LibraryState,
     coordinator: &mut PlaybackCoordinator,
-    artwork_service: &ArtworkService,
+    artwork_service: &mut ArtworkService,
     current_track: Option<&Track>,
     is_playing: bool,
     theme: &Theme,
@@ -27,7 +27,8 @@ pub fn render_albums_view(
         active_track_id: current_track.map(|t| t.id),
         is_playing,
         favorite_track_ids: &library_state.favorite_ids,
-        artwork_map: artwork_service.texture_cache(),
+        album_covers: &library_state.album_cover_tracks,
+        artwork: artwork_service,
         theme,
     }
     .show(ui);
