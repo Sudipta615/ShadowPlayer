@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.7.0] - 2026-10-21
 
 ### Added
 - **Quick-filter chips**: All / Lossless / Hi-Res / Favorites / Played narrow the current view without leaving it. The filtering was fully implemented and simply had no way to be reached.
@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **One radius scale and one spacing scale.** The theme tokenised colour and nothing else: there were 240 corner-radius calls across 16 literal values, and 176 spacing overrides while `ui.spacing()` was read zero times. Every radius and every spacing now reads its value from the theme, and the egui widget radius follows the same scale.
 - **One card width and one gutter** across the album, artist, genre and song grids, so the columns line up from one view to the next.
 - The README's "Known limitations" no longer claims that screen-reader support is absent — accesskit was enabled all along, and the labelling is now much more complete.
+- The startup log now reports both versions — `Version: ShadowPlayer v0.7.0 · audio-engine v1.3.1` — where it previously printed only the engine's, despite the README promising both.
 
 ---
 

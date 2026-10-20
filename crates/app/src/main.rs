@@ -75,6 +75,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let saved_settings = SettingsRepo::new(db.clone()).load().unwrap_or_default();
 
     // Initialize authoritative Audio Engine session
+    //
+    // Both versions are printed: the player and the engine are versioned
+    // separately, so the log is where you check which pair a build actually
+    // carries.
+    info!(
+        "Version: ShadowPlayer v{} · {} v{}",
+        env!("CARGO_PKG_VERSION"),
+        engine::NAME,
+        engine::VERSION
+    );
     info!(
         "Initializing {} v{} session...",
         engine::NAME,
