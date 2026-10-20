@@ -334,8 +334,11 @@ pub fn dual_tone_slider(
 
     // Background track (clearly visible in both dark & light modes)
     let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
-    ui.painter()
-        .rect_filled(track_rect, CornerRadius::same(2), theme.slider_track);
+    ui.painter().rect_filled(
+        track_rect,
+        CornerRadius::same(theme.radius_xs),
+        theme.slider_track,
+    );
 
     // Active single-hue filled track
     let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
@@ -346,8 +349,11 @@ pub fn dual_tone_slider(
             Pos2::new(track_rect.min.x, track_rect.min.y),
             Pos2::new(track_rect.min.x + filled_w, track_rect.max.y),
         );
-        ui.painter()
-            .rect_filled(fill_rect, CornerRadius::same(2), theme.accent_highlight);
+        ui.painter().rect_filled(
+            fill_rect,
+            CornerRadius::same(theme.radius_xs),
+            theme.accent_highlight,
+        );
     }
 
     // Thumb knob
@@ -519,7 +525,7 @@ pub fn show_settings_tab_extended(
     let mut actions = SettingsTabActions::default();
 
     ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 14.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
 
         // 1. Top Category Segmented Tabs
         render_category_bar(ui, state, theme);
@@ -529,7 +535,7 @@ pub fn show_settings_tab_extended(
             .id_salt("settings_main_scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 16.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
 
                 match state.active_category {
                     SettingsCategory::Playback => {
@@ -567,12 +573,12 @@ fn render_category_bar(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &
     let container_frame = egui::Frame::NONE
         .fill(theme.bg_card)
         .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(egui::Margin::symmetric(5, 5));
 
     container_frame.show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(5.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
             let num_cats = SettingsCategory::ALL.len() as f32;
             let tab_w = ((ui.available_width() - (num_cats - 1.0) * 5.0) / num_cats).max(80.0);
 
@@ -605,7 +611,7 @@ fn render_category_bar(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &
 
                 p.rect(
                     tab_rect,
-                    CornerRadius::same(8),
+                    CornerRadius::same(theme.radius_md),
                     bg,
                     Stroke::new(1.0, border),
                     egui::StrokeKind::Inside,
@@ -771,11 +777,11 @@ fn render_playback_category(
             let sub_frame = egui::Frame::NONE
                 .fill(theme.bg_pill.linear_multiply(0.6))
                 .stroke(Stroke::new(1.0, theme.border_card))
-                .corner_radius(CornerRadius::same(10))
+                .corner_radius(CornerRadius::same(theme.radius_lg))
                 .inner_margin(egui::Margin::symmetric(14, 12));
 
             sub_frame.show(ui, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
                 setting_item(
                     ui,
@@ -873,18 +879,18 @@ fn render_output_category(
     let bp_frame = egui::Frame::NONE
         .fill(bp_fill)
         .stroke(Stroke::new(1.2, bp_border))
-        .corner_radius(CornerRadius::same(14))
+        .corner_radius(CornerRadius::same(theme.radius_xl))
         .inner_margin(egui::Margin::symmetric(18, 16));
 
     bp_frame.show(ui, |ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
             let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(32.0, 32.0), Sense::hover());
             ui.painter_at(icon_rect).rect_filled(
                 icon_rect,
-                CornerRadius::same(8),
+                CornerRadius::same(theme.radius_md),
                 if state.bit_perfect { theme.bit_perfect_green } else { theme.bg_pill },
             );
             crate::components::icons::draw_speaker(
@@ -896,7 +902,7 @@ fn render_output_category(
 
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                     ui.label(
                         egui::RichText::new("Audiophile Bit-Perfect Direct Stream")
                             .font(crate::theme::font(15.0))
@@ -1183,7 +1189,7 @@ fn render_spatial_category(
         });
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
             badge_label(
                 ui,
                 format!("Virtual Center: {:+.1}°", state.screen_center_az),
@@ -1341,11 +1347,11 @@ fn render_spatial_category(
             let room_grid = egui::Frame::NONE
                 .fill(theme.bg_pill.linear_multiply(0.6))
                 .stroke(Stroke::new(1.0, theme.border_card))
-                .corner_radius(CornerRadius::same(10))
+                .corner_radius(CornerRadius::same(theme.radius_lg))
                 .inner_margin(egui::Margin::symmetric(14, 12));
 
             room_grid.show(ui, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
                 setting_item(
                     ui,
@@ -1509,7 +1515,7 @@ fn render_chain_presets_card(
         for (idx, preset) in chain_presets.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                     ui.label(
                         egui::RichText::new(&preset.name)
                             .font(crate::theme::font(13.0))
@@ -2289,7 +2295,7 @@ fn render_tools_category(
                                 .color(Color32::WHITE),
                         )
                         .fill(theme.accent)
-                        .corner_radius(CornerRadius::same(8)),
+                        .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
                     .clicked()
                 {
@@ -2305,7 +2311,7 @@ fn render_tools_category(
                                 .color(Color32::WHITE),
                         )
                         .fill(Color32::from_rgb(220, 38, 38))
-                        .corner_radius(CornerRadius::same(8)),
+                        .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
                     .clicked()
                 {
@@ -2420,7 +2426,7 @@ fn render_tools_category(
                                 .color(Color32::WHITE),
                         )
                         .fill(theme.accent)
-                        .corner_radius(CornerRadius::same(8)),
+                        .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
                     .clicked()
                 {
@@ -2552,7 +2558,7 @@ fn render_library_category(
                                 .color(Color32::WHITE),
                         )
                         .fill(theme.accent)
-                        .corner_radius(CornerRadius::same(8))
+                        .corner_radius(CornerRadius::same(theme.radius_md))
                         .min_size(Vec2::new(160.0, 30.0)),
                     )
                     .clicked()
@@ -2621,7 +2627,7 @@ fn render_library_category(
             |ui| {
                 ui.add_enabled_ui(!extra.import_active, |ui| {
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
 
                         if ui.add(pill_btn("Import Songs…", true, theme)).clicked() {
                             actions.import_files = true;
@@ -2689,7 +2695,7 @@ fn render_library_category(
             );
             for dir in extra.imported_dirs {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
                     let (folder_rect, _) =
                         ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
                     crate::components::icons::draw_folder(ui, folder_rect, theme.accent_warm);
@@ -2713,7 +2719,7 @@ fn render_library_category(
 
             for root in extra.scan_roots {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
                     let (folder_rect, _) =
                         ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
                     crate::components::icons::draw_folder(ui, folder_rect, theme.accent);
@@ -2776,10 +2782,13 @@ fn render_library_category(
         );
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_3xl, 0.0);
             let (logo_rect, _) = ui.allocate_exact_size(Vec2::new(48.0, 48.0), Sense::hover());
-            ui.painter_at(logo_rect)
-                .rect_filled(logo_rect, CornerRadius::same(12), theme.bg_pill);
+            ui.painter_at(logo_rect).rect_filled(
+                logo_rect,
+                CornerRadius::same(theme.radius_lg),
+                theme.bg_pill,
+            );
             crate::components::icons::draw_logo(
                 ui,
                 logo_rect.shrink2(Vec2::splat(6.0)),
@@ -2787,7 +2796,7 @@ fn render_library_category(
             );
 
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
                 ui.label(
                     egui::RichText::new("ShadowPlayer")
                         .font(crate::theme::font(15.0))
@@ -2823,12 +2832,12 @@ pub fn setting_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(
     let card_frame = egui::Frame::NONE
         .fill(theme.bg_card)
         .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(14))
+        .corner_radius(CornerRadius::same(theme.radius_xl))
         .inner_margin(egui::Margin::symmetric(20, 16));
 
     card_frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 12.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xl);
         add_contents(ui);
     });
 }
@@ -2854,11 +2863,14 @@ pub fn card_header_with_info(
     theme: &Theme,
 ) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
         let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(32.0, 32.0), Sense::hover());
-        ui.painter_at(icon_rect)
-            .rect_filled(icon_rect, CornerRadius::same(8), theme.bg_pill);
+        ui.painter_at(icon_rect).rect_filled(
+            icon_rect,
+            CornerRadius::same(theme.radius_md),
+            theme.bg_pill,
+        );
         icon_fn(
             ui,
             icon_rect.shrink2(Vec2::splat(7.0)),
@@ -2866,9 +2878,9 @@ pub fn card_header_with_info(
         );
 
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                 ui.label(
                     egui::RichText::new(title)
                         .font(crate::theme::font(14.5))
@@ -2888,7 +2900,7 @@ pub fn card_header_with_info(
                     egui::Frame::NONE
                         .fill(bg)
                         .stroke(Stroke::new(1.0, fg.linear_multiply(0.4)))
-                        .corner_radius(CornerRadius::same(6))
+                        .corner_radius(CornerRadius::same(theme.radius_sm))
                         .inner_margin(egui::Margin::symmetric(7, 2))
                         .show(ui, |ui| {
                             ui.label(
@@ -2934,7 +2946,7 @@ pub fn setting_item_with_info(
     add_control: impl FnOnce(&mut egui::Ui),
 ) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(20.0, 0.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
         let avail_w = ui.available_width();
         let label_w = 240.0_f32.min(avail_w * 0.40);
 
@@ -2943,9 +2955,9 @@ pub fn setting_item_with_info(
             Vec2::new(label_w, 24.0),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                     ui.label(
                         egui::RichText::new(label)
                             .font(crate::theme::font(13.0))
@@ -3003,7 +3015,7 @@ pub fn toggle_switch(ui: &mut egui::Ui, value: &mut bool, theme: &Theme) -> bool
     };
     painter.rect(
         rect,
-        CornerRadius::same(10),
+        CornerRadius::same(theme.radius_lg),
         bg_color,
         border_stroke,
         egui::StrokeKind::Inside,
@@ -3052,7 +3064,7 @@ pub fn segment_picker<T: Clone + PartialEq>(
             } else {
                 Stroke::new(1.0, theme.border_card)
             })
-            .corner_radius(CornerRadius::same(7))
+            .corner_radius(CornerRadius::same(theme.radius_sm))
             .min_size(Vec2::new(0.0, 26.0));
 
             if ui.add(btn).clicked() && !is_sel {
@@ -3080,7 +3092,7 @@ fn pill_btn(label: &str, selected: bool, theme: &Theme) -> egui::Button<'static>
         theme.bg_pill
     })
     .stroke(Stroke::new(1.0, theme.border_card))
-    .corner_radius(CornerRadius::same(7))
+    .corner_radius(CornerRadius::same(theme.radius_sm))
     .min_size(Vec2::new(0.0, 24.0))
 }
 
@@ -3089,7 +3101,7 @@ fn badge_label(ui: &mut egui::Ui, text: impl Into<String>, theme: &Theme) {
     egui::Frame::NONE
         .fill(theme.bg_pill)
         .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(6))
+        .corner_radius(CornerRadius::same(theme.radius_sm))
         .inner_margin(egui::Margin::symmetric(8, 3))
         .show(ui, |ui| {
             ui.label(

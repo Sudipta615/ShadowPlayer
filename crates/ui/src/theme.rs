@@ -5,6 +5,21 @@ use eframe::egui::{
     TextStyle, Vec2,
 };
 
+/// Blend two colours, for animated state changes.
+///
+/// egui's animation helpers return a 0..1 progress value; this turns that
+/// into the colour it should be at.
+pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgba_unmultiplied(
+        mix(a.r(), b.r()),
+        mix(a.g(), b.g()),
+        mix(a.b(), b.b()),
+        mix(a.a(), b.a()),
+    )
+}
+
 /// The one knob that controls the UI type scale.
 ///
 /// Every explicit text size in the app goes through [`font`], so this is enough
@@ -149,6 +164,41 @@ pub struct Theme {
     pub meter_gutter: Color32,
     /// The grid lines inside the instrument panels.
     pub meter_grid: Color32,
+
+    // Layout tokens
+    /// The corner radius of the tiniest surfaces -- slider tracks, meter
+    /// bars, the equalizer's tick marks.
+    pub radius_xs: u8,
+    /// The corner radius of a fully-round control -- a pill-shaped button.
+    pub radius_pill: u8,
+    /// The corner radius of the small surfaces -- chips, tags, checkboxes.
+    pub radius_sm: u8,
+    /// The corner radius of the medium surfaces -- buttons, list rows.
+    pub radius_md: u8,
+    /// The corner radius of the large surfaces -- cards, panels.
+    pub radius_lg: u8,
+    /// The corner radius of the largest surfaces -- the app's own panels.
+    pub radius_xl: u8,
+    /// The spacing scale, on a 2 px grid.
+    ///
+    /// The app's spacing already sat on this grid; naming the steps means
+    /// the components share one scale instead of each inventing its own.
+    pub space_xxxs: f32,
+    pub space_xxs: f32,
+    pub space_xs: f32,
+    pub space_sm: f32,
+    pub space_md: f32,
+    pub space_lg: f32,
+    pub space_xl: f32,
+    pub space_2xl: f32,
+    pub space_3xl: f32,
+    pub space_4xl: f32,
+    pub space_5xl: f32,
+    /// The width of a card in the grid views. Shared by all four so the
+    /// columns line up from one view to the next.
+    pub card_w: f32,
+    /// The gap between cards in the grid views.
+    pub card_gutter: f32,
     /// Background of the "scanning…" information banner.
     pub scan_banner_bg: Color32,
     /// Sun / light-mode accent.
@@ -199,6 +249,26 @@ impl Theme {
             meter_bg: Color32::from_rgb(12, 14, 22), // #0C0E16
             meter_gutter: Color32::from_rgb(18, 20, 32), // #121420
             meter_grid: Color32::from_rgba_unmultiplied(100, 116, 139, 40),
+
+            radius_xs: 2,
+            radius_pill: 19,
+            radius_sm: 6,
+            radius_md: 8,
+            radius_lg: 12,
+            radius_xl: 14,
+            space_xxxs: 1.0,
+            space_xxs: 2.0,
+            space_xs: 4.0,
+            space_sm: 6.0,
+            space_md: 8.0,
+            space_lg: 10.0,
+            space_xl: 12.0,
+            space_2xl: 14.0,
+            space_3xl: 16.0,
+            space_4xl: 18.0,
+            space_5xl: 20.0,
+            card_w: 148.0,
+            card_gutter: 14.0,
             scan_banner_bg: Color32::from_rgb(16, 43, 40), // #102B28
             sun_accent: Color32::from_rgb(245, 158, 11),
         }
@@ -241,6 +311,26 @@ impl Theme {
             meter_bg: Color32::from_rgb(238, 243, 241), // #EEF3F1
             meter_gutter: Color32::from_rgb(220, 229, 226), // #DCE5E2
             meter_grid: Color32::from_rgba_unmultiplied(16, 32, 29, 30),
+
+            radius_xs: 2,
+            radius_pill: 19,
+            radius_sm: 6,
+            radius_md: 8,
+            radius_lg: 12,
+            radius_xl: 14,
+            space_xxxs: 1.0,
+            space_xxs: 2.0,
+            space_xs: 4.0,
+            space_sm: 6.0,
+            space_md: 8.0,
+            space_lg: 10.0,
+            space_xl: 12.0,
+            space_2xl: 14.0,
+            space_3xl: 16.0,
+            space_4xl: 18.0,
+            space_5xl: 20.0,
+            card_w: 148.0,
+            card_gutter: 14.0,
             scan_banner_bg: Color32::from_rgb(226, 244, 239), // #E2F4EF
             sun_accent: Color32::from_rgb(180, 83, 9),
         }
@@ -274,7 +364,7 @@ impl Theme {
         visuals.warn_fg_color = self.warning_yellow;
         visuals.error_fg_color = self.destructive;
 
-        let rounding = CornerRadius::same(10);
+        let rounding = CornerRadius::same(self.radius_md);
         visuals.widgets.noninteractive.bg_fill = self.bg_card;
         visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, self.border_subtle);
         visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, self.text_primary);
@@ -298,9 +388,9 @@ impl Theme {
         visuals.selection.bg_fill = self.accent;
         visuals.selection.stroke = Stroke::new(1.0_f32, self.accent_highlight);
 
-        visuals.window_corner_radius = CornerRadius::same(14);
+        visuals.window_corner_radius = CornerRadius::same(self.radius_xl);
         visuals.window_stroke = Stroke::new(1.0_f32, self.border_card);
-        visuals.menu_corner_radius = CornerRadius::same(12);
+        visuals.menu_corner_radius = CornerRadius::same(self.radius_lg);
 
         ctx.set_visuals(visuals);
 

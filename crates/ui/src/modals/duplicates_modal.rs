@@ -82,7 +82,7 @@ pub fn show_duplicates_modal(
 
     let closed =
         crate::dialog::show_modal(ctx, "duplicates", "Duplicate Tracks", 620.0, theme, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
 
             ui.horizontal(|ui| {
                 ui.label(
@@ -137,7 +137,8 @@ pub fn show_duplicates_modal(
                                 for t in &group.tracks {
                                     let is_keeper = Some(t.id) == group.keep;
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                                        ui.spacing_mut().item_spacing =
+                                            Vec2::new(theme.space_sm, 0.0);
                                         let mut checked = state.selected.contains(&t.id);
                                         let label = format!(
                                             "{} — {}  ({:.0}s)",

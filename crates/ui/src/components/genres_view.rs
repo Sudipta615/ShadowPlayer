@@ -32,7 +32,7 @@ impl<'a> GenresView<'a> {
         if let Some(sel_name) = self.selected_genre.clone() {
             // ── Genre Detail View ──────────────────────────────────────────
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 
                 let back_btn = egui::Button::new(
                     egui::RichText::new("‹ Back to Genres")
@@ -40,7 +40,7 @@ impl<'a> GenresView<'a> {
                         .color(self.theme.accent_highlight),
                 )
                 .fill(self.theme.bg_pill)
-                .corner_radius(CornerRadius::same(8));
+                .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                 if ui.add(back_btn).clicked() {
                     *self.selected_genre = None;
@@ -53,12 +53,12 @@ impl<'a> GenresView<'a> {
             let header_frame = egui::Frame::NONE
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
-                .corner_radius(CornerRadius::same(12))
+                .corner_radius(CornerRadius::same(self.theme.radius_lg))
                 .inner_margin(egui::Margin::same(16));
 
             header_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(18.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_4xl, 0.0);
 
                     // Genre Icon Box
                     let box_size = Vec2::new(80.0, 80.0);
@@ -66,12 +66,12 @@ impl<'a> GenresView<'a> {
                     let p = ui.painter_at(box_rect);
                     p.rect_filled(
                         box_rect,
-                        CornerRadius::same(12),
+                        CornerRadius::same(self.theme.radius_lg),
                         self.theme.artwork_placeholder,
                     );
                     p.rect_stroke(
                         box_rect,
-                        CornerRadius::same(12),
+                        CornerRadius::same(self.theme.radius_lg),
                         Stroke::new(1.2_f32, self.theme.accent_warm),
                         egui::StrokeKind::Inside,
                     );
@@ -82,7 +82,7 @@ impl<'a> GenresView<'a> {
                     );
 
                     ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xs);
                         ui.label(
                             egui::RichText::new("GENRE")
                                 .font(crate::theme::font(11.0))
@@ -109,7 +109,7 @@ impl<'a> GenresView<'a> {
                                     .color(Color32::WHITE),
                             )
                             .fill(self.theme.accent)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(play_all_btn).clicked() {
                                 action.play_genre = Some(sel_name.clone());
@@ -121,7 +121,7 @@ impl<'a> GenresView<'a> {
                                     .color(self.theme.text_primary),
                             )
                             .fill(self.theme.bg_pill)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(queue_all_btn).clicked() {
                                 action.queue_genre = Some(sel_name.clone());
@@ -137,7 +137,7 @@ impl<'a> GenresView<'a> {
             egui::ScrollArea::vertical()
                 .id_salt("genre_tracks_scroll")
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xxs);
                     let full_w = ui.available_width();
 
                     for (idx, track) in self.genre_tracks.iter().enumerate() {
@@ -155,19 +155,19 @@ impl<'a> GenresView<'a> {
                         if is_cur {
                             painter.rect_filled(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 self.theme.bg_active_row,
                             );
                             painter.rect_stroke(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 Stroke::new(1.0_f32, self.theme.border_active_row),
                                 egui::StrokeKind::Inside,
                             );
                         } else if row_resp.hovered() {
                             painter.rect_filled(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 self.theme.bg_card_hover,
                             );
                         }
@@ -255,7 +255,7 @@ impl<'a> GenresView<'a> {
         } else {
             // ── Genres Grid View ───────────────────────────────────────────
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
                 ui.label(
                     egui::RichText::new("Genres")
                         .font(crate::theme::font(24.0))
@@ -284,13 +284,14 @@ impl<'a> GenresView<'a> {
                 egui::ScrollArea::vertical()
                     .id_salt("genres_grid_scroll")
                     .show(ui, |ui| {
-                        let card_w = 160.0;
+                        let card_w = self.theme.card_w;
                         let card_h = 76.0;
                         let avail_w = ui.available_width();
-                        let cols = ((avail_w + 14.0) / (card_w + 14.0)).floor().max(1.0) as usize;
+                        let gap = self.theme.card_gutter;
+                        let cols = ((avail_w + gap) / (card_w + gap)).floor().max(1.0) as usize;
 
                         egui::Grid::new("genres_grid")
-                            .spacing(Vec2::new(14.0, 14.0))
+                            .spacing(Vec2::new(self.theme.card_gutter, self.theme.card_gutter))
                             .show(ui, |ui| {
                                 for (idx, genre) in self.genres.iter().enumerate() {
                                     let (rect, resp) = ui.allocate_exact_size(
@@ -304,10 +305,14 @@ impl<'a> GenresView<'a> {
                                     } else {
                                         self.theme.bg_card
                                     };
-                                    p.rect_filled(rect, CornerRadius::same(10), bg);
+                                    p.rect_filled(
+                                        rect,
+                                        CornerRadius::same(self.theme.radius_lg),
+                                        bg,
+                                    );
                                     p.rect_stroke(
                                         rect,
-                                        CornerRadius::same(10),
+                                        CornerRadius::same(self.theme.radius_lg),
                                         Stroke::new(1.0_f32, self.theme.border_card),
                                         egui::StrokeKind::Inside,
                                     );

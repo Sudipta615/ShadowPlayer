@@ -69,7 +69,7 @@ impl<'a> NowPlayingCard<'a> {
         let card_frame = egui::Frame::NONE
             .fill(self.theme.bg_card)
             .stroke(Stroke::new(1.0_f32, self.theme.border_card))
-            .corner_radius(CornerRadius::same(14))
+            .corner_radius(CornerRadius::same(self.theme.radius_xl))
             .inner_margin(egui::Margin::symmetric(
                 if dense {
                     10
@@ -113,21 +113,25 @@ impl<'a> NowPlayingCard<'a> {
 
                 if let Some(texture) = self.artwork {
                     // Render loaded artwork texture with rounding & a hairline border.
-                    painter.rect_filled(art_rect, CornerRadius::same(12), Color32::BLACK);
+                    painter.rect_filled(
+                        art_rect,
+                        CornerRadius::same(self.theme.radius_lg),
+                        Color32::BLACK,
+                    );
                     egui::Image::new(texture)
-                        .corner_radius(CornerRadius::same(12))
+                        .corner_radius(CornerRadius::same(self.theme.radius_lg))
                         .fit_to_exact_size(art_size)
                         .paint_at(ui, art_rect);
                     painter.rect_stroke(
                         art_rect,
-                        CornerRadius::same(12),
+                        CornerRadius::same(self.theme.radius_lg),
                         Stroke::new(1.0_f32, self.theme.border_card),
                         egui::StrokeKind::Inside,
                     );
                 } else {
                     painter.rect_filled(
                         art_rect,
-                        CornerRadius::same(12),
+                        CornerRadius::same(self.theme.radius_lg),
                         self.theme.artwork_placeholder,
                     );
                     let disc_center = Pos2::new(art_rect.center().x, art_rect.center().y - 8.0);
@@ -166,7 +170,7 @@ impl<'a> NowPlayingCard<'a> {
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_xl, 0.0);
 
                             // Menu button - opens Track Properties
                             let (menu_rect, menu_resp) =
@@ -313,7 +317,7 @@ impl<'a> NowPlayingCard<'a> {
                         // Background track (clearly visible in both dark & light modes)
                         painter.rect_filled(
                             track_rect,
-                            CornerRadius::same(2),
+                            CornerRadius::same(self.theme.radius_xs),
                             self.theme.slider_track,
                         );
 
@@ -332,7 +336,7 @@ impl<'a> NowPlayingCard<'a> {
                             );
                             painter.rect_filled(
                                 fill_rect,
-                                CornerRadius::same(2),
+                                CornerRadius::same(self.theme.radius_xs),
                                 self.theme.accent_highlight,
                             );
                         }
@@ -592,10 +596,14 @@ impl<'a> NowPlayingCard<'a> {
                                     } else {
                                         self.theme.text_secondary
                                     };
-                                    ep.rect_filled(eq_rect, CornerRadius::same(7), bg);
+                                    ep.rect_filled(
+                                        eq_rect,
+                                        CornerRadius::same(self.theme.radius_sm),
+                                        bg,
+                                    );
                                     ep.rect_stroke(
                                         eq_rect,
-                                        CornerRadius::same(7),
+                                        CornerRadius::same(self.theme.radius_sm),
                                         Stroke::new(1.0_f32, border_color),
                                         egui::StrokeKind::Inside,
                                     );

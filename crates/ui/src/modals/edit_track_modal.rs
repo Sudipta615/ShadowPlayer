@@ -82,7 +82,7 @@ pub fn show_edit_track_modal(
 
     let closed =
         crate::dialog::show_modal(ctx, "edit_track", "Edit Song Info", 380.0, theme, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 7.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
 
             let field = |ui: &mut egui::Ui, label: &str, buf: &mut String, id: egui::Id| {
                 ui.horizontal(|ui| {

@@ -338,7 +338,7 @@ pub fn show_autoeq_modal(
                 .auto_shrink([false, false])
                 .max_height((crate::dialog::viewport_rect(ctx).height() - 140.0).max(160.0))
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 12.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xl);
 
                     ui.label(
                         egui::RichText::new(
@@ -366,7 +366,7 @@ pub fn show_autoeq_modal(
 
                     // Target Curve & Gain Clamp Options
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_3xl, 0.0);
                         ui.label(
                             egui::RichText::new("Target Curve:")
                                 .font(crate::theme::font(12.0))
@@ -411,7 +411,7 @@ pub fn show_autoeq_modal(
                         .id_salt("autoeq_list")
                         .max_height(200.0)
                         .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
 
                             for (orig_idx, prof) in filtered_profiles {
                                 let is_sel = state.selected_index == Some(orig_idx);
@@ -429,7 +429,7 @@ pub fn show_autoeq_modal(
                                         }),
                                 )
                                 .fill(if is_sel { theme.accent } else { theme.bg_pill })
-                                .corner_radius(CornerRadius::same(6))
+                                .corner_radius(CornerRadius::same(theme.radius_sm))
                                 .min_size(Vec2::new(ui.available_width(), 26.0));
 
                                 if ui.add(btn).clicked() {
@@ -497,7 +497,7 @@ pub fn show_autoeq_modal(
                                     .color(Color32::WHITE),
                             )
                             .fill(theme.accent)
-                            .corner_radius(CornerRadius::same(8))
+                            .corner_radius(CornerRadius::same(theme.radius_md))
                             .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
 
                             if ui.add(apply_btn).clicked() {

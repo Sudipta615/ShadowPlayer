@@ -156,7 +156,7 @@ pub fn render_main_playback_view(
         let result = &library_state.search_result;
         if !result.artists.is_empty() || !result.albums.is_empty() || !result.playlists.is_empty() {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                 ui.label(
                     egui::RichText::new("Matches")
                         .font(crate::theme::font(11.0))
@@ -167,7 +167,7 @@ pub fn render_main_playback_view(
                     .max_height(30.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                             let chip = |ui: &mut egui::Ui, label: String| -> bool {
                                 ui.add(
                                     egui::Button::new(
@@ -177,7 +177,7 @@ pub fn render_main_playback_view(
                                     )
                                     .fill(theme.bg_pill)
                                     .stroke(Stroke::new(1.0, theme.border_subtle))
-                                    .corner_radius(CornerRadius::same(6)),
+                                    .corner_radius(CornerRadius::same(theme.radius_sm)),
                                 )
                                 .clicked()
                             };

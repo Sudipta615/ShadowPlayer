@@ -47,7 +47,7 @@ impl<'a> VisualizerWidget<'a> {
                 );
                 painter.rect_filled(
                     bar,
-                    CornerRadius::same(1),
+                    CornerRadius::same(self.theme.radius_xs),
                     self.theme.text_dim.gamma_multiply(0.45),
                 );
             }
@@ -93,14 +93,18 @@ impl<'a> VisualizerWidget<'a> {
             } else {
                 color.gamma_multiply(0.55)
             };
-            painter.rect_filled(bar, CornerRadius::same(1), color);
+            painter.rect_filled(bar, CornerRadius::same(self.theme.radius_xs), color);
 
             if bar_height > 10.0 {
                 let cap = Rect::from_min_max(
                     Pos2::new(x, bar.min.y),
                     Pos2::new(x + bar_width, bar.min.y + 1.5),
                 );
-                painter.rect_filled(cap, CornerRadius::same(1), color.gamma_multiply(1.3));
+                painter.rect_filled(
+                    cap,
+                    CornerRadius::same(self.theme.radius_xs),
+                    color.gamma_multiply(1.3),
+                );
             }
         }
 

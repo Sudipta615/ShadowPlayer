@@ -49,7 +49,7 @@ impl<'a> FoldersView<'a> {
         if let Some(sel_path) = self.selected_folder.clone() {
             // ── Folder Detail / Track List View ────────────────────────────
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 
                 let back_btn = egui::Button::new(
                     egui::RichText::new("‹ Back to Folders")
@@ -57,7 +57,7 @@ impl<'a> FoldersView<'a> {
                         .color(self.theme.accent_highlight),
                 )
                 .fill(self.theme.bg_pill)
-                .corner_radius(CornerRadius::same(8));
+                .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                 if ui.add(back_btn).clicked() {
                     *self.selected_folder = None;
@@ -70,24 +70,24 @@ impl<'a> FoldersView<'a> {
             let header_frame = egui::Frame::NONE
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
-                .corner_radius(CornerRadius::same(12))
+                .corner_radius(CornerRadius::same(self.theme.radius_lg))
                 .inner_margin(egui::Margin::same(16));
 
             header_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(18.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_4xl, 0.0);
 
                     let box_size = Vec2::new(80.0, 80.0);
                     let (box_rect, _) = ui.allocate_exact_size(box_size, Sense::hover());
                     let p = ui.painter_at(box_rect);
                     p.rect_filled(
                         box_rect,
-                        CornerRadius::same(12),
+                        CornerRadius::same(self.theme.radius_lg),
                         self.theme.artwork_placeholder,
                     );
                     p.rect_stroke(
                         box_rect,
-                        CornerRadius::same(12),
+                        CornerRadius::same(self.theme.radius_lg),
                         Stroke::new(1.2_f32, self.theme.accent),
                         egui::StrokeKind::Inside,
                     );
@@ -98,7 +98,7 @@ impl<'a> FoldersView<'a> {
                     );
 
                     ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xs);
                         ui.label(
                             egui::RichText::new("FOLDER")
                                 .font(crate::theme::font(11.0))
@@ -140,7 +140,7 @@ impl<'a> FoldersView<'a> {
                                     .color(Color32::WHITE),
                             )
                             .fill(self.theme.accent)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(play_all_btn).clicked() {
                                 action.play_folder = Some(sel_path.clone());
@@ -152,7 +152,7 @@ impl<'a> FoldersView<'a> {
                                     .color(self.theme.text_primary),
                             )
                             .fill(self.theme.bg_pill)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(queue_all_btn).clicked() {
                                 action.queue_folder = Some(sel_path.clone());
@@ -164,7 +164,7 @@ impl<'a> FoldersView<'a> {
                                     .color(self.theme.text_primary),
                             )
                             .fill(self.theme.bg_pill)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(rescan_btn).clicked() {
                                 action.rescan_folder = Some(sel_path.clone());
@@ -180,7 +180,7 @@ impl<'a> FoldersView<'a> {
             egui::ScrollArea::vertical()
                 .id_salt("folder_tracks_scroll")
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xxs);
                     let full_w = ui.available_width();
 
                     for (idx, track) in self.folder_tracks.iter().enumerate() {
@@ -198,19 +198,19 @@ impl<'a> FoldersView<'a> {
                         if is_cur {
                             painter.rect_filled(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 self.theme.bg_active_row,
                             );
                             painter.rect_stroke(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 Stroke::new(1.0_f32, self.theme.border_active_row),
                                 egui::StrokeKind::Inside,
                             );
                         } else if row_resp.hovered() {
                             painter.rect_filled(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 self.theme.bg_card_hover,
                             );
                         }
@@ -298,7 +298,7 @@ impl<'a> FoldersView<'a> {
         } else {
             // ── Folders & Library Manager ──────────────────────────────────
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
                 ui.label(
                     egui::RichText::new("Music Folders")
                         .font(crate::theme::font(24.0))
@@ -318,12 +318,12 @@ impl<'a> FoldersView<'a> {
             let add_frame = egui::Frame::NONE
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
-                .corner_radius(CornerRadius::same(12))
+                .corner_radius(CornerRadius::same(self.theme.radius_lg))
                 .inner_margin(egui::Margin::same(14));
 
             add_frame.show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_md);
                     ui.label(
                         egui::RichText::new("Add Music Folder to Library")
                             .font(crate::theme::font(14.0))
@@ -332,7 +332,7 @@ impl<'a> FoldersView<'a> {
                     );
 
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_md, 0.0);
 
                         // Native pickers: the primary way to add music.
                         if ui.add_enabled(!self.import_active, browse_btn("Browse Folder…", self.theme)).clicked() {
@@ -351,7 +351,7 @@ impl<'a> FoldersView<'a> {
                     });
 
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_md, 0.0);
 
                         let hint = dirs::audio_dir()
                             .map(|d| d.to_string_lossy().to_string())
@@ -370,7 +370,7 @@ impl<'a> FoldersView<'a> {
                                 .color(Color32::WHITE),
                         )
                         .fill(self.theme.accent)
-                        .corner_radius(CornerRadius::same(8));
+                        .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                         if ui.add(add_btn).clicked() && !self.new_folder_input.trim().is_empty() {
                             let p = PathBuf::from(self.new_folder_input.trim());
@@ -386,7 +386,7 @@ impl<'a> FoldersView<'a> {
                                     .color(self.theme.text_secondary),
                             )
                             .fill(self.theme.bg_pill)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(quick_btn).clicked() {
                                 action.add_folder = Some(audio_d);
@@ -396,7 +396,7 @@ impl<'a> FoldersView<'a> {
 
                     // Drag and drop hint
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_sm, 0.0);
                         ui.label(
                             egui::RichText::new("Tip:")
                                 .font(crate::theme::font(11.5))
@@ -418,12 +418,12 @@ impl<'a> FoldersView<'a> {
                 let scan_frame = egui::Frame::NONE
                     .fill(self.theme.scan_banner_bg)
                     .stroke(Stroke::new(1.0_f32, self.theme.accent_highlight))
-                    .corner_radius(CornerRadius::same(8))
+                    .corner_radius(CornerRadius::same(self.theme.radius_md))
                     .inner_margin(egui::Margin::symmetric(14, 8));
 
                 scan_frame.show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
                         ui.spinner();
                         ui.label(
                             egui::RichText::new(self.scan_progress_text)
@@ -455,18 +455,19 @@ impl<'a> FoldersView<'a> {
                 egui::ScrollArea::vertical()
                     .id_salt("roots_list_scroll")
                     .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_sm);
 
                         for root in self.scan_roots {
                             let item_frame = egui::Frame::NONE
                                 .fill(self.theme.bg_card)
                                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
-                                .corner_radius(CornerRadius::same(10))
+                                .corner_radius(CornerRadius::same(self.theme.radius_lg))
                                 .inner_margin(egui::Margin::symmetric(14, 10));
 
                             item_frame.show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+                                    ui.spacing_mut().item_spacing =
+                                        Vec2::new(self.theme.space_xl, 0.0);
 
                                     let (folder_icon_rect, _) = ui
                                         .allocate_exact_size(Vec2::new(24.0, 24.0), Sense::hover());
@@ -477,7 +478,8 @@ impl<'a> FoldersView<'a> {
                                     );
 
                                     ui.vertical(|ui| {
-                                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                                        ui.spacing_mut().item_spacing =
+                                            Vec2::new(0.0, self.theme.space_xxs);
                                         let name = root
                                             .path
                                             .file_name()
@@ -501,7 +503,8 @@ impl<'a> FoldersView<'a> {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                                            ui.spacing_mut().item_spacing =
+                                                Vec2::new(self.theme.space_md, 0.0);
 
                                             let del_btn = egui::Button::new(
                                                 egui::RichText::new("Del")
@@ -509,7 +512,9 @@ impl<'a> FoldersView<'a> {
                                                     .color(self.theme.accent_highlight),
                                             )
                                             .fill(self.theme.bg_pill)
-                                            .corner_radius(CornerRadius::same(6));
+                                            .corner_radius(CornerRadius::same(
+                                                self.theme.radius_sm,
+                                            ));
 
                                             if ui
                                                 .add(del_btn)
@@ -525,7 +530,9 @@ impl<'a> FoldersView<'a> {
                                                     .color(self.theme.text_primary),
                                             )
                                             .fill(self.theme.bg_pill)
-                                            .corner_radius(CornerRadius::same(6));
+                                            .corner_radius(CornerRadius::same(
+                                                self.theme.radius_sm,
+                                            ));
 
                                             if ui.add(scan_btn).clicked() {
                                                 action.rescan_folder = Some(root.path.clone());
@@ -537,7 +544,9 @@ impl<'a> FoldersView<'a> {
                                                     .color(self.theme.accent_highlight),
                                             )
                                             .fill(self.theme.bg_pill)
-                                            .corner_radius(CornerRadius::same(6));
+                                            .corner_radius(CornerRadius::same(
+                                                self.theme.radius_sm,
+                                            ));
 
                                             if ui.add(view_btn).clicked() {
                                                 *self.selected_folder = Some(root.path.clone());
@@ -571,6 +580,6 @@ fn browse_btn(label: &str, theme: &Theme) -> egui::Button<'static> {
             .color(Color32::WHITE),
     )
     .fill(theme.accent)
-    .corner_radius(CornerRadius::same(8))
+    .corner_radius(CornerRadius::same(theme.radius_md))
     .min_size(Vec2::new(0.0, 28.0))
 }

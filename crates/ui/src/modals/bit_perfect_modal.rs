@@ -41,7 +41,7 @@ pub fn show_bit_perfect_modal(
                     (crate::dialog::viewport_rect(ctx).height() - 140.0).max(160.0),
                 )
                 .show(ui, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 14.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
 
                 // 1. Status Banner
                 let banner_color = if is_bit_perfect {
@@ -58,11 +58,11 @@ pub fn show_bit_perfect_modal(
                 egui::Frame::NONE
                     .fill(banner_color)
                     .stroke(Stroke::new(1.0_f32, banner_stroke))
-                    .corner_radius(CornerRadius::same(10))
+                    .corner_radius(CornerRadius::same(theme.radius_lg))
                     .inner_margin(egui::Margin::symmetric(14, 12))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
                             if is_bit_perfect {
                                 paint_status_dot(ui, theme.bit_perfect_green, 6.5);
                                 ui.vertical(|ui| {
@@ -178,8 +178,8 @@ pub fn show_bit_perfect_modal(
                         (theme.accent_highlight.linear_multiply(0.18), theme.accent_highlight)
                     };
 
-                    painter.rect_filled(node_rect, CornerRadius::same(6), bg_col);
-                    painter.rect_stroke(node_rect, CornerRadius::same(6), Stroke::new(1.0_f32, stroke_col), egui::StrokeKind::Inside);
+                    painter.rect_filled(node_rect, CornerRadius::same(theme.radius_sm), bg_col);
+                    painter.rect_stroke(node_rect, CornerRadius::same(theme.radius_sm), Stroke::new(1.0_f32, stroke_col), egui::StrokeKind::Inside);
 
                     painter.text(
                         node_rect.center(),
@@ -225,11 +225,11 @@ pub fn show_bit_perfect_modal(
                 let table_frame = egui::Frame::NONE
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0_f32, theme.border_subtle))
-                    .corner_radius(CornerRadius::same(8))
+                    .corner_radius(CornerRadius::same(theme.radius_md))
                     .inner_margin(egui::Margin::symmetric(14, 10));
 
                 table_frame.show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
 
                     let rows = [
                         ("Input Format", current_track.map(|t| t.format.as_str()).unwrap_or("Unknown")),
@@ -270,7 +270,7 @@ pub fn show_bit_perfect_modal(
                             .color(Color32::WHITE),
                     )
                     .fill(theme.bit_perfect_green)
-                    .corner_radius(CornerRadius::same(8))
+                    .corner_radius(CornerRadius::same(theme.radius_md))
                     .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
 
                     if ui.add(pure_direct_btn).clicked() {

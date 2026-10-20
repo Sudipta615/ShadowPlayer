@@ -55,7 +55,7 @@ pub fn show_clap_rack_panel(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
-                .corner_radius(CornerRadius::same(16))
+                .corner_radius(CornerRadius::same(theme.radius_lg))
                 .inner_margin(Margin::symmetric(18, 14)),
         )
         .show(ctx, |ui| {
@@ -70,7 +70,7 @@ pub fn show_clap_rack_panel(
                     .id_salt("clap_rack_body")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
                         render_parameters(ui, view, theme, &mut actions);
                         ui.add_space(6.0);
                         render_presets(ui, state, view, theme, &mut actions);
@@ -115,10 +115,10 @@ fn render_header(
     egui::Frame::NONE
         .fill(theme.bg_input)
         .stroke(Stroke::new(1.0, theme.border_subtle))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
 
             match &view.rack.plugin {
                 Some(plugin) => {
@@ -299,12 +299,12 @@ fn render_unloaded(
     for plugin in &library.plugins {
         egui::Frame::NONE
             .fill(theme.bg_pill)
-            .corner_radius(CornerRadius::same(8))
+            .corner_radius(CornerRadius::same(theme.radius_md))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                         ui.label(
                             egui::RichText::new(&plugin.name)
                                 .font(crate::theme::font(12.5))
@@ -541,12 +541,12 @@ fn render_preset_row(
 
     egui::Frame::NONE
         .fill(background)
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(CornerRadius::same(theme.radius_md))
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                     ui.label(
                         egui::RichText::new(&preset.name)
                             .font(crate::theme::font(12.0))
@@ -596,6 +596,6 @@ fn pill(ui: &mut egui::Ui, label: &str, theme: &Theme, primary: bool) -> egui::R
     ui.add(
         egui::Button::new(text)
             .fill(fill)
-            .corner_radius(CornerRadius::same(7)),
+            .corner_radius(CornerRadius::same(theme.radius_sm)),
     )
 }

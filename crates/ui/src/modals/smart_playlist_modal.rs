@@ -79,7 +79,7 @@ pub fn show_smart_playlist_editor(
         560.0,
         theme,
         |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
 
             ui.horizontal_top(|ui| {
                 // ── Left: saved smart playlists ────────────────────────

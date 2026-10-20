@@ -550,11 +550,11 @@ pub fn show_eq_panel(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
-                .corner_radius(CornerRadius::same(18))
+                .corner_radius(CornerRadius::same(theme.radius_xl))
                 .inner_margin(Margin::symmetric(20, 16)),
         )
         .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
             // ── 1. Top Header Bar (Always Enabled) ───────────────────────────
             render_header(ui, state, &mut actions, theme);
@@ -567,13 +567,13 @@ pub fn show_eq_panel(
             let content_start_y = ui.cursor().top();
 
             ui.add_enabled_ui(eq_active, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
                 egui::ScrollArea::vertical()
                     .id_salt("eq_tabs_scroll_area")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
                         match state.active_tab {
                             EqTab::Graphic => {
                                 render_graphic_eq_tab(ui, state, &mut actions, theme);
@@ -598,7 +598,7 @@ pub fn show_eq_panel(
                 );
                 ui.painter().rect_filled(
                     overlay_rect,
-                    CornerRadius::same(14),
+                    CornerRadius::same(theme.radius_xl),
                     Color32::from_rgba_unmultiplied(10, 15, 30, 140),
                 );
 
@@ -611,11 +611,14 @@ pub fn show_eq_panel(
                 let badge_rect =
                     Rect::from_center_size(badge_pos, galley.size() + Vec2::new(26.0, 12.0));
 
-                ui.painter()
-                    .rect_filled(badge_rect, CornerRadius::same(12), theme.bg_pill);
+                ui.painter().rect_filled(
+                    badge_rect,
+                    CornerRadius::same(theme.radius_lg),
+                    theme.bg_pill,
+                );
                 ui.painter().rect_stroke(
                     badge_rect,
-                    CornerRadius::same(12),
+                    CornerRadius::same(theme.radius_lg),
                     Stroke::new(1.0, theme.border_card),
                     egui::StrokeKind::Inside,
                 );
@@ -653,7 +656,7 @@ fn render_header(
     theme: &Theme,
 ) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
 
         // Icon (Sliders)
         let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::hover());
@@ -680,7 +683,7 @@ fn render_header(
 
         // Right-aligned actions: AutoEQ badge, More (⋮), and Close (✕)
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
 
             // Close button (✕)
             let (close_rect, close_resp) =
@@ -691,7 +694,7 @@ fn render_header(
             } else {
                 theme.bg_pill
             };
-            cp.rect_filled(close_rect, CornerRadius::same(6), close_bg);
+            cp.rect_filled(close_rect, CornerRadius::same(theme.radius_sm), close_bg);
             let icon_col = if close_resp.hovered() {
                 Color32::from_rgb(248, 113, 113)
             } else {
@@ -739,7 +742,7 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
                 egui::Frame::NONE
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.border_card))
-                    .corner_radius(CornerRadius::same(16))
+                    .corner_radius(CornerRadius::same(theme.radius_lg))
                     .inner_margin(Margin::symmetric(5, 4))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -765,7 +768,7 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
                                 )
                                 .fill(bg)
                                 .stroke(Stroke::NONE)
-                                .corner_radius(CornerRadius::same(12))
+                                .corner_radius(CornerRadius::same(theme.radius_lg))
                                 .min_size(Vec2::new(tab_w, tab_h));
 
                                 if ui.add(btn).clicked() {
@@ -793,7 +796,7 @@ fn render_graphic_eq_tab(
     ui.horizontal(|ui| {
         // 1. Left side: Band Count Buttons (Secondary filter chips: visually distinct from main tabs)
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
 
             let band_options = [
                 ("10 Bands", GraphicEqLayout::TenBand),
@@ -835,7 +838,7 @@ fn render_graphic_eq_tab(
                 )
                 .fill(bg)
                 .stroke(stroke)
-                .corner_radius(CornerRadius::same(6))
+                .corner_radius(CornerRadius::same(theme.radius_sm))
                 .min_size(Vec2::new(60.0, 24.0));
 
                 if ui.add(btn).clicked() && !is_active {
@@ -856,7 +859,7 @@ fn render_graphic_eq_tab(
 
         // 2. Right side: Preset Dropdown & Save Button (No "Preset:" label, moved to right, UI color)
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
 
             // Save Preset Button
             let save_btn = egui::Button::new(
@@ -866,7 +869,7 @@ fn render_graphic_eq_tab(
             )
             .fill(theme.bg_pill)
             .stroke(Stroke::NONE)
-            .corner_radius(CornerRadius::same(6))
+            .corner_radius(CornerRadius::same(theme.radius_sm))
             .min_size(Vec2::new(44.0, 24.0));
 
             if ui
@@ -889,7 +892,7 @@ fn render_graphic_eq_tab(
                 )
                 .fill(theme.bg_pill)
                 .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius::same(6))
+                .corner_radius(CornerRadius::same(theme.radius_sm))
                 .min_size(Vec2::new(44.0, 24.0));
 
                 if ui
@@ -921,21 +924,21 @@ fn render_graphic_eq_tab(
                 visuals.widgets.inactive.weak_bg_fill = theme.bg_pill;
                 visuals.widgets.inactive.bg_fill = theme.bg_pill;
                 visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-                visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
+                visuals.widgets.inactive.corner_radius = CornerRadius::same(theme.radius_sm);
 
                 visuals.widgets.hovered.weak_bg_fill = theme.bg_card_hover;
                 visuals.widgets.hovered.bg_fill = theme.bg_card_hover;
                 visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-                visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
+                visuals.widgets.hovered.corner_radius = CornerRadius::same(theme.radius_sm);
 
                 visuals.widgets.open.weak_bg_fill = theme.bg_card_hover;
                 visuals.widgets.open.bg_fill = theme.bg_card_hover;
                 visuals.widgets.open.bg_stroke = Stroke::NONE;
-                visuals.widgets.open.corner_radius = CornerRadius::same(6);
+                visuals.widgets.open.corner_radius = CornerRadius::same(theme.radius_sm);
 
                 visuals.window_fill = theme.bg_card;
                 visuals.window_stroke = Stroke::new(1.0, theme.border_card);
-                visuals.menu_corner_radius = CornerRadius::same(8);
+                visuals.menu_corner_radius = CornerRadius::same(theme.radius_md);
 
                 egui::ComboBox::from_id_salt("eq_presets_combo")
                     .selected_text(
@@ -1001,11 +1004,11 @@ fn render_graphic_eq_tab(
         egui::Frame::NONE
             .fill(theme.bg_card_hover)
             .stroke(Stroke::new(1.0, theme.accent_highlight))
-            .corner_radius(CornerRadius::same(8))
+            .corner_radius(CornerRadius::same(theme.radius_md))
             .inner_margin(Margin::symmetric(12, 6))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
                     ui.label(
                         egui::RichText::new("Preset Name:")
                             .font(crate::theme::font(11.5))
@@ -1090,10 +1093,14 @@ fn render_spline_eq_canvas(
     let painter = ui.painter_at(canvas_rect);
 
     // Pill Background & Subtle Border
-    painter.rect_filled(canvas_rect, CornerRadius::same(12), theme.bg_pill);
+    painter.rect_filled(
+        canvas_rect,
+        CornerRadius::same(theme.radius_lg),
+        theme.bg_pill,
+    );
     painter.rect_stroke(
         canvas_rect,
-        CornerRadius::same(12),
+        CornerRadius::same(theme.radius_lg),
         Stroke::new(1.0, theme.border_card),
         egui::StrokeKind::Inside,
     );
@@ -1342,10 +1349,10 @@ fn render_spline_eq_canvas(
         let galley = painter.layout_no_wrap(tip_str, font, theme.text_primary);
         let tip_rect = Rect::from_center_size(tip_pos, galley.size() + Vec2::new(10.0, 4.0));
 
-        painter.rect_filled(tip_rect, CornerRadius::same(5), theme.bg_card);
+        painter.rect_filled(tip_rect, CornerRadius::same(theme.radius_sm), theme.bg_card);
         painter.rect_stroke(
             tip_rect,
-            CornerRadius::same(5),
+            CornerRadius::same(theme.radius_sm),
             Stroke::new(1.0, theme.accent_highlight),
             egui::StrokeKind::Inside,
         );
@@ -1411,11 +1418,11 @@ fn render_tone_acoustics_tab(
     };
 
     ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
         // Row 1: Bass & Treble
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
             // Card 1: Bass Shelf (80-100 Hz)
             render_slider_card(
@@ -1474,7 +1481,7 @@ fn render_tone_acoustics_tab(
 
         // Row 2: Stereo Width & Balance
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
             // Card 3: Stereo Width (0% to 200%)
             render_slider_card(
@@ -1571,11 +1578,11 @@ fn render_advanced_tab(
     };
 
     ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
         // Row 1: Extended Gain Range & Auto Headroom
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
             // Card 1: Extended Dynamic Range (±24 dB Max Values Mode)
             render_advanced_toggle_card(
@@ -1633,7 +1640,7 @@ fn render_advanced_tab(
 
         // Row 2: Mid/Side Processing & TPDF Dithering
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
             // Card 3: Mid/Side Processing (M/S Mode)
             let mut ms = state.midside_eq;
@@ -1697,20 +1704,20 @@ fn render_advanced_tab(
         egui::Frame::NONE
             .fill(theme.bg_card_hover)
             .stroke(Stroke::new(1.0, theme.border_card))
-            .corner_radius(CornerRadius::same(12))
+            .corner_radius(CornerRadius::same(theme.radius_lg))
             .inner_margin(Margin::symmetric(16, 12))
             .show(ui, |ui| {
                 ui.set_width(avail_w - 32.0);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(14.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_2xl, 0.0);
 
                     let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::hover());
                     crate::components::icons::draw_headphones(ui, icon_rect, theme.accent_highlight);
 
                     ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                             ui.label(
                                 egui::RichText::new("AutoEQ Headphone Target Calibration")
                                     .font(crate::theme::font(13.5))
@@ -1740,7 +1747,7 @@ fn render_advanced_tab(
                         )
                         .fill(theme.accent)
                         .stroke(Stroke::NONE)
-                        .corner_radius(CornerRadius::same(8))
+                        .corner_radius(CornerRadius::same(theme.radius_md))
                         .min_size(Vec2::new(110.0, 30.0));
 
                         if ui.add(btn).on_hover_text("Open headphone calibration search dialog").clicked() {
@@ -1778,16 +1785,16 @@ fn render_advanced_toggle_card(
                 theme.border_card
             },
         ))
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(Margin::symmetric(14, 12))
         .show(ui, |ui| {
             ui.set_width(width - 28.0);
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
 
                 // Row 1: Title, Clickable Info Icon, and Toggle Switch
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                     ui.label(
                         egui::RichText::new(title)
                             .font(crate::theme::font(13.0))
@@ -1817,7 +1824,7 @@ fn render_advanced_toggle_card(
                     };
                     egui::Frame::NONE
                         .fill(badge_bg)
-                        .corner_radius(CornerRadius::same(5))
+                        .corner_radius(CornerRadius::same(theme.radius_sm))
                         .inner_margin(Margin::symmetric(6, 2))
                         .show(ui, |ui| {
                             ui.label(
@@ -1858,16 +1865,16 @@ fn render_slider_card(
     egui::Frame::NONE
         .fill(theme.bg_card_hover)
         .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(width - 28.0);
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
 
                 // Row 1: Title + Clickable Info Icon
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                     ui.label(
                         egui::RichText::new(title)
                             .font(crate::theme::font(13.5))
@@ -1952,22 +1959,22 @@ fn render_footer_controls(
     };
 
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
         // Preamp Card (All-in-one control shared across tabs)
         egui::Frame::NONE
             .fill(theme.bg_card_hover)
             .stroke(Stroke::new(1.0, theme.border_card))
-            .corner_radius(CornerRadius::same(12))
+            .corner_radius(CornerRadius::same(theme.radius_lg))
             .inner_margin(Margin::symmetric(14, 8))
             .show(ui, |ui| {
                 ui.set_width(preamp_card_w - 28.0);
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
 
                     // Row 1: Label + Info Button
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                         ui.label(
                             egui::RichText::new("Preamp (Master)")
                                 .font(crate::theme::font(12.5))
@@ -1984,7 +1991,7 @@ fn render_footer_controls(
 
                     // Row 2: Range Labels & Slider
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
                         ui.label(
                             egui::RichText::new(min_lbl)
                                 .font(crate::theme::font(10.5))
@@ -2039,10 +2046,10 @@ fn render_footer_controls(
         } else {
             theme.bg_card_hover
         };
-        rp.rect_filled(reset_rect, CornerRadius::same(12), bg);
+        rp.rect_filled(reset_rect, CornerRadius::same(theme.radius_lg), bg);
         rp.rect_stroke(
             reset_rect,
-            CornerRadius::same(12),
+            CornerRadius::same(theme.radius_lg),
             Stroke::new(1.0, theme.border_card),
             egui::StrokeKind::Inside,
         );
@@ -2153,8 +2160,11 @@ fn gradient_horizontal_slider(
 
     // Paint background track using theme token (clearly visible in both dark & light modes)
     let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
-    ui.painter()
-        .rect_filled(track_rect, CornerRadius::same(2), theme.slider_track);
+    ui.painter().rect_filled(
+        track_rect,
+        CornerRadius::same(theme.radius_xs),
+        theme.slider_track,
+    );
 
     // Paint active track up to thumb (single jade hue).
     let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
@@ -2165,8 +2175,11 @@ fn gradient_horizontal_slider(
             Pos2::new(track_rect.min.x, track_rect.min.y),
             Pos2::new(track_rect.min.x + filled_w, track_rect.max.y),
         );
-        ui.painter()
-            .rect_filled(fill_rect, CornerRadius::same(2), theme.accent_highlight);
+        ui.painter().rect_filled(
+            fill_rect,
+            CornerRadius::same(theme.radius_xs),
+            theme.accent_highlight,
+        );
     }
 
     // Paint circular thumb
@@ -2210,7 +2223,7 @@ fn custom_toggle_switch(ui: &mut egui::Ui, value: &mut bool, tooltip: &str, them
     } else {
         theme.border_card
     };
-    p.rect_filled(rect, CornerRadius::same(10), bg);
+    p.rect_filled(rect, CornerRadius::same(theme.radius_lg), bg);
 
     let thumb_x = if *value {
         rect.right() - 10.0

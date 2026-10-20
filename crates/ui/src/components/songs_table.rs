@@ -214,7 +214,7 @@ fn render_empty_state(
                         .color(Color32::WHITE),
                 )
                 .fill(theme.accent)
-                .corner_radius(CornerRadius::same(8))
+                .corner_radius(CornerRadius::same(theme.radius_md))
                 .min_size(Vec2::new(158.0, 32.0)),
             );
             resp.widget_info(|| {
@@ -332,10 +332,14 @@ fn paint_quality_tag(
     let w = galley.size().x + 14.0;
     let h = 15.0;
     let rect = Rect::from_center_size(Pos2::new(right_x - w * 0.5, cy), Vec2::new(w, h));
-    painter.rect_filled(rect, CornerRadius::same(4), color.gamma_multiply(0.14));
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(theme.radius_sm),
+        color.gamma_multiply(0.14),
+    );
     painter.rect_stroke(
         rect,
-        CornerRadius::same(4),
+        CornerRadius::same(theme.radius_sm),
         Stroke::new(1.0, color.gamma_multiply(0.55)),
         egui::StrokeKind::Inside,
     );
@@ -470,7 +474,7 @@ impl<'a> SongsTable<'a> {
         // 1. Section Header
         if show_header {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
                 ui.label(
                     egui::RichText::new("Songs")
@@ -490,28 +494,35 @@ impl<'a> SongsTable<'a> {
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
 
-                    // View Mode Toggles (Grid vs List)
-                    let grid_bg = if is_grid_view {
-                        theme.accent
-                    } else {
-                        theme.bg_pill
-                    };
-                    let list_bg = if !is_grid_view {
-                        theme.accent
-                    } else {
-                        theme.bg_pill
-                    };
+                    // View Mode Toggles (Grid vs List). The active button's
+                    // fill fades in rather than snapping, and the animation
+                    // ids are fixed, so the state stays bounded.
+                    let grid_t = ui.ctx().animate_bool_with_time(
+                        ui.make_persistent_id("view_mode_grid"),
+                        is_grid_view,
+                        0.16,
+                    );
+                    let list_t = ui.ctx().animate_bool_with_time(
+                        ui.make_persistent_id("view_mode_list"),
+                        !is_grid_view,
+                        0.16,
+                    );
+                    let grid_bg = crate::theme::lerp_color(theme.bg_pill, theme.accent, grid_t);
+                    let list_bg = crate::theme::lerp_color(theme.bg_pill, theme.accent, list_t);
 
                     let (grid_rect, grid_resp) =
                         ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
-                    ui.painter()
-                        .rect_filled(grid_rect, CornerRadius::same(8), grid_bg);
+                    ui.painter().rect_filled(
+                        grid_rect,
+                        CornerRadius::same(theme.radius_md),
+                        grid_bg,
+                    );
                     if !is_grid_view {
                         ui.painter().rect_stroke(
                             grid_rect,
-                            CornerRadius::same(8),
+                            CornerRadius::same(theme.radius_md),
                             Stroke::new(1.0_f32, theme.border_subtle),
                             egui::StrokeKind::Inside,
                         );
@@ -540,8 +551,11 @@ impl<'a> SongsTable<'a> {
 
                     let (list_rect, list_resp) =
                         ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
-                    ui.painter()
-                        .rect_filled(list_rect, CornerRadius::same(8), list_bg);
+                    ui.painter().rect_filled(
+                        list_rect,
+                        CornerRadius::same(theme.radius_md),
+                        list_bg,
+                    );
                     crate::components::icons::draw_list_icon(
                         ui,
                         list_rect.shrink2(Vec2::new(7.0, 7.0)),
@@ -577,10 +591,10 @@ impl<'a> SongsTable<'a> {
                     } else {
                         theme.bg_pill
                     };
-                    sp.rect_filled(sort_rect, CornerRadius::same(15), sort_bg);
+                    sp.rect_filled(sort_rect, CornerRadius::same(theme.radius_pill), sort_bg);
                     sp.rect_stroke(
                         sort_rect,
-                        CornerRadius::same(15),
+                        CornerRadius::same(theme.radius_pill),
                         Stroke::new(1.0_f32, theme.border_subtle),
                         egui::StrokeKind::Inside,
                     );
@@ -664,10 +678,10 @@ impl<'a> SongsTable<'a> {
                     } else {
                         theme.bg_pill
                     };
-                    dp.rect_filled(dir_rect, CornerRadius::same(8), dir_bg);
+                    dp.rect_filled(dir_rect, CornerRadius::same(theme.radius_md), dir_bg);
                     dp.rect_stroke(
                         dir_rect,
-                        CornerRadius::same(8),
+                        CornerRadius::same(theme.radius_md),
                         Stroke::new(1.0_f32, theme.border_subtle),
                         egui::StrokeKind::Inside,
                     );
@@ -728,25 +742,31 @@ impl<'a> SongsTable<'a> {
             // view, so the user does not have to hunt for a collection view
             // to find the lossless or Hi-Res tracks.
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                 for filter in QuickFilter::ALL {
                     let is_active = quick_filter == filter;
                     let label = filter.label();
+                    // One animation id per chip, so the state stays bounded.
+                    let chip_t = ui.ctx().animate_bool_with_time(
+                        ui.make_persistent_id(("chip", label)),
+                        is_active,
+                        0.16,
+                    );
                     let resp = ui.add(
                         egui::Button::new(
                             egui::RichText::new(label)
                                 .font(crate::theme::font(11.5))
-                                .color(if is_active {
-                                    Color32::WHITE
-                                } else {
-                                    theme.text_secondary
-                                }),
+                                .color(crate::theme::lerp_color(
+                                    theme.text_secondary,
+                                    Color32::WHITE,
+                                    chip_t,
+                                )),
                         )
-                        .fill(if is_active {
-                            theme.accent
-                        } else {
-                            theme.bg_pill
-                        })
+                        .fill(crate::theme::lerp_color(
+                            theme.bg_pill,
+                            theme.accent,
+                            chip_t,
+                        ))
                         .stroke(Stroke::new(
                             1.0,
                             if is_active {
@@ -755,7 +775,7 @@ impl<'a> SongsTable<'a> {
                                 theme.border_subtle
                             },
                         ))
-                        .corner_radius(CornerRadius::same(6))
+                        .corner_radius(CornerRadius::same(theme.radius_sm))
                         .min_size(Vec2::new(0.0, 24.0)),
                     );
                     resp.widget_info(|| {
@@ -789,9 +809,9 @@ impl<'a> SongsTable<'a> {
 
         if is_grid_view {
             // ── Grid View (virtualized in horizontal bands) ─────────────────
-            let card_w = 140.0;
+            let card_w = theme.card_w;
             let card_h = 180.0;
-            let gap = 12.0;
+            let gap = theme.card_gutter;
             let avail_w = ui.available_width();
             ui.set_width(avail_w);
             let cols = (((avail_w + gap) / (card_w + gap)).floor()).max(1.0) as usize;
@@ -1042,31 +1062,31 @@ impl<'a> SongsTable<'a> {
                         if is_active {
                             painter.rect_filled(
                                 vis_rect,
-                                CornerRadius::same(8),
+                                CornerRadius::same(theme.radius_md),
                                 theme.bg_card_active,
                             );
                             painter.rect_stroke(
                                 vis_rect,
-                                CornerRadius::same(8),
+                                CornerRadius::same(theme.radius_md),
                                 Stroke::new(1.0_f32, theme.accent),
                                 egui::StrokeKind::Inside,
                             );
                         } else if is_selected {
                             painter.rect_filled(
                                 vis_rect,
-                                CornerRadius::same(8),
+                                CornerRadius::same(theme.radius_md),
                                 theme.bg_card_hover,
                             );
                             painter.rect_stroke(
                                 vis_rect,
-                                CornerRadius::same(8),
+                                CornerRadius::same(theme.radius_md),
                                 Stroke::new(1.0_f32, theme.info),
                                 egui::StrokeKind::Inside,
                             );
                         } else if is_hovered {
                             painter.rect_filled(
                                 vis_rect,
-                                CornerRadius::same(8),
+                                CornerRadius::same(theme.radius_md),
                                 theme.bg_card_hover,
                             );
                         }
@@ -1167,11 +1187,15 @@ impl<'a> SongsTable<'a> {
 
                         if let Some(tex) = art_for(artwork, &ctx, &mut art_budget, track) {
                             egui::Image::new(&tex)
-                                .corner_radius(CornerRadius::same(6))
+                                .corner_radius(CornerRadius::same(theme.radius_sm))
                                 .fit_to_exact_size(Vec2::new(36.0, 36.0))
                                 .paint_at(ui, thumb_rect);
                         } else {
-                            painter.rect_filled(thumb_rect, CornerRadius::same(6), theme.bg_card);
+                            painter.rect_filled(
+                                thumb_rect,
+                                CornerRadius::same(theme.radius_sm),
+                                theme.bg_card,
+                            );
                             crate::components::icons::draw_disc(
                                 ui,
                                 thumb_rect.shrink2(Vec2::new(8.0, 8.0)),
@@ -1224,7 +1248,7 @@ impl<'a> SongsTable<'a> {
                                 );
                                 painter.rect_filled(
                                     bar_r,
-                                    CornerRadius::same(1),
+                                    CornerRadius::same(theme.radius_xs),
                                     theme.accent_highlight,
                                 );
                             }
@@ -1410,7 +1434,7 @@ fn paint_checkbox(
     indeterminate: bool,
     theme: &Theme,
 ) {
-    let radius = CornerRadius::same(4);
+    let radius = CornerRadius::same(theme.radius_sm);
     if checked || indeterminate {
         painter.rect_filled(rect, radius, theme.info);
         let c = rect.center();
@@ -1453,7 +1477,7 @@ fn render_bulk_bar(
 ) {
     egui::Frame::NONE
         .fill(theme.bg_card)
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(CornerRadius::same(theme.radius_md))
         .stroke(Stroke::new(1.0_f32, theme.info))
         .inner_margin(egui::Margin {
             left: 10,
@@ -1463,7 +1487,7 @@ fn render_bulk_bar(
         })
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
                 ui.label(
                     egui::RichText::new(format!("{count} selected"))
                         .font(crate::theme::font(12.5))
@@ -1588,7 +1612,7 @@ fn render_grid_card(
     } else {
         theme.bg_card
     };
-    p.rect_filled(rect, CornerRadius::same(10), bg);
+    p.rect_filled(rect, CornerRadius::same(theme.radius_lg), bg);
     let stroke_col = if is_cur {
         theme.accent
     } else if is_selected {
@@ -1598,7 +1622,7 @@ fn render_grid_card(
     };
     p.rect_stroke(
         rect,
-        CornerRadius::same(10),
+        CornerRadius::same(theme.radius_lg),
         Stroke::new(1.0_f32, stroke_col),
         egui::StrokeKind::Inside,
     );
@@ -1616,11 +1640,11 @@ fn render_grid_card(
 
     if let Some(tex) = art_for(artwork, ctx, art_budget, track) {
         egui::Image::new(&tex)
-            .corner_radius(CornerRadius::same(8))
+            .corner_radius(CornerRadius::same(theme.radius_md))
             .fit_to_exact_size(art_size)
             .paint_at(ui, art_rect);
     } else {
-        p.rect_filled(art_rect, CornerRadius::same(8), theme.bg_pill);
+        p.rect_filled(art_rect, CornerRadius::same(theme.radius_md), theme.bg_pill);
         crate::components::icons::draw_disc(
             ui,
             art_rect.shrink2(Vec2::new(30.0, 30.0)),

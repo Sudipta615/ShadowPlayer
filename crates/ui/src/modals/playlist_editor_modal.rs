@@ -80,14 +80,17 @@ pub fn show_playlist_editor(
         760.0,
         theme,
         |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
             // ── 1. Top Branded Header ──────────────────────────────────────────
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
                 let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(28.0, 28.0), Sense::hover());
-                ui.painter()
-                    .rect_filled(icon_rect, CornerRadius::same(8), theme.accent);
+                ui.painter().rect_filled(
+                    icon_rect,
+                    CornerRadius::same(theme.radius_md),
+                    theme.accent,
+                );
                 crate::components::icons::draw_list_icon(
                     ui,
                     icon_rect.shrink2(Vec2::splat(5.0)),
@@ -95,7 +98,7 @@ pub fn show_playlist_editor(
                 );
 
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                     ui.label(
                         egui::RichText::new("Playlist Studio")
                             .font(crate::theme::font(16.0))
@@ -116,12 +119,12 @@ pub fn show_playlist_editor(
             let create_card = egui::Frame::NONE
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
-                .corner_radius(CornerRadius::same(12))
+                .corner_radius(CornerRadius::same(theme.radius_lg))
                 .inner_margin(Margin::symmetric(14, 12));
 
             create_card.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
 
                     let (plus_rect, _) =
                         ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::hover());
@@ -150,7 +153,7 @@ pub fn show_playlist_editor(
                             .color(Color32::WHITE),
                     )
                     .fill(theme.accent)
-                    .corner_radius(CornerRadius::same(8))
+                    .corner_radius(CornerRadius::same(theme.radius_md))
                     .min_size(Vec2::new(115.0, 30.0));
 
                     if (ui.add(btn).clicked() || enter_pressed) && !state.new_name.trim().is_empty()
@@ -188,7 +191,7 @@ pub fn show_playlist_editor(
                                         .color(if can_export { theme.text_secondary } else { theme.text_muted }),
                                 )
                                 .fill(theme.bg_pill)
-                                .corner_radius(CornerRadius::same(6));
+                                .corner_radius(CornerRadius::same(theme.radius_sm));
 
                                 if ui
                                     .add_enabled(can_export, btn)
@@ -205,7 +208,7 @@ pub fn show_playlist_editor(
                         if playlists.is_empty() {
                             let empty_frame = egui::Frame::NONE
                                 .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(10))
+                                .corner_radius(CornerRadius::same(theme.radius_lg))
                                 .inner_margin(Margin::same(14));
                             empty_frame.show(ui, |ui| {
                                 ui.label(
@@ -221,13 +224,13 @@ pub fn show_playlist_editor(
                             .auto_shrink([false, false])
                             .max_height(ui.available_height() - 6.0)
                             .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
                                 for pl in playlists {
                                     let is_sel = state.selected == Some(pl.id);
 
                                     if state.rename_id == Some(pl.id) {
                                         ui.horizontal(|ui| {
-                                            ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+                                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
                                             let edit = egui::TextEdit::singleline(&mut state.rename_buf)
                                                 .desired_width(ui.available_width() - 56.0);
                                             ui.add(edit);
@@ -284,7 +287,7 @@ pub fn show_playlist_editor(
                                     } else {
                                         theme.bg_card
                                     };
-                                    p.rect_filled(row_rect, CornerRadius::same(8), bg);
+                                    p.rect_filled(row_rect, CornerRadius::same(theme.radius_md), bg);
 
                                     // Playlist icon
                                     let icon_r = Rect::from_center_size(
@@ -352,7 +355,7 @@ pub fn show_playlist_editor(
                         let Some(selected_id) = state.selected else {
                             let empty_card = egui::Frame::NONE
                                 .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(12))
+                                .corner_radius(CornerRadius::same(theme.radius_lg))
                                 .inner_margin(Margin::same(24));
                             empty_card.show(ui, |ui| {
                                 ui.vertical_centered(|ui| {
@@ -422,7 +425,7 @@ pub fn show_playlist_editor(
                                 }
                                 for (idx, t) in playlist_tracks.iter().enumerate() {
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
 
                                         let (up_r, up_resp) = ui.allocate_exact_size(
                                             Vec2::new(16.0, 18.0),
@@ -557,7 +560,7 @@ pub fn show_playlist_editor(
                             .auto_shrink([false, false])
                             .max_height(ui.available_height() - 4.0)
                             .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
+                                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
                                 for &i in &state.results {
                                     let Some(t) = library_tracks.get(i) else {
                                         continue;
@@ -565,7 +568,7 @@ pub fn show_playlist_editor(
                                     let already_in = playlist_tracks.iter().any(|pt| pt.id == t.id);
 
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
 
                                         let add_btn = egui::Button::new(
                                             egui::RichText::new(if already_in { "✓ Added" } else { "+ Add" })
@@ -573,7 +576,7 @@ pub fn show_playlist_editor(
                                                 .color(if already_in { theme.accent } else { Color32::WHITE }),
                                         )
                                         .fill(if already_in { theme.bg_pill } else { theme.accent })
-                                        .corner_radius(CornerRadius::same(5))
+                                        .corner_radius(CornerRadius::same(theme.radius_sm))
                                         .min_size(Vec2::new(56.0, 22.0));
 
                                         if ui.add(add_btn).on_hover_text("Add song to this playlist").clicked() {

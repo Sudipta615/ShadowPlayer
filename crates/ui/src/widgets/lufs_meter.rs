@@ -66,10 +66,14 @@ impl<'a> LufsMeterWidget<'a> {
                 Rect::from_min_size(Pos2::new(x_left, y_top), Vec2::new(block_w - 8.0, block_h));
 
             // Metric container card
-            painter.rect_filled(b_rect, CornerRadius::same(6), self.theme.meter_gutter);
+            painter.rect_filled(
+                b_rect,
+                CornerRadius::same(self.theme.radius_sm),
+                self.theme.meter_gutter,
+            );
             painter.rect_stroke(
                 b_rect,
-                CornerRadius::same(6),
+                CornerRadius::same(self.theme.radius_sm),
                 Stroke::new(1.0_f32, self.theme.meter_grid),
                 egui::StrokeKind::Inside,
             );
@@ -123,7 +127,11 @@ impl<'a> LufsMeterWidget<'a> {
             let bar_w = b_rect.width() - 16.0;
             let bar_bg =
                 Rect::from_min_size(Pos2::new(b_rect.left() + 8.0, bar_y), Vec2::new(bar_w, 4.0));
-            painter.rect_filled(bar_bg, CornerRadius::same(2), self.theme.meter_gutter);
+            painter.rect_filled(
+                bar_bg,
+                CornerRadius::same(self.theme.radius_xs),
+                self.theme.meter_gutter,
+            );
 
             // Level normalization (-40 to 0 dB)
             let norm = ((*val + 40.0) / 40.0).clamp(0.0, 1.0);
@@ -132,7 +140,11 @@ impl<'a> LufsMeterWidget<'a> {
                 Pos2::new(b_rect.left() + 8.0, bar_y),
                 Vec2::new(fill_w, 4.0),
             );
-            painter.rect_filled(bar_fill, CornerRadius::same(2), val_color);
+            painter.rect_filled(
+                bar_fill,
+                CornerRadius::same(self.theme.radius_xs),
+                val_color,
+            );
         }
 
         let _ = response.on_hover_text(

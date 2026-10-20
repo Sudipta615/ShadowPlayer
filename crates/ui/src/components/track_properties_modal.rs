@@ -21,17 +21,17 @@ pub fn show_track_properties_modal(
         520.0,
         theme,
         |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
             let card_frame = egui::Frame::NONE
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
-                .corner_radius(CornerRadius::same(10))
+                .corner_radius(CornerRadius::same(theme.radius_lg))
                 .inner_margin(egui::Margin::same(14));
 
             card_frame.show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
 
                     render_property_row(ui, "Title", &track.title, theme);
                     render_property_row(ui, "Artist", &track.artist, theme);

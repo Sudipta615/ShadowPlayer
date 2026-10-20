@@ -2633,7 +2633,7 @@ impl eframe::App for ShadowPlayerApp {
                 center_ui.set_width(center_w);
                 center_ui.set_max_width(center_w);
                 let ui = &mut center_ui;
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_lg);
 
                 // Top bar: search plus queue/theme/mini actions. On
                 // Settings and Help the search is replaced by the

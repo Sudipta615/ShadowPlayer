@@ -105,7 +105,7 @@ impl<'a> SpectrumVisualizerWidget<'a> {
             };
 
             // Glow cap
-            painter.rect_filled(bar_rect, CornerRadius::same(2), color);
+            painter.rect_filled(bar_rect, CornerRadius::same(self.theme.radius_xs), color);
 
             // Subtle peak cap dot
             let peak_y = (y0 - 2.5).max(rect.top() + 4.0);

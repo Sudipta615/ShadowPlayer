@@ -157,7 +157,7 @@ pub fn render_info_icon_button(
                 let frame = egui::Frame::NONE
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.accent.linear_multiply(0.6)))
-                    .corner_radius(CornerRadius::same(12))
+                    .corner_radius(CornerRadius::same(theme.radius_lg))
                     .shadow(egui::epaint::Shadow {
                         offset: [0, 8],
                         blur: 20,
@@ -168,11 +168,11 @@ pub fn render_info_icon_button(
 
                 let frame_resp = frame.show(ui, |ui| {
                     ui.set_width(box_width);
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
 
                     // 1. Header: Icon + Title + Subtitle + Close Button (✕)
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
 
                         // Mini badge icon
                         let (badge_r, _) =
@@ -202,7 +202,7 @@ pub fn render_info_icon_button(
                         );
 
                         ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                             ui.label(
                                 egui::RichText::new(content.title)
                                     .font(crate::theme::font(13.0))
@@ -228,7 +228,7 @@ pub fn render_info_icon_button(
                             } else {
                                 theme.bg_pill
                             };
-                            cp.rect_filled(c_rect, CornerRadius::same(5), bg);
+                            cp.rect_filled(c_rect, CornerRadius::same(theme.radius_sm), bg);
                             let cross_col = if c_resp.hovered() {
                                 Color32::from_rgb(248, 113, 113)
                             } else {
@@ -268,11 +268,11 @@ pub fn render_info_icon_button(
                         egui::Frame::NONE
                             .fill(theme.bg_card_hover)
                             .stroke(Stroke::new(1.0, theme.border_subtle))
-                            .corner_radius(CornerRadius::same(8))
+                            .corner_radius(CornerRadius::same(theme.radius_md))
                             .inner_margin(Margin::symmetric(10, 6))
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
-                                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                                     ui.horizontal(|ui| {
                                         ui.label(
                                             egui::RichText::new("ENGINE & DSP DYNAMICS")
@@ -295,11 +295,11 @@ pub fn render_info_icon_button(
                         egui::Frame::NONE
                             .fill(theme.accent.linear_multiply(0.12))
                             .stroke(Stroke::new(1.0, theme.accent.linear_multiply(0.3)))
-                            .corner_radius(CornerRadius::same(8))
+                            .corner_radius(CornerRadius::same(theme.radius_md))
                             .inner_margin(Margin::symmetric(10, 6))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+                                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
                                     ui.label(
                                         egui::RichText::new("RECOMMENDED:")
                                             .font(crate::theme::font(9.5))

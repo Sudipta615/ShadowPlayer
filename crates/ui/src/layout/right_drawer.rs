@@ -30,7 +30,7 @@ pub fn render_right_drawer(
         Vec2::new(right_w, avail_h),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
             // 1. Theme Toggle (wide drawer only). In narrow layouts the
             // top bar owns this control, so the overlay must not render a

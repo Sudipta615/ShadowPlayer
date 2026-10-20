@@ -31,12 +31,12 @@ pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bo
             let frame = egui::Frame::NONE
                 .fill(theme.bg_input)
                 .stroke(Stroke::new(1.0_f32, theme.border_input))
-                .corner_radius(CornerRadius::same(19))
+                .corner_radius(CornerRadius::same(theme.radius_pill))
                 .inner_margin(egui::Margin::symmetric(14, 8));
 
             frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
 
                     // Vector Search Icon
                     let (icon_rect, _) =
@@ -104,10 +104,14 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
             });
 
             // Capsule pill background
-            painter.rect_filled(toggle_rect, CornerRadius::same(14), theme.bg_input);
+            painter.rect_filled(
+                toggle_rect,
+                CornerRadius::same(theme.radius_xl),
+                theme.bg_input,
+            );
             painter.rect_stroke(
                 toggle_rect,
-                CornerRadius::same(14),
+                CornerRadius::same(theme.radius_xl),
                 Stroke::new(1.0_f32, theme.border_subtle),
                 StrokeKind::Inside,
             );
@@ -156,11 +160,17 @@ pub fn render_action_button(
     let hovered = response.hovered();
 
     if active {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(9), theme.bg_card_active);
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(theme.radius_md),
+            theme.bg_card_active,
+        );
     } else if hovered {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(9), theme.bg_card_hover);
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(theme.radius_md),
+            theme.bg_card_hover,
+        );
     }
 
     let color = if active {
@@ -185,13 +195,13 @@ pub fn render_action_button(
             let outer = Rect::from_center_size(rect.center(), Vec2::new(18.0, 13.0));
             p.rect_stroke(
                 outer,
-                CornerRadius::same(3),
+                CornerRadius::same(theme.radius_xs),
                 Stroke::new(1.4_f32, color),
                 StrokeKind::Inside,
             );
             let inner =
                 Rect::from_center_size(outer.center() + Vec2::new(1.0, 1.0), Vec2::new(9.0, 6.0));
-            p.rect_filled(inner, CornerRadius::same(1), color);
+            p.rect_filled(inner, CornerRadius::same(theme.radius_xs), color);
         }
     }
 

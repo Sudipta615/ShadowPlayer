@@ -56,15 +56,19 @@ impl MiniPlayer<'_> {
 
         let art_rect = Rect::from_min_size(content.min, Vec2::splat(art_size));
         if let Some(texture) = self.artwork {
-            painter.rect_filled(art_rect, CornerRadius::same(8), Color32::BLACK);
+            painter.rect_filled(
+                art_rect,
+                CornerRadius::same(self.theme.radius_md),
+                Color32::BLACK,
+            );
             egui::Image::new(texture)
-                .corner_radius(CornerRadius::same(8))
+                .corner_radius(CornerRadius::same(self.theme.radius_md))
                 .fit_to_exact_size(Vec2::splat(art_size))
                 .paint_at(ui, art_rect);
         } else {
             painter.rect_filled(
                 art_rect,
-                CornerRadius::same(8),
+                CornerRadius::same(self.theme.radius_md),
                 self.theme.artwork_placeholder,
             );
             crate::components::icons::draw_music_note(
@@ -114,7 +118,7 @@ impl MiniPlayer<'_> {
                 .max_rect(actions)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        actions.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+        actions.spacing_mut().item_spacing = Vec2::new(self.theme.space_xxs, 0.0);
         let cy = actions.max_rect().center().y;
         let button = |ui: &mut Ui, x: f32, size: f32, icon: fn(&Ui, Rect, Color32)| {
             let r = Rect::from_center_size(Pos2::new(x, cy), Vec2::splat(size));
@@ -204,13 +208,13 @@ impl MiniPlayer<'_> {
         let outer = Rect::from_center_size(restore_rect.center(), Vec2::new(15.0, 11.0));
         p.rect_stroke(
             outer,
-            CornerRadius::same(2),
+            CornerRadius::same(self.theme.radius_xs),
             Stroke::new(1.2_f32, rc),
             egui::StrokeKind::Inside,
         );
         p.rect_filled(
             Rect::from_center_size(outer.center() + Vec2::new(1.0, 1.0), Vec2::new(7.0, 5.0)),
-            CornerRadius::same(1),
+            CornerRadius::same(self.theme.radius_xs),
             rc,
         );
         let _ = restore.clone().on_hover_text("Restore the full player");
@@ -231,7 +235,11 @@ impl MiniPlayer<'_> {
             ui.scope_id().with("mini_seek"),
             Sense::click_and_drag(),
         );
-        painter.rect_filled(bar, CornerRadius::same(1), self.theme.slider_track);
+        painter.rect_filled(
+            bar,
+            CornerRadius::same(self.theme.radius_xs),
+            self.theme.slider_track,
+        );
         let frac = if self.duration_secs > 0.0 {
             (self.position_secs / self.duration_secs).clamp(0.0, 1.0) as f32
         } else {
@@ -242,7 +250,11 @@ impl MiniPlayer<'_> {
                 bar.min,
                 Pos2::new(bar.min.x + bar.width() * frac, bar.max.y),
             );
-            painter.rect_filled(fill, CornerRadius::same(1), self.theme.accent_highlight);
+            painter.rect_filled(
+                fill,
+                CornerRadius::same(self.theme.radius_xs),
+                self.theme.accent_highlight,
+            );
         }
         bar_resp.widget_info(|| {
             egui::WidgetInfo::slider(

@@ -35,7 +35,7 @@ pub fn render_settings_view(
 ) -> SettingsViewActions {
     let mut view_actions = SettingsViewActions::default();
     ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 14.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
 
         // ── 1. Page Header with Title, Description, and Live Badges ────────
         ui.horizontal(|ui| {
@@ -48,7 +48,7 @@ pub fn render_settings_view(
 
             // Right-aligned status pills
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
 
                 // Bit-Perfect Indicator Pill
                 let (bp_text, bp_bg, bp_fg, bp_border) = if dsp_state.settings_tab.bit_perfect {
@@ -70,11 +70,11 @@ pub fn render_settings_view(
                 egui::Frame::NONE
                     .fill(bp_bg)
                     .stroke(Stroke::new(1.0, bp_border))
-                    .corner_radius(CornerRadius::same(7))
+                    .corner_radius(CornerRadius::same(theme.radius_sm))
                     .inner_margin(egui::Margin::symmetric(10, 5))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                             let (dot_rect, _) =
                                 ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                             ui.painter_at(dot_rect)
@@ -92,11 +92,11 @@ pub fn render_settings_view(
                 egui::Frame::NONE
                     .fill(theme.bg_pill)
                     .stroke(Stroke::new(1.0, theme.border_card))
-                    .corner_radius(CornerRadius::same(7))
+                    .corner_radius(CornerRadius::same(theme.radius_sm))
                     .inner_margin(egui::Margin::symmetric(10, 5))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                             let (dot_rect, _) =
                                 ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                             ui.painter_at(dot_rect).circle_filled(

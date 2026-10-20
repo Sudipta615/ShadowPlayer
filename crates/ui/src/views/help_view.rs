@@ -84,7 +84,7 @@ pub fn render_help_view(
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 16.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
 
             // 1. Hero Banner with Manual Title & Search Bar
             render_hero_banner(ui, state, theme);
@@ -121,35 +121,35 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     let frame = egui::Frame::NONE
         .fill(theme.bg_card)
         .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(16))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(egui::Margin::symmetric(24, 18));
 
     frame.show(ui, |ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 12.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xl);
 
         // Top Row: Glowing Icon + Title + Version Badge + Subtitle
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(14.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_2xl, 0.0);
 
             // Glowing Manual Icon Badge
             let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(44.0, 44.0), Sense::hover());
             ui.painter_at(icon_rect).rect_filled(
                 icon_rect,
-                CornerRadius::same(12),
+                CornerRadius::same(theme.radius_lg),
                 theme.accent.linear_multiply(0.2),
             );
             ui.painter_at(icon_rect).rect_stroke(
                 icon_rect,
-                CornerRadius::same(12),
+                CornerRadius::same(theme.radius_lg),
                 Stroke::new(1.5, theme.accent_highlight),
                 egui::StrokeKind::Inside,
             );
             crate::components::icons::draw_help(ui, icon_rect.shrink2(Vec2::splat(10.0)), theme.accent_warm);
 
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
                     ui.label(
                         egui::RichText::new("ShadowPlayer Master Manual & Audio Knowledge Base")
                             .font(crate::theme::font(17.5))
@@ -165,6 +165,7 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                         ),
                         theme.accent,
                         Color32::WHITE,
+                        theme,
                     );
                 });
                 ui.label(
@@ -181,12 +182,12 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
         let search_frame = egui::Frame::NONE
             .fill(theme.bg_input)
             .stroke(Stroke::new(1.0_f32, theme.border_input))
-            .corner_radius(CornerRadius::same(14))
+            .corner_radius(CornerRadius::same(theme.radius_xl))
             .inner_margin(egui::Margin::symmetric(14, 8));
 
         search_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
 
                 // Search Icon
                 let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(18.0, 18.0), Sense::hover());
@@ -244,7 +245,7 @@ fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &The
     ];
 
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, theme.space_md);
         for (tab, label) in tabs {
             let is_active = state.active_tab == tab;
             let (bg, fg, stroke) = if is_active {
@@ -270,7 +271,7 @@ fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &The
                 )
                 .fill(bg)
                 .stroke(stroke)
-                .corner_radius(CornerRadius::same(9))
+                .corner_radius(CornerRadius::same(theme.radius_md))
                 .min_size(Vec2::new(0.0, 30.0)),
             );
 
@@ -346,7 +347,7 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
         let avail_w = ui.available_width();
         let img_h = avail_w * (768.0 / 1376.0);
         let img = egui::Image::new(egui::include_image!("../../assets/help/audio_flow.jpg"))
-            .corner_radius(CornerRadius::same(12))
+            .corner_radius(CornerRadius::same(theme.radius_lg))
             .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
@@ -373,10 +374,10 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
 
         for (name, desc) in layout_points {
             ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
                 ui.label(egui::RichText::new("•").color(theme.accent_warm));
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                     ui.label(
                         egui::RichText::new(name)
                             .strong()
@@ -436,14 +437,27 @@ fn render_signal_path_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Them
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {
-            spec_badge(ui, "PRECISION", "64-bit IEEE Float", theme.accent);
-            spec_badge(ui, "BUFFER JITTER", "< 0.05 ms", theme.bit_perfect_green);
-            spec_badge(ui, "INTERNAL NOISE FLOOR", "-310 dBFS", theme.accent_warm);
+            spec_badge(ui, "PRECISION", "64-bit IEEE Float", theme.accent, theme);
+            spec_badge(
+                ui,
+                "BUFFER JITTER",
+                "< 0.05 ms",
+                theme.bit_perfect_green,
+                theme,
+            );
+            spec_badge(
+                ui,
+                "INTERNAL NOISE FLOOR",
+                "-310 dBFS",
+                theme.accent_warm,
+                theme,
+            );
             spec_badge(
                 ui,
                 "THREAD LOCKS",
                 "0 (Lock-Free Atomics)",
                 theme.accent_highlight,
+                theme,
             );
         });
     });
@@ -470,7 +484,7 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
     ];
 
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, theme.space_lg);
 
         for (block, title, subtitle) in blocks {
             let is_selected = state.selected_signal_block == Some(block);
@@ -487,10 +501,10 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(135.0, 56.0), Sense::click());
             let painter = ui.painter_at(rect);
 
-            painter.rect_filled(rect, CornerRadius::same(10), bg);
+            painter.rect_filled(rect, CornerRadius::same(theme.radius_lg), bg);
             painter.rect_stroke(
                 rect,
-                CornerRadius::same(10),
+                CornerRadius::same(theme.radius_lg),
                 Stroke::new(if is_selected { 2.0 } else { 1.0 }, border),
                 egui::StrokeKind::Inside,
             );
@@ -521,7 +535,7 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
     let inspect_frame = egui::Frame::NONE
         .fill(theme.bg_pill.linear_multiply(0.8))
         .stroke(Stroke::new(1.2, theme.accent))
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(egui::Margin::symmetric(18, 14));
 
     inspect_frame.show(ui, |ui| {
@@ -585,7 +599,7 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
         };
 
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
             ui.label(egui::RichText::new(title).font(crate::theme::font(15.0)).strong().color(theme.accent_warm));
             ui.separator();
 
@@ -600,14 +614,26 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                badge(ui, "PLAIN ENGLISH", theme.bit_perfect_green.linear_multiply(0.2), theme.bit_perfect_green);
+                badge(
+                    ui,
+                    "PLAIN ENGLISH",
+                    theme.bit_perfect_green.linear_multiply(0.2),
+                    theme.bit_perfect_green,
+                    theme,
+                );
                 ui.label(egui::RichText::new("Function Overview:").strong().color(theme.bit_perfect_green));
             });
             ui.add(egui::Label::new(egui::RichText::new(plain_desc).font(crate::theme::font(12.5)).color(theme.text_secondary)).wrap());
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                badge(ui, "DSP SPECS", theme.accent.linear_multiply(0.2), theme.accent_warm);
+                badge(
+                    ui,
+                    "DSP SPECS",
+                    theme.accent.linear_multiply(0.2),
+                    theme.accent_warm,
+                    theme,
+                );
                 ui.label(egui::RichText::new("Engineering & Mathematics:").strong().color(theme.accent_warm));
             });
             ui.add(egui::Label::new(egui::RichText::new(tech_desc).font(crate::theme::font(12.0)).color(theme.text_muted)).wrap());
@@ -633,7 +659,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
         let img = egui::Image::new(egui::include_image!(
             "../../assets/help/equalizer_bands.jpg"
         ))
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
@@ -650,14 +676,14 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
         let canvas_w = (avail_w - controls_w - 20.0).max(180.0);
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_3xl, 0.0);
 
             // Column 1: Controls
             ui.allocate_ui_with_layout(
                 Vec2::new(controls_w, 160.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
                     ui.label(
                         egui::RichText::new("Simulated Controls:")
                             .strong()
@@ -742,10 +768,10 @@ fn render_frequency_response_curve_painter(
     theme: &Theme,
 ) {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, CornerRadius::same(10), theme.bg_card);
+    p.rect_filled(rect, CornerRadius::same(theme.radius_lg), theme.bg_card);
     p.rect_stroke(
         rect,
-        CornerRadius::same(10),
+        CornerRadius::same(theme.radius_lg),
         Stroke::new(1.0, theme.border_card),
         egui::StrokeKind::Inside,
     );
@@ -836,7 +862,7 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
         let avail_w = ui.available_width();
         let img_h = avail_w * (768.0 / 1376.0);
         let img = egui::Image::new(egui::include_image!("../../assets/help/bitperfect_dac.jpg"))
-            .corner_radius(CornerRadius::same(12))
+            .corner_radius(CornerRadius::same(theme.radius_lg))
             .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
@@ -913,7 +939,7 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
         let avail_w = ui.available_width();
         let img_h = avail_w * (768.0 / 1376.0);
         let img = egui::Image::new(egui::include_image!("../../assets/help/spatial_3d.jpg"))
-            .corner_radius(CornerRadius::same(12))
+            .corner_radius(CornerRadius::same(theme.radius_lg))
             .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
@@ -930,14 +956,14 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
         let controls_w = (avail_w - radar_size - 24.0).max(200.0);
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(20.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
             // Controls
             ui.allocate_ui_with_layout(
                 Vec2::new(controls_w, radar_size),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
                     ui.label(
                         egui::RichText::new("Acoustic Coordinates:")
                             .strong()
@@ -1016,10 +1042,10 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
 
 fn render_radar_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme: &Theme) {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, CornerRadius::same(12), theme.bg_card);
+    p.rect_filled(rect, CornerRadius::same(theme.radius_lg), theme.bg_card);
     p.rect_stroke(
         rect,
-        CornerRadius::same(12),
+        CornerRadius::same(theme.radius_lg),
         Stroke::new(1.0, theme.border_card),
         egui::StrokeKind::Inside,
     );
@@ -1116,6 +1142,7 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
                 format!("Varispeed Pitch: {:+.2} semitones", semitones),
                 theme.accent,
                 Color32::WHITE,
+                theme,
             );
         });
     });
@@ -1178,10 +1205,10 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
 
 fn render_crossfade_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme: &Theme) {
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, CornerRadius::same(10), theme.bg_card);
+    p.rect_filled(rect, CornerRadius::same(theme.radius_lg), theme.bg_card);
     p.rect_stroke(
         rect,
-        CornerRadius::same(10),
+        CornerRadius::same(theme.radius_lg),
         Stroke::new(1.0, theme.border_card),
         egui::StrokeKind::Inside,
     );
@@ -1328,16 +1355,20 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
         let shortcuts = crate::shortcuts::SHORTCUTS;
 
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
             for shortcut in shortcuts {
                 ui.horizontal_top(|ui| {
                     let (badge_rect, _) =
                         ui.allocate_exact_size(Vec2::new(120.0, 24.0), Sense::hover());
                     let p = ui.painter_at(badge_rect);
-                    p.rect_filled(badge_rect, CornerRadius::same(6), theme.bg_pill);
+                    p.rect_filled(
+                        badge_rect,
+                        CornerRadius::same(theme.radius_sm),
+                        theme.bg_pill,
+                    );
                     p.rect_stroke(
                         badge_rect,
-                        CornerRadius::same(6),
+                        CornerRadius::same(theme.radius_sm),
                         Stroke::new(1.0, theme.border_subtle),
                         egui::StrokeKind::Inside,
                     );
@@ -1447,7 +1478,7 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
                         Vec2::new(text_w, 0.0),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
+                            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
                             ui.label(
                                 egui::RichText::new(title)
                                     .font(crate::theme::font(14.0))
@@ -1478,7 +1509,7 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
                                             .color(Color32::WHITE),
                                     )
                                     .fill(theme.accent)
-                                    .corner_radius(CornerRadius::same(6))
+                                    .corner_radius(CornerRadius::same(theme.radius_sm))
                                     .min_size(Vec2::new(135.0, 26.0)),
                                 )
                                 .clicked()
@@ -1513,18 +1544,18 @@ fn manual_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(&mut 
     let frame = egui::Frame::NONE
         .fill(theme.bg_card)
         .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(14))
+        .corner_radius(CornerRadius::same(theme.radius_xl))
         .inner_margin(egui::Margin::symmetric(22, 18));
 
     frame.show(ui, |ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
         add_contents(ui);
     });
 }
 
 fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str, theme: &Theme) {
     ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
         ui.label(
             egui::RichText::new(title)
                 .font(crate::theme::font(16.0))
@@ -1548,12 +1579,12 @@ fn feature_pillar_card(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme
     let frame = egui::Frame::NONE
         .fill(theme.bg_pill.linear_multiply(0.7))
         .stroke(Stroke::new(1.0, theme.border_subtle))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(egui::Margin::symmetric(14, 12));
 
     frame.show(ui, |ui| {
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
             ui.label(
                 egui::RichText::new(title)
                     .font(crate::theme::font(13.5))
@@ -1577,7 +1608,7 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
     if avail_w < 540.0 {
         // Vertical layout for narrow windows: title on top, description below
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
             ui.label(
                 egui::RichText::new(title)
                     .font(crate::theme::font(13.5))
@@ -1596,7 +1627,7 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
     } else {
         // Side-by-side two column layout with auto-wrapping on both columns
         ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_3xl, 0.0);
             let label_w = (avail_w * 0.32).clamp(180.0, 280.0);
             let desc_w = (avail_w - label_w - 20.0).max(100.0);
 
@@ -1637,8 +1668,8 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
 
 fn caption_box(ui: &mut egui::Ui, text: &str, theme: &Theme) {
     ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
-        badge(ui, "DIAGRAM", theme.bg_pill, theme.accent_warm);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+        badge(ui, "DIAGRAM", theme.bg_pill, theme.accent_warm, theme);
         ui.add(
             egui::Label::new(
                 egui::RichText::new(text)
@@ -1651,10 +1682,10 @@ fn caption_box(ui: &mut egui::Ui, text: &str, theme: &Theme) {
     });
 }
 
-fn badge(ui: &mut egui::Ui, text: impl Into<String>, bg: Color32, fg: Color32) {
+fn badge(ui: &mut egui::Ui, text: impl Into<String>, bg: Color32, fg: Color32, theme: &Theme) {
     egui::Frame::NONE
         .fill(bg)
-        .corner_radius(CornerRadius::same(6))
+        .corner_radius(CornerRadius::same(theme.radius_sm))
         .inner_margin(egui::Margin::symmetric(7, 2))
         .show(ui, |ui| {
             ui.label(
@@ -1666,15 +1697,15 @@ fn badge(ui: &mut egui::Ui, text: impl Into<String>, bg: Color32, fg: Color32) {
         });
 }
 
-fn spec_badge(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {
+fn spec_badge(ui: &mut egui::Ui, label: &str, value: &str, color: Color32, theme: &Theme) {
     egui::Frame::NONE
         .fill(color.linear_multiply(0.15))
         .stroke(Stroke::new(1.0, color.linear_multiply(0.4)))
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(CornerRadius::same(theme.radius_md))
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
                 ui.label(
                     egui::RichText::new(label)
                         .font(crate::theme::font(10.0))

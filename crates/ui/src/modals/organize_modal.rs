@@ -156,7 +156,7 @@ pub fn show_organize_modal(
     let mut close_requested = false;
 
     let closed = crate::dialog::show_modal(ctx, "organize", "Organize Files", 860.0, theme, |ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
 
         ui.label(
                 egui::RichText::new(format!(
@@ -361,14 +361,14 @@ fn render_preview_row(ui: &mut egui::Ui, index: usize, entry: &OrganizeEntry, th
     };
 
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
         ui.label(
             egui::RichText::new(marker)
                 .font(crate::theme::font(11.0))
                 .color(marker_color),
         );
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
             ui.label(
                 egui::RichText::new(entry.from.display().to_string())
                     .font(crate::theme::font(11.0))

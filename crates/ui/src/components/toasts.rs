@@ -106,7 +106,7 @@ impl ToastState {
             .order(egui::Order::Foreground)
             .interactable(false)
             .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
                 ui.vertical_centered(|ui| {
                     for t in &self.items {
                         let age = now.duration_since(t.born);
@@ -138,7 +138,7 @@ impl ToastState {
                         egui::Frame::NONE
                             .fill(fill)
                             .stroke(egui::Stroke::new(1.0, border))
-                            .corner_radius(CornerRadius::same(9))
+                            .corner_radius(CornerRadius::same(theme.radius_md))
                             .inner_margin(egui::Margin::symmetric(14, 9))
                             .show(ui, |ui| {
                                 let resp = ui.add(egui::Label::new(

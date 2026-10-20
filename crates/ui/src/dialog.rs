@@ -61,7 +61,7 @@ pub fn show_modal(
             egui::Frame::popup(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
-                .corner_radius(CornerRadius::same(14))
+                .corner_radius(CornerRadius::same(theme.radius_xl))
                 .inner_margin(egui::Margin::same(16)),
         )
         .backdrop_color(if theme.is_light {

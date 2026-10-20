@@ -42,7 +42,7 @@ impl<'a> AlbumsView<'a> {
         if let Some((sel_title, sel_artist)) = self.selected_album.clone() {
             // ── Album Detail View ──────────────────────────────────────────
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 
                 let back_btn = egui::Button::new(
                     egui::RichText::new("‹ Back to Albums")
@@ -50,7 +50,7 @@ impl<'a> AlbumsView<'a> {
                         .color(self.theme.accent_highlight),
                 )
                 .fill(self.theme.bg_pill)
-                .corner_radius(CornerRadius::same(8));
+                .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                 if ui.add(back_btn).clicked() {
                     *self.selected_album = None;
@@ -63,12 +63,12 @@ impl<'a> AlbumsView<'a> {
             let header_frame = egui::Frame::NONE
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
-                .corner_radius(CornerRadius::same(12))
+                .corner_radius(CornerRadius::same(self.theme.radius_lg))
                 .inner_margin(egui::Margin::same(16));
 
             header_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(18.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_4xl, 0.0);
 
                     // Album Art
                     let art_size = Vec2::new(100.0, 100.0);
@@ -81,13 +81,13 @@ impl<'a> AlbumsView<'a> {
                         .and_then(|t| self.artwork.get_texture(&t.id));
                     if let Some(tex) = first_track_art {
                         egui::Image::new(tex)
-                            .corner_radius(CornerRadius::same(10))
+                            .corner_radius(CornerRadius::same(self.theme.radius_lg))
                             .fit_to_exact_size(art_size)
                             .paint_at(ui, art_rect);
                     } else {
                         painter.rect_filled(
                             art_rect,
-                            CornerRadius::same(10),
+                            CornerRadius::same(self.theme.radius_lg),
                             self.theme.artwork_placeholder,
                         );
                         crate::components::icons::draw_disc(
@@ -98,7 +98,7 @@ impl<'a> AlbumsView<'a> {
                     }
 
                     ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xs);
                         ui.label(
                             egui::RichText::new("ALBUM")
                                 .font(crate::theme::font(11.0))
@@ -138,7 +138,7 @@ impl<'a> AlbumsView<'a> {
                                     .color(Color32::WHITE),
                             )
                             .fill(self.theme.accent)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(play_all_btn).clicked() {
                                 action.play_album = Some((sel_title.clone(), sel_artist.clone()));
@@ -150,7 +150,7 @@ impl<'a> AlbumsView<'a> {
                                     .color(self.theme.text_primary),
                             )
                             .fill(self.theme.bg_pill)
-                            .corner_radius(CornerRadius::same(8));
+                            .corner_radius(CornerRadius::same(self.theme.radius_md));
 
                             if ui.add(queue_all_btn).clicked() {
                                 action.queue_album = Some((sel_title.clone(), sel_artist.clone()));
@@ -166,7 +166,7 @@ impl<'a> AlbumsView<'a> {
             egui::ScrollArea::vertical()
                 .id_salt("album_tracks_scroll")
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xxs);
                     let full_w = ui.available_width();
 
                     for (idx, track) in self.album_tracks.iter().enumerate() {
@@ -184,19 +184,19 @@ impl<'a> AlbumsView<'a> {
                         if is_cur {
                             painter.rect_filled(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 self.theme.bg_active_row,
                             );
                             painter.rect_stroke(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 Stroke::new(1.0_f32, self.theme.border_active_row),
                                 egui::StrokeKind::Inside,
                             );
                         } else if row_resp.hovered() {
                             painter.rect_filled(
                                 row_rect,
-                                CornerRadius::same(6),
+                                CornerRadius::same(self.theme.radius_sm),
                                 self.theme.bg_card_hover,
                             );
                         }
@@ -277,7 +277,7 @@ impl<'a> AlbumsView<'a> {
         } else {
             // ── Albums Grid View ───────────────────────────────────────────
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
                 ui.label(
                     egui::RichText::new("Albums")
                         .font(crate::theme::font(24.0))
@@ -313,7 +313,7 @@ impl<'a> AlbumsView<'a> {
                 egui::ScrollArea::vertical()
                     .id_salt("albums_grid_scroll")
                     .show(ui, |ui| {
-                        let card_w = 148.0;
+                        let card_w = self.theme.card_w;
                         let card_h = 196.0;
                         let avail_w = ui.available_width();
                         // Bound the cover decoding per frame, exactly as the
@@ -321,10 +321,11 @@ impl<'a> AlbumsView<'a> {
                         // frame.
                         let ctx = ui.ctx().clone();
                         let mut art_budget = 8usize;
-                        let cols = ((avail_w + 14.0) / (card_w + 14.0)).floor().max(1.0) as usize;
+                        let gap = self.theme.card_gutter;
+                        let cols = ((avail_w + gap) / (card_w + gap)).floor().max(1.0) as usize;
 
                         egui::Grid::new("albums_grid")
-                            .spacing(Vec2::new(14.0, 14.0))
+                            .spacing(Vec2::new(self.theme.card_gutter, self.theme.card_gutter))
                             .show(ui, |ui| {
                                 for (idx, album) in self.albums.iter().enumerate() {
                                     let (rect, resp) = ui.allocate_exact_size(
@@ -345,10 +346,14 @@ impl<'a> AlbumsView<'a> {
                                     } else {
                                         self.theme.bg_card
                                     };
-                                    p.rect_filled(rect, CornerRadius::same(10), bg);
+                                    p.rect_filled(
+                                        rect,
+                                        CornerRadius::same(self.theme.radius_lg),
+                                        bg,
+                                    );
                                     p.rect_stroke(
                                         rect,
-                                        CornerRadius::same(10),
+                                        CornerRadius::same(self.theme.radius_lg),
                                         Stroke::new(1.0_f32, self.theme.border_card),
                                         egui::StrokeKind::Inside,
                                     );
@@ -383,13 +388,13 @@ impl<'a> AlbumsView<'a> {
 
                                     if let Some(tex) = cover_tex {
                                         egui::Image::new(&tex)
-                                            .corner_radius(CornerRadius::same(8))
+                                            .corner_radius(CornerRadius::same(self.theme.radius_md))
                                             .fit_to_exact_size(cover_rect.size())
                                             .paint_at(ui, cover_rect);
                                     } else {
                                         p.rect_filled(
                                             cover_rect,
-                                            CornerRadius::same(8),
+                                            CornerRadius::same(self.theme.radius_md),
                                             self.theme.artwork_placeholder,
                                         );
                                         crate::components::icons::draw_disc(

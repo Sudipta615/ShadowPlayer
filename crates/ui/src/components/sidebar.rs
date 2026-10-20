@@ -92,14 +92,14 @@ impl<'a> SideBar<'a> {
                 // brand type down instead of truncating "ShadowPla...".
                 let compact_brand = ui.available_width() < 180.0;
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 
                     let (logo_rect, _) =
                         ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::hover());
                     crate::components::icons::draw_logo(ui, logo_rect, self.theme.accent_warm);
 
                     ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xxs);
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new("ShadowPlayer")
@@ -276,9 +276,17 @@ impl<'a> SideBar<'a> {
             }
             let painter = ui.painter_at(rect);
             if is_active {
-                painter.rect_filled(rect, CornerRadius::same(9), self.theme.accent);
+                painter.rect_filled(
+                    rect,
+                    CornerRadius::same(self.theme.radius_md),
+                    self.theme.accent,
+                );
             } else if response.hovered() {
-                painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
+                painter.rect_filled(
+                    rect,
+                    CornerRadius::same(self.theme.radius_md),
+                    self.theme.bg_card_hover,
+                );
             }
             crate::components::icons::draw_filter(
                 ui,
@@ -332,9 +340,17 @@ impl<'a> SideBar<'a> {
         let is_hovered = response.hovered();
 
         if is_active {
-            painter.rect_filled(rect, CornerRadius::same(7), self.theme.info);
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(self.theme.radius_sm),
+                self.theme.info,
+            );
         } else if is_hovered {
-            painter.rect_filled(rect, CornerRadius::same(7), self.theme.bg_card_hover);
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(self.theme.radius_sm),
+                self.theme.bg_card_hover,
+            );
         }
 
         let text_color = if is_active || is_hovered {
@@ -396,9 +412,17 @@ impl<'a> SideBar<'a> {
             }
             let painter = ui.painter_at(rect);
             if is_active {
-                painter.rect_filled(rect, CornerRadius::same(9), self.theme.accent);
+                painter.rect_filled(
+                    rect,
+                    CornerRadius::same(self.theme.radius_md),
+                    self.theme.accent,
+                );
             } else if response.hovered() {
-                painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
+                painter.rect_filled(
+                    rect,
+                    CornerRadius::same(self.theme.radius_md),
+                    self.theme.bg_card_hover,
+                );
             }
             crate::components::icons::draw_list_icon(
                 ui,
@@ -452,9 +476,17 @@ impl<'a> SideBar<'a> {
         let is_hovered = response.hovered();
 
         if is_active {
-            painter.rect_filled(rect, CornerRadius::same(7), self.theme.accent);
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(self.theme.radius_sm),
+                self.theme.accent,
+            );
         } else if is_hovered {
-            painter.rect_filled(rect, CornerRadius::same(7), self.theme.bg_card_hover);
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(self.theme.radius_sm),
+                self.theme.bg_card_hover,
+            );
         }
 
         let text_color = if is_active || is_hovered {
@@ -534,10 +566,20 @@ impl<'a> SideBar<'a> {
         let painter = ui.painter_at(rect);
         let is_hovered = response.hovered();
 
-        if is_active {
-            painter.rect_filled(rect, CornerRadius::same(9), self.theme.accent);
+        // The active fill fades in rather than snapping. The id is the item's
+        // label, so there is one animation state per navigation item.
+        let active_t =
+            ui.ctx()
+                .animate_bool_with_time(ui.make_persistent_id(("nav", label)), is_active, 0.16);
+        let fill = if is_active {
+            crate::theme::lerp_color(self.theme.bg_card_hover, self.theme.accent, active_t)
         } else if is_hovered {
-            painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
+            self.theme.bg_card_hover
+        } else {
+            Color32::TRANSPARENT
+        };
+        if fill != Color32::TRANSPARENT {
+            painter.rect_filled(rect, CornerRadius::same(self.theme.radius_md), fill);
         }
 
         let text_color = if is_active || is_hovered {
@@ -600,10 +642,26 @@ impl<'a> SideBar<'a> {
         let painter = ui.painter_at(rect);
         let is_hovered = response.hovered();
 
-        if is_active {
-            painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_active);
+        // The active fill fades in rather than snapping. One animation state
+        // per badge item.
+        let active_t = ui.ctx().animate_bool_with_time(
+            ui.make_persistent_id(("badge", label)),
+            is_active,
+            0.16,
+        );
+        let fill = if is_active {
+            crate::theme::lerp_color(
+                self.theme.bg_card_hover,
+                self.theme.bg_card_active,
+                active_t,
+            )
         } else if is_hovered {
-            painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
+            self.theme.bg_card_hover
+        } else {
+            Color32::TRANSPARENT
+        };
+        if fill != Color32::TRANSPARENT {
+            painter.rect_filled(rect, CornerRadius::same(self.theme.radius_md), fill);
         }
 
         // Draw colored rounded square badge
@@ -613,7 +671,11 @@ impl<'a> SideBar<'a> {
             Pos2::new(rect.min.x + 22.0, rect.center().y)
         };
         let badge_rect = Rect::from_center_size(badge_center, Vec2::new(24.0, 24.0));
-        painter.rect_filled(badge_rect, CornerRadius::same(7), badge_color);
+        painter.rect_filled(
+            badge_rect,
+            CornerRadius::same(self.theme.radius_sm),
+            badge_color,
+        );
         let icon_sub_rect = badge_rect.shrink2(Vec2::new(4.5, 4.5));
         match item {
             NavItem::Favorites => {
