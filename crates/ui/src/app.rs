@@ -2257,6 +2257,9 @@ impl eframe::App for ShadowPlayerApp {
                     self.refresh_view();
                 }
             }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_LIGHT").is_ok() {
+                self.theme = crate::theme::Theme::light();
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_HELP").is_ok() {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Help;
                 if let Ok(tab_str) = std::env::var("SHADOWPLAYER_EVAL_HELP_TAB") {
