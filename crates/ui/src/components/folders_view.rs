@@ -257,7 +257,14 @@ impl<'a> FoldersView<'a> {
                             Pos2::new(row_rect.max.x - 16.0, cy),
                             Vec2::new(18.0, 18.0),
                         );
-                        let fav_hover = ui.rect_contains_pointer(fav_rect);
+                        // A real widget, so the heart can be reached by
+                        // keyboard and announced by a screen reader.
+                        let fav_resp = ui.interact(
+                            fav_rect,
+                            ui.scope_id().with(("row_fav", track.id)),
+                            Sense::click(),
+                        );
+                        let fav_hover = fav_resp.hovered();
                         let heart_col = if is_fav {
                             self.theme.accent_warm
                         } else if fav_hover {
@@ -267,9 +274,25 @@ impl<'a> FoldersView<'a> {
                         };
                         crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_fav);
 
-                        if fav_hover && ui.input(|i| i.pointer.primary_clicked()) {
+                        if fav_resp.clicked() {
                             action.toggle_favorite = Some(track.id);
                         }
+                        fav_resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                true,
+                                if is_fav {
+                                    "Remove from favourites"
+                                } else {
+                                    "Add to favourites"
+                                },
+                            )
+                        });
+                        let _ = fav_resp.on_hover_text(if is_fav {
+                            "Remove from favourites"
+                        } else {
+                            "Add to favourites"
+                        });
                     }
                 });
         } else {

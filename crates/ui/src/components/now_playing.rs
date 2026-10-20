@@ -205,6 +205,11 @@ impl<'a> NowPlayingCard<'a> {
                                 heart_color,
                                 self.is_favorite,
                             );
+                            let _ = heart_resp.clone().on_hover_text(if self.is_favorite {
+                                "Remove from favourites"
+                            } else {
+                                "Add to favourites"
+                            });
 
                             heart_resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(
@@ -402,6 +407,11 @@ impl<'a> NowPlayingCard<'a> {
                                 self.theme.text_muted
                             };
                             crate::components::icons::draw_shuffle(ui, shuf_rect, shuffle_color);
+                            let _ = shuf_resp.clone().on_hover_text(if self.is_shuffle {
+                                "Shuffle on — click to turn off"
+                            } else {
+                                "Shuffle — click to turn on"
+                            });
                             shuf_resp.widget_info(|| {
                                 egui::WidgetInfo::selected(
                                     egui::Role::Button,
@@ -424,6 +434,7 @@ impl<'a> NowPlayingCard<'a> {
                                 prev_rect,
                                 self.theme.text_primary,
                             );
+                            let _ = prev_resp.clone().on_hover_text("Previous track");
                             prev_resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::Role::Button,
@@ -488,6 +499,11 @@ impl<'a> NowPlayingCard<'a> {
                                     true,
                                 );
                             }
+                            let _ = play_resp.clone().on_hover_text(if self.is_playing {
+                                "Pause"
+                            } else {
+                                "Play"
+                            });
                             play_resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::Role::Button,
@@ -509,6 +525,7 @@ impl<'a> NowPlayingCard<'a> {
                                 next_rect,
                                 self.theme.text_primary,
                             );
+                            let _ = next_resp.clone().on_hover_text("Next track");
                             next_resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::Role::Button, true, "Next track")
                             });
@@ -527,6 +544,11 @@ impl<'a> NowPlayingCard<'a> {
                                 self.theme.text_muted
                             };
                             crate::components::icons::draw_repeat(ui, rep_rect, repeat_color);
+                            let _ = rep_resp.clone().on_hover_text(if self.is_repeat {
+                                "Repeat on — click to change mode"
+                            } else {
+                                "Repeat — click to repeat all"
+                            });
                             rep_resp.widget_info(|| {
                                 egui::WidgetInfo::selected(
                                     egui::Role::Button,

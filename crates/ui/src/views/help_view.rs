@@ -180,7 +180,7 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
         // Dedicated Full-Width Search Input Row
         let search_frame = egui::Frame::NONE
             .fill(theme.bg_input)
-            .stroke(Stroke::new(1.0_f32, theme.border_subtle))
+            .stroke(Stroke::new(1.0_f32, theme.border_input))
             .corner_radius(CornerRadius::same(14))
             .inner_margin(egui::Margin::symmetric(14, 8));
 

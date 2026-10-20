@@ -78,8 +78,22 @@ impl<'a> RightPanel<'a> {
                         Vec2::new(half_w, switch_rect.height()),
                     );
 
-                    let q_hover = ui.rect_contains_pointer(queue_rect);
-                    let l_hover = ui.rect_contains_pointer(lyrics_rect);
+                    // The two halves are real widgets, not raw pointer
+                    // hit-tests: a tab switcher that cannot be reached by
+                    // keyboard or by a screen reader is not a tab switcher.
+                    let q_resp = ui.interact(
+                        queue_rect,
+                        ui.make_persistent_id("right_tab_queue"),
+                        Sense::click(),
+                    );
+                    let l_resp = ui.interact(
+                        lyrics_rect,
+                        ui.make_persistent_id("right_tab_lyrics"),
+                        Sense::click(),
+                    );
+
+                    let q_hover = q_resp.hovered();
+                    let l_hover = l_resp.hovered();
 
                     // Active Tab Indicator
                     if self.active_tab == RightTab::Queue {
@@ -88,6 +102,24 @@ impl<'a> RightPanel<'a> {
                     } else if self.active_tab == RightTab::Lyrics {
                         let active_pill = lyrics_rect.shrink2(Vec2::new(2.0, 2.0));
                         painter.rect_filled(active_pill, CornerRadius::same(8), self.theme.accent);
+                    }
+
+                    // Hover feedback for the half that is *not* the active one.
+                    if self.active_tab != RightTab::Queue && q_hover {
+                        let hovered_pill = queue_rect.shrink2(Vec2::new(2.0, 2.0));
+                        painter.rect_filled(
+                            hovered_pill,
+                            CornerRadius::same(8),
+                            self.theme.bg_card_hover,
+                        );
+                    }
+                    if self.active_tab != RightTab::Lyrics && l_hover {
+                        let hovered_pill = lyrics_rect.shrink2(Vec2::new(2.0, 2.0));
+                        painter.rect_filled(
+                            hovered_pill,
+                            CornerRadius::same(8),
+                            self.theme.bg_card_hover,
+                        );
                     }
 
                     let q_color = if self.active_tab == RightTab::Queue {
@@ -116,12 +148,30 @@ impl<'a> RightPanel<'a> {
                         l_color,
                     );
 
-                    if q_hover && ui.input(|i| i.pointer.primary_clicked()) {
+                    if q_resp.clicked() {
                         action.tab_changed = Some(RightTab::Queue);
                     }
-                    if l_hover && ui.input(|i| i.pointer.primary_clicked()) {
+                    if l_resp.clicked() {
                         action.tab_changed = Some(RightTab::Lyrics);
                     }
+                    q_resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::Button,
+                            true,
+                            self.active_tab == RightTab::Queue,
+                            "Queue",
+                        )
+                    });
+                    l_resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::Button,
+                            true,
+                            self.active_tab == RightTab::Lyrics,
+                            "Lyrics",
+                        )
+                    });
+                    let _ = q_resp.on_hover_text("Show the play queue");
+                    let _ = l_resp.on_hover_text("Show the lyrics for the current track");
                 });
 
                 ui.add_space(10.0);
@@ -315,9 +365,29 @@ impl<'a> RightPanel<'a> {
                                         );
                                         let can_up = orig_idx > start;
                                         let can_down = orig_idx + 1 < qlen;
-                                        let up_hov = can_up && ui.rect_contains_pointer(up_rect);
-                                        let down_hov =
-                                            can_down && ui.rect_contains_pointer(down_rect);
+                                        // Real widgets, so the queue controls
+                                        // can be reached by keyboard and
+                                        // announced by a screen reader.
+                                        let up_resp = ui.interact(
+                                            up_rect,
+                                            ui.scope_id().with(("queue_up", orig_idx)),
+                                            Sense::click(),
+                                        );
+                                        let down_resp = ui.interact(
+                                            down_rect,
+                                            ui.scope_id().with(("queue_down", orig_idx)),
+                                            Sense::click(),
+                                        );
+                                        let del_resp = ui.interact(
+                                            Rect::from_center_size(
+                                                Pos2::new(rect.max.x - 12.0, cy),
+                                                Vec2::new(14.0, 14.0),
+                                            ),
+                                            ui.scope_id().with(("queue_del", orig_idx)),
+                                            Sense::click(),
+                                        );
+                                        let up_hov = can_up && up_resp.hovered();
+                                        let down_hov = can_down && down_resp.hovered();
                                         let up_col = if up_hov {
                                             theme.accent_highlight
                                         } else {
@@ -342,20 +412,38 @@ impl<'a> RightPanel<'a> {
                                             crate::theme::font(13.0),
                                             if can_down { down_col } else { theme.text_dim },
                                         );
-                                        if up_hov && ui.input(|i| i.pointer.primary_clicked()) {
+                                        if can_up && up_resp.clicked() {
                                             action.move_queue = Some((orig_idx, -1));
                                             action.play_queue_index = None;
                                         }
-                                        if down_hov && ui.input(|i| i.pointer.primary_clicked()) {
+                                        if can_down && down_resp.clicked() {
                                             action.move_queue = Some((orig_idx, 1));
                                             action.play_queue_index = None;
                                         }
+                                        up_resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                can_up,
+                                                "Move up in the queue",
+                                            )
+                                        });
+                                        down_resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                can_down,
+                                                "Move down in the queue",
+                                            )
+                                        });
+                                        del_resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                true,
+                                                "Remove from the queue",
+                                            )
+                                        });
 
-                                        let del_rect = Rect::from_center_size(
-                                            Pos2::new(rect.max.x - 12.0, cy),
-                                            Vec2::new(14.0, 14.0),
-                                        );
-                                        let del_hov = ui.rect_contains_pointer(del_rect);
+                                        let del_rect = del_resp.rect;
+                                        let del_hov = del_resp.hovered();
                                         let del_col = if del_hov {
                                             theme.accent_highlight
                                         } else {
@@ -366,7 +454,7 @@ impl<'a> RightPanel<'a> {
                                             del_rect.shrink2(Vec2::new(2.0, 2.0)),
                                             del_col,
                                         );
-                                        if del_hov && ui.input(|i| i.pointer.primary_clicked()) {
+                                        if del_resp.clicked() {
                                             action.remove_queue_index = Some(orig_idx);
                                             action.play_queue_index = None;
                                         }
@@ -553,6 +641,16 @@ impl<'a> RightPanel<'a> {
                     is_muted,
                 );
 
+                spk_resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        true,
+                        if is_muted { "Unmute" } else { "Mute" },
+                    )
+                });
+                let _ = spk_resp
+                    .clone()
+                    .on_hover_text(if is_muted { "Unmute" } else { "Mute" });
                 if spk_resp.clicked() {
                     action.toggle_mute = true;
                 }

@@ -30,7 +30,7 @@ pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bo
         |ui| {
             let frame = egui::Frame::NONE
                 .fill(theme.bg_input)
-                .stroke(Stroke::new(1.0_f32, theme.border_subtle))
+                .stroke(Stroke::new(1.0_f32, theme.border_input))
                 .corner_radius(CornerRadius::same(19))
                 .inner_margin(egui::Margin::symmetric(14, 8));
 
@@ -86,6 +86,22 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
             if toggle_resp.clicked() {
                 resp.theme_toggle_requested = true;
             }
+            toggle_resp.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::Role::Button,
+                    true,
+                    if theme.is_light {
+                        "Switch to the dark theme"
+                    } else {
+                        "Switch to the light theme"
+                    },
+                )
+            });
+            let _ = toggle_resp.on_hover_text(if theme.is_light {
+                "Switch to the dark theme"
+            } else {
+                "Switch to the light theme"
+            });
 
             // Capsule pill background
             painter.rect_filled(toggle_rect, CornerRadius::same(14), theme.bg_input);

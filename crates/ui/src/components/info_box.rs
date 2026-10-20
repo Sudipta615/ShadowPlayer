@@ -90,21 +90,19 @@ pub fn render_info_icon_button(
         Stroke::new(1.2, fg_col),
     );
 
-    // On hover, show brief prompt tooltip
-    resp.clone().on_hover_ui(|ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-            ui.label(
-                egui::RichText::new("ℹ")
-                    .font(crate::theme::font(11.0))
-                    .color(theme.accent_warm),
-            );
-            ui.label(
-                egui::RichText::new(format!("Click for details on {}", content.title))
-                    .font(crate::theme::font(11.0))
-                    .color(theme.text_primary),
-            );
-        });
+    // On hover, show a prompt tooltip.
+    //
+    // `on_hover_text` and not `on_hover_ui`: egui only turns the former into
+    // the control's accessible name, so the button used to be an unnamed node
+    // in the accessibility tree.
+    resp.clone()
+        .on_hover_text(format!("Details on {}", content.title));
+    resp.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            true,
+            format!("Details on {}", content.title),
+        )
     });
 
     // Toggle logic on click

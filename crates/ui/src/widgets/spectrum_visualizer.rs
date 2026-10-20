@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Stroke, Vec2};
 
 /// High-Resolution 60fps FFT Spectrum Visualizer Widget
 pub struct SpectrumVisualizerWidget<'a> {
@@ -56,7 +56,7 @@ impl<'a> SpectrumVisualizerWidget<'a> {
                     Pos2::new(rect.left() + 10.0, mid_y),
                     Pos2::new(rect.right() - 10.0, mid_y),
                 ],
-                Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 20)),
+                Stroke::new(1.0_f32, self.theme.meter_grid),
             );
             return;
         }
@@ -111,7 +111,7 @@ impl<'a> SpectrumVisualizerWidget<'a> {
             let peak_y = (y0 - 2.5).max(rect.top() + 4.0);
             painter.line_segment(
                 [Pos2::new(x0, peak_y), Pos2::new(x1, peak_y)],
-                Stroke::new(1.2_f32, Color32::WHITE),
+                Stroke::new(1.2_f32, self.theme.text_primary),
             );
         }
     }

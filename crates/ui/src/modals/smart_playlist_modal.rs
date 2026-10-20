@@ -120,7 +120,10 @@ pub fn show_smart_playlist_editor(
                                         {
                                             actions.open = Some(sp.id);
                                         }
-                                        if ui.small_button("Del").on_hover_text("Delete").clicked()
+                                        if ui
+                                            .small_button("Delete playlist")
+                                            .on_hover_text("Delete")
+                                            .clicked()
                                         {
                                             actions.delete = Some(sp.id);
                                         }

@@ -35,7 +35,7 @@ impl<'a> VuMeterWidget<'a> {
         let painter = ui.painter_at(rect);
 
         // Dark chassis frame
-        painter.rect_filled(rect, 8.0, Color32::from_rgba_premultiplied(12, 14, 22, 240));
+        painter.rect_filled(rect, 8.0, self.theme.meter_bg);
         painter.rect_stroke(
             rect,
             8.0,
@@ -85,11 +85,11 @@ impl<'a> VuMeterWidget<'a> {
         theme: &Theme,
     ) {
         // Dial Face (Warm retro incandescent glass or deep dark cyber)
-        painter.rect_filled(rect, 6.0, Color32::from_rgb(18, 20, 32));
+        painter.rect_filled(rect, 6.0, theme.meter_gutter);
         painter.rect_stroke(
             rect,
             6.0,
-            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 18)),
+            Stroke::new(1.0_f32, theme.meter_grid),
             egui::StrokeKind::Inside,
         );
 
@@ -140,9 +140,9 @@ impl<'a> VuMeterWidget<'a> {
             let p1 = Pos2::new(pivot.x + r_outer * rad.cos(), pivot.y + r_outer * rad.sin());
 
             let tick_col = if db >= 0.0 {
-                Color32::from_rgb(239, 68, 68) // Red overload zone
+                theme.destructive // Red overload zone
             } else {
-                Color32::from_rgb(180, 190, 210)
+                theme.text_muted
             };
 
             painter.line_segment([p0, p1], Stroke::new(1.2_f32, tick_col));
@@ -176,19 +176,19 @@ impl<'a> VuMeterWidget<'a> {
         let shadow_tip = Pos2::new(needle_tip.x + 1.5, needle_tip.y + 1.5);
         painter.line_segment(
             [pivot, shadow_tip],
-            Stroke::new(1.5_f32, Color32::from_rgba_premultiplied(0, 0, 0, 80)),
+            Stroke::new(1.5_f32, theme.border_subtle),
         );
 
         // Needle line
         let needle_color = if needle_db >= 0.0 {
-            Color32::from_rgb(255, 80, 80)
+            theme.destructive
         } else {
             theme.accent_highlight
         };
         painter.line_segment([pivot, needle_tip], Stroke::new(1.5_f32, needle_color));
 
         // Pivot cap
-        painter.circle_filled(pivot, 4.0, Color32::from_rgb(60, 70, 90));
+        painter.circle_filled(pivot, 4.0, theme.text_dim);
 
         // Channel Label & VU branding
         painter.text(
@@ -202,12 +202,9 @@ impl<'a> VuMeterWidget<'a> {
         // Peak Overload LED
         let led_pos = Pos2::new(rect.right() - 10.0, rect.top() + 10.0);
         let (led_fill, led_glow) = if peak_overload || needle_db >= 0.0 {
-            (
-                Color32::from_rgb(255, 30, 30),
-                Color32::from_rgba_premultiplied(255, 0, 0, 90),
-            )
+            (theme.destructive, theme.destructive.gamma_multiply(0.35))
         } else {
-            (Color32::from_rgb(40, 20, 25), Color32::TRANSPARENT)
+            (theme.destructive.gamma_multiply(0.25), Color32::TRANSPARENT)
         };
 
         if peak_overload || needle_db >= 0.0 {

@@ -173,6 +173,10 @@ impl<'a> SideBar<'a> {
                             self.theme.text_muted
                         };
                         crate::components::icons::draw_plus_circle(ui, plus_rect, plus_color);
+                        plus_resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::Button, true, "New playlist")
+                        });
+                        let _ = plus_resp.clone().on_hover_text("New playlist");
                         if plus_resp.clicked() {
                             menu_open = !menu_open;
                             ui.ctx().data_mut(|d| d.insert_temp(plus_id, menu_open));
@@ -300,6 +304,14 @@ impl<'a> SideBar<'a> {
         let height = 34.0;
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::Role::Button,
+                true,
+                is_active,
+                format!("Smart playlist: {}", playlist.name),
+            )
+        });
 
         let trash_rect = Rect::from_center_size(
             Pos2::new(rect.max.x - 12.0, rect.center().y),
@@ -412,6 +424,14 @@ impl<'a> SideBar<'a> {
         let height = 34.0;
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::Role::Button,
+                true,
+                is_active,
+                format!("Playlist: {}", playlist.name),
+            )
+        });
 
         let trash_rect = Rect::from_center_size(
             Pos2::new(rect.max.x - 12.0, rect.center().y),

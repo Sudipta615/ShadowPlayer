@@ -49,11 +49,7 @@ impl<'a> SpatialRadarWidget<'a> {
         let mut changed = false;
 
         // Background radar card
-        painter.rect_filled(
-            rect,
-            12.0,
-            Color32::from_rgba_premultiplied(10, 12, 22, 240),
-        );
+        painter.rect_filled(rect, 12.0, self.theme.meter_bg);
         painter.rect_stroke(
             rect,
             12.0,
@@ -73,7 +69,7 @@ impl<'a> SpatialRadarWidget<'a> {
         painter.rect_stroke(
             room_rect,
             4.0,
-            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(100, 116, 139, 40)),
+            Stroke::new(1.0_f32, self.theme.meter_grid),
             egui::StrokeKind::Inside,
         );
         painter.text(
@@ -88,7 +84,7 @@ impl<'a> SpatialRadarWidget<'a> {
         );
 
         // 2. Draw Distance Concentric Rings
-        let grid_stroke = Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 15));
+        let grid_stroke = Stroke::new(1.0_f32, self.theme.meter_grid);
         for &dist in &[1.0, 2.0, 3.0, 4.0] {
             let r = dist * scale;
             if r <= radar_radius {
@@ -121,7 +117,7 @@ impl<'a> SpatialRadarWidget<'a> {
 
         // 4. Draw Listener Head (Center)
         // Listener body circle
-        painter.circle_filled(center, 9.0, Color32::from_rgb(45, 55, 75));
+        painter.circle_filled(center, 9.0, self.theme.text_dim);
         painter.circle_stroke(center, 9.0, Stroke::new(1.5_f32, self.theme.accent));
 
         // Listener nose / direction pointer
@@ -185,7 +181,11 @@ impl<'a> SpatialRadarWidget<'a> {
             ),
         );
         painter.circle_filled(source_pos, 7.0, self.theme.accent_highlight);
-        painter.circle_stroke(source_pos, 7.0, Stroke::new(1.5_f32, Color32::WHITE));
+        painter.circle_stroke(
+            source_pos,
+            7.0,
+            Stroke::new(1.5_f32, self.theme.text_primary),
+        );
 
         // Source Label & Telemetry
         let source_info = format!("Centre {:+.0}°", *self.center_azimuth_deg);

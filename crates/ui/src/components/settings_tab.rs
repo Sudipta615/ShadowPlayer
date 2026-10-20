@@ -581,6 +581,10 @@ fn render_category_bar(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &
 
                 let (tab_rect, resp) =
                     ui.allocate_exact_size(Vec2::new(tab_w, 34.0), Sense::click());
+                resp.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::Role::Button, true, is_active, cat.title())
+                });
+                let _ = resp.clone().on_hover_text(cat.title());
                 if resp.clicked() && !is_active {
                     state.active_category = cat;
                 }

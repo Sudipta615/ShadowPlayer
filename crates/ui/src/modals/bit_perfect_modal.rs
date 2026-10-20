@@ -126,11 +126,7 @@ pub fn show_bit_perfect_modal(
                 let (flow_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 84.0), egui::Sense::hover());
                 let painter = ui.painter_at(flow_rect);
 
-                painter.rect_filled(
-                    flow_rect,
-                    8.0,
-                    Color32::from_rgba_premultiplied(8, 10, 18, 255),
-                );
+                painter.rect_filled(flow_rect, 8.0, theme.meter_bg);
                 painter.rect_stroke(
                     flow_rect,
                     8.0,

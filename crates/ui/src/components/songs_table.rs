@@ -525,6 +525,15 @@ impl<'a> SongsTable<'a> {
                             theme.text_muted
                         },
                     );
+                    grid_resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::Button,
+                            true,
+                            is_grid_view,
+                            "Show covers as a grid",
+                        )
+                    });
+                    let _ = grid_resp.clone().on_hover_text("Show covers as a grid");
                     if grid_resp.clicked() && !is_grid_view {
                         action.toggle_view_mode = true;
                     }
@@ -542,6 +551,15 @@ impl<'a> SongsTable<'a> {
                             theme.text_muted
                         },
                     );
+                    list_resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::Button,
+                            true,
+                            !is_grid_view,
+                            "Show tracks as a list",
+                        )
+                    });
+                    let _ = list_resp.clone().on_hover_text("Show tracks as a list");
                     if list_resp.clicked() && is_grid_view {
                         action.toggle_view_mode = true;
                     }
@@ -1293,8 +1311,17 @@ impl<'a> SongsTable<'a> {
                             },
                         );
 
-                        // Column 6: Heart Favorite Toggle
-                        let fav_hover = ui.rect_contains_pointer(fav_rect);
+                        // Column 6: Heart Favorite Toggle.
+                        //
+                        // A real widget, so the heart can be reached by
+                        // keyboard and announced by a screen reader — it used
+                        // to be a raw pointer hit-test, which is neither.
+                        let fav_resp = ui.interact(
+                            fav_rect,
+                            ui.scope_id().with(("row_fav", idx)),
+                            Sense::click(),
+                        );
+                        let fav_hover = fav_resp.hovered();
                         let heart_col = if is_favorite {
                             theme.accent_warm
                         } else if fav_hover {
@@ -1303,9 +1330,25 @@ impl<'a> SongsTable<'a> {
                             theme.text_muted
                         };
                         crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_favorite);
-                        if fav_hover && ui.input(|i| i.pointer.primary_clicked()) {
+                        if fav_resp.clicked() {
                             action.toggle_favorite = Some(track.id);
                         }
+                        fav_resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                true,
+                                if is_favorite {
+                                    "Remove from favourites"
+                                } else {
+                                    "Add to favourites"
+                                },
+                            )
+                        });
+                        let _ = fav_resp.on_hover_text(if is_favorite {
+                            "Remove from favourites"
+                        } else {
+                            "Add to favourites"
+                        });
 
                         // Column 7: Overflow Menu "⋮"
                         let menu_hover = ui.rect_contains_pointer(menu_rect);
@@ -1518,6 +1561,13 @@ fn render_grid_card(
     let is_selected = selected_track_ids.contains(&track.id);
 
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::click());
+    resp.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            true,
+            format!("{} by {}", track.title, track.artist),
+        )
+    });
     if resp.clicked() {
         let modifiers = ui.input(|i| i.modifiers);
         if modifiers.command || modifiers.ctrl || modifiers.shift {

@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Stroke, Vec2};
 use engine::dsp::ProfessionalMeterSnapshot;
 
 /// Broadcast-style loudness & true-peak meter.
@@ -37,7 +37,7 @@ impl<'a> LufsMeterWidget<'a> {
         let painter = ui.painter_at(rect);
 
         // Frame
-        painter.rect_filled(rect, 8.0, Color32::from_rgba_premultiplied(10, 12, 20, 240));
+        painter.rect_filled(rect, 8.0, self.theme.meter_bg);
         painter.rect_stroke(
             rect,
             8.0,
@@ -66,11 +66,11 @@ impl<'a> LufsMeterWidget<'a> {
                 Rect::from_min_size(Pos2::new(x_left, y_top), Vec2::new(block_w - 8.0, block_h));
 
             // Metric container card
-            painter.rect_filled(b_rect, CornerRadius::same(6), Color32::from_rgb(16, 18, 28));
+            painter.rect_filled(b_rect, CornerRadius::same(6), self.theme.meter_gutter);
             painter.rect_stroke(
                 b_rect,
                 CornerRadius::same(6),
-                Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 12)),
+                Stroke::new(1.0_f32, self.theme.meter_grid),
                 egui::StrokeKind::Inside,
             );
 
@@ -92,7 +92,7 @@ impl<'a> LufsMeterWidget<'a> {
 
             let val_color = if *label == "TRUE PEAK" {
                 if *val > 0.0 {
-                    Color32::from_rgb(255, 60, 60)
+                    self.theme.destructive
                 } else {
                     self.theme.bit_perfect_green
                 }
@@ -123,7 +123,7 @@ impl<'a> LufsMeterWidget<'a> {
             let bar_w = b_rect.width() - 16.0;
             let bar_bg =
                 Rect::from_min_size(Pos2::new(b_rect.left() + 8.0, bar_y), Vec2::new(bar_w, 4.0));
-            painter.rect_filled(bar_bg, CornerRadius::same(2), Color32::from_rgb(30, 32, 45));
+            painter.rect_filled(bar_bg, CornerRadius::same(2), self.theme.meter_gutter);
 
             // Level normalization (-40 to 0 dB)
             let norm = ((*val + 40.0) / 40.0).clamp(0.0, 1.0);
