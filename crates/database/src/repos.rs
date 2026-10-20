@@ -144,6 +144,8 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         is_lossless: is_lossless_int != 0,
         replaygain_track_db: row.get("replaygain_track_db")?,
         replaygain_track_peak: row.get("replaygain_track_peak")?,
+        replaygain_album_db: row.get("replaygain_album_db")?,
+        replaygain_album_peak: row.get("replaygain_album_peak")?,
         r128_loudness_lufs: row.get("r128_loudness_lufs")?,
         file_size_bytes: row.get::<_, i64>("file_size_bytes")? as u64,
         mtime_unix_secs: row.get("mtime_unix_secs")?,
@@ -172,9 +174,10 @@ impl TrackRepo {
                     id, path, title, artist, album, genre, year, track_number, disc_number,
                     duration_secs, sample_rate, channels, format, bitrate_kbps, is_lossless,
                     replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
+                    replaygain_album_db, replaygain_album_peak,
                     file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash,
                     is_favorite, play_count, last_played_at, added_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
                 ON CONFLICT(path) DO UPDATE SET
                     title = excluded.title,
                     artist = excluded.artist,
@@ -192,6 +195,8 @@ impl TrackRepo {
                     replaygain_track_db = excluded.replaygain_track_db,
                     replaygain_track_peak = excluded.replaygain_track_peak,
                     r128_loudness_lufs = excluded.r128_loudness_lufs,
+                    replaygain_album_db = excluded.replaygain_album_db,
+                    replaygain_album_peak = excluded.replaygain_album_peak,
                     file_size_bytes = excluded.file_size_bytes,
                     mtime_unix_secs = excluded.mtime_unix_secs,
                     mtime_nanos = excluded.mtime_nanos,
@@ -215,6 +220,8 @@ impl TrackRepo {
                     track.replaygain_track_db,
                     track.replaygain_track_peak,
                     track.r128_loudness_lufs,
+                    track.replaygain_album_db,
+                    track.replaygain_album_peak,
                     track.file_size_bytes as i64,
                     track.mtime_unix_secs,
                     track.mtime_nanos,
@@ -442,18 +449,65 @@ impl TrackRepo {
         })
     }
 
+    /// Store an album's ReplayGain gain for every track of that album.
+    ///
+    /// ReplayGain 2.0's album gain belongs to the album, not to a track, so
+    /// every track of the album carries the same value. The album is
+    /// identified by name and artist, which is how the library groups it.
+    pub fn set_album_loudness(
+        &self,
+        album: &str,
+        artist: &str,
+        replaygain_album_db: Option<f32>,
+        replaygain_album_peak: Option<f32>,
+    ) -> Result<usize> {
+        self.db.with_conn(|conn| {
+            let updated = conn.execute(
+                "UPDATE tracks
+                    SET replaygain_album_db = ?1,
+                        replaygain_album_peak = ?2
+                  WHERE album = ?3 AND artist = ?4;",
+                params![replaygain_album_db, replaygain_album_peak, album, artist],
+            )?;
+            Ok(updated)
+        })
+    }
+
     /// Tracks that have no measured loudness yet, for a library-wide scan.
     pub fn list_missing_replaygain(&self) -> Result<Vec<(TrackId, PathBuf)>> {
+        Ok(self
+            .list_missing_replaygain_with_album()?
+            .into_iter()
+            .map(|(id, path, _, _)| (id, path))
+            .collect())
+    }
+
+    /// Tracks that have no measured loudness yet, with the album they belong
+    /// to.
+    ///
+    /// The album and artist are needed because ReplayGain's album gain is a
+    /// property of the album, so the scan has to group its results by album
+    /// before it can compute one.
+    pub fn list_missing_replaygain_with_album(
+        &self,
+    ) -> Result<Vec<(TrackId, PathBuf, String, String)>> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, path FROM tracks
+                "SELECT id, path, album, artist FROM tracks
                   WHERE replaygain_track_db IS NULL
                   ORDER BY artist COLLATE NOCASE ASC, album COLLATE NOCASE ASC;",
             )?;
             let iter = stmt.query_map([], |row| {
                 let id: String = row.get(0)?;
                 let path: String = row.get(1)?;
-                Ok((parse_id(&id, "tracks.id")?, decode_path_key(&path)))
+                let album: String = row.get(2)?;
+                let artist: String = row.get(3)?;
+                Ok((
+                    parse_id(&id, "tracks.id")?,
+                    decode_path_key(&path),
+                    album,
+                    artist,
+                ))
             })?;
             let mut out = Vec::new();
             for r in iter {

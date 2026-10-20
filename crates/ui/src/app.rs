@@ -34,6 +34,26 @@ use crate::views::{
     render_help_view, render_main_playback_view, render_settings_view, HelpState,
 };
 
+/// Fixture titles for the synthetic library rows.
+#[cfg(feature = "eval-tools")]
+const EVAL_TRACK_TITLES: [&str; 6] = [
+    "Weightless",
+    "An Ending (Ascent)",
+    "Nightcall",
+    "Teardrop",
+    "Xtal",
+    "Halcyon Drift",
+];
+/// Fixture artists.
+#[cfg(feature = "eval-tools")]
+const EVAL_TRACK_ARTISTS: [&str; 3] = ["Marconi Union", "Neon Harbour", "Aurelia Vox"];
+/// Fixture albums.
+#[cfg(feature = "eval-tools")]
+const EVAL_TRACK_ALBUMS: [&str; 2] = ["Ambient Transmissions", "Low Orbit"];
+/// Fixture sample rates, so the Hi-Res tag has something to mark.
+#[cfg(feature = "eval-tools")]
+const EVAL_SAMPLE_RATES: [u32; 4] = [44100, 48000, 96000, 192000];
+
 /// Authoritative orchestrator for ShadowPlayer desktop interface
 pub struct ShadowPlayerApp {
     session: Arc<AudioSession>,
@@ -654,6 +674,12 @@ impl ShadowPlayerApp {
         ));
         entries.push(PaletteEntry::new(
             "Panel",
+            "Loudness inspector",
+            "how loud this track is",
+            PaletteAction::OpenLoudness,
+        ));
+        entries.push(PaletteEntry::new(
+            "Panel",
             "Duplicate tracks",
             "find identical audio",
             PaletteAction::OpenDuplicates,
@@ -768,6 +794,9 @@ impl ShadowPlayerApp {
             PaletteAction::OpenBitPerfect => {
                 self.app_state.bit_perfect_modal_open = true;
             }
+            PaletteAction::OpenLoudness => {
+                self.open_loudness_inspector();
+            }
             PaletteAction::OpenDuplicates => {
                 self.scan_duplicates();
             }
@@ -805,6 +834,30 @@ impl ShadowPlayerApp {
                 }
             }
         }
+    }
+
+    /// Open the loudness inspector for the current track.
+    ///
+    /// The album's other tracks are captured here rather than per frame, so
+    /// the inspector can show how the track sits inside its album without
+    /// scanning the library on every redraw.
+    fn open_loudness_inspector(&mut self) {
+        let Some(current) = self.coordinator.current_track().cloned() else {
+            return;
+        };
+        let album = current.album.clone();
+        let artist = current.artist.clone();
+        self.app_state.loudness_modal.album_tracks = if album.is_empty() {
+            Vec::new()
+        } else {
+            self.library_state
+                .all_tracks
+                .iter()
+                .filter(|t| t.album == album && t.artist == artist)
+                .cloned()
+                .collect()
+        };
+        self.app_state.loudness_modal.is_open = true;
     }
 
     /// Move the keyboard focus to the search field.
@@ -2371,6 +2424,8 @@ impl eframe::App for ShadowPlayerApp {
                             is_lossless: false,
                             replaygain_track_db: None,
                             replaygain_track_peak: None,
+                            replaygain_album_db: None,
+                            replaygain_album_peak: None,
                             r128_loudness_lufs: None,
                             file_size_bytes: 18,
                             mtime_unix_secs: 1,
@@ -2539,6 +2594,48 @@ impl eframe::App for ShadowPlayerApp {
                         _ => QF::All,
                     };
                     self.refresh_view();
+                }
+            }
+            // Synthetic library rows, so a screenshot run can show a
+            // populated library: the song table with its quality tags, the
+            // populated state of every view, and the loudness inspector.
+            if self.app_state.frame_count == 1 {
+                if let Ok(raw) = std::env::var("SHADOWPLAYER_EVAL_TRACKS") {
+                    let count: usize = raw.parse().unwrap_or(0);
+                    for i in 0..count {
+                        let track = domain::models::Track {
+                            id: domain::ids::TrackId::new(),
+                            path: std::path::PathBuf::from(format!("/eval/track_{i}.flac")),
+                            title: EVAL_TRACK_TITLES[i % EVAL_TRACK_TITLES.len()].to_string(),
+                            artist: EVAL_TRACK_ARTISTS[i % EVAL_TRACK_ARTISTS.len()].to_string(),
+                            album: EVAL_TRACK_ALBUMS[i % EVAL_TRACK_ALBUMS.len()].to_string(),
+                            genre: Some("Ambient".to_string()),
+                            year: Some(2019 + (i % 6) as u32),
+                            track_number: Some((i % 6) as u32 + 1),
+                            disc_number: None,
+                            duration_secs: 180.0 + (i as f32) * 23.5,
+                            sample_rate: EVAL_SAMPLE_RATES[i % EVAL_SAMPLE_RATES.len()],
+                            channels: 2,
+                            format: if i % 4 == 3 { "MP3" } else { "FLAC" }.to_string(),
+                            bitrate_kbps: Some(if i % 4 == 3 { 320 } else { 1000 }),
+                            is_lossless: i % 4 != 3,
+                            replaygain_track_db: Some(-6.0 - (i as f32) * 0.4),
+                            replaygain_track_peak: Some(0.91),
+                            replaygain_album_db: Some(-5.2),
+                            replaygain_album_peak: Some(0.88),
+                            r128_loudness_lufs: Some(-16.0 - (i as f32) * 0.7),
+                            file_size_bytes: 48_000_000,
+                            mtime_unix_secs: 1_600_000_000,
+                            mtime_nanos: 0,
+                            content_hash: None,
+                            is_favorite: i % 3 == 0,
+                            play_count: (i as u32) * 7,
+                            last_played_at: Some(1_700_000_000),
+                            added_at: 1_600_000_000 + (i as i64) * 86_400,
+                        };
+                        let _ = self.track_repo.upsert(&track);
+                    }
+                    self.reload_library();
                 }
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_PALETTE").is_ok()
@@ -3135,6 +3232,9 @@ impl eframe::App for ShadowPlayerApp {
                             self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
                             self.settings_dirty = true;
                         }
+                        if view_action.open_loudness {
+                            self.open_loudness_inspector();
+                        }
                         if view_action.needs_reload {
                             self.refresh_view();
                         }
@@ -3505,6 +3605,14 @@ impl eframe::App for ShadowPlayerApp {
             }
             self.reload_library();
         }
+
+        // The loudness inspector.
+        crate::modals::loudness_modal::show_loudness_modal(
+            &ctx,
+            &mut self.app_state.loudness_modal,
+            self.coordinator.current_track(),
+            &self.theme,
+        );
 
         // The command palette. It is a modal, so it traps the keyboard and
         // the background stays inert while it is open.

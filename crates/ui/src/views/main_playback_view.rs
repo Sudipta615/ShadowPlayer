@@ -28,6 +28,8 @@ pub struct MainViewAction {
     pub organize_tracks: Option<Vec<Track>>,
     /// A grouped-search chip asked to run a narrower query.
     pub search_query: Option<String>,
+    /// The loudness inspector was requested.
+    pub open_loudness: bool,
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
@@ -143,6 +145,9 @@ pub fn render_main_playback_view(
     }
     if np_events.open_bit_perfect {
         app_state.bit_perfect_modal_open = true;
+    }
+    if np_events.open_loudness {
+        view_action.open_loudness = true;
     }
     if np_events.open_eq_panel {
         view_action.open_eq_panel = true;

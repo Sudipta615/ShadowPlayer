@@ -138,9 +138,9 @@ fn layout_truncated(
     max_width: f32,
 ) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::simple_singleline(text.into(), font, color);
-    job.wrap.max_width = max_width;
-    job.wrap.break_anywhere = false;
-    job.wrap.overflow_character = Some('…');
+    // `truncate_at_width` keeps the text on one row and elides it, where
+    // setting `max_width` alone would wrap it onto a second row.
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max_width);
     painter.layout_job(job)
 }
 
@@ -935,16 +935,23 @@ impl<'a> SongsTable<'a> {
             } else {
                 theme.text_muted
             };
-            hp.text(
-                Pos2::new(header_rect.min.x + cols.title_text_x, header_y),
-                egui::Align2::LEFT_CENTER,
-                "TITLE",
-                crate::theme::font(11.8),
+            let title_label =
+                hp.layout_no_wrap("TITLE".to_string(), crate::theme::font(11.8), title_col);
+            let title_label_w = title_label.size().x;
+            hp.galley(
+                Pos2::new(
+                    header_rect.min.x + cols.title_text_x,
+                    header_y - title_label.size().y * 0.5,
+                ),
+                title_label,
                 title_col,
             );
             paint_sort_arrow(
                 &hp,
-                Pos2::new(header_rect.min.x + cols.title_text_x + 34.0, header_y),
+                Pos2::new(
+                    header_rect.min.x + cols.title_text_x + title_label_w + 8.0,
+                    header_y,
+                ),
                 current_sort == SortField::Title,
                 sort_order,
                 title_col,
@@ -960,16 +967,23 @@ impl<'a> SongsTable<'a> {
             } else {
                 theme.text_muted
             };
-            hp.text(
-                Pos2::new(header_rect.min.x + cols.artist_x, header_y),
-                egui::Align2::LEFT_CENTER,
-                "ARTIST",
-                crate::theme::font(11.8),
+            let artist_label =
+                hp.layout_no_wrap("ARTIST".to_string(), crate::theme::font(11.8), artist_col);
+            let artist_label_w = artist_label.size().x;
+            hp.galley(
+                Pos2::new(
+                    header_rect.min.x + cols.artist_x,
+                    header_y - artist_label.size().y * 0.5,
+                ),
+                artist_label,
                 artist_col,
             );
             paint_sort_arrow(
                 &hp,
-                Pos2::new(header_rect.min.x + cols.artist_x + 44.0, header_y),
+                Pos2::new(
+                    header_rect.min.x + cols.artist_x + artist_label_w + 8.0,
+                    header_y,
+                ),
                 current_sort == SortField::Artist,
                 sort_order,
                 artist_col,
@@ -985,16 +999,23 @@ impl<'a> SongsTable<'a> {
             } else {
                 theme.text_muted
             };
-            hp.text(
-                Pos2::new(header_rect.min.x + cols.album_x, header_y),
-                egui::Align2::LEFT_CENTER,
-                "ALBUM",
-                crate::theme::font(11.8),
+            let album_label =
+                hp.layout_no_wrap("ALBUM".to_string(), crate::theme::font(11.8), album_col);
+            let album_label_w = album_label.size().x;
+            hp.galley(
+                Pos2::new(
+                    header_rect.min.x + cols.album_x,
+                    header_y - album_label.size().y * 0.5,
+                ),
+                album_label,
                 album_col,
             );
             paint_sort_arrow(
                 &hp,
-                Pos2::new(header_rect.min.x + cols.album_x + 42.0, header_y),
+                Pos2::new(
+                    header_rect.min.x + cols.album_x + album_label_w + 8.0,
+                    header_y,
+                ),
                 current_sort == SortField::Album,
                 sort_order,
                 album_col,

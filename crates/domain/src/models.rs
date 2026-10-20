@@ -21,6 +21,14 @@ pub struct Track {
     pub is_lossless: bool,
     pub replaygain_track_db: Option<f32>,
     pub replaygain_track_peak: Option<f32>,
+    /// The album's ReplayGain gain, in dB.
+    ///
+    /// The engine can read this from the file's own `REPLAYGAIN_ALBUM` tag,
+    /// but the library indexes it too, so the app can show it and so an album
+    /// with no tag still gets a computed value.
+    pub replaygain_album_db: Option<f32>,
+    /// The album's ReplayGain peak (linear amplitude).
+    pub replaygain_album_peak: Option<f32>,
     pub r128_loudness_lufs: Option<f32>,
     pub file_size_bytes: u64,
     pub mtime_unix_secs: i64,

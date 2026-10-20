@@ -33,6 +33,8 @@ pub enum PaletteAction {
     OpenAutoEq,
     /// Open the bit-perfect inspector.
     OpenBitPerfect,
+    /// Open the loudness inspector.
+    OpenLoudness,
     /// Open the duplicate-track finder.
     OpenDuplicates,
     /// Open the batch organiser.
@@ -357,9 +359,8 @@ pub fn show_command_palette(
                                         crate::theme::font(11.0),
                                         theme.text_muted,
                                     );
-                                    job.wrap.max_width = hint_room;
-                                    job.wrap.break_anywhere = false;
-                                    job.wrap.overflow_character = Some('…');
+                                    job.wrap =
+                                        egui::text::TextWrapping::truncate_at_width(hint_room);
                                     let hint_galley = painter.layout_job(job);
                                     painter.galley(
                                         Pos2::new(

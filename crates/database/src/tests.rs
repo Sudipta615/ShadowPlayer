@@ -26,6 +26,8 @@ mod unit {
             is_lossless: true,
             replaygain_track_db: Some(-6.5),
             replaygain_track_peak: Some(0.98),
+            replaygain_album_db: None,
+            replaygain_album_peak: None,
             r128_loudness_lufs: Some(-16.0),
             file_size_bytes: 25_000_000,
             mtime_unix_secs: 1700000000,
@@ -670,6 +672,48 @@ mod unit {
         assert_eq!(got.r128_loudness_lufs, Some(-14.2));
 
         assert_eq!(repo.list_missing_replaygain().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_album_gain_is_stored_for_every_track_of_the_album() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let a = sample_track(TrackId::new(), "/m/a.flac", "A", "Artist", "Album");
+        let b = sample_track(TrackId::new(), "/m/b.flac", "B", "Artist", "Album");
+        let other = sample_track(TrackId::new(), "/m/c.flac", "C", "Artist", "Other");
+        repo.upsert(&a).unwrap();
+        repo.upsert(&b).unwrap();
+        repo.upsert(&other).unwrap();
+
+        let updated = repo
+            .set_album_loudness("Album", "Artist", Some(-6.25), Some(0.51))
+            .unwrap();
+        assert_eq!(updated, 2, "both tracks of the album are updated");
+
+        for id in [a.id, b.id] {
+            let got = repo.get_by_id(&id).unwrap().unwrap();
+            assert_eq!(got.replaygain_album_db, Some(-6.25));
+            assert_eq!(got.replaygain_album_peak, Some(0.51));
+        }
+        // A different album is untouched.
+        let got = repo.get_by_id(&other.id).unwrap().unwrap();
+        assert_eq!(got.replaygain_album_db, None);
+    }
+
+    #[test]
+    fn test_the_scan_queue_carries_the_album() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let mut t = sample_track(TrackId::new(), "/m/a.flac", "A", "Artist", "Album");
+        t.replaygain_track_db = None;
+        repo.upsert(&t).unwrap();
+
+        let items = repo.list_missing_replaygain_with_album().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].2, "Album");
+        assert_eq!(items[0].3, "Artist");
     }
 
     #[test]

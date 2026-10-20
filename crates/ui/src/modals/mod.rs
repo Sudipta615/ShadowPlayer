@@ -2,6 +2,7 @@ pub mod autoeq_modal;
 pub mod bit_perfect_modal;
 pub mod duplicates_modal;
 pub mod edit_track_modal;
+pub mod loudness_modal;
 pub mod organize_modal;
 pub mod playlist_editor_modal;
 pub mod smart_playlist_modal;

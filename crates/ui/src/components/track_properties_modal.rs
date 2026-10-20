@@ -119,6 +119,30 @@ pub fn show_track_properties_modal(
                             theme,
                         );
                     }
+                    if let Some(db) = track.replaygain_track_db {
+                        render_property_row(
+                            ui,
+                            "ReplayGain (track)",
+                            &format!("{db:+.2} dB", db = db),
+                            theme,
+                        );
+                    }
+                    if let Some(db) = track.replaygain_album_db {
+                        render_property_row(
+                            ui,
+                            "ReplayGain (album)",
+                            &format!("{db:+.2} dB", db = db),
+                            theme,
+                        );
+                    }
+                    if track.replaygain_track_db.is_none() && track.replaygain_album_db.is_none() {
+                        render_property_row(
+                            ui,
+                            "ReplayGain",
+                            "Not measured — run a loudness scan from Settings",
+                            theme,
+                        );
+                    }
 
                     let size_mb = track.file_size_bytes as f64 / (1024.0 * 1024.0);
                     render_property_row(

@@ -106,6 +106,10 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         is_lossless,
         replaygain_track_db: loudness.replaygain_track_db,
         replaygain_track_peak: loudness.replaygain_track_peak,
+        // The engine's probe already reads `REPLAYGAIN_ALBUM_GAIN` and the
+        // album peak from the file's own tags.
+        replaygain_album_db: loudness.replaygain_album_db,
+        replaygain_album_peak: loudness.replaygain_album_peak,
         r128_loudness_lufs: loudness.ebu_r128_loudness,
         file_size_bytes,
         mtime_unix_secs,
@@ -228,6 +232,8 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             is_lossless: audio_meta.track.is_lossless,
             replaygain_track_db: None,
             replaygain_track_peak: None,
+            replaygain_album_db: None,
+            replaygain_album_peak: None,
             r128_loudness_lufs: None,
             file_size_bytes: audio_meta.track.file_size_bytes,
             mtime_unix_secs: audio_meta.track.mtime_unix_secs,

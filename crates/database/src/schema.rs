@@ -62,6 +62,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v5(conn)?;
     }
 
+    if current_version < 6 {
+        apply_v6(conn)?;
+    }
+
     Ok(())
 }
 
@@ -368,6 +372,50 @@ pub(crate) fn apply_v4_for_test(conn: &mut Connection) -> Result<()> {
 #[cfg(test)]
 pub(crate) fn apply_v5_for_test(conn: &mut Connection) -> Result<()> {
     apply_v5(conn)
+}
+
+/// V6: ReplayGain album gain.
+///
+/// The engine could already read an album's gain from the file's own
+/// `REPLAYGAIN_ALBUM` tag and apply it, but the library never indexed it, so
+/// the app could neither show it nor fall back to a computed value for an
+/// album that has no tag.
+fn apply_v6(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V6 (ReplayGain album gain)");
+    let tx = conn.transaction()?;
+
+    // `ALTER TABLE ADD COLUMN` has no `IF NOT EXISTS`, so guard it explicitly:
+    // a lost migration row must not make the database refuse to open.
+    let existing: Vec<String> = {
+        let mut stmt = tx.prepare("PRAGMA table_info(tracks);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = Vec::new();
+        for name in names {
+            found.push(name?);
+        }
+        found
+    };
+
+    let mut statements: Vec<&str> = Vec::new();
+    if !existing.iter().any(|n| n == "replaygain_album_db") {
+        statements.push("ALTER TABLE tracks ADD COLUMN replaygain_album_db REAL;");
+    }
+    if !existing.iter().any(|n| n == "replaygain_album_peak") {
+        statements.push("ALTER TABLE tracks ADD COLUMN replaygain_album_peak REAL;");
+    }
+    statements.push(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (6, strftime('%s', 'now'));",
+    );
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V6 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
 }
 
 /// V5: sub-second modification times, the indexes the hot queries need, and an

@@ -8,6 +8,8 @@
 //! The scan fully decodes each file, so it is CPU-bound; on modest hardware it
 //! deliberately yields between tracks to avoid starving the audio thread.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -91,7 +93,7 @@ impl LoudnessService {
             return;
         }
 
-        let items = match TrackRepo::new(self.db.clone()).list_missing_replaygain() {
+        let items = match TrackRepo::new(self.db.clone()).list_missing_replaygain_with_album() {
             Ok(items) => items,
             Err(e) => {
                 log::warn!("Could not list tracks for loudness scan: {e}");
@@ -133,8 +135,15 @@ impl LoudnessService {
                 let mut done = 0usize;
                 let mut failed = 0usize;
                 let mut tagged = 0usize;
+                // The scan's results, grouped by album. ReplayGain's album
+                // gain is a property of the album, so it can only be computed
+                // once every track of that album has been measured.
+                let mut by_album: HashMap<
+                    (String, String),
+                    Vec<(PathBuf, engine::decode::LoudnessScanResult)>,
+                > = HashMap::new();
 
-                for (id, path) in items {
+                for (id, path, album, artist) in items {
                     if cancel.load(Ordering::Relaxed) {
                         let _ = tx.send(LoudnessEvent::Cancelled { done, tagged });
                         return;
@@ -153,6 +162,11 @@ impl LoudnessService {
 
                     match engine::decode::scan_track_loudness(&path) {
                         Some(result) => {
+                            by_album
+                                .entry((album.clone(), artist.clone()))
+                                .or_default()
+                                .push((path.clone(), result.clone()));
+
                             // Feed the engine's own cache so normalization works
                             // on playback without touching the source file.
                             engine::decode::loudness_cache::store(&path, &result);
@@ -192,6 +206,50 @@ impl LoudnessService {
                     // Cooperative yield: a full decode is heavy and this must not
                     // starve audio rendering on a dual-core machine.
                     std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+
+                // ── Album gain ────────────────────────────────────────────
+                // ReplayGain 2.0's album gain is not the mean of the track
+                // gains: every track contributes with its loudness weight, so
+                // a quiet track pulls the album gain down the way the
+                // specification says it should.
+                for ((album, artist), tracks) in by_album {
+                    let Some(album_gain) =
+                        engine::decode::accumulate_album_replaygain(tracks.iter().map(|(_, r)| r))
+                    else {
+                        continue;
+                    };
+                    if let Err(e) = repo.set_album_loudness(
+                        &album,
+                        &artist,
+                        Some(album_gain.album_gain_db),
+                        Some(album_gain.album_peak),
+                    ) {
+                        log::warn!("Could not record the album gain for {album}: {e}");
+                        continue;
+                    }
+
+                    // When the values are being written into the files, the
+                    // album gain is written too — but only now that it is
+                    // known, which is why this is a second pass.
+                    if write_tags {
+                        for (path, result) in &tracks {
+                            let meta = engine::dsp::LoudnessMetadata {
+                                replaygain_track_db: result.replaygain_track_db,
+                                replaygain_album_db: Some(album_gain.album_gain_db),
+                                replaygain_track_peak: result.replaygain_track_peak,
+                                replaygain_album_peak: Some(album_gain.album_peak),
+                                ebu_r128_loudness: result.ebu_r128_loudness,
+                                ebu_r128_peak: result.ebu_r128_peak_dbtp,
+                            };
+                            match engine::decode::write_loudness_tags(path, &meta) {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    log::debug!("Not tagging {}: {e:?}", path.display())
+                                }
+                            }
+                        }
+                    }
                 }
 
                 let _ = tx.send(LoudnessEvent::Finished {

@@ -15,6 +15,8 @@ pub struct NowPlayingEvents {
     pub open_eq_panel: bool,
     pub open_properties: bool,
     pub open_bit_perfect: bool,
+    /// The loudness inspector was requested.
+    pub open_loudness: bool,
     /// A sleep-timer choice was made.
     pub sleep_timer_request: Option<SleepTimerRequest>,
 }
@@ -60,6 +62,7 @@ impl<'a> NowPlayingCard<'a> {
             open_eq_panel: false,
             open_properties: false,
             open_bit_perfect: false,
+            open_loudness: false,
             sleep_timer_request: None,
         };
 
@@ -630,6 +633,34 @@ impl<'a> NowPlayingCard<'a> {
                                         .clicked()
                                     {
                                         events.open_eq_panel = true;
+                                    }
+
+                                    // Loudness Inspector Button
+                                    let (ld_slot, ld_resp) = ui.allocate_exact_size(
+                                        Vec2::new(30.0, row_h),
+                                        Sense::click(),
+                                    );
+                                    let ld_rect = Rect::from_center_size(
+                                        ld_slot.center(),
+                                        Vec2::new(22.0, 22.0),
+                                    );
+                                    crate::components::icons::draw_bar_chart(
+                                        ui,
+                                        ld_rect,
+                                        self.theme.text_secondary,
+                                    );
+                                    ld_resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            true,
+                                            "Loudness inspector",
+                                        )
+                                    });
+                                    let _ = ld_resp.clone().on_hover_text(
+                                        "Loudness inspector — how loud this track is",
+                                    );
+                                    if ld_resp.clicked() {
+                                        events.open_loudness = true;
                                     }
 
                                     // Sleep Timer Button (with a small preset popup)

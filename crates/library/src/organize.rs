@@ -478,6 +478,8 @@ mod tests {
             is_lossless: true,
             replaygain_track_db: None,
             replaygain_track_peak: None,
+            replaygain_album_db: None,
+            replaygain_album_peak: None,
             r128_loudness_lufs: None,
             file_size_bytes: 1,
             mtime_unix_secs: 1,
