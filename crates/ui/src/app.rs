@@ -17,9 +17,9 @@ use crate::components::topbar::{render_action_button, TopbarAction};
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
     show_autoeq_modal, show_bit_perfect_modal, show_duplicates_modal, show_edit_track_modal,
-    show_eq_panel, show_help_modal, show_organize_modal, show_playlist_editor,
-    show_smart_playlist_editor, show_track_properties_modal, DuplicateGroup, DuplicatesState,
-    OrganizeState, SmartPlaylistEditorState,
+    show_eq_panel, show_organize_modal, show_playlist_editor, show_smart_playlist_editor,
+    show_track_properties_modal, DuplicateGroup, DuplicatesState, OrganizeState,
+    SmartPlaylistEditorState,
 };
 use crate::services::{
     ArtworkService, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
@@ -364,8 +364,6 @@ impl ShadowPlayerApp {
             self.app_state.track_properties_open = false;
         } else if self.app_state.open_playlist_editor {
             self.app_state.open_playlist_editor = false;
-        } else if self.app_state.help_modal_open {
-            self.app_state.help_modal_open = false;
         } else if self.dsp_state.clap_rack.is_open {
             self.dsp_state.clap_rack.is_open = false;
         } else if self.dsp_state.eq_panel.is_open {
@@ -376,6 +374,164 @@ impl ShadowPlayerApp {
             self.app_state.search_query.clear();
             self.refresh_view();
         }
+    }
+
+    /// Handle the app-wide keyboard shortcuts.
+    ///
+    /// Two subtleties shape this function, and both were wrong before:
+    ///
+    /// * `InputState::focused` is the *native window* focus — whether the OS is
+    ///   delivering key presses to this window — not "a widget has focus".
+    ///   Guarding on `!i.focused` therefore ran these bindings only while the
+    ///   window was in the background, where the OS delivers no key events at
+    ///   all. Space/K, J, L, M, S, R and the four arrows could never fire.
+    /// * A focused text field owns the keyboard, and egui routes Space/Enter
+    ///   to whatever widget holds focus. Both have to be left alone, or typing
+    ///   "moon" into the search box would mute the player.
+    fn handle_global_shortcuts(&mut self, ctx: &egui::Context) {
+        let text_focused = ctx.text_edit_focused();
+        let widget_focused = ctx.memory(|m| m.focused()).is_some();
+
+        ctx.input(|i| {
+            let ctrl = i.modifiers.command || i.modifiers.ctrl;
+
+            // Ctrl/Cmd chords are explicit app commands, and none of them is a
+            // key a text field wants, so they stay live even while a field has
+            // focus.
+            if ctrl {
+                if i.key_pressed(egui::Key::N) {
+                    self.app_state.open_playlist_editor = true;
+                }
+                if i.key_pressed(egui::Key::B) {
+                    self.toggle_bit_perfect();
+                }
+                if i.key_pressed(egui::Key::P) {
+                    self.app_state.active_nav = NavItem::Settings;
+                }
+                if i.key_pressed(egui::Key::O) {
+                    self.app_state.active_nav = NavItem::Folders;
+                }
+                if i.key_pressed(egui::Key::E) {
+                    self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
+                }
+                if i.key_pressed(egui::Key::F) {
+                    self.request_search_focus();
+                }
+            }
+
+            if i.key_pressed(egui::Key::Escape) {
+                // The info popup is the topmost transient surface, so it takes
+                // the press first: one Escape must not close it *and* the
+                // layer behind it.
+                if crate::components::info_box::dismiss_open_info_box(ctx) {
+                    return;
+                }
+                self.dismiss_foreground_overlay();
+            }
+
+            // The plain transport keys. Ctrl/Cmd is excluded so `Ctrl+M` and
+            // friends stay available to the OS, and Shift/Alt are excluded so
+            // they keep their usual text-selection and window-management jobs.
+            if ctrl || i.modifiers.shift || i.modifiers.alt || text_focused {
+                return;
+            }
+
+            // Space also activates a focused widget (egui synthesises a click
+            // for it), so leave it alone when something else holds focus.
+            if !widget_focused && (i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::K)) {
+                self.coordinator.toggle_play_pause();
+            }
+            if i.key_pressed(egui::Key::J) {
+                self.coordinator.previous();
+            }
+            if i.key_pressed(egui::Key::Slash) {
+                self.request_search_focus();
+            }
+            if i.key_pressed(egui::Key::L) {
+                self.coordinator.next();
+            }
+            if i.key_pressed(egui::Key::M) {
+                self.app_state.is_muted = !self.app_state.is_muted;
+                let target_vol = if self.app_state.is_muted {
+                    0.0
+                } else {
+                    self.app_state.volume
+                };
+                self.session.set_volume(target_vol);
+                self.settings_dirty = true;
+            }
+            if i.key_pressed(egui::Key::S) {
+                let new_shuffle = !self.coordinator.is_shuffle();
+                self.coordinator.set_shuffle(new_shuffle);
+                self.settings_dirty = true;
+            }
+            if i.key_pressed(egui::Key::R) {
+                let next_mode = match self.coordinator.repeat_mode() {
+                    domain::models::RepeatModeChoice::Off => domain::models::RepeatModeChoice::All,
+                    domain::models::RepeatModeChoice::All => domain::models::RepeatModeChoice::One,
+                    domain::models::RepeatModeChoice::One => domain::models::RepeatModeChoice::Off,
+                };
+                self.coordinator.set_repeat_mode(next_mode);
+                self.settings_dirty = true;
+            }
+            if i.key_pressed(egui::Key::ArrowLeft) {
+                let cur = self.session.position_secs_compensated();
+                self.session.seek((cur - 5.0).max(0.0));
+            }
+            if i.key_pressed(egui::Key::ArrowRight) {
+                let cur = self.session.position_secs_compensated();
+                let dur = self.session.duration_secs().max(1.0);
+                self.session.seek((cur + 5.0).min(dur));
+            }
+            if i.key_pressed(egui::Key::ArrowUp) {
+                self.app_state.volume = (self.app_state.volume + 0.05).min(1.0);
+                self.app_state.is_muted = false;
+                self.session.set_volume(self.app_state.volume);
+                self.settings_dirty = true;
+            }
+            if i.key_pressed(egui::Key::ArrowDown) {
+                self.app_state.volume = (self.app_state.volume - 0.05).max(0.0);
+                self.app_state.is_muted = false;
+                self.session.set_volume(self.app_state.volume);
+                self.settings_dirty = true;
+            }
+        });
+    }
+
+    /// Flip the bit-perfect "Pure Direct" mode, bypassing the whole DSP chain.
+    ///
+    /// Enabling it also neutralises every stage that would alter the signal, so
+    /// the toggle is the same in both directions.
+    fn toggle_bit_perfect(&mut self) {
+        let cur_bp = self.session.bit_perfect();
+        if !cur_bp {
+            // Activate Pure Direct
+            self.session.set_volume(1.0);
+            self.session.set_preamp(0.0);
+            self.session.set_speed(1.0);
+            self.session.set_eq_enabled(false);
+            self.session.set_graphic_eq_enabled(false);
+            self.session.set_limiter_enabled(false);
+            self.session.set_compressor_enabled(false);
+            self.session.set_spatial_enabled(false);
+            self.session.set_stereo_enhancer_enabled(false);
+            self.session.set_bit_perfect(true);
+            self.dsp_state.settings_tab.bit_perfect = true;
+        } else {
+            self.session.set_bit_perfect(false);
+            self.dsp_state.settings_tab.bit_perfect = false;
+        }
+    }
+
+    /// Move the keyboard focus to the search field.
+    ///
+    /// The Settings and Help views have no search box, so the shortcut returns
+    /// to the library first and focuses the field on the next frame.
+    fn request_search_focus(&mut self) {
+        if matches!(self.app_state.active_nav, NavItem::Help | NavItem::Settings) {
+            self.app_state.active_nav = NavItem::Home;
+        }
+        self.app_state.focus_search = true;
     }
 
     pub fn load_persisted_settings(&mut self) {
@@ -2264,105 +2420,7 @@ impl eframe::App for ShadowPlayerApp {
         });
 
         // 6. Global Keyboard Shortcuts
-        ctx.input(|i| {
-            if !i.focused {
-                if i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::K) {
-                    self.coordinator.toggle_play_pause();
-                }
-                if i.key_pressed(egui::Key::J) {
-                    self.coordinator.previous();
-                }
-                if i.key_pressed(egui::Key::L) {
-                    self.coordinator.next();
-                }
-                if i.key_pressed(egui::Key::M) {
-                    self.app_state.is_muted = !self.app_state.is_muted;
-                    let target_vol = if self.app_state.is_muted {
-                        0.0
-                    } else {
-                        self.app_state.volume
-                    };
-                    self.session.set_volume(target_vol);
-                    self.settings_dirty = true;
-                }
-                if i.key_pressed(egui::Key::S) {
-                    let new_shuffle = !self.coordinator.is_shuffle();
-                    self.coordinator.set_shuffle(new_shuffle);
-                    self.settings_dirty = true;
-                }
-                if i.key_pressed(egui::Key::R) {
-                    let next_mode = match self.coordinator.repeat_mode() {
-                        domain::models::RepeatModeChoice::Off => {
-                            domain::models::RepeatModeChoice::All
-                        }
-                        domain::models::RepeatModeChoice::All => {
-                            domain::models::RepeatModeChoice::One
-                        }
-                        domain::models::RepeatModeChoice::One => {
-                            domain::models::RepeatModeChoice::Off
-                        }
-                    };
-                    self.coordinator.set_repeat_mode(next_mode);
-                    self.settings_dirty = true;
-                }
-                if i.key_pressed(egui::Key::ArrowLeft) {
-                    let cur = self.session.position_secs_compensated();
-                    self.session.seek((cur - 5.0).max(0.0));
-                }
-                if i.key_pressed(egui::Key::ArrowRight) {
-                    let cur = self.session.position_secs_compensated();
-                    let dur = self.session.duration_secs().max(1.0);
-                    self.session.seek((cur + 5.0).min(dur));
-                }
-                if i.key_pressed(egui::Key::ArrowUp) {
-                    self.app_state.volume = (self.app_state.volume + 0.05).min(1.0);
-                    self.app_state.is_muted = false;
-                    self.session.set_volume(self.app_state.volume);
-                    self.settings_dirty = true;
-                }
-                if i.key_pressed(egui::Key::ArrowDown) {
-                    self.app_state.volume = (self.app_state.volume - 0.05).max(0.0);
-                    self.app_state.is_muted = false;
-                    self.session.set_volume(self.app_state.volume);
-                    self.settings_dirty = true;
-                }
-            }
-            if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::N) {
-                self.app_state.open_playlist_editor = true;
-            }
-            if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::B) {
-                let cur_bp = self.session.bit_perfect();
-                if !cur_bp {
-                    // Activate Pure Direct
-                    self.session.set_volume(1.0);
-                    self.session.set_preamp(0.0);
-                    self.session.set_speed(1.0);
-                    self.session.set_eq_enabled(false);
-                    self.session.set_graphic_eq_enabled(false);
-                    self.session.set_limiter_enabled(false);
-                    self.session.set_compressor_enabled(false);
-                    self.session.set_spatial_enabled(false);
-                    self.session.set_stereo_enhancer_enabled(false);
-                    self.session.set_bit_perfect(true);
-                    self.dsp_state.settings_tab.bit_perfect = true;
-                } else {
-                    self.session.set_bit_perfect(false);
-                    self.dsp_state.settings_tab.bit_perfect = false;
-                }
-            }
-            if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::P) {
-                self.app_state.active_nav = NavItem::Settings;
-            }
-            if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::O) {
-                self.app_state.active_nav = NavItem::Folders;
-            }
-            if (i.modifiers.command || i.modifiers.ctrl) && i.key_pressed(egui::Key::E) {
-                self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
-            }
-            if i.key_pressed(egui::Key::Escape) {
-                self.dismiss_foreground_overlay();
-            }
-        });
+        self.handle_global_shortcuts(&ctx);
 
         // 7. Polled Authoritative Telemetry
         let current_track = self.coordinator.current_track().cloned();
@@ -2604,6 +2662,16 @@ impl eframe::App for ShadowPlayerApp {
                     if search_changed {
                         self.app_state.search_query = search_buf;
                         self.refresh_view();
+                    }
+                    // The `/` and `Ctrl+F` shortcuts park the caret in the
+                    // search field. The focus has to be requested after the
+                    // field has been laid out, otherwise egui has no widget
+                    // with that id to focus yet.
+                    if self.app_state.focus_search {
+                        self.app_state.focus_search = false;
+                        ctx.memory_mut(|m| {
+                            m.request_focus(crate::components::topbar::search_input_id())
+                        });
                     }
                 } else {
                     let title = if is_help_view {
@@ -2935,8 +3003,6 @@ impl eframe::App for ShadowPlayerApp {
             &mut self.dsp_state,
             &self.theme,
         );
-
-        show_help_modal(&ctx, &mut self.app_state.help_modal_open, &self.theme);
 
         show_track_properties_modal(
             &ctx,

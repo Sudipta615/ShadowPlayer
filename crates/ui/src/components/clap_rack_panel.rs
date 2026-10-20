@@ -50,7 +50,7 @@ pub fn show_clap_rack_panel(
         .title_bar(false)
         .default_pos(initial_pos)
         .default_size(Vec2::new(default_w, default_h))
-        .min_size(Vec2::new(440.0, 360.0))
+        .min_size(crate::dialog::min_dialog_size())
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)

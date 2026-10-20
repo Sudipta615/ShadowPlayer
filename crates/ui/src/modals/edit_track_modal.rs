@@ -70,8 +70,9 @@ pub fn show_edit_track_modal(
     egui::Window::new("Edit Song Info")
         .open(&mut is_open)
         .collapsible(false)
-        .resizable(false)
-        .default_size(Vec2::new(380.0, 300.0))
+        .resizable(true)
+        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(380.0, 300.0)))
+        .min_size(crate::dialog::min_dialog_size())
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 7.0);
 

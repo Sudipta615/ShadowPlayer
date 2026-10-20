@@ -1325,37 +1325,11 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
             theme,
         );
 
-        let shortcuts = [
-            ("Space / K", "Play / Pause active track playback"),
-            ("J", "Skip to previous track in queue"),
-            ("L", "Skip to next track in queue"),
-            ("M", "Toggle mute / unmute master audio"),
-            ("S", "Toggle random shuffle mode"),
-            ("R", "Cycle repeat mode (Off -> Repeat All -> Repeat One)"),
-            ("Left Arrow", "Seek backward by 5 seconds"),
-            ("Right Arrow", "Seek forward by 5 seconds"),
-            ("Up Arrow", "Increase master volume by 5%"),
-            ("Down Arrow", "Decrease master volume by 5%"),
-            (
-                "Ctrl + B",
-                "Instant toggle for Bit-Perfect Pure Direct Mode",
-            ),
-            ("Ctrl + P", "Open Settings & Audio DSP Studio"),
-            (
-                "Ctrl + N",
-                "Open the playlist editor (create or manage playlists)",
-            ),
-            ("Ctrl + O", "Open Folders & Music Library Manager"),
-            ("Ctrl + E", "Toggle the Equalizer & DSP studio panel"),
-            (
-                "Escape",
-                "Close the open dialog (one layer per press), or clear search queries",
-            ),
-        ];
+        let shortcuts = crate::shortcuts::SHORTCUTS;
 
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
-            for (key, desc) in shortcuts {
+            for shortcut in shortcuts {
                 ui.horizontal_top(|ui| {
                     let (badge_rect, _) =
                         ui.allocate_exact_size(Vec2::new(120.0, 24.0), Sense::hover());
@@ -1370,14 +1344,14 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
                     p.text(
                         badge_rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        key,
+                        shortcut.keys,
                         crate::theme::mono_font(12.0),
                         theme.accent_warm,
                     );
 
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(desc)
+                            egui::RichText::new(shortcut.description)
                                 .font(crate::theme::font(13.0))
                                 .color(theme.text_secondary),
                         )

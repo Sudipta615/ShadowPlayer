@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Key, Margin, Pos2, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Sense, Stroke, Vec2};
 
 /// Rich structured information explaining an audiophile or player setting
 #[derive(Clone, Copy, Debug)]
@@ -13,6 +13,24 @@ pub struct InfoBoxContent {
 
 /// Unique persistent ID used in Context data storage for the currently open info box
 const ACTIVE_INFO_BOX_KEY: &str = "shadowplayer_active_info_box_id";
+
+/// Close the open info popup, if there is one.
+///
+/// Returns `true` when a popup was open and has now been closed. The app's
+/// global Escape handler uses this to give the popup — the topmost transient
+/// surface — the press before the layers behind it, so one Escape never
+/// closes two things at once.
+pub fn dismiss_open_info_box(ctx: &egui::Context) -> bool {
+    let key_id = egui::Id::NULL.with(ACTIVE_INFO_BOX_KEY);
+    if ctx.data(|d| d.get_temp::<u64>(key_id)).is_none() {
+        return false;
+    }
+    ctx.data_mut(|d| {
+        d.remove_temp::<u64>(key_id);
+    });
+    ctx.request_repaint();
+    true
+}
 
 /// Renders a clickable circular 'i' icon that opens a floating, glassmorphic info box
 pub fn render_info_icon_button(
@@ -101,13 +119,9 @@ pub fn render_info_icon_button(
         ui.ctx().request_repaint();
     }
 
-    // Dismiss with Escape key
-    if is_open && ui.input(|i| i.key_pressed(Key::Escape)) {
-        ui.ctx().data_mut(|d| {
-            d.remove_temp::<u64>(key_id);
-        });
-        ui.ctx().request_repaint();
-    }
+    // Dismissal with Escape is handled centrally, in the app's global
+    // shortcut handler, so that exactly one owner acts on the key press. See
+    // [`dismiss_open_info_box`].
 
     // If active, render the floating info card in the Foreground layer
     if is_open {

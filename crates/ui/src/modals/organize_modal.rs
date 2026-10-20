@@ -159,7 +159,8 @@ pub fn show_organize_modal(
         .open(&mut is_open)
         .collapsible(false)
         .resizable(true)
-        .default_size(Vec2::new(860.0, 620.0))
+        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(860.0, 620.0)))
+        .min_size(crate::dialog::min_dialog_size())
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
 

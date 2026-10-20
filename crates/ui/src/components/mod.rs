@@ -5,7 +5,6 @@ pub mod clap_rack_panel;
 pub mod eq_panel;
 pub mod folders_view;
 pub mod genres_view;
-pub mod help_modal;
 pub mod icons;
 pub mod info_box;
 pub mod mini_player;

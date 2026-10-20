@@ -16,9 +16,10 @@ pub fn show_track_properties_modal(
 
     Window::new("Track Properties & Audio Details")
         .open(is_open)
-        .resizable(false)
+        .resizable(true)
         .collapsible(false)
-        .default_size(Vec2::new(520.0, 420.0))
+        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(520.0, 420.0)))
+        .min_size(crate::dialog::min_dialog_size())
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 

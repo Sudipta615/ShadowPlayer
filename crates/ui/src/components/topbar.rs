@@ -9,6 +9,15 @@ pub struct WindowControlsResponse {
     pub theme_toggle_requested: bool,
 }
 
+/// The stable id of the search field.
+///
+/// It is fixed rather than derived from the layout so the app can move the
+/// keyboard focus to it from a shortcut (`/` or `Ctrl+F`) without needing the
+/// `Ui` that drew it.
+pub fn search_input_id() -> egui::Id {
+    egui::Id::unique("shadowplayer_search_input")
+}
+
 /// Renders the search bar that fills the top of the Center Column,
 /// perfectly aligning its left edge with the Now Playing card and Songs table.
 pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bool {
@@ -36,6 +45,7 @@ pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bo
 
                     let hint = "Search for songs, artists, albums, or playlists...";
                     let text_edit = egui::TextEdit::singleline(query)
+                        .id(search_input_id())
                         .hint_text(
                             egui::RichText::new(hint)
                                 .color(theme.text_muted)

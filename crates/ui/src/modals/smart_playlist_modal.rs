@@ -76,7 +76,8 @@ pub fn show_smart_playlist_editor(
         .open(&mut is_open)
         .collapsible(false)
         .resizable(true)
-        .default_size(Vec2::new(560.0, 470.0))
+        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(560.0, 470.0)))
+        .min_size(crate::dialog::min_dialog_size())
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
 

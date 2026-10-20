@@ -1,8 +1,10 @@
 pub mod app;
 pub mod components;
+pub mod dialog;
 pub mod layout;
 pub mod modals;
 pub mod services;
+pub mod shortcuts;
 pub mod state;
 pub mod theme;
 pub mod views;

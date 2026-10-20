@@ -544,7 +544,7 @@ pub fn show_eq_panel(
         .title_bar(false)
         .default_pos(initial_pos)
         .default_size(Vec2::new(default_w, default_h))
-        .min_size(Vec2::new(620.0, 440.0))
+        .min_size(crate::dialog::min_dialog_size())
         .max_size(Vec2::new(880.0, (screen.height() - 40.0).max(500.0)))
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))

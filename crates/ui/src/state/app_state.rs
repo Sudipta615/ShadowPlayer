@@ -28,6 +28,9 @@ pub struct AppState {
     pub right_panel_visible: bool,
     /// Narrow layout: show the queue/lyrics drawer as a temporary overlay.
     pub right_overlay_open: bool,
+    /// Set by the `/` and `Ctrl+F` shortcuts: move the keyboard focus to the
+    /// search field on the next frame.
+    pub focus_search: bool,
     /// Single-window compact player mode.
     pub mini_player: bool,
     /// Keep the mini player above other windows (best-effort on Wayland).
@@ -43,7 +46,6 @@ pub struct AppState {
     pub open_playlist_editor: bool,
     pub track_properties_track: Option<Track>,
     pub track_properties_open: bool,
-    pub help_modal_open: bool,
     pub bit_perfect_modal_open: bool,
 
     /// Directories that individual songs were imported from (newest first),
@@ -70,6 +72,7 @@ impl Default for AppState {
             visualizer_mode: VisualizerMode::Spectrum,
             right_panel_visible: true,
             right_overlay_open: false,
+            focus_search: false,
             mini_player: false,
             mini_always_on_top: true,
 
@@ -81,7 +84,6 @@ impl Default for AppState {
             open_playlist_editor: false,
             track_properties_track: None,
             track_properties_open: false,
-            help_modal_open: false,
             bit_perfect_modal_open: false,
 
             imported_dirs: Vec::new(),

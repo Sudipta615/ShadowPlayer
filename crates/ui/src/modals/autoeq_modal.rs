@@ -328,9 +328,10 @@ pub fn show_autoeq_modal(
 
     Window::new("AutoEQ Headphone & IEM Calibration")
         .open(&mut is_open)
-        .resizable(false)
+        .resizable(true)
         .collapsible(false)
-        .default_size(Vec2::new(580.0, 520.0))
+        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(580.0, 520.0)))
+        .min_size(crate::dialog::min_dialog_size())
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
@@ -339,195 +340,203 @@ pub fn show_autoeq_modal(
                 .inner_margin(egui::Margin::same(18)),
         )
         .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 12.0);
-
-            ui.label(
-                egui::RichText::new("Auto-compensate frequency response using the AutoEQ database")
-                    .font(crate::theme::font(12.5))
-                    .color(theme.text_secondary),
-            );
-
-            // Search Bar
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Search:")
-                        .font(crate::theme::font(13.0))
-                        .color(theme.text_primary),
-                );
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.search_query)
-                        .desired_width(ui.available_width() - 80.0),
-                );
-                if ui.button("Clear").clicked() {
-                    state.search_query.clear();
-                }
-            });
-
-            // Target Curve & Gain Clamp Options
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
-                ui.label(
-                    egui::RichText::new("Target Curve:")
-                        .font(crate::theme::font(12.0))
-                        .color(theme.text_secondary),
-                );
-
-                let targets = ["Harman 2018", "Flat Reference"];
-                for (idx, label) in targets.iter().enumerate() {
-                    let active = state.target_curve_idx == idx;
-                    if ui.selectable_label(active, *label).clicked() {
-                        state.target_curve_idx = idx;
-                    }
-                }
-
-                ui.label(
-                    egui::RichText::new("Max Boost:")
-                        .font(crate::theme::font(12.0))
-                        .color(theme.text_secondary),
-                );
-                ui.add(
-                    egui::Slider::new(&mut state.max_gain_db, 3.0..=15.0)
-                        .suffix(" dB")
-                        .step_by(1.0),
-                );
-            });
-
-            ui.separator();
-
-            // Headphone List & Selection
-            let q = state.search_query.to_lowercase();
-            let filtered_profiles: Vec<(usize, &AutoEqModelProfile)> = profiles
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| {
-                    q.is_empty()
-                        || p.brand.to_lowercase().contains(&q)
-                        || p.model.to_lowercase().contains(&q)
-                })
-                .collect();
-
             egui::ScrollArea::vertical()
-                .id_salt("autoeq_list")
-                .max_height(200.0)
+                .id_salt("autoeq_body")
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 12.0);
 
-                    for (orig_idx, prof) in filtered_profiles {
-                        let is_sel = state.selected_index == Some(orig_idx);
-                        let kind_badge = if prof.is_iem { "IEM" } else { "Over-Ear" };
-                        let display_text =
-                            format!("{} — {} [{}]", prof.brand, prof.model, kind_badge);
-
-                        let btn = egui::Button::new(
-                            egui::RichText::new(display_text)
-                                .font(crate::theme::font(12.5))
-                                .color(if is_sel {
-                                    Color32::WHITE
-                                } else {
-                                    theme.text_primary
-                                }),
+                    ui.label(
+                        egui::RichText::new(
+                            "Auto-compensate frequency response using the AutoEQ database",
                         )
-                        .fill(if is_sel { theme.accent } else { theme.bg_pill })
-                        .corner_radius(CornerRadius::same(6))
-                        .min_size(Vec2::new(ui.available_width(), 26.0));
-
-                        if ui.add(btn).clicked() {
-                            state.selected_index = Some(orig_idx);
-
-                            // Trigger AutoEq optimization
-                            let target = if state.target_curve_idx == 0 {
-                                if prof.is_iem {
-                                    TargetCurve::HarmanIem2018
-                                } else {
-                                    TargetCurve::HarmanHeadphone2018
-                                }
-                            } else {
-                                TargetCurve::Flat
-                            };
-
-                            let params = AutoEqParams {
-                                target,
-                                max_gain_db: state.max_gain_db,
-                                ..Default::default()
-                            };
-
-                            let freq_resp = FrequencyResponse::new(prof.measurement.to_vec());
-                            let result = AutoEq::optimize(
-                                &format!("{} {}", prof.brand, prof.model),
-                                &freq_resp,
-                                &params,
-                            );
-                            state.last_result = Some(result);
-                        }
-                    }
-                });
-
-            // Results & Application Section
-            if let Some(ref res) = state.last_result {
-                ui.separator();
-                let prof_name = state
-                    .selected_index
-                    .map(|idx| format!("{} {}", profiles[idx].brand, profiles[idx].model))
-                    .unwrap_or_else(|| "Headphone".into());
-
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("• Profile Ready: {}", prof_name))
-                            .font(crate::theme::font(13.0))
-                            .strong()
-                            .color(theme.bit_perfect_green),
-                    );
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "Preamp: {:+0.1} dB | Fit RMS Error: {:.2} dB",
-                            res.preamp_db, res.rms_error_db
-                        ))
-                        .font(crate::theme::font(11.5))
+                        .font(crate::theme::font(12.5))
                         .color(theme.text_secondary),
                     );
-                });
 
-                ui.horizontal(|ui| {
-                    let apply_btn = egui::Button::new(
-                        egui::RichText::new("Apply Calibration to Audio Engine")
-                            .font(crate::theme::font(13.0))
-                            .strong()
-                            .color(Color32::WHITE),
-                    )
-                    .fill(theme.accent)
-                    .corner_radius(CornerRadius::same(8))
-                    .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
+                    // Search Bar
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Search:")
+                                .font(crate::theme::font(13.0))
+                                .color(theme.text_primary),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut state.search_query)
+                                .desired_width(ui.available_width() - 80.0),
+                        );
+                        if ui.button("Clear").clicked() {
+                            state.search_query.clear();
+                        }
+                    });
 
-                    if ui.add(apply_btn).clicked() {
-                        // Apply directly to AudioEngine via AudioSession
-                        session.set_eq_preset(res.preset.clone());
-                        session.set_preamp(res.preamp_db);
-                        session.set_eq_enabled(true);
-                        session.set_eq_auto_headroom(true);
+                    // Target Curve & Gain Clamp Options
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
+                        ui.label(
+                            egui::RichText::new("Target Curve:")
+                                .font(crate::theme::font(12.0))
+                                .color(theme.text_secondary),
+                        );
 
-                        // Sync to UI state
-                        eq_panel_state.eq_enabled = true;
-                        eq_panel_state.preamp_db = res.preamp_db;
-                        eq_panel_state.auto_headroom = true;
-
-                        for (i, band) in res.preset.bands.iter().take(10).enumerate() {
-                            eq_panel_state.bands[i] = ParametricBand {
-                                freq: band.frequency,
-                                gain_db: band.gain_db,
-                                q: band.q,
-                                filter_type: band.filter_type.into(),
-                                enabled: band.enabled,
-                            };
+                        let targets = ["Harman 2018", "Flat Reference"];
+                        for (idx, label) in targets.iter().enumerate() {
+                            let active = state.target_curve_idx == idx;
+                            if ui.selectable_label(active, *label).clicked() {
+                                state.target_curve_idx = idx;
+                            }
                         }
 
-                        state.is_open = false;
-                    }
+                        ui.label(
+                            egui::RichText::new("Max Boost:")
+                                .font(crate::theme::font(12.0))
+                                .color(theme.text_secondary),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut state.max_gain_db, 3.0..=15.0)
+                                .suffix(" dB")
+                                .step_by(1.0),
+                        );
+                    });
 
-                    if ui.button("Close").clicked() {
-                        state.is_open = false;
+                    ui.separator();
+
+                    // Headphone List & Selection
+                    let q = state.search_query.to_lowercase();
+                    let filtered_profiles: Vec<(usize, &AutoEqModelProfile)> = profiles
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| {
+                            q.is_empty()
+                                || p.brand.to_lowercase().contains(&q)
+                                || p.model.to_lowercase().contains(&q)
+                        })
+                        .collect();
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("autoeq_list")
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+
+                            for (orig_idx, prof) in filtered_profiles {
+                                let is_sel = state.selected_index == Some(orig_idx);
+                                let kind_badge = if prof.is_iem { "IEM" } else { "Over-Ear" };
+                                let display_text =
+                                    format!("{} — {} [{}]", prof.brand, prof.model, kind_badge);
+
+                                let btn = egui::Button::new(
+                                    egui::RichText::new(display_text)
+                                        .font(crate::theme::font(12.5))
+                                        .color(if is_sel {
+                                            Color32::WHITE
+                                        } else {
+                                            theme.text_primary
+                                        }),
+                                )
+                                .fill(if is_sel { theme.accent } else { theme.bg_pill })
+                                .corner_radius(CornerRadius::same(6))
+                                .min_size(Vec2::new(ui.available_width(), 26.0));
+
+                                if ui.add(btn).clicked() {
+                                    state.selected_index = Some(orig_idx);
+
+                                    // Trigger AutoEq optimization
+                                    let target = if state.target_curve_idx == 0 {
+                                        if prof.is_iem {
+                                            TargetCurve::HarmanIem2018
+                                        } else {
+                                            TargetCurve::HarmanHeadphone2018
+                                        }
+                                    } else {
+                                        TargetCurve::Flat
+                                    };
+
+                                    let params = AutoEqParams {
+                                        target,
+                                        max_gain_db: state.max_gain_db,
+                                        ..Default::default()
+                                    };
+
+                                    let freq_resp =
+                                        FrequencyResponse::new(prof.measurement.to_vec());
+                                    let result = AutoEq::optimize(
+                                        &format!("{} {}", prof.brand, prof.model),
+                                        &freq_resp,
+                                        &params,
+                                    );
+                                    state.last_result = Some(result);
+                                }
+                            }
+                        });
+
+                    // Results & Application Section
+                    if let Some(ref res) = state.last_result {
+                        ui.separator();
+                        let prof_name = state
+                            .selected_index
+                            .map(|idx| format!("{} {}", profiles[idx].brand, profiles[idx].model))
+                            .unwrap_or_else(|| "Headphone".into());
+
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!("• Profile Ready: {}", prof_name))
+                                    .font(crate::theme::font(13.0))
+                                    .strong()
+                                    .color(theme.bit_perfect_green),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Preamp: {:+0.1} dB | Fit RMS Error: {:.2} dB",
+                                    res.preamp_db, res.rms_error_db
+                                ))
+                                .font(crate::theme::font(11.5))
+                                .color(theme.text_secondary),
+                            );
+                        });
+
+                        ui.horizontal(|ui| {
+                            let apply_btn = egui::Button::new(
+                                egui::RichText::new("Apply Calibration to Audio Engine")
+                                    .font(crate::theme::font(13.0))
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            )
+                            .fill(theme.accent)
+                            .corner_radius(CornerRadius::same(8))
+                            .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
+
+                            if ui.add(apply_btn).clicked() {
+                                // Apply directly to AudioEngine via AudioSession
+                                session.set_eq_preset(res.preset.clone());
+                                session.set_preamp(res.preamp_db);
+                                session.set_eq_enabled(true);
+                                session.set_eq_auto_headroom(true);
+
+                                // Sync to UI state
+                                eq_panel_state.eq_enabled = true;
+                                eq_panel_state.preamp_db = res.preamp_db;
+                                eq_panel_state.auto_headroom = true;
+
+                                for (i, band) in res.preset.bands.iter().take(10).enumerate() {
+                                    eq_panel_state.bands[i] = ParametricBand {
+                                        freq: band.frequency,
+                                        gain_db: band.gain_db,
+                                        q: band.q,
+                                        filter_type: band.filter_type.into(),
+                                        enabled: band.enabled,
+                                    };
+                                }
+
+                                state.is_open = false;
+                            }
+
+                            if ui.button("Close").clicked() {
+                                state.is_open = false;
+                            }
+                        });
                     }
                 });
-            }
         });
 
     state.is_open = is_open;

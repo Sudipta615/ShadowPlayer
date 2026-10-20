@@ -92,18 +92,23 @@ files or write ReplayGain tags.
 
 | Key | Action |
 | :--- | :--- |
-| Space / K | Play / pause |
-| J / L | Previous / next track |
-| M | Mute |
-| S | Shuffle |
-| R | Repeat (off → all → one) |
-| ← / → | Seek 5 s |
-| ↑ / ↓ | Volume ±5 % |
-| Ctrl+B | Toggle bit-perfect Pure Direct |
-| Ctrl+P | Settings & DSP studio |
-| Ctrl+N | Playlist editor |
-| Ctrl+O | Folders & library manager |
-| Ctrl+E | Equalizer & DSP panel |
+| Space / K | Play / pause the active track |
+| J | Skip to the previous track in the queue |
+| L | Skip to the next track in the queue |
+| M | Toggle mute / unmute on the master output |
+| S | Toggle random shuffle |
+| R | Cycle repeat mode (off → all → one) |
+| Left Arrow | Seek backward by 5 seconds |
+| Right Arrow | Seek forward by 5 seconds |
+| Up Arrow | Raise the master volume by 5 % |
+| Down Arrow | Lower the master volume by 5 % |
+| / | Jump to the search box |
+| Ctrl + F | Jump to the search box |
+| Ctrl + B | Toggle bit-perfect Pure Direct mode |
+| Ctrl + P | Open Settings & DSP studio |
+| Ctrl + N | Open the playlist editor (create or manage playlists) |
+| Ctrl + O | Open Folders & library manager |
+| Ctrl + E | Toggle the equalizer & DSP panel |
 | Escape | Close the open dialog (one layer per press), or clear the search |
 
 ---
@@ -152,9 +157,11 @@ release:
 
 Stated plainly, because the alternative is finding out the hard way:
 
-- **No screen-reader support.** The UI is drawn by egui, whose accessibility
-  layer (accesskit) is not enabled in this build, so assistive technology sees a
-  blank window. Keyboard operation is complete and is the supported alternative.
+- **Partial screen-reader support.** egui's accessibility layer (accesskit) *is*
+  enabled, so assistive technology sees the app's control tree rather than a
+  blank window. The labelling is not complete yet — some icon-only controls are
+  still unnamed — and full keyboard operation is the recommended way to drive
+  the app. Every command below works without a mouse.
 - **English only.** All copy is hard-coded; there is no localisation layer yet.
   This is a direction, not a promise — see `AUDIT.md` (C10).
 - **Exclusive output where native backends exist.** This build negotiates
