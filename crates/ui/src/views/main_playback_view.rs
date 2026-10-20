@@ -2,14 +2,14 @@ use audio_session::AudioSession;
 use database::{FavoritesRepo, PlaylistRepo, TrackRepo};
 use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
-use eframe::egui::{self, Color32, FontId, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Stroke, Vec2};
 use playback::PlaybackCoordinator;
 
 use crate::components::now_playing::{NowPlayingCard, SleepTimerRequest};
 use crate::components::sidebar::NavItem;
 use crate::components::songs_table::{SongsTable, SongsTableAction};
 use crate::services::ArtworkService;
-use crate::state::{AppState, LibraryState, SleepTimer, TelemetryState, VisualizerMode};
+use crate::state::{AppState, LibraryState, SleepTimer, TelemetryState};
 use crate::theme::Theme;
 
 #[derive(Default, Debug, Clone)]
@@ -26,6 +26,8 @@ pub struct MainViewAction {
     pub edit_smart_playlist: Option<domain::ids::PlaylistId>,
     /// The user asked to organize the current selection.
     pub organize_tracks: Option<Vec<Track>>,
+    /// A grouped-search chip asked to run a narrower query.
+    pub search_query: Option<String>,
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
@@ -146,268 +148,69 @@ pub fn render_main_playback_view(
         view_action.open_eq_panel = true;
     }
 
-    // Telemetry & Visualizer Studio Dock & Tabs (only shown for non-Home views or when explicitly toggled)
-    if app_state.active_nav != NavItem::Home && app_state.visualizer_mode != VisualizerMode::Off {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("AUDIO VISUALIZER")
-                    .font(FontId::proportional(11.0))
-                    .strong()
-                    .color(theme.text_muted),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-                for (mode, lbl) in [
-                    (VisualizerMode::Off, "Off"),
-                    (VisualizerMode::LufsRadar, "LUFS"),
-                    (VisualizerMode::VuMeters, "Analog VU"),
-                    (VisualizerMode::Spectrum, "FFT Spectrum"),
-                ] {
-                    let is_sel = app_state.visualizer_mode == mode;
-                    let bg = if is_sel {
-                        theme.accent_violet
-                    } else {
-                        theme.bg_pill
-                    };
-                    let fg = if is_sel {
-                        Color32::WHITE
-                    } else {
-                        theme.text_secondary
-                    };
-                    let btn = egui::Button::new(
-                        egui::RichText::new(lbl)
-                            .font(FontId::proportional(11.0))
-                            .color(fg),
-                    )
-                    .fill(bg)
-                    .corner_radius(egui::CornerRadius::same(6));
-                    if ui.add(btn).clicked() {
-                        app_state.visualizer_mode = mode;
-                    }
-                }
-            });
-        });
+    ui.add_space(8.0);
 
-        match app_state.visualizer_mode {
-            VisualizerMode::Spectrum => {
-                crate::widgets::SpectrumVisualizerWidget::new(
-                    &telemetry.spectrum.spectrum_db,
-                    theme,
-                )
-                .height(72.0)
-                .show(ui);
-                ui.add_space(4.0);
-            }
-            VisualizerMode::VuMeters => {
-                let tp = telemetry
-                    .meters
-                    .as_ref()
-                    .map(|m| m.max_true_peak_dbtp)
-                    .unwrap_or(0.0);
-                crate::widgets::VuMeterWidget::new(
-                    telemetry.spectrum.peak_db_l,
-                    telemetry.spectrum.peak_db_r,
-                    tp,
-                    theme,
-                )
-                .height(78.0)
-                .show(ui);
-                ui.add_space(4.0);
-            }
-            VisualizerMode::LufsRadar => {
-                crate::widgets::LufsMeterWidget::new(telemetry.meters.as_ref(), theme)
-                    .height(72.0)
-                    .show(ui);
-                ui.add_space(4.0);
-            }
-            VisualizerMode::Off => {}
-        }
-    }
-
-    if app_state.active_nav != NavItem::Home {
-        // Multi-Tab Playlist Bar for non-Home views
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-
-            let standard_tabs = [
-                (NavItem::Home, "Library"),
-                (NavItem::Favorites, "Favorites"),
-                (NavItem::RecentlyAdded, "New Adds"),
-                (NavItem::RecentlyPlayed, "Recent"),
-                (NavItem::MostPlayed, "Most Played"),
-            ];
-
-            egui::ScrollArea::horizontal()
-                .id_salt("playlist_tabs_scroll")
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-
-                        for (item_nav, label) in standard_tabs {
-                            let is_active = app_state.active_nav == item_nav;
-                            let text_color = if is_active {
-                                theme.accent_magenta
-                            } else {
-                                theme.text_secondary
-                            };
-                            let bg = if is_active {
-                                theme.bg_card_active
-                            } else {
-                                theme.bg_pill
-                            };
-                            let stroke = if is_active {
-                                Stroke::new(1.0_f32, theme.accent_magenta)
-                            } else {
-                                Stroke::new(1.0_f32, theme.border_subtle)
-                            };
-
-                            let btn = egui::Button::new(
-                                egui::RichText::new(label)
-                                    .font(FontId::proportional(12.0))
-                                    .color(text_color),
-                            )
-                            .fill(bg)
-                            .stroke(stroke)
-                            .corner_radius(egui::CornerRadius::same(6));
-
-                            if ui.add(btn).clicked() && !is_active {
-                                view_action.switch_nav = Some(item_nav);
-                            }
-                        }
-
-                        // User custom playlist tabs
-                        for pl in &library_state.playlists {
-                            let item_nav = NavItem::Playlist(pl.id);
-                            let is_active = app_state.active_nav == item_nav;
-                            let text_color = if is_active {
-                                theme.accent_magenta
-                            } else {
-                                theme.text_secondary
-                            };
-                            let bg = if is_active {
-                                theme.bg_card_active
-                            } else {
-                                theme.bg_pill
-                            };
-                            let stroke = if is_active {
-                                Stroke::new(1.0_f32, theme.accent_magenta)
-                            } else {
-                                Stroke::new(1.0_f32, theme.border_subtle)
-                            };
-
-                            let btn = egui::Button::new(
-                                egui::RichText::new(pl.name.clone())
-                                    .font(FontId::proportional(12.0))
-                                    .color(text_color),
-                            )
-                            .fill(bg)
-                            .stroke(stroke)
-                            .corner_radius(egui::CornerRadius::same(6));
-
-                            if ui.add(btn).clicked() && !is_active {
-                                view_action.switch_nav = Some(item_nav);
-                            }
-                        }
-
-                        // Add playlist button
-                        let add_btn = egui::Button::new(
-                            egui::RichText::new("+")
-                                .font(FontId::proportional(14.0))
-                                .color(theme.text_muted),
-                        )
-                        .fill(theme.bg_pill)
-                        .stroke(Stroke::new(1.0_f32, theme.border_subtle))
-                        .corner_radius(egui::CornerRadius::same(6));
-
-                        if ui
-                            .add(add_btn)
-                            .on_hover_text("Create New Playlist")
-                            .clicked()
-                        {
-                            view_action.create_playlist = true;
-                        }
-
-                        // Smart playlist tabs
-                        for sp in &library_state.smart_playlists {
-                            let item_nav = NavItem::SmartPlaylist(sp.id);
-                            let is_active = app_state.active_nav == item_nav;
-                            let text_color = if is_active {
-                                theme.accent_blue
-                            } else {
-                                theme.text_secondary
-                            };
-                            let bg = if is_active {
-                                theme.bg_card_active
-                            } else {
-                                theme.bg_pill
-                            };
-                            let stroke = if is_active {
-                                Stroke::new(1.0_f32, theme.accent_blue)
-                            } else {
-                                Stroke::new(1.0_f32, theme.border_subtle)
-                            };
-
-                            let btn = egui::Button::new(
-                                egui::RichText::new(sp.name.clone())
-                                    .font(FontId::proportional(12.0))
-                                    .color(text_color),
-                            )
-                            .fill(bg)
-                            .stroke(stroke)
-                            .corner_radius(egui::CornerRadius::same(6));
-
-                            if ui.add(btn).clicked() && !is_active {
-                                view_action.switch_nav = Some(item_nav);
-                            }
-                        }
-                    });
-                });
-        });
-        ui.add_space(4.0);
-    } else {
-        ui.add_space(8.0);
-    }
-
-    // Dynamic View / Playlist Header
-    match app_state.active_nav {
-        NavItem::Playlist(pl_id) => {
-            let pl_name = library_state
-                .playlists
-                .iter()
-                .find(|p| p.id == pl_id)
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| "Playlist".into());
-
+    // Grouped search: artists, albums and playlists are first-class results
+    // rather than silently discarded while only tracks reach the table.
+    if !app_state.search_query.trim().is_empty() {
+        let result = &library_state.search_result;
+        if !result.artists.is_empty() || !result.albums.is_empty() || !result.playlists.is_empty() {
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                 ui.label(
-                    egui::RichText::new(format!("Playlist: {}", pl_name))
-                        .font(FontId::proportional(16.0))
-                        .strong()
-                        .color(theme.accent_magenta),
+                    egui::RichText::new("Matches")
+                        .font(crate::theme::font(11.0))
+                        .color(theme.text_muted),
                 );
-                ui.label(
-                    egui::RichText::new(format!(
-                        "({} tracks)",
-                        library_state.displayed_tracks.len()
-                    ))
-                    .font(FontId::proportional(12.0))
-                    .color(theme.text_muted),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Delete Playlist").clicked() {
-                        let _ = playlist_repo.delete(&pl_id);
-                        view_action.switch_nav = Some(NavItem::Home);
-                    }
-                });
+                egui::ScrollArea::horizontal()
+                    .id_salt("grouped_search_chips")
+                    .max_height(30.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                            let chip = |ui: &mut egui::Ui, label: String| -> bool {
+                                ui.add(
+                                    egui::Button::new(
+                                        egui::RichText::new(label)
+                                            .font(crate::theme::font(11.0))
+                                            .color(theme.text_secondary),
+                                    )
+                                    .fill(theme.bg_pill)
+                                    .stroke(Stroke::new(1.0, theme.border_subtle))
+                                    .corner_radius(CornerRadius::same(6)),
+                                )
+                                .clicked()
+                            };
+                            for artist in result.artists.iter().take(4) {
+                                if chip(ui, format!("Artist: {artist}")) {
+                                    view_action.search_query = Some(artist.clone());
+                                }
+                            }
+                            for album in result.albums.iter().take(4) {
+                                if chip(ui, format!("Album: {album}")) {
+                                    view_action.search_query = Some(album.clone());
+                                }
+                            }
+                            for playlist in result.playlists.iter().take(4) {
+                                if chip(ui, format!("Playlist: {}", playlist.name)) {
+                                    view_action.switch_nav = Some(NavItem::Playlist(playlist.id));
+                                    view_action.search_query = Some(String::new());
+                                }
+                            }
+                        });
+                    });
             });
-            ui.add_space(4.0);
+            ui.add_space(2.0);
         }
+    }
+
+    // Dynamic View Header
+    match app_state.active_nav {
         NavItem::HiRes => {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Hi-Res Studio Master Collection")
-                        .font(FontId::proportional(16.0))
+                        .font(crate::theme::font(16.0))
                         .strong()
                         .color(theme.bit_perfect_green),
                 );
@@ -416,7 +219,7 @@ pub fn render_main_playback_view(
                         "({} tracks >48kHz / >1000kbps)",
                         library_state.displayed_tracks.len()
                     ))
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
             });
@@ -426,16 +229,16 @@ pub fn render_main_playback_view(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Pure Lossless Bit-Exact Collection")
-                        .font(FontId::proportional(16.0))
+                        .font(crate::theme::font(16.0))
                         .strong()
-                        .color(theme.accent_blue),
+                        .color(theme.info),
                 );
                 ui.label(
                     egui::RichText::new(format!(
                         "({} FLAC / ALAC / WAV / DSD tracks)",
                         library_state.displayed_tracks.len()
                     ))
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
             });
@@ -445,16 +248,16 @@ pub fn render_main_playback_view(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Favorites")
-                        .font(FontId::proportional(16.0))
+                        .font(crate::theme::font(16.0))
                         .strong()
-                        .color(theme.accent_pink),
+                        .color(theme.accent_warm),
                 );
                 ui.label(
                     egui::RichText::new(format!(
                         "({} tracks)",
                         library_state.displayed_tracks.len()
                     ))
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
             });
@@ -464,16 +267,16 @@ pub fn render_main_playback_view(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Recently Added")
-                        .font(FontId::proportional(16.0))
+                        .font(crate::theme::font(16.0))
                         .strong()
-                        .color(theme.accent_blue),
+                        .color(theme.info),
                 );
                 ui.label(
                     egui::RichText::new(format!(
                         "({} tracks, newest first)",
                         library_state.displayed_tracks.len()
                     ))
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
             });
@@ -483,16 +286,16 @@ pub fn render_main_playback_view(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Recently Played History")
-                        .font(FontId::proportional(16.0))
+                        .font(crate::theme::font(16.0))
                         .strong()
-                        .color(Color32::from_rgb(99, 102, 241)),
+                        .color(theme.info),
                 );
                 ui.label(
                     egui::RichText::new(format!(
                         "({} tracks)",
                         library_state.displayed_tracks.len()
                     ))
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
             });
@@ -502,16 +305,16 @@ pub fn render_main_playback_view(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Most Played Tracks")
-                        .font(FontId::proportional(16.0))
+                        .font(crate::theme::font(16.0))
                         .strong()
-                        .color(theme.accent_orange),
+                        .color(theme.accent_warm),
                 );
                 ui.label(
                     egui::RichText::new(format!(
                         "({} tracks)",
                         library_state.displayed_tracks.len()
                     ))
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
             });
@@ -530,16 +333,16 @@ pub fn render_main_playback_view(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(name)
-                        .font(FontId::proportional(16.0))
+                        .font(crate::theme::font(16.0))
                         .strong()
-                        .color(theme.accent_blue),
+                        .color(theme.info),
                 );
                 ui.label(
                     egui::RichText::new(format!(
                         "({} tracks)",
                         library_state.displayed_tracks.len()
                     ))
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -569,6 +372,7 @@ pub fn render_main_playback_view(
         last_clicked_index: &mut library_state.last_clicked_index,
         artwork: artwork_service,
         theme,
+        show_header: ui.available_height() > 210.0,
     }
     .show(ui);
 

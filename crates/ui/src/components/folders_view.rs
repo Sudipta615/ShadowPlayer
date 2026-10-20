@@ -1,7 +1,7 @@
 use crate::theme::Theme;
 use domain::ids::{ScanRootId, TrackId};
 use domain::models::{ScanRoot, Track};
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use std::path::PathBuf;
 
 pub struct FoldersViewAction {
@@ -53,8 +53,8 @@ impl<'a> FoldersView<'a> {
 
                 let back_btn = egui::Button::new(
                     egui::RichText::new("‹ Back to Folders")
-                        .font(FontId::proportional(13.5))
-                        .color(self.theme.accent_purple),
+                        .font(crate::theme::font(13.5))
+                        .color(self.theme.accent_highlight),
                 )
                 .fill(self.theme.bg_pill)
                 .corner_radius(CornerRadius::same(8));
@@ -88,22 +88,22 @@ impl<'a> FoldersView<'a> {
                     p.rect_stroke(
                         box_rect,
                         CornerRadius::same(12),
-                        Stroke::new(1.2_f32, self.theme.accent_violet),
+                        Stroke::new(1.2_f32, self.theme.accent),
                         egui::StrokeKind::Inside,
                     );
                     crate::components::icons::draw_folder(
                         ui,
                         box_rect.shrink2(Vec2::new(20.0, 20.0)),
-                        self.theme.accent_pink,
+                        self.theme.accent_warm,
                     );
 
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
                         ui.label(
                             egui::RichText::new("FOLDER")
-                                .font(FontId::proportional(11.0))
+                                .font(crate::theme::font(11.0))
                                 .strong()
-                                .color(self.theme.accent_magenta),
+                                .color(self.theme.accent_highlight),
                         );
 
                         let folder_name = sel_path
@@ -112,14 +112,14 @@ impl<'a> FoldersView<'a> {
                             .unwrap_or_else(|| sel_path.to_string_lossy().to_string());
                         ui.label(
                             egui::RichText::new(folder_name)
-                                .font(FontId::proportional(20.0))
+                                .font(crate::theme::font(20.0))
                                 .strong()
                                 .color(self.theme.text_primary),
                         );
 
                         ui.label(
                             egui::RichText::new(sel_path.to_string_lossy())
-                                .font(FontId::proportional(11.5))
+                                .font(crate::theme::font(11.5))
                                 .color(self.theme.text_dim),
                         );
 
@@ -128,7 +128,7 @@ impl<'a> FoldersView<'a> {
                                 "{} songs in directory",
                                 self.folder_tracks.len()
                             ))
-                            .font(FontId::proportional(12.0))
+                            .font(crate::theme::font(12.0))
                             .color(self.theme.text_muted),
                         );
 
@@ -136,10 +136,10 @@ impl<'a> FoldersView<'a> {
                         ui.horizontal(|ui| {
                             let play_all_btn = egui::Button::new(
                                 egui::RichText::new("Play All")
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .color(Color32::WHITE),
                             )
-                            .fill(self.theme.accent_violet)
+                            .fill(self.theme.accent)
                             .corner_radius(CornerRadius::same(8));
 
                             if ui.add(play_all_btn).clicked() {
@@ -148,7 +148,7 @@ impl<'a> FoldersView<'a> {
 
                             let queue_all_btn = egui::Button::new(
                                 egui::RichText::new("Queue All")
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .color(self.theme.text_primary),
                             )
                             .fill(self.theme.bg_pill)
@@ -160,7 +160,7 @@ impl<'a> FoldersView<'a> {
 
                             let rescan_btn = egui::Button::new(
                                 egui::RichText::new("Rescan")
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .color(self.theme.text_primary),
                             )
                             .fill(self.theme.bg_pill)
@@ -220,7 +220,7 @@ impl<'a> FoldersView<'a> {
                             Pos2::new(row_rect.min.x + 10.0, cy),
                             egui::Align2::LEFT_CENTER,
                             format!("{:02}", idx + 1),
-                            FontId::proportional(12.0),
+                            crate::theme::font(12.0),
                             self.theme.text_muted,
                         );
 
@@ -228,7 +228,7 @@ impl<'a> FoldersView<'a> {
                             Pos2::new(row_rect.min.x + 44.0, cy),
                             egui::Align2::LEFT_CENTER,
                             &track.title,
-                            FontId::proportional(13.2),
+                            crate::theme::font(13.2),
                             if is_cur {
                                 Color32::WHITE
                             } else {
@@ -240,7 +240,7 @@ impl<'a> FoldersView<'a> {
                             Pos2::new(row_rect.min.x + 280.0, cy),
                             egui::Align2::LEFT_CENTER,
                             &track.artist,
-                            FontId::proportional(12.5),
+                            crate::theme::font(12.5),
                             self.theme.text_muted,
                         );
 
@@ -249,7 +249,7 @@ impl<'a> FoldersView<'a> {
                             Pos2::new(row_rect.max.x - 48.0, cy),
                             egui::Align2::RIGHT_CENTER,
                             &dur_s,
-                            FontId::proportional(12.0),
+                            crate::theme::font(12.0),
                             self.theme.text_muted,
                         );
 
@@ -259,7 +259,7 @@ impl<'a> FoldersView<'a> {
                         );
                         let fav_hover = ui.rect_contains_pointer(fav_rect);
                         let heart_col = if is_fav {
-                            self.theme.accent_pink
+                            self.theme.accent_warm
                         } else if fav_hover {
                             self.theme.text_primary
                         } else {
@@ -278,13 +278,13 @@ impl<'a> FoldersView<'a> {
                 ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
                 ui.label(
                     egui::RichText::new("Music Folders")
-                        .font(FontId::proportional(24.0))
+                        .font(crate::theme::font(24.0))
                         .strong()
                         .color(self.theme.text_primary),
                 );
                 ui.label(
                     egui::RichText::new(format!("{} indexed folders", self.scan_roots.len()))
-                        .font(FontId::proportional(13.5))
+                        .font(crate::theme::font(13.5))
                         .color(self.theme.text_muted),
                 );
             });
@@ -303,7 +303,7 @@ impl<'a> FoldersView<'a> {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
                     ui.label(
                         egui::RichText::new("Add Music Folder to Library")
-                            .font(FontId::proportional(14.0))
+                            .font(crate::theme::font(14.0))
                             .strong()
                             .color(self.theme.text_primary),
                     );
@@ -321,7 +321,7 @@ impl<'a> FoldersView<'a> {
                         if self.import_active {
                             ui.label(
                                 egui::RichText::new("waiting for file picker…")
-                                    .font(FontId::proportional(11.5))
+                                    .font(crate::theme::font(11.5))
                                     .color(self.theme.text_muted),
                             );
                         }
@@ -342,11 +342,11 @@ impl<'a> FoldersView<'a> {
 
                         let add_btn = egui::Button::new(
                             egui::RichText::new("+ Add & Scan")
-                                .font(FontId::proportional(12.5))
+                                .font(crate::theme::font(12.5))
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(self.theme.accent_violet)
+                        .fill(self.theme.accent)
                         .corner_radius(CornerRadius::same(8));
 
                         if ui.add(add_btn).clicked() && !self.new_folder_input.trim().is_empty() {
@@ -359,7 +359,7 @@ impl<'a> FoldersView<'a> {
                         if let Some(audio_d) = dirs::audio_dir() {
                             let quick_btn = egui::Button::new(
                                 egui::RichText::new("Use ~/Music")
-                                    .font(FontId::proportional(12.0))
+                                    .font(crate::theme::font(12.0))
                                     .color(self.theme.text_secondary),
                             )
                             .fill(self.theme.bg_pill)
@@ -376,12 +376,12 @@ impl<'a> FoldersView<'a> {
                         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                         ui.label(
                             egui::RichText::new("Tip:")
-                                .font(FontId::proportional(11.5))
-                                .color(self.theme.accent_magenta),
+                                .font(crate::theme::font(11.5))
+                                .color(self.theme.accent_highlight),
                         );
                         ui.label(
                             egui::RichText::new("You can also drag and drop audio files or entire folders directly into ShadowPlayer at any time.")
-                                .font(FontId::proportional(11.5))
+                                .font(crate::theme::font(11.5))
                                 .color(self.theme.text_muted),
                         );
                     });
@@ -394,7 +394,7 @@ impl<'a> FoldersView<'a> {
             if self.is_scanning {
                 let scan_frame = egui::Frame::NONE
                     .fill(self.theme.scan_banner_bg)
-                    .stroke(Stroke::new(1.0_f32, self.theme.accent_magenta))
+                    .stroke(Stroke::new(1.0_f32, self.theme.accent_highlight))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(egui::Margin::symmetric(14, 8));
 
@@ -404,7 +404,7 @@ impl<'a> FoldersView<'a> {
                         ui.spinner();
                         ui.label(
                             egui::RichText::new(self.scan_progress_text)
-                                .font(FontId::proportional(13.0))
+                                .font(crate::theme::font(13.0))
                                 .color(Color32::WHITE),
                         );
                     });
@@ -415,7 +415,7 @@ impl<'a> FoldersView<'a> {
             // Scanned Roots List
             ui.label(
                 egui::RichText::new("Configured Folders")
-                    .font(FontId::proportional(14.0))
+                    .font(crate::theme::font(14.0))
                     .strong()
                     .color(self.theme.text_primary),
             );
@@ -425,8 +425,8 @@ impl<'a> FoldersView<'a> {
             if self.scan_roots.is_empty() {
                 ui.vertical_centered(|ui| {
                     ui.add_space(30.0);
-                    ui.label(egui::RichText::new("No library folders configured yet").font(FontId::proportional(14.0)).color(self.theme.text_muted));
-                    ui.label(egui::RichText::new("Add your music folder above or drag and drop files to start building your library").font(FontId::proportional(12.0)).color(self.theme.text_dim));
+                    ui.label(egui::RichText::new("No library folders configured yet").font(crate::theme::font(14.0)).color(self.theme.text_muted));
+                    ui.label(egui::RichText::new("Add your music folder above or drag and drop files to start building your library").font(crate::theme::font(12.0)).color(self.theme.text_dim));
                 });
             } else {
                 egui::ScrollArea::vertical()
@@ -450,7 +450,7 @@ impl<'a> FoldersView<'a> {
                                     crate::components::icons::draw_folder(
                                         ui,
                                         folder_icon_rect,
-                                        self.theme.accent_pink,
+                                        self.theme.accent_warm,
                                     );
 
                                     ui.vertical(|ui| {
@@ -464,13 +464,13 @@ impl<'a> FoldersView<'a> {
                                             });
                                         ui.label(
                                             egui::RichText::new(name)
-                                                .font(FontId::proportional(13.8))
+                                                .font(crate::theme::font(13.8))
                                                 .strong()
                                                 .color(self.theme.text_primary),
                                         );
                                         ui.label(
                                             egui::RichText::new(root.path.to_string_lossy())
-                                                .font(FontId::proportional(11.5))
+                                                .font(crate::theme::font(11.5))
                                                 .color(self.theme.text_muted),
                                         );
                                     });
@@ -482,8 +482,8 @@ impl<'a> FoldersView<'a> {
 
                                             let del_btn = egui::Button::new(
                                                 egui::RichText::new("Del")
-                                                    .font(FontId::proportional(12.0))
-                                                    .color(self.theme.accent_magenta),
+                                                    .font(crate::theme::font(12.0))
+                                                    .color(self.theme.accent_highlight),
                                             )
                                             .fill(self.theme.bg_pill)
                                             .corner_radius(CornerRadius::same(6));
@@ -498,7 +498,7 @@ impl<'a> FoldersView<'a> {
 
                                             let scan_btn = egui::Button::new(
                                                 egui::RichText::new("Scan")
-                                                    .font(FontId::proportional(12.0))
+                                                    .font(crate::theme::font(12.0))
                                                     .color(self.theme.text_primary),
                                             )
                                             .fill(self.theme.bg_pill)
@@ -510,8 +510,8 @@ impl<'a> FoldersView<'a> {
 
                                             let view_btn = egui::Button::new(
                                                 egui::RichText::new("View Tracks →")
-                                                    .font(FontId::proportional(12.0))
-                                                    .color(self.theme.accent_purple),
+                                                    .font(crate::theme::font(12.0))
+                                                    .color(self.theme.accent_highlight),
                                             )
                                             .fill(self.theme.bg_pill)
                                             .corner_radius(CornerRadius::same(6));
@@ -543,11 +543,11 @@ fn format_time(seconds: f64) -> String {
 fn browse_btn(label: &str, theme: &Theme) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(label.to_owned())
-            .font(FontId::proportional(12.5))
+            .font(crate::theme::font(12.5))
             .strong()
             .color(Color32::WHITE),
     )
-    .fill(theme.accent_violet)
+    .fill(theme.accent)
     .corner_radius(CornerRadius::same(8))
     .min_size(Vec2::new(0.0, 28.0))
 }

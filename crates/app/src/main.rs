@@ -43,10 +43,11 @@ fn purge_legacy_demo_data(db: &Database, data_dir: &std::path::Path) {
     }
 }
 
-/// The smallest window that still fits the layout: sidebar, table columns and
-/// the right drawer.
-const MIN_WINDOW_WIDTH: f32 = 1024.0;
-const MIN_WINDOW_HEIGHT: f32 = 682.0;
+/// The smallest normal window. The responsive shell collapses the sidebar to
+/// an icon rail and turns the queue drawer into an overlay before this point;
+/// the mini player has its own smaller floor.
+const MIN_WINDOW_WIDTH: f32 = 640.0;
+const MIN_WINDOW_HEIGHT: f32 = 360.0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
@@ -84,14 +85,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Apply the persisted profile
     session.apply_profile(saved_settings.audio_profile);
 
-    // Native window options
+    // Native window options. Development screenshot runs can choose a size
+    // with `SHADOWPLAYER_EVAL_SIZE=640x360`.
+    let (start_w, start_h) = {
+        #[cfg(feature = "eval-tools")]
+        {
+            std::env::var("SHADOWPLAYER_EVAL_SIZE")
+                .ok()
+                .and_then(|raw| {
+                    let (w, h) = raw.split_once('x')?;
+                    Some((w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?))
+                })
+                .unwrap_or((
+                    saved_settings.window_width.max(MIN_WINDOW_WIDTH),
+                    saved_settings.window_height.max(MIN_WINDOW_HEIGHT),
+                ))
+        }
+        #[cfg(not(feature = "eval-tools"))]
+        {
+            (
+                saved_settings.window_width.max(MIN_WINDOW_WIDTH),
+                saved_settings.window_height.max(MIN_WINDOW_HEIGHT),
+            )
+        }
+    };
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("ShadowPlayer")
-            .with_inner_size(Vec2::new(
-                saved_settings.window_width.max(MIN_WINDOW_WIDTH),
-                saved_settings.window_height.max(MIN_WINDOW_HEIGHT),
-            ))
+            .with_inner_size(Vec2::new(start_w, start_h))
             .with_min_inner_size(Vec2::new(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT))
             .with_decorations(true)
             .with_transparent(false),

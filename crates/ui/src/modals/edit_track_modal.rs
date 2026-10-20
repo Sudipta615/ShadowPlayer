@@ -1,5 +1,5 @@
 use domain::models::Track;
-use eframe::egui::{self, Color32, FontId, Vec2};
+use eframe::egui::{self, Color32, Vec2};
 
 use crate::theme::Theme;
 
@@ -83,7 +83,7 @@ pub fn show_edit_track_modal(
                         |ui| {
                             ui.label(
                                 egui::RichText::new(label)
-                                    .font(FontId::proportional(12.0))
+                                    .font(crate::theme::font(12.0))
                                     .color(theme.text_secondary),
                             );
                         },
@@ -103,7 +103,7 @@ pub fn show_edit_track_modal(
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 let save_btn = egui::Button::new(egui::RichText::new("Save").color(Color32::WHITE))
-                    .fill(theme.accent_violet);
+                    .fill(theme.accent);
                 if ui.add(save_btn).clicked() {
                     save = true;
                 }

@@ -343,6 +343,26 @@ impl PlaybackCoordinator {
         self.preload_next();
     }
 
+    /// Move an upcoming queue item by one slot. Moving the currently playing
+    /// item is deliberately rejected: it would desynchronise the engine's
+    /// active playlist from the coordinator's display index.
+    pub fn move_in_queue(&mut self, from: usize, to: usize) {
+        if from == to || from >= self.queue.len() || to >= self.queue.len() {
+            return;
+        }
+        let first_upcoming = self.current_index.map(|i| i + 1).unwrap_or(0);
+        if from < first_upcoming || to < first_upcoming {
+            return;
+        }
+        let item = self.queue.remove(from);
+        self.queue.insert(to, item);
+        if self.shuffle {
+            self.unshuffled_queue = None;
+        }
+        self.persist_queue();
+        self.preload_next();
+    }
+
     pub fn remove_from_queue(&mut self, index: usize) {
         if index < self.queue.len() {
             self.queue.remove(index);
@@ -406,7 +426,7 @@ impl PlaybackCoordinator {
     fn shuffle_upcoming_from(&mut self, from: usize) {
         let from = from.min(self.queue.len());
         if self.queue.len() > from + 1 {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             self.queue[from..].shuffle(&mut rng);
         }
     }

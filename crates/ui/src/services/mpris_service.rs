@@ -1,16 +1,17 @@
-//! MPRIS2 (Linux desktop media control) bridge.
+//! Desktop media-control bridge.
 //!
 //! The player's authoritative transport lives in [`crate::PlaybackCoordinator`],
-//! *not* in the audio engine, so this service implements the MPRIS2 D-Bus
-//! interface in the app and bridges desktop media keys back into the UI loop:
+//! *not* in the audio engine, so this service implements the integration in the
+//! app and bridges desktop media keys back into the UI loop:
 //!
 //! * the UI loop publishes an [`MprisSnapshot`] every frame,
-//! * a background thread turns it into `PropertiesChanged` signals, and
-//! * transport calls arriving on the bus are queued as [`MprisCommand`]s which
-//!   the UI loop drains and forwards to the coordinator / session.
+//! * on Linux a background thread turns it into MPRIS2 `PropertiesChanged`
+//!   signals; on Windows/macOS `souvlaki` publishes SMTC / Now Playing state,
+//! * transport calls from the shell are queued as [`MprisCommand`]s which the
+//!   UI loop drains and forwards to the coordinator / session.
 //!
-//! On non-Linux targets (and when the session bus is unavailable) this degrades
-//! to an inert no-op, so callers need no `cfg`.
+//! When the platform service is unavailable the handle is inert, so callers
+//! need no `cfg`.
 
 use std::sync::{Arc, Mutex};
 
@@ -65,6 +66,22 @@ pub struct MprisService {
     #[cfg(target_os = "linux")]
     #[allow(dead_code)]
     inner: Option<linux::ServerHandle>,
+
+    /// Windows SMTC / macOS Now Playing controls, created once the first
+    /// window handle is available.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    media: Option<souvlaki::MediaControls>,
+    /// Sender used by the souvlaki callback thread to wake the UI.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    command_tx: crossbeam::channel::Sender<MprisCommand>,
+    /// Avoids re-uploading artwork/metadata every frame on Windows/macOS.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    last_media: Option<(String, String, String, Option<String>, u64)>,
+    /// Playback state/progress is throttled to ~10 updates per second. Windows
+    /// timeline updates re-render the system flyout, so doing that per frame
+    /// would be wasteful.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    last_playback: Option<(bool, bool, u64)>,
 }
 
 impl MprisService {
@@ -93,6 +110,9 @@ impl MprisService {
         #[cfg(not(target_os = "linux"))]
         let active = false;
 
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        let command_tx = tx.clone();
+
         Self {
             commands,
             snapshot,
@@ -100,10 +120,18 @@ impl MprisService {
             active,
             #[cfg(target_os = "linux")]
             inner,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            media: None,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            command_tx,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            last_media: None,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            last_playback: None,
         }
     }
 
-    /// Whether the D-Bus service is actually running.
+    /// Whether the desktop media service is actually running.
     pub fn is_active(&self) -> bool {
         self.active
     }
@@ -118,13 +146,174 @@ impl MprisService {
         }
     }
 
+    /// Create the Windows/macOS media integration once the window exists.
+    /// Linux already has its D-Bus service, so this is a no-op there.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub fn attach_window(&mut self, _frame: &eframe::Frame) {
+        if self.media.is_some() {
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        let hwnd = {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            _frame
+                .window_handle()
+                .ok()
+                .and_then(|handle| match handle.as_raw() {
+                    RawWindowHandle::Win32(h) => Some(h.hwnd.get() as *mut std::ffi::c_void),
+                    _ => None,
+                })
+        };
+        #[cfg(target_os = "macos")]
+        let hwnd: Option<*mut std::ffi::c_void> = None;
+
+        #[cfg(target_os = "windows")]
+        if hwnd.is_none() {
+            log::warn!("Windows media controls unavailable: no HWND yet");
+            return;
+        }
+
+        let config = souvlaki::PlatformConfig {
+            display_name: "ShadowPlayer",
+            dbus_name: "org.shadowplayer.ShadowPlayer",
+            hwnd,
+        };
+        let mut controls = match souvlaki::MediaControls::new(config) {
+            Ok(controls) => controls,
+            Err(e) => {
+                log::warn!("Windows/macOS media integration unavailable: {e}");
+                return;
+            }
+        };
+
+        let tx = self.command_tx.clone();
+        let repaint = Arc::clone(&self.repaint);
+        let attached = controls.attach(move |event| {
+            use souvlaki::{MediaControlEvent, SeekDirection};
+            let command = match event {
+                MediaControlEvent::Play => MprisCommand::Play,
+                MediaControlEvent::Pause => MprisCommand::Pause,
+                MediaControlEvent::Toggle => MprisCommand::PlayPause,
+                MediaControlEvent::Next => MprisCommand::Next,
+                MediaControlEvent::Previous => MprisCommand::Previous,
+                MediaControlEvent::Stop => MprisCommand::Stop,
+                MediaControlEvent::Seek(direction) => {
+                    MprisCommand::SeekRelative(if direction == SeekDirection::Forward {
+                        10.0
+                    } else {
+                        -10.0
+                    })
+                }
+                MediaControlEvent::SeekBy(direction, amount) => {
+                    let seconds = amount.as_secs_f64();
+                    MprisCommand::SeekRelative(if direction == SeekDirection::Forward {
+                        seconds
+                    } else {
+                        -seconds
+                    })
+                }
+                MediaControlEvent::SetPosition(position) => {
+                    MprisCommand::SetPosition(position.0.as_secs_f64())
+                }
+                MediaControlEvent::SetVolume(volume) => MprisCommand::SetVolume(volume as f32),
+                MediaControlEvent::Raise => MprisCommand::Raise,
+                MediaControlEvent::Quit => MprisCommand::Quit,
+                MediaControlEvent::OpenUri(uri) => {
+                    log::info!("Ignoring media-control open request for {uri}");
+                    return;
+                }
+            };
+            let _ = tx.send(command);
+            if let Ok(slot) = repaint.lock() {
+                if let Some(ctx) = slot.as_ref() {
+                    ctx.request_repaint();
+                }
+            }
+        });
+
+        if let Err(e) = attached {
+            log::warn!("Could not attach Windows/macOS media controls: {e}");
+            return;
+        }
+        self.media = Some(controls);
+        self.active = true;
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    pub fn attach_window(&mut self, _frame: &eframe::Frame) {}
+
     /// Non-blocking read of the next desktop transport request.
     pub fn try_recv(&self) -> Option<MprisCommand> {
         self.commands.try_recv().ok()
     }
 
     /// Publish the current player state to the desktop.
-    pub fn publish(&self, snap: MprisSnapshot) {
+    pub fn publish(&mut self, snap: MprisSnapshot) {
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        {
+            let length_ms = (snap.length_secs * 1000.0).max(0.0) as u64;
+            if let Some(controls) = self.media.as_mut() {
+                // Compare borrowed fields first: this runs every frame while
+                // playing, and cloning four strings just to throw them away is
+                // needless allocation churn.
+                let unchanged =
+                    self.last_media
+                        .as_ref()
+                        .is_some_and(|(title, artist, album, art, length)| {
+                            title == &snap.title
+                                && artist == &snap.artist
+                                && album == &snap.album
+                                && art == &snap.art_url
+                                && *length == length_ms
+                        });
+                if !unchanged {
+                    let metadata = souvlaki::MediaMetadata {
+                        title: Some(snap.title.as_str()),
+                        album: Some(snap.album.as_str()),
+                        artist: Some(snap.artist.as_str()),
+                        cover_url: snap.art_url.as_deref(),
+                        duration: Some(std::time::Duration::from_secs_f64(
+                            snap.length_secs.max(0.0),
+                        )),
+                    };
+                    if let Err(e) = controls.set_metadata(metadata) {
+                        log::debug!("Could not publish media metadata: {e}");
+                    }
+                    self.last_media = Some((
+                        snap.title.clone(),
+                        snap.artist.clone(),
+                        snap.album.clone(),
+                        snap.art_url.clone(),
+                        length_ms,
+                    ));
+                }
+
+                let position_tenths = (snap.position_secs.max(0.0) * 10.0) as u64;
+                let playback_key = (snap.loaded, snap.playing, position_tenths);
+                if self.last_playback != Some(playback_key) {
+                    let progress = souvlaki::MediaPosition(std::time::Duration::from_secs_f64(
+                        snap.position_secs.max(0.0),
+                    ));
+                    let playback = if !snap.loaded {
+                        souvlaki::MediaPlayback::Stopped
+                    } else if snap.playing {
+                        souvlaki::MediaPlayback::Playing {
+                            progress: Some(progress),
+                        }
+                    } else {
+                        souvlaki::MediaPlayback::Paused {
+                            progress: Some(progress),
+                        }
+                    };
+                    if let Err(e) = controls.set_playback(playback) {
+                        log::debug!("Could not publish media playback state: {e}");
+                    }
+                    self.last_playback = Some(playback_key);
+                }
+            }
+        }
+
         if let Ok(mut s) = self.snapshot.lock() {
             *s = snap;
         }
@@ -141,7 +330,7 @@ mod linux {
 
     use crossbeam::channel::Sender;
     use eframe::egui;
-    use zbus::zvariant::{ObjectPath, Value};
+    use zbus::{ObjectPath, Variant};
 
     use super::{MprisCommand, MprisSnapshot};
 
@@ -180,10 +369,8 @@ mod linux {
         snapshot: Arc<Mutex<MprisSnapshot>>,
         repaint: RepaintSlot,
     ) -> Result<ServerHandle, String> {
-        let conn = zbus::blocking::connection::Builder::session()
-            .map_err(|e| e.to_string())?
+        let builder = zbus::connection::Builder::session()
             .name(BUS_NAME)
-            .map_err(|e| e.to_string())?
             .serve_at(
                 OBJECT_PATH,
                 Root {
@@ -191,7 +378,6 @@ mod linux {
                     repaint: Arc::clone(&repaint),
                 },
             )
-            .map_err(|e| e.to_string())?
             .serve_at(
                 OBJECT_PATH,
                 Player {
@@ -199,10 +385,8 @@ mod linux {
                     tx,
                     repaint,
                 },
-            )
-            .map_err(|e| e.to_string())?
-            .build()
-            .map_err(|e| e.to_string())?;
+            );
+        let conn = pollster::block_on(builder.build()).map_err(|e| e.to_string())?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let stop_worker = Arc::clone(&stop);
@@ -217,29 +401,33 @@ mod linux {
                 while !stop_worker.load(Ordering::Acquire) {
                     let cur = snapshot.lock().map(|s| s.clone()).unwrap_or_default();
 
-                    let mut changed: HashMap<String, Value<'static>> = HashMap::new();
+                    let mut changed: HashMap<String, Variant<'static>> = HashMap::new();
 
                     if first || cur.playing != prev.playing || cur.loaded != prev.loaded {
                         changed.insert(
                             "PlaybackStatus".to_string(),
-                            Value::from(playback_status(&cur)),
+                            Variant::from(playback_status(&cur)),
                         );
                     }
                     if first || (cur.volume - prev.volume).abs() > 0.001 {
-                        changed.insert("Volume".to_string(), Value::from(cur.volume as f64));
+                        changed.insert("Volume".to_string(), Variant::from(cur.volume as f64));
                     }
                     if first || metadata_changed(&cur, &prev) {
-                        changed.insert("Metadata".to_string(), Value::from(metadata_map(&cur)));
+                        changed.insert("Metadata".to_string(), Variant::from(metadata_map(&cur)));
                     }
 
                     if !changed.is_empty() {
-                        let _ = conn.emit_signal(
+                        let emitted = pollster::block_on(conn.emit_signal(
                             None::<&str>,
                             OBJECT_PATH,
                             PROPS_IFACE,
                             "PropertiesChanged",
                             &(PLAYER_IFACE, changed, Vec::<String>::new()),
-                        );
+                        ));
+                        if let Err(e) = emitted {
+                            log::warn!("MPRIS2 PropertiesChanged failed: {e}");
+                            break;
+                        }
                         prev = cur;
                         first = false;
                     }
@@ -284,35 +472,35 @@ mod linux {
             || a.art_url != b.art_url
     }
 
-    fn metadata_map(s: &MprisSnapshot) -> HashMap<String, Value<'static>> {
-        let mut m: HashMap<String, Value<'static>> = HashMap::new();
+    fn metadata_map(s: &MprisSnapshot) -> HashMap<String, Variant<'static>> {
+        let mut m: HashMap<String, Variant<'static>> = HashMap::new();
 
         let track_id =
             ObjectPath::try_from("/org/mpris/MediaPlayer2/Track/0").unwrap_or_else(|_| {
                 ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/Track/0")
             });
-        m.insert("mpris:trackid".to_string(), Value::from(track_id));
+        m.insert("mpris:trackid".to_string(), Variant::from(track_id));
 
         if s.length_secs > 0.0 {
             m.insert(
                 "mpris:length".to_string(),
-                Value::from((s.length_secs * 1_000_000.0) as i64),
+                Variant::from((s.length_secs * 1_000_000.0) as i64),
             );
         }
         if !s.title.is_empty() {
-            m.insert("xesam:title".to_string(), Value::from(s.title.clone()));
+            m.insert("xesam:title".to_string(), Variant::from(s.title.clone()));
         }
         if !s.artist.is_empty() {
             m.insert(
                 "xesam:artist".to_string(),
-                Value::from(vec![s.artist.clone()]),
+                Variant::from(vec![s.artist.clone()]),
             );
         }
         if !s.album.is_empty() {
-            m.insert("xesam:album".to_string(), Value::from(s.album.clone()));
+            m.insert("xesam:album".to_string(), Variant::from(s.album.clone()));
         }
         if let Some(url) = &s.art_url {
-            m.insert("mpris:artUrl".to_string(), Value::from(url.clone()));
+            m.insert("mpris:artUrl".to_string(), Variant::from(url.clone()));
         }
         m
     }
@@ -462,7 +650,7 @@ mod linux {
         fn set_shuffle(&self, _shuffle: bool) {}
 
         #[zbus(property)]
-        fn metadata(&self) -> HashMap<String, Value<'static>> {
+        fn metadata(&self) -> HashMap<String, Variant<'static>> {
             metadata_map(&self.snap())
         }
 

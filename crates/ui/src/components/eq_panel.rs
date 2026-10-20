@@ -1,8 +1,6 @@
 use crate::theme::Theme;
 use config::{CrossfeedProfile, GraphicEqLayout};
-use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window,
-};
+use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
 use engine::dsp::equalizer::EqFilterType;
 use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
@@ -530,7 +528,7 @@ pub fn show_eq_panel(
         .input(|i| i.raw.screen_rect)
         .unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 830.0)));
     let default_w = 760.0_f32.min((screen.width() - 40.0).max(400.0));
-    let default_h = 550.0_f32.min((screen.height() - 40.0).max(350.0));
+    let default_h = 560.0_f32.min((screen.height() - 40.0).max(350.0));
     let default_x = ((screen.width() - default_w) / 2.0).max(10.0);
     let default_y = ((screen.height() - default_h) / 2.0).max(10.0);
     let initial_pos = state
@@ -546,7 +544,8 @@ pub fn show_eq_panel(
         .title_bar(false)
         .default_pos(initial_pos)
         .default_size(Vec2::new(default_w, default_h))
-        .min_size(Vec2::new(580.0, 480.0))
+        .min_size(Vec2::new(620.0, 440.0))
+        .max_size(Vec2::new(880.0, (screen.height() - 40.0).max(500.0)))
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
@@ -560,28 +559,21 @@ pub fn show_eq_panel(
             // ── 1. Top Header Bar (Always Enabled) ───────────────────────────
             render_header(ui, state, &mut actions, theme);
 
-            // ── 2. More Options Popup Menu (when 3-dots toggled) ─────────────
-            if state.show_more_menu {
-                render_more_menu(ui, state, &mut actions, theme);
-            }
-
-            // ── 3. Tab Switcher: [ 🎚 Graphic Equalizer ]   [ 🎛 Tone & Acoustics ]   [ ⚙ Advanced ]
+            // ── 2. Tab Switcher: [ 🎚 Graphic Equalizer ]   [ 🎛 Tone & Acoustics ]   [ ⚙ Advanced ]
             render_tab_navigation(ui, state, theme);
 
-            // ── 4. Enabled UI Wrapper with Visual Greying-Out ─────────────────
+            // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
             let eq_active = state.graphic_enabled || state.eq_enabled;
             let content_start_y = ui.cursor().top();
 
-            match state.active_tab {
-                EqTab::Advanced => {
-                    // Advanced tab options (headroom, dynamic range, dither, AutoEQ) can be configured anytime
-                    render_advanced_tab(ui, state, &mut actions, theme);
-                }
-                _ => {
-                    // Graphic EQ and Tone tabs are live filter stages
-                    ui.add_enabled_ui(eq_active, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+            ui.add_enabled_ui(eq_active, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 
+                egui::ScrollArea::vertical()
+                    .id_salt("eq_tabs_scroll_area")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
                         match state.active_tab {
                             EqTab::Graphic => {
                                 render_graphic_eq_tab(ui, state, &mut actions, theme);
@@ -589,53 +581,49 @@ pub fn show_eq_panel(
                             EqTab::Tone => {
                                 render_tone_acoustics_tab(ui, state, &mut actions, theme);
                             }
-                            _ => {
-                                render_graphic_eq_tab(ui, state, &mut actions, theme);
+                            EqTab::Advanced => {
+                                render_advanced_tab(ui, state, &mut actions, theme);
                             }
+                            _ => {}
                         }
                     });
+            });
 
-                    // If EQ is bypassed, draw subtle darkening overlay & informative badge
-                    if !eq_active {
-                        let rect = ui.min_rect();
-                        let overlay_rect = Rect::from_min_max(
-                            Pos2::new(rect.left(), content_start_y),
-                            Pos2::new(rect.right(), rect.bottom()),
-                        );
-                        ui.painter().rect_filled(
-                            overlay_rect,
-                            CornerRadius::same(14),
-                            Color32::from_rgba_unmultiplied(10, 15, 30, 130),
-                        );
+            // If EQ is bypassed, draw subtle darkening overlay & informative badge
+            if !eq_active {
+                let rect = ui.min_rect();
+                let overlay_rect = Rect::from_min_max(
+                    Pos2::new(rect.left(), content_start_y),
+                    Pos2::new(rect.right(), rect.bottom()),
+                );
+                ui.painter().rect_filled(
+                    overlay_rect,
+                    CornerRadius::same(14),
+                    Color32::from_rgba_unmultiplied(10, 15, 30, 140),
+                );
 
-                        let badge_pos = overlay_rect.center();
-                        let badge_text = "Equalizer Bypassed (Toggle Switch in Header to Enable)";
-                        let font = FontId::proportional(12.5);
-                        let galley = ui.painter().layout_no_wrap(
-                            badge_text.to_string(),
-                            font,
-                            theme.text_muted,
-                        );
-                        let badge_rect = Rect::from_center_size(
-                            badge_pos,
-                            galley.size() + Vec2::new(26.0, 12.0),
-                        );
+                let badge_pos = overlay_rect.center();
+                let badge_text = "Equalizer Bypassed (Toggle Switch in Header to Enable)";
+                let font = crate::theme::font(12.5);
+                let galley =
+                    ui.painter()
+                        .layout_no_wrap(badge_text.to_string(), font, theme.text_muted);
+                let badge_rect =
+                    Rect::from_center_size(badge_pos, galley.size() + Vec2::new(26.0, 12.0));
 
-                        ui.painter()
-                            .rect_filled(badge_rect, CornerRadius::same(12), theme.bg_pill);
-                        ui.painter().rect_stroke(
-                            badge_rect,
-                            CornerRadius::same(12),
-                            Stroke::new(1.0, theme.border_card),
-                            egui::StrokeKind::Inside,
-                        );
-                        ui.painter().galley(
-                            badge_rect.min + Vec2::new(13.0, 6.0),
-                            galley,
-                            theme.text_secondary,
-                        );
-                    }
-                }
+                ui.painter()
+                    .rect_filled(badge_rect, CornerRadius::same(12), theme.bg_pill);
+                ui.painter().rect_stroke(
+                    badge_rect,
+                    CornerRadius::same(12),
+                    Stroke::new(1.0, theme.border_card),
+                    egui::StrokeKind::Inside,
+                );
+                ui.painter().galley(
+                    badge_rect.min + Vec2::new(13.0, 6.0),
+                    galley,
+                    theme.text_secondary,
+                );
             }
         });
 
@@ -669,12 +657,12 @@ fn render_header(
 
         // Icon (Sliders)
         let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::hover());
-        crate::components::icons::draw_equalizer_sliders(ui, icon_rect, theme.accent_pink);
+        crate::components::icons::draw_equalizer_sliders(ui, icon_rect, theme.accent_warm);
 
         // Title
         ui.label(
             egui::RichText::new("Equalizer")
-                .font(FontId::proportional(17.5))
+                .font(crate::theme::font(17.5))
                 .strong()
                 .color(theme.text_primary),
         );
@@ -720,117 +708,11 @@ fn render_header(
             {
                 state.is_open = false;
             }
-
-            // More Options (⋮) button
-            let (more_rect, more_resp) =
-                ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
-            let mp = ui.painter_at(more_rect);
-            let more_bg = if state.show_more_menu || more_resp.hovered() {
-                theme.bg_card_hover
-            } else {
-                theme.bg_pill
-            };
-            mp.rect_filled(more_rect, CornerRadius::same(6), more_bg);
-            let more_col = if state.show_more_menu {
-                theme.accent_pink
-            } else {
-                theme.text_secondary
-            };
-            crate::components::icons::draw_more_menu(
-                ui,
-                more_rect.shrink2(Vec2::splat(5.0)),
-                more_col,
-            );
-            if more_resp.on_hover_text("More EQ & DSP Tools").clicked() {
-                state.show_more_menu = !state.show_more_menu;
-            }
         });
     });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. More Menu Popup
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn render_more_menu(
-    ui: &mut egui::Ui,
-    state: &mut EqPanelState,
-    actions: &mut EqPanelActions,
-    theme: &Theme,
-) {
-    egui::Frame::NONE
-        .fill(theme.bg_card_hover)
-        .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(10))
-        .inner_margin(Margin::symmetric(14, 10))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
-
-                // AutoEQ Button
-                let autoeq_btn = egui::Button::new(
-                    egui::RichText::new("AutoEQ Calibration")
-                        .font(FontId::proportional(12.0))
-                        .color(Color32::WHITE),
-                )
-                .fill(theme.accent_magenta)
-                .corner_radius(CornerRadius::same(6));
-                if ui
-                    .add(autoeq_btn)
-                    .on_hover_text("Calibrate headphones via the AutoEQ curve database")
-                    .clicked()
-                {
-                    actions.open_autoeq_dialog = true;
-                    state.show_more_menu = false;
-                }
-
-                // Dither Toggle
-                let mut dither = state.dither_enabled;
-                if ui
-                    .checkbox(
-                        &mut dither,
-                        egui::RichText::new("TPDF Dither")
-                            .font(FontId::proportional(12.0))
-                            .color(theme.text_secondary),
-                    )
-                    .changed()
-                {
-                    state.dither_enabled = dither;
-                    actions.dither_enabled_changed = Some(dither);
-                }
-
-                // Mid/Side EQ Toggle
-                let mut midside = state.midside_eq;
-                if ui
-                    .checkbox(
-                        &mut midside,
-                        egui::RichText::new("Mid/Side Processing")
-                            .font(FontId::proportional(12.0))
-                            .color(theme.text_secondary),
-                    )
-                    .changed()
-                {
-                    state.midside_eq = midside;
-                    actions.midside_eq_changed = Some(midside);
-                }
-
-                // Auto Headroom
-                let mut ah = state.auto_headroom;
-                if ui
-                    .checkbox(
-                        &mut ah,
-                        egui::RichText::new("Auto Headroom")
-                            .font(FontId::proportional(12.0))
-                            .color(theme.text_secondary),
-                    )
-                    .changed()
-                {
-                    state.auto_headroom = ah;
-                    actions.eq_auto_headroom_changed = Some(ah);
-                }
-            });
-        });
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Tab Switcher Navigation
@@ -866,16 +748,12 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
                             for (tab, label) in tab_items {
                                 let is_sel = state.active_tab == tab;
                                 let (bg, text_col, font) = if is_sel {
-                                    (
-                                        theme.accent_violet,
-                                        Color32::WHITE,
-                                        FontId::proportional(12.5),
-                                    )
+                                    (theme.accent, Color32::WHITE, crate::theme::font(12.5))
                                 } else {
                                     (
                                         Color32::TRANSPARENT,
                                         theme.text_secondary,
-                                        FontId::proportional(12.0),
+                                        crate::theme::font(12.0),
                                     )
                                 };
 
@@ -940,7 +818,7 @@ fn render_graphic_eq_tab(
                 );
 
                 let (bg, text_col, stroke) = if is_active {
-                    (theme.accent_pink, Color32::WHITE, Stroke::NONE)
+                    (theme.accent_warm, Color32::WHITE, Stroke::NONE)
                 } else {
                     (
                         theme.bg_pill,
@@ -951,7 +829,7 @@ fn render_graphic_eq_tab(
 
                 let btn = egui::Button::new(
                     egui::RichText::new(lbl)
-                        .font(FontId::proportional(11.0))
+                        .font(crate::theme::font(11.0))
                         .strong()
                         .color(text_col),
                 )
@@ -983,7 +861,7 @@ fn render_graphic_eq_tab(
             // Save Preset Button
             let save_btn = egui::Button::new(
                 egui::RichText::new("Save")
-                    .font(FontId::proportional(11.5))
+                    .font(crate::theme::font(11.5))
                     .color(theme.text_primary),
             )
             .fill(theme.bg_pill)
@@ -1006,7 +884,7 @@ fn render_graphic_eq_tab(
             if let Some(idx) = state.selected_custom_preset_idx {
                 let del_btn = egui::Button::new(
                     egui::RichText::new("Delete")
-                        .font(FontId::proportional(11.0))
+                        .font(crate::theme::font(11.0))
                         .color(Color32::from_rgb(248, 113, 113)),
                 )
                 .fill(theme.bg_pill)
@@ -1062,14 +940,14 @@ fn render_graphic_eq_tab(
                 egui::ComboBox::from_id_salt("eq_presets_combo")
                     .selected_text(
                         egui::RichText::new(current_preset_name)
-                            .font(FontId::proportional(11.5))
+                            .font(crate::theme::font(11.5))
                             .color(theme.text_primary),
                     )
                     .width(115.0)
                     .show_ui(ui, |ui| {
                         ui.label(
                             egui::RichText::new("Factory Presets")
-                                .font(FontId::proportional(10.5))
+                                .font(crate::theme::font(10.5))
                                 .color(theme.text_muted),
                         );
                         for preset in EqPreset::ALL {
@@ -1089,7 +967,7 @@ fn render_graphic_eq_tab(
                             ui.separator();
                             ui.label(
                                 egui::RichText::new("Saved Presets")
-                                    .font(FontId::proportional(10.5))
+                                    .font(crate::theme::font(10.5))
                                     .color(theme.text_muted),
                             );
                             for (idx, cp) in state.custom_presets.iter().enumerate() {
@@ -1122,7 +1000,7 @@ fn render_graphic_eq_tab(
     if state.is_saving_preset {
         egui::Frame::NONE
             .fill(theme.bg_card_hover)
-            .stroke(Stroke::new(1.0, theme.accent_magenta))
+            .stroke(Stroke::new(1.0, theme.accent_highlight))
             .corner_radius(CornerRadius::same(8))
             .inner_margin(Margin::symmetric(12, 6))
             .show(ui, |ui| {
@@ -1130,7 +1008,7 @@ fn render_graphic_eq_tab(
                     ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
                     ui.label(
                         egui::RichText::new("Preset Name:")
-                            .font(FontId::proportional(11.5))
+                            .font(crate::theme::font(11.5))
                             .color(theme.text_secondary),
                     );
                     ui.add(
@@ -1205,7 +1083,7 @@ fn render_spline_eq_canvas(
     let avail_w = ui.available_width();
     let avail_h = ui.available_height();
     // Dynamic height scaling with plenty of space in the dedicated tab
-    let canvas_h = (avail_h - 90.0).clamp(190.0, 310.0);
+    let canvas_h = (avail_h - 90.0).clamp(190.0, 500.0);
 
     let (canvas_rect, canvas_resp) =
         ui.allocate_exact_size(Vec2::new(avail_w, canvas_h), Sense::click_and_drag());
@@ -1263,7 +1141,7 @@ fn render_spline_eq_canvas(
             Pos2::new(canvas_rect.left() + 10.0, y),
             egui::Align2::LEFT_CENTER,
             lbl_text,
-            FontId::proportional(10.5),
+            crate::theme::font(10.5),
             if is_zero {
                 theme.text_secondary
             } else {
@@ -1342,7 +1220,7 @@ fn render_spline_eq_canvas(
                 Pos2::new(center_x, plot_rect.top()),
                 Pos2::new(center_x, plot_rect.bottom()),
             ],
-            Stroke::new(1.0, Color32::from_rgba_premultiplied(40, 48, 70, 70)),
+            Stroke::new(1.0, theme.border_subtle),
         );
 
         // Vertical stem line from node down to bottom track with vibrant gradient
@@ -1360,8 +1238,8 @@ fn render_spline_eq_canvas(
                 &painter,
                 stem_start,
                 stem_end,
-                Color32::from_rgb(244, 63, 130), // Hot pink
-                theme.accent_violet,             // Violet
+                theme.accent_highlight,
+                theme.accent,
                 stem_thickness,
             );
         }
@@ -1383,7 +1261,7 @@ fn render_spline_eq_canvas(
                 Pos2::new(center_x, lbl_y),
                 egui::Align2::CENTER_CENTER,
                 freq_str,
-                FontId::proportional(if num_bands > 15 { 9.5 } else { 10.5 }),
+                crate::theme::font(if num_bands > 15 { 9.5 } else { 10.5 }),
                 theme.text_secondary,
             );
         }
@@ -1409,10 +1287,7 @@ fn render_spline_eq_canvas(
     let spline_pts = catmull_rom_spline(&node_positions, segments_per_band);
 
     for w in spline_pts.windows(2) {
-        painter.line_segment(
-            [w[0], w[1]],
-            Stroke::new(2.4, Color32::from_rgb(244, 63, 130)),
-        );
+        painter.line_segment([w[0], w[1]], Stroke::new(2.4, theme.accent_highlight));
     }
 
     // Draw Node Thumbs (white circular nodes with glow and border)
@@ -1435,7 +1310,12 @@ fn render_spline_eq_canvas(
         painter.circle_filled(
             pos,
             halo_r,
-            Color32::from_rgba_premultiplied(244, 63, 130, if is_hovered { 90 } else { 45 }),
+            Color32::from_rgba_unmultiplied(
+                theme.accent_highlight.r(),
+                theme.accent_highlight.g(),
+                theme.accent_highlight.b(),
+                if is_hovered { 90 } else { 45 },
+            ),
         );
 
         // Center Node
@@ -1445,11 +1325,7 @@ fn render_spline_eq_canvas(
             base_node_r
         };
         painter.circle_filled(pos, node_r, Color32::WHITE);
-        painter.circle_stroke(
-            pos,
-            node_r,
-            Stroke::new(1.6, Color32::from_rgb(244, 63, 130)),
-        );
+        painter.circle_stroke(pos, node_r, Stroke::new(1.6, theme.accent_highlight));
     }
 
     // Floating Gain Tooltip on hovered node
@@ -1462,18 +1338,22 @@ fn render_spline_eq_canvas(
         let tip_pos = Pos2::new(pos.x, tip_y);
         let tip_str = format!("{}: {:+.1} dB", format_exact_frequency(freq), gain);
 
-        let font = FontId::proportional(11.0);
-        let galley = painter.layout_no_wrap(tip_str, font, Color32::WHITE);
+        let font = crate::theme::font(11.0);
+        let galley = painter.layout_no_wrap(tip_str, font, theme.text_primary);
         let tip_rect = Rect::from_center_size(tip_pos, galley.size() + Vec2::new(10.0, 4.0));
 
         painter.rect_filled(tip_rect, CornerRadius::same(5), theme.bg_card);
         painter.rect_stroke(
             tip_rect,
             CornerRadius::same(5),
-            Stroke::new(1.0, Color32::from_rgb(244, 63, 130)),
+            Stroke::new(1.0, theme.accent_highlight),
             egui::StrokeKind::Inside,
         );
-        painter.galley(tip_rect.min + Vec2::new(5.0, 2.0), galley, Color32::WHITE);
+        painter.galley(
+            tip_rect.min + Vec2::new(5.0, 2.0),
+            galley,
+            theme.text_primary,
+        );
     }
 }
 
@@ -1825,7 +1705,7 @@ fn render_advanced_tab(
                     ui.spacing_mut().item_spacing = Vec2::new(14.0, 0.0);
 
                     let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::hover());
-                    crate::components::icons::draw_headphones(ui, icon_rect, theme.accent_magenta);
+                    crate::components::icons::draw_headphones(ui, icon_rect, theme.accent_highlight);
 
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
@@ -1833,7 +1713,7 @@ fn render_advanced_tab(
                             ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                             ui.label(
                                 egui::RichText::new("AutoEQ Headphone Target Calibration")
-                                    .font(FontId::proportional(13.5))
+                                    .font(crate::theme::font(13.5))
                                     .strong()
                                     .color(theme.text_primary),
                             );
@@ -1846,7 +1726,7 @@ fn render_advanced_tab(
                         });
                         ui.label(
                             egui::RichText::new("Calibrate your headphones or IEMs using Harman/Diffuse-field acoustic targets from 4,000+ lab measurements.")
-                                .font(FontId::proportional(11.0))
+                                .font(crate::theme::font(11.0))
                                 .color(theme.text_secondary),
                         );
                     });
@@ -1854,11 +1734,11 @@ fn render_advanced_tab(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let btn = egui::Button::new(
                             egui::RichText::new("Open AutoEQ")
-                                .font(FontId::proportional(12.0))
+                                .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(theme.accent_magenta)
+                        .fill(theme.accent)
                         .stroke(Stroke::NONE)
                         .corner_radius(CornerRadius::same(8))
                         .min_size(Vec2::new(110.0, 30.0));
@@ -1893,7 +1773,7 @@ fn render_advanced_toggle_card(
         .stroke(Stroke::new(
             1.0,
             if is_active {
-                theme.accent_violet.linear_multiply(0.4)
+                theme.accent.linear_multiply(0.4)
             } else {
                 theme.border_card
             },
@@ -1910,7 +1790,7 @@ fn render_advanced_toggle_card(
                     ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                     ui.label(
                         egui::RichText::new(title)
-                            .font(FontId::proportional(13.0))
+                            .font(crate::theme::font(13.0))
                             .strong()
                             .color(theme.text_primary),
                     );
@@ -1926,12 +1806,12 @@ fn render_advanced_toggle_card(
                 // Row 2: Status Pill Badge
                 ui.horizontal(|ui| {
                     let badge_bg = if is_active {
-                        theme.accent_violet.linear_multiply(0.2)
+                        theme.accent.linear_multiply(0.2)
                     } else {
                         theme.bg_pill
                     };
                     let badge_fg = if is_active {
-                        theme.accent_pink
+                        theme.accent_warm
                     } else {
                         theme.text_muted
                     };
@@ -1942,7 +1822,7 @@ fn render_advanced_toggle_card(
                         .show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new(badge_text)
-                                    .font(FontId::proportional(10.5))
+                                    .font(crate::theme::font(10.5))
                                     .strong()
                                     .color(badge_fg),
                             );
@@ -1952,7 +1832,7 @@ fn render_advanced_toggle_card(
                 // Row 3: Description text
                 ui.label(
                     egui::RichText::new(description)
-                        .font(FontId::proportional(11.0))
+                        .font(crate::theme::font(11.0))
                         .color(theme.text_secondary),
                 );
             });
@@ -1990,7 +1870,7 @@ fn render_slider_card(
                     ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                     ui.label(
                         egui::RichText::new(title)
-                            .font(FontId::proportional(13.5))
+                            .font(crate::theme::font(13.5))
                             .strong()
                             .color(theme.text_primary),
                     );
@@ -2001,7 +1881,7 @@ fn render_slider_card(
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(left_lbl)
-                            .font(FontId::proportional(10.5))
+                            .font(crate::theme::font(10.5))
                             .color(theme.text_muted),
                     );
                     let avail_mid = (ui.available_width() - 48.0).max(40.0);
@@ -2011,7 +1891,7 @@ fn render_slider_card(
                         |ui| {
                             ui.label(
                                 egui::RichText::new(center_lbl)
-                                    .font(FontId::proportional(10.5))
+                                    .font(crate::theme::font(10.5))
                                     .color(theme.text_muted),
                             );
                         },
@@ -2019,7 +1899,7 @@ fn render_slider_card(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new(right_lbl)
-                                .font(FontId::proportional(10.5))
+                                .font(crate::theme::font(10.5))
                                 .color(theme.text_muted),
                         );
                     });
@@ -2036,7 +1916,7 @@ fn render_slider_card(
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new(format_val(*value))
-                            .font(FontId::proportional(12.0))
+                            .font(crate::theme::font(12.0))
                             .color(theme.text_secondary),
                     );
                 });
@@ -2090,7 +1970,7 @@ fn render_footer_controls(
                         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                         ui.label(
                             egui::RichText::new("Preamp (Master)")
-                                .font(FontId::proportional(12.5))
+                                .font(crate::theme::font(12.5))
                                 .strong()
                                 .color(theme.text_primary),
                         );
@@ -2107,7 +1987,7 @@ fn render_footer_controls(
                         ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
                         ui.label(
                             egui::RichText::new(min_lbl)
-                                .font(FontId::proportional(10.5))
+                                .font(crate::theme::font(10.5))
                                 .color(theme.text_muted),
                         );
 
@@ -2134,7 +2014,7 @@ fn render_footer_controls(
 
                         ui.label(
                             egui::RichText::new(max_lbl)
-                                .font(FontId::proportional(10.5))
+                                .font(crate::theme::font(10.5))
                                 .color(theme.text_muted),
                         );
                     });
@@ -2143,7 +2023,7 @@ fn render_footer_controls(
                     ui.vertical_centered(|ui| {
                         ui.label(
                             egui::RichText::new(format!("{:+.1} dB", state.graphic_preamp_db))
-                                .font(FontId::proportional(11.5))
+                                .font(crate::theme::font(11.5))
                                 .color(theme.text_secondary),
                         );
                     });
@@ -2155,7 +2035,7 @@ fn render_footer_controls(
             ui.allocate_exact_size(Vec2::new(reset_btn_w, 58.0), Sense::click());
         let rp = ui.painter_at(reset_rect);
         let bg = if reset_resp.hovered() {
-            theme.accent_violet
+            theme.accent
         } else {
             theme.bg_card_hover
         };
@@ -2172,13 +2052,13 @@ fn render_footer_controls(
             Pos2::new(reset_rect.center().x + 22.0, reset_rect.center().y),
             Vec2::splat(16.0),
         );
-        crate::components::icons::draw_reset(ui, icon_rect, theme.accent_magenta);
+        crate::components::icons::draw_reset(ui, icon_rect, theme.accent_highlight);
 
         rp.text(
             Pos2::new(reset_rect.center().x - 12.0, reset_rect.center().y),
             egui::Align2::CENTER_CENTER,
             "Reset",
-            FontId::proportional(13.0),
+            crate::theme::font(13.0),
             theme.text_primary,
         );
 
@@ -2271,37 +2151,22 @@ fn gradient_horizontal_slider(
         changed = true;
     }
 
-    // Paint background track using theme token
+    // Paint background track using theme token (clearly visible in both dark & light modes)
     let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
     ui.painter()
-        .rect_filled(track_rect, CornerRadius::same(2), theme.border_card);
+        .rect_filled(track_rect, CornerRadius::same(2), theme.slider_track);
 
-    // Paint active gradient track up to thumb (dual-tone: rose pink -> luminous indigo)
+    // Paint active track up to thumb (single jade hue).
     let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
     let thumb_x = rect.left() + thumb_t * rect.width();
     let filled_w = (thumb_x - track_rect.min.x).max(0.0);
     if filled_w > 0.0 {
-        let num_slices = (filled_w / 3.0).clamp(1.0, 40.0) as usize;
-        for i in 0..num_slices {
-            let t0 = i as f32 / num_slices as f32;
-            let t1 = (i + 1) as f32 / num_slices as f32;
-            let x0 = track_rect.min.x + filled_w * t0;
-            let x1 = track_rect.min.x + filled_w * t1;
-            // Dual-tone: Rose Pink (236, 72, 153) to Luminous Soft Indigo (129, 140, 248)
-            let r = (236.0 * (1.0 - t0) + 129.0 * t0) as u8;
-            let g = (72.0 * (1.0 - t0) + 140.0 * t0) as u8;
-            let b = (153.0 * (1.0 - t0) + 248.0 * t0) as u8;
-            let col = Color32::from_rgb(r, g, b);
-            let slice_rect = Rect::from_min_max(
-                Pos2::new(x0, track_rect.min.y),
-                Pos2::new(x1, track_rect.max.y),
-            );
-            ui.painter().rect_filled(
-                slice_rect,
-                CornerRadius::same(if i == 0 { 2 } else { 0 }),
-                col,
-            );
-        }
+        let fill_rect = Rect::from_min_max(
+            Pos2::new(track_rect.min.x, track_rect.min.y),
+            Pos2::new(track_rect.min.x + filled_w, track_rect.max.y),
+        );
+        ui.painter()
+            .rect_filled(fill_rect, CornerRadius::same(2), theme.accent_highlight);
     }
 
     // Paint circular thumb
@@ -2311,7 +2176,9 @@ fn gradient_horizontal_slider(
     ui.painter().circle_filled(
         thumb_pos,
         if is_hovered { 8.5 } else { 7.0 },
-        Color32::from_rgba_premultiplied(129, 140, 248, if is_hovered { 90 } else { 45 }),
+        theme
+            .accent_highlight
+            .gamma_multiply(if is_hovered { 0.35 } else { 0.18 }),
     );
     ui.painter().circle_filled(
         thumb_pos,
@@ -2321,7 +2188,7 @@ fn gradient_horizontal_slider(
     ui.painter().circle_stroke(
         thumb_pos,
         if is_hovered { 5.8 } else { 5.0 },
-        Stroke::new(1.6, theme.accent_magenta),
+        Stroke::new(1.6, theme.accent_highlight),
     );
 
     changed
@@ -2339,7 +2206,7 @@ fn custom_toggle_switch(ui: &mut egui::Ui, value: &mut bool, tooltip: &str, them
 
     let p = ui.painter_at(rect);
     let bg = if *value {
-        theme.accent_violet
+        theme.accent
     } else {
         theme.border_card
     };

@@ -1,6 +1,6 @@
 [package]
 name = "ui"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 
 [dependencies]
@@ -14,19 +14,32 @@ search = { path = "../search" }
 playback = { path = "../playback" }
 config = { package = "config", path = "../engine/crates/config" }
 engine = { package = "audio-engine", path = "../engine", features = ["tag-write"] }
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 egui_extras = { version = "0.37", features = ["image", "svg"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 log = "0.4"
 crossbeam = "0.8"
-dirs = "6.0"
+dirs = "7.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # Native OS file/folder picker. Default features use the XDG Desktop Portal
 # backend (no GTK3 dev libraries required on Linux).
-rfd = "0.15"
-# MPRIS2 desktop integration (Linux). zbus is already in the tree via `ashpd`.
-zbus = "5"
+rfd = "0.17"
+# MPRIS2 desktop integration is Linux-only. Keeping zbus target-scoped means
+# Windows/macOS builds do not try to compile a D-Bus stack they cannot use.
+[target.'cfg(target_os = "linux")'.dependencies]
+# zbus is already in the tree via `ashpd`.
+zbus = "6"
+# zbus 6 dropped its blocking API; the MPRIS worker drives the async calls on
+# its own thread with this tiny executor.
+pollster = "1.0"
+
+# Windows System Media Transport Controls and macOS Now Playing. Linux keeps
+# its native MPRIS2 backend above; souvlaki's Linux feature would pull a second
+# D-Bus stack, so it is only compiled on the other desktop platforms.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+souvlaki = { version = "0.8", default-features = false }
+raw-window-handle = "0.6"
 
 [features]
 # Development-only automation hooks: `SHADOWPLAYER_EVAL*` drives the UI to a

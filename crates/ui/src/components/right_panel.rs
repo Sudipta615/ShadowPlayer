@@ -1,7 +1,7 @@
 use crate::services::{ArtworkService, LyricsSource};
 use crate::theme::Theme;
 use domain::models::{SyncedLyricLine, Track};
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightTab {
@@ -13,6 +13,8 @@ pub struct RightPanelAction {
     pub tab_changed: Option<RightTab>,
     pub play_queue_index: Option<usize>,
     pub remove_queue_index: Option<usize>,
+    /// Move an upcoming queue row up/down by one slot.
+    pub move_queue: Option<(usize, isize)>,
     pub clear_queue: bool,
     pub volume_changed: Option<f32>,
     pub toggle_mute: bool,
@@ -39,6 +41,7 @@ impl<'a> RightPanel<'a> {
             tab_changed: None,
             play_queue_index: None,
             remove_queue_index: None,
+            move_queue: None,
             clear_queue: false,
             volume_changed: None,
             toggle_mute: false,
@@ -81,18 +84,10 @@ impl<'a> RightPanel<'a> {
                     // Active Tab Indicator
                     if self.active_tab == RightTab::Queue {
                         let active_pill = queue_rect.shrink2(Vec2::new(2.0, 2.0));
-                        painter.rect_filled(
-                            active_pill,
-                            CornerRadius::same(8),
-                            self.theme.accent_violet,
-                        );
+                        painter.rect_filled(active_pill, CornerRadius::same(8), self.theme.accent);
                     } else if self.active_tab == RightTab::Lyrics {
                         let active_pill = lyrics_rect.shrink2(Vec2::new(2.0, 2.0));
-                        painter.rect_filled(
-                            active_pill,
-                            CornerRadius::same(8),
-                            self.theme.accent_violet,
-                        );
+                        painter.rect_filled(active_pill, CornerRadius::same(8), self.theme.accent);
                     }
 
                     let q_color = if self.active_tab == RightTab::Queue {
@@ -110,14 +105,14 @@ impl<'a> RightPanel<'a> {
                         queue_rect.center(),
                         egui::Align2::CENTER_CENTER,
                         "Queue",
-                        FontId::proportional(12.8),
+                        crate::theme::font(12.8),
                         q_color,
                     );
                     painter.text(
                         lyrics_rect.center(),
                         egui::Align2::CENTER_CENTER,
                         "Lyrics",
-                        FontId::proportional(12.8),
+                        crate::theme::font(12.8),
                         l_color,
                     );
 
@@ -146,7 +141,7 @@ impl<'a> RightPanel<'a> {
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new("Up Next")
-                                    .font(FontId::proportional(15.5))
+                                    .font(crate::theme::font(15.5))
                                     .strong()
                                     .color(self.theme.text_primary),
                             );
@@ -163,7 +158,7 @@ impl<'a> RightPanel<'a> {
                                 |ui| {
                                     ui.label(
                                         egui::RichText::new(summary_str)
-                                            .font(FontId::proportional(11.8))
+                                            .font(crate::theme::font(11.8))
                                             .color(self.theme.text_muted),
                                     );
                                 },
@@ -201,6 +196,13 @@ impl<'a> RightPanel<'a> {
                                         Pos2::new(item_rect.max.x, item_rect.max.y - 1.0),
                                     );
 
+                                    item_resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            true,
+                                            format!("Play {} by {}", track.title, track.artist),
+                                        )
+                                    });
                                     if item_resp.clicked() {
                                         action.play_queue_index = Some(orig_idx);
                                     }
@@ -220,7 +222,7 @@ impl<'a> RightPanel<'a> {
                                         Pos2::new(rect.min.x + 4.0, cy),
                                         egui::Align2::LEFT_CENTER,
                                         format!("{}", disp_idx + 1),
-                                        FontId::proportional(12.0),
+                                        crate::theme::font(12.0),
                                         theme.text_muted,
                                     );
 
@@ -252,7 +254,7 @@ impl<'a> RightPanel<'a> {
                                         crate::components::icons::draw_disc(
                                             ui,
                                             thumb_rect.shrink2(Vec2::new(8.0, 8.0)),
-                                            theme.accent_pink,
+                                            theme.accent_warm,
                                         );
                                     }
 
@@ -262,26 +264,72 @@ impl<'a> RightPanel<'a> {
                                         Pos2::new(text_left, cy - 7.0),
                                         egui::Align2::LEFT_CENTER,
                                         &track.title,
-                                        FontId::proportional(12.8),
+                                        crate::theme::font(12.8),
                                         theme.text_primary,
                                     );
                                     painter.text(
                                         Pos2::new(text_left, cy + 8.0),
                                         egui::Align2::LEFT_CENTER,
                                         &track.artist,
-                                        FontId::proportional(11.2),
+                                        crate::theme::font(11.2),
                                         theme.text_muted,
                                     );
 
-                                    // Duration or delete button on hover
+                                    // Queue reordering + remove controls appear on hover.
                                     if item_resp.hovered() {
+                                        let up_rect = Rect::from_center_size(
+                                            Pos2::new(rect.max.x - 52.0, cy),
+                                            Vec2::new(14.0, 18.0),
+                                        );
+                                        let down_rect = Rect::from_center_size(
+                                            Pos2::new(rect.max.x - 35.0, cy),
+                                            Vec2::new(14.0, 18.0),
+                                        );
+                                        let can_up = orig_idx > start;
+                                        let can_down = orig_idx + 1 < qlen;
+                                        let up_hov = can_up && ui.rect_contains_pointer(up_rect);
+                                        let down_hov =
+                                            can_down && ui.rect_contains_pointer(down_rect);
+                                        let up_col = if up_hov {
+                                            theme.accent_highlight
+                                        } else {
+                                            theme.text_muted
+                                        };
+                                        let down_col = if down_hov {
+                                            theme.accent_highlight
+                                        } else {
+                                            theme.text_muted
+                                        };
+                                        painter.text(
+                                            up_rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            "↑",
+                                            crate::theme::font(13.0),
+                                            if can_up { up_col } else { theme.text_dim },
+                                        );
+                                        painter.text(
+                                            down_rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            "↓",
+                                            crate::theme::font(13.0),
+                                            if can_down { down_col } else { theme.text_dim },
+                                        );
+                                        if up_hov && ui.input(|i| i.pointer.primary_clicked()) {
+                                            action.move_queue = Some((orig_idx, -1));
+                                            action.play_queue_index = None;
+                                        }
+                                        if down_hov && ui.input(|i| i.pointer.primary_clicked()) {
+                                            action.move_queue = Some((orig_idx, 1));
+                                            action.play_queue_index = None;
+                                        }
+
                                         let del_rect = Rect::from_center_size(
                                             Pos2::new(rect.max.x - 12.0, cy),
                                             Vec2::new(14.0, 14.0),
                                         );
                                         let del_hov = ui.rect_contains_pointer(del_rect);
                                         let del_col = if del_hov {
-                                            theme.accent_magenta
+                                            theme.accent_highlight
                                         } else {
                                             theme.text_muted
                                         };
@@ -292,13 +340,14 @@ impl<'a> RightPanel<'a> {
                                         );
                                         if del_hov && ui.input(|i| i.pointer.primary_clicked()) {
                                             action.remove_queue_index = Some(orig_idx);
+                                            action.play_queue_index = None;
                                         }
                                     } else {
                                         painter.text(
                                             Pos2::new(rect.max.x - 4.0, cy),
                                             egui::Align2::RIGHT_CENTER,
                                             format_duration(track.duration_secs as f64),
-                                            FontId::proportional(11.8),
+                                            crate::theme::font(11.8),
                                             theme.text_muted,
                                         );
                                     }
@@ -337,7 +386,7 @@ impl<'a> RightPanel<'a> {
                                 Pos2::new(clear_rect.center().x - 24.0, clear_rect.center().y),
                                 egui::Align2::LEFT_CENTER,
                                 "Clear Queue",
-                                FontId::proportional(12.5),
+                                crate::theme::font(12.5),
                                 self.theme.text_secondary,
                             );
 
@@ -359,7 +408,7 @@ impl<'a> RightPanel<'a> {
                         if let Some(caption) = caption {
                             ui.label(
                                 egui::RichText::new(caption)
-                                    .font(FontId::proportional(11.0))
+                                    .font(crate::theme::font(11.0))
                                     .color(self.theme.text_dim),
                             );
                             ui.add_space(6.0);
@@ -375,7 +424,7 @@ impl<'a> RightPanel<'a> {
                                         for line in plain.lines() {
                                             ui.label(
                                                 egui::RichText::new(line)
-                                                    .font(FontId::proportional(13.0))
+                                                    .font(crate::theme::font(13.0))
                                                     .color(self.theme.text_secondary),
                                             );
                                         }
@@ -385,7 +434,7 @@ impl<'a> RightPanel<'a> {
                                     ui.add_space(40.0);
                                     ui.label(
                                         egui::RichText::new("Looking for lyrics...")
-                                            .font(FontId::proportional(13.5))
+                                            .font(crate::theme::font(13.5))
                                             .color(self.theme.text_muted),
                                     );
                                 });
@@ -394,7 +443,7 @@ impl<'a> RightPanel<'a> {
                                     ui.add_space(40.0);
                                     ui.label(
                                         egui::RichText::new("No lyrics available")
-                                            .font(FontId::proportional(13.5))
+                                            .font(crate::theme::font(13.5))
                                             .color(self.theme.text_muted),
                                     );
                                     ui.add_space(6.0);
@@ -402,12 +451,12 @@ impl<'a> RightPanel<'a> {
                                         egui::RichText::new(
                                             "Place a .lrc or .txt file beside the track,",
                                         )
-                                        .font(FontId::proportional(11.5))
+                                        .font(crate::theme::font(11.5))
                                         .color(self.theme.text_dim),
                                     );
                                     ui.label(
                                         egui::RichText::new("or embed lyrics in the file's tags.")
-                                            .font(FontId::proportional(11.5))
+                                            .font(crate::theme::font(11.5))
                                             .color(self.theme.text_dim),
                                     );
                                 });
@@ -427,7 +476,7 @@ impl<'a> RightPanel<'a> {
                                         let is_current = idx == active_idx;
 
                                         let (font_size, color) = if is_current {
-                                            (16.0, self.theme.accent_magenta)
+                                            (16.0, self.theme.accent_highlight)
                                         } else if idx < active_idx {
                                             (12.5, self.theme.text_muted)
                                         } else {
@@ -436,12 +485,12 @@ impl<'a> RightPanel<'a> {
 
                                         let rich = if is_current {
                                             egui::RichText::new(&line.text)
-                                                .font(FontId::proportional(font_size))
+                                                .font(crate::theme::font(font_size))
                                                 .strong()
                                                 .color(color)
                                         } else {
                                             egui::RichText::new(&line.text)
-                                                .font(FontId::proportional(font_size))
+                                                .font(crate::theme::font(font_size))
                                                 .color(color)
                                         };
 
@@ -477,22 +526,32 @@ impl<'a> RightPanel<'a> {
                     action.toggle_mute = true;
                 }
 
-                // Gradient Volume Slider filling entire remaining width
+                // Full-width volume slider with a single jade fill.
                 let slider_w = (ui.available_width() - 4.0).max(60.0);
                 let (slider_rect, slider_resp) =
                     ui.allocate_exact_size(Vec2::new(slider_w, 20.0), Sense::click_and_drag());
 
+                slider_resp.widget_info(|| {
+                    egui::WidgetInfo::slider(
+                        true,
+                        if self.is_muted {
+                            0.0
+                        } else {
+                            self.volume as f64
+                        },
+                        "Volume",
+                    )
+                });
                 let painter = ui.painter_at(slider_rect);
                 let cy = slider_rect.center().y;
 
-                // Background track
+                // Background track (clearly visible in both dark & light modes)
                 let track_rect = Rect::from_min_max(
                     Pos2::new(slider_rect.min.x, cy - 2.0),
                     Pos2::new(slider_rect.max.x, cy + 2.0),
                 );
-                painter.rect_filled(track_rect, CornerRadius::same(2), self.theme.bg_input);
+                painter.rect_filled(track_rect, CornerRadius::same(2), self.theme.slider_track);
 
-                // Filled portion with gradient (electric indigo -> luminous lavender)
                 let effective_vol = if self.is_muted {
                     0.0
                 } else {
@@ -501,29 +560,26 @@ impl<'a> RightPanel<'a> {
                 let filled_w = slider_w * effective_vol;
 
                 if filled_w > 0.0 {
-                    let num_slices = (filled_w / 3.0).clamp(1.0, 40.0) as usize;
-                    for i in 0..num_slices {
-                        let t0 = i as f32 / num_slices as f32;
-                        let t1 = (i + 1) as f32 / num_slices as f32;
-                        let x0 = slider_rect.min.x + filled_w * t0;
-                        let x1 = slider_rect.min.x + filled_w * t1;
-                        let r = (236.0 * (1.0 - t0) + 129.0 * t0) as u8;
-                        let g = (72.0 * (1.0 - t0) + 140.0 * t0) as u8;
-                        let b = (153.0 * (1.0 - t0) + 248.0 * t0) as u8;
-                        let col = Color32::from_rgb(r, g, b);
-                        let slice_rect =
-                            Rect::from_min_max(Pos2::new(x0, cy - 2.0), Pos2::new(x1, cy + 2.0));
-                        painter.rect_filled(
-                            slice_rect,
-                            CornerRadius::same(if i == 0 { 2 } else { 0 }),
-                            col,
-                        );
-                    }
+                    let filled_rect = Rect::from_min_max(
+                        Pos2::new(slider_rect.min.x, cy - 2.0),
+                        Pos2::new(slider_rect.min.x + filled_w, cy + 2.0),
+                    );
+                    painter.rect_filled(
+                        filled_rect,
+                        CornerRadius::same(2),
+                        self.theme.accent_highlight,
+                    );
                 }
 
-                // White circular handle
-                let thumb_pos = Pos2::new(slider_rect.min.x + filled_w, cy);
-                painter.circle_filled(thumb_pos, 6.0, Color32::WHITE);
+                if slider_resp.hovered() || slider_resp.dragged() {
+                    let thumb_pos = Pos2::new(slider_rect.min.x + filled_w, cy);
+                    painter.circle_filled(thumb_pos, 5.0, self.theme.text_primary);
+                    painter.circle_stroke(
+                        thumb_pos,
+                        5.0,
+                        Stroke::new(1.5_f32, self.theme.bg_sidebar),
+                    );
+                }
 
                 if slider_resp.dragged() || slider_resp.clicked() {
                     if let Some(pos) = slider_resp.interact_pointer_pos() {

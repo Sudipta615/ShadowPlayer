@@ -44,7 +44,7 @@ pub enum TagWriteError {
 }
 
 #[cfg(feature = "tag-write")]
-fn lofty_err(e: lofty::error::LoftyError) -> TagWriteError {
+fn lofty_err(e: impl std::fmt::Display) -> TagWriteError {
     TagWriteError::Lofty(e.to_string())
 }
 
@@ -149,20 +149,18 @@ pub fn write_loudness_tags(path: &Path, meta: &LoudnessMetadata) -> Result<(), T
 #[cfg(feature = "tag-write")]
 fn set_loudness(tag: &mut Tag, meta: &LoudnessMetadata) {
     if let Some(r128_gain) = meta.ebu_r128_loudness {
-        // R128 keys are not in lofty's ItemKey map, so `insert_text` would
-        // drop them; `insert_unchecked` writes the raw key (in spec form:
-        // LUFS × 100).
-        tag.insert_unchecked(TagItem::new(
-            ItemKey::Unknown("R128_TRACK_GAIN".to_string()),
-            ItemValue::Text(format!("{:.0}", r128_gain * 100.0)),
-        ));
+        // EBU R128 gain is a Vorbis-comment key. Lofty 0.25 dropped arbitrary
+        // vendor keys, so ID3v2/MP4/APE containers cannot carry R128_TRACK_GAIN
+        // through its public API; those containers still get ReplayGain 2.0
+        // below. Values use the EBU integer form (LUFS × 100).
+        let value = format!("{:.0}", r128_gain * 100.0);
+        if tag.tag_type() == TagType::VorbisComments {
+            tag.insert_unchecked(TagItem::new(ItemKey::R128TrackGain, ItemValue::Text(value)));
+        }
     }
-    if let Some(r128_peak) = meta.ebu_r128_peak {
-        tag.insert_unchecked(TagItem::new(
-            ItemKey::Unknown("R128_TRACK_PEAK".to_string()),
-            ItemValue::Text(format!("{:.0}", r128_peak * 100.0)),
-        ));
-    }
+    // Lofty 0.25 no longer exposes arbitrary vendor keys, and its ItemKey
+    // map has no R128_TRACK_PEAK entry. The peak stays in ShadowPlayer's
+    // cache rather than being written as an invalid key.
     if let Some(rg_gain) = meta.replaygain_track_db {
         tag.insert_text(ItemKey::ReplayGainTrackGain, format!("{:.2} dB", rg_gain));
     }
@@ -231,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_and_reads_back_r128_tags() {
+    fn writes_and_reads_back_replaygain_tags() {
         let dir = test_dir("roundtrip");
         let path = dir.join("loudness.wav");
         std::fs::write(&path, build_wav(4410)).unwrap();
@@ -251,24 +249,37 @@ mod tests {
             ),
         }
 
-        // Read back through lofty directly.
+        // Read back through lofty directly. WAV carries ID3v2, which can hold
+        // the standard ReplayGain frames but not an arbitrary R128 vendor key.
         let tagged = match lofty::read_from_path(&path) {
             Ok(t) => t,
             Err(e) => panic!("read_from_path failed: {e:?}"),
         };
         let tag = tagged.primary_tag().expect("tag must exist");
-        assert!(tag
-            .get_string(&ItemKey::Unknown("R128_TRACK_GAIN".to_string()))
-            .is_some());
-        assert!(tag.get_string(&ItemKey::ReplayGainTrackGain).is_some());
-
-        // NOTE: we verify the round trip through lofty (the tags are in the
-        // file with the right keys/values). The engine's own reader picks
-        // these up for Vorbis-comment containers (FLAC/Ogg/Opus); symphonia's
-        // WAV probe does not surface custom ID3v2 TXXX frames, which is a
-        // pre-existing symphonia limitation rather than a write-back defect.
+        assert_eq!(
+            tag.get_string(ItemKey::ReplayGainTrackGain),
+            Some("-4.00 dB")
+        );
+        assert!(tag.get_string(ItemKey::ReplayGainTrackPeak).is_some());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn r128_gain_is_written_for_vorbis_comments() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        set_loudness(
+            &mut tag,
+            &LoudnessMetadata {
+                ebu_r128_loudness: Some(-14.0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            tag.get_string(ItemKey::R128TrackGain),
+            Some("-1400"),
+            "R128 gain must use the EBU integer form"
+        );
     }
 
     #[test]
@@ -304,12 +315,12 @@ mod tests {
         let tagged = lofty::read_from_path(&path).expect("read back");
         let tag = tagged.primary_tag().expect("tag must exist");
         assert_eq!(
-            tag.get_string(&ItemKey::ReplayGainAlbumGain),
+            tag.get_string(ItemKey::ReplayGainAlbumGain),
             Some("-5.80 dB"),
             "album gain must be written, not silently dropped"
         );
         assert_eq!(
-            tag.get_string(&ItemKey::ReplayGainAlbumPeak),
+            tag.get_string(ItemKey::ReplayGainAlbumPeak),
             Some("0.52218205"),
             "album peak must be written"
         );
@@ -345,7 +356,7 @@ mod tests {
         assert_eq!(
             tagged
                 .primary_tag()
-                .and_then(|t| t.get_string(&ItemKey::ReplayGainAlbumGain)),
+                .and_then(|t| t.get_string(ItemKey::ReplayGainAlbumGain)),
             Some("-3.00 dB")
         );
 

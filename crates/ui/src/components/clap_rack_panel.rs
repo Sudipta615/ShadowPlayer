@@ -11,7 +11,7 @@
 //! which keeps "what the rack looks like" and "what the rack does" separable —
 //! and testable without a window.
 
-use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, Pos2, Rect, Stroke, Vec2, Window};
+use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Stroke, Vec2, Window};
 
 use crate::state::clap_rack::{ClapRackActions, ClapRackPreset, ClapRackState};
 use crate::theme::Theme;
@@ -97,7 +97,7 @@ fn render_header(
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("Plugin Rack")
-                .font(FontId::proportional(15.0))
+                .font(crate::theme::font(15.0))
                 .color(theme.text_primary)
                 .strong(),
         );
@@ -125,21 +125,21 @@ fn render_header(
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new(&plugin.name)
-                                .font(FontId::proportional(13.5))
+                                .font(crate::theme::font(13.5))
                                 .color(theme.text_primary)
                                 .strong(),
                         );
                         if !plugin.vendor.trim().is_empty() {
                             ui.label(
                                 egui::RichText::new(format!("· {}", plugin.vendor))
-                                    .font(FontId::proportional(11.5))
+                                    .font(crate::theme::font(11.5))
                                     .color(theme.text_secondary),
                             );
                         }
                         if !plugin.version.trim().is_empty() {
                             ui.label(
                                 egui::RichText::new(format!("v{}", plugin.version))
-                                    .font(FontId::proportional(11.0))
+                                    .font(crate::theme::font(11.0))
                                     .color(theme.text_muted),
                             );
                         }
@@ -148,7 +148,7 @@ fn render_header(
                 None => {
                     ui.label(
                         egui::RichText::new("No plugin loaded")
-                            .font(FontId::proportional(13.0))
+                            .font(crate::theme::font(13.0))
                             .color(theme.text_secondary),
                     );
                 }
@@ -156,7 +156,7 @@ fn render_header(
 
             if let Some(error) = &view.rack.error {
                 let text = egui::RichText::new(error)
-                    .font(FontId::proportional(11.0))
+                    .font(crate::theme::font(11.0))
                     .color(theme.destructive);
                 ui.label(text);
             }
@@ -183,7 +183,7 @@ fn render_header(
                 if view.rack.is_loaded() && view.rack.has_state {
                     ui.label(
                         egui::RichText::new("· state available")
-                            .font(FontId::proportional(10.5))
+                            .font(crate::theme::font(10.5))
                             .color(theme.text_muted),
                     );
                 }
@@ -193,7 +193,7 @@ fn render_header(
                             "· {} samples latency",
                             view.rack.latency_samples
                         ))
-                        .font(FontId::proportional(10.5))
+                        .font(crate::theme::font(10.5))
                         .color(theme.text_muted),
                     );
                 }
@@ -223,8 +223,8 @@ fn render_header(
         ui.add_space(6.0);
         ui.label(
             egui::RichText::new(notice)
-                .font(FontId::proportional(11.0))
-                .color(theme.accent_blue),
+                .font(crate::theme::font(11.0))
+                .color(theme.info),
         );
     }
 }
@@ -244,7 +244,7 @@ fn render_unloaded(
              editor is a native window, so this rack drives every parameter the \
              plugin publishes instead.",
         )
-        .font(FontId::proportional(11.5))
+        .font(crate::theme::font(11.5))
         .color(theme.text_secondary),
     );
 
@@ -263,7 +263,7 @@ fn render_unloaded(
     if let Some(error) = &library.error {
         ui.label(
             egui::RichText::new(format!("{}: {error}", library.path))
-                .font(FontId::proportional(11.0))
+                .font(crate::theme::font(11.0))
                 .color(theme.destructive),
         );
         ui.add_space(6.0);
@@ -279,7 +279,7 @@ fn render_unloaded(
     if library.plugins.is_empty() {
         ui.label(
             egui::RichText::new(format!("{} contains no CLAP plugins.", library.path))
-                .font(FontId::proportional(11.5))
+                .font(crate::theme::font(11.5))
                 .color(theme.text_secondary),
         );
         return;
@@ -291,7 +291,7 @@ fn render_unloaded(
         } else {
             format!("{} plugins in this library:", library.plugins.len())
         })
-        .font(FontId::proportional(11.5))
+        .font(crate::theme::font(11.5))
         .color(theme.text_primary),
     );
     ui.add_space(4.0);
@@ -307,7 +307,7 @@ fn render_unloaded(
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
                         ui.label(
                             egui::RichText::new(&plugin.name)
-                                .font(FontId::proportional(12.5))
+                                .font(crate::theme::font(12.5))
                                 .color(theme.text_primary)
                                 .strong(),
                         );
@@ -318,7 +318,7 @@ fn render_unloaded(
                         };
                         ui.label(
                             egui::RichText::new(detail)
-                                .font(FontId::proportional(10.5))
+                                .font(crate::theme::font(10.5))
                                 .color(theme.text_muted),
                         );
                     });
@@ -346,7 +346,7 @@ fn render_parameters(
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(format!("Parameters ({})", editable.len()))
-                .font(FontId::proportional(12.5))
+                .font(crate::theme::font(12.5))
                 .color(theme.text_primary)
                 .strong(),
         );
@@ -356,7 +356,7 @@ fn render_parameters(
                     "· {} hidden or read-only",
                     view.rack.params.len() - editable.len()
                 ))
-                .font(FontId::proportional(10.5))
+                .font(crate::theme::font(10.5))
                 .color(theme.text_muted),
             );
         }
@@ -365,7 +365,7 @@ fn render_parameters(
     if editable.is_empty() {
         ui.label(
             egui::RichText::new("This plugin publishes no editable parameters.")
-                .font(FontId::proportional(11.5))
+                .font(crate::theme::font(11.5))
                 .color(theme.text_secondary),
         );
         return;
@@ -398,13 +398,13 @@ fn render_parameters(
                     // would show — for an enumeration, the name of the mode.
                     ui.label(
                         egui::RichText::new(&param.value_text)
-                            .font(FontId::proportional(10.5))
+                            .font(crate::theme::font(10.5))
                             .color(theme.text_muted),
                     );
                 } else {
                     ui.label(
                         egui::RichText::new(format!("{:.3}", param.value))
-                            .font(FontId::proportional(10.5))
+                            .font(crate::theme::font(10.5))
                             .color(theme.text_muted),
                     );
                 }
@@ -445,9 +445,9 @@ fn param_label(ui: &mut egui::Ui, param: &engine::dsp::clap_rack::ClapParamInfo,
     };
     ui.label(
         egui::RichText::new(label)
-            .font(FontId::proportional(11.5))
+            .font(crate::theme::font(11.5))
             .color(if param.is_bypass {
-                theme.accent_orange
+                theme.accent_warm
             } else {
                 theme.text_secondary
             }),
@@ -475,7 +475,7 @@ fn render_presets(
 
     ui.label(
         egui::RichText::new(format!("Presets for this plugin ({})", relevant.len()))
-            .font(FontId::proportional(12.5))
+            .font(crate::theme::font(12.5))
             .color(theme.text_primary)
             .strong(),
     );
@@ -484,7 +484,7 @@ fn render_presets(
             "A preset stores the parameter values the host set, and the plugin's own \
              state when it has one.",
         )
-        .font(FontId::proportional(10.5))
+        .font(crate::theme::font(10.5))
         .color(theme.text_muted),
     );
 
@@ -509,7 +509,7 @@ fn render_presets(
     if relevant.is_empty() {
         ui.label(
             egui::RichText::new("No presets saved for this plugin yet.")
-                .font(FontId::proportional(11.0))
+                .font(crate::theme::font(11.0))
                 .color(theme.text_secondary),
         );
         return;
@@ -549,7 +549,7 @@ fn render_preset_row(
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
                     ui.label(
                         egui::RichText::new(&preset.name)
-                            .font(FontId::proportional(12.0))
+                            .font(crate::theme::font(12.0))
                             .color(theme.text_primary),
                     );
                     let detail = format!(
@@ -564,7 +564,7 @@ fn render_preset_row(
                     );
                     ui.label(
                         egui::RichText::new(detail)
-                            .font(FontId::proportional(10.0))
+                            .font(crate::theme::font(10.0))
                             .color(theme.text_muted),
                     );
                 });
@@ -586,17 +586,13 @@ fn render_preset_row(
 /// settings tab's private helpers.
 fn pill(ui: &mut egui::Ui, label: &str, theme: &Theme, primary: bool) -> egui::Response {
     let text = egui::RichText::new(label)
-        .font(FontId::proportional(11.5))
+        .font(crate::theme::font(11.5))
         .color(if primary {
             Color32::WHITE
         } else {
             theme.text_primary
         });
-    let fill = if primary {
-        theme.accent_violet
-    } else {
-        theme.bg_pill
-    };
+    let fill = if primary { theme.accent } else { theme.bg_pill };
     ui.add(
         egui::Button::new(text)
             .fill(fill)

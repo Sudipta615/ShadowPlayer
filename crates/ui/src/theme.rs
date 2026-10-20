@@ -1,6 +1,89 @@
-use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
+use std::sync::{Arc, OnceLock};
 
-/// Color palette faithfully extracted from the reference design.
+use eframe::egui::{
+    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Stroke,
+    TextStyle, Vec2,
+};
+
+/// The one knob that controls the UI type scale.
+///
+/// Every explicit text size in the app goes through [`font`], so this is enough
+/// to make the interface comfortably larger without touching hundreds of
+/// individual call sites. The floor keeps the smallest chart and caption
+/// labels legible.
+pub const TEXT_SCALE: f32 = 1.08;
+pub const TEXT_MIN: f32 = 10.0;
+
+/// Font family used for headings and other display-sized text.
+fn display_family() -> FontFamily {
+    static DISPLAY: OnceLock<FontFamily> = OnceLock::new();
+    DISPLAY
+        .get_or_init(|| FontFamily::Name(Arc::from("inter-display")))
+        .clone()
+}
+
+/// The UI's proportional font at `size`, scaled and floored by the global
+/// typography tokens. Sizes at or above display scale use Inter Medium.
+pub fn font(size: f32) -> FontId {
+    let size = (size.max(TEXT_MIN) * TEXT_SCALE).max(11.0);
+    let family = if size >= 20.0 {
+        display_family()
+    } else {
+        FontFamily::Proportional
+    };
+    FontId::new(size, family)
+}
+
+/// Monospace text (track numbers, technical values, diagnostics).
+pub fn mono_font(size: f32) -> FontId {
+    FontId::new(
+        (size.max(9.0) * TEXT_SCALE).max(10.5),
+        FontFamily::Monospace,
+    )
+}
+
+/// Install the bundled Inter family. Called once, before the first frame.
+///
+/// Inter is deliberately bundled rather than discovered from the system so the
+/// app looks the same on every platform. The default egui fonts stay in the
+/// fallback chain for glyphs Inter does not carry.
+pub fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+
+    fonts.font_data.insert(
+        "inter-regular".to_owned(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-Regular.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "inter-medium".to_owned(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-Medium.ttf"
+        ))),
+    );
+
+    let fallback = fonts
+        .families
+        .get(&FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut proportional = vec!["inter-regular".to_owned()];
+    proportional.extend(fallback.iter().cloned());
+    fonts
+        .families
+        .insert(FontFamily::Proportional, proportional);
+
+    let mut display = vec!["inter-medium".to_owned(), "inter-regular".to_owned()];
+    display.extend(fallback);
+    fonts.families.insert(display_family(), display);
+
+    ctx.set_fonts(fonts);
+}
+
+/// ShadowPlayer's visual identity: obsidian surfaces, jade actions, mint
+/// highlights, and a warm amber secondary. No purple, no multi-hue ramps.
 #[derive(Clone, Copy, Debug)]
 pub struct Theme {
     pub is_light: bool,
@@ -16,14 +99,17 @@ pub struct Theme {
     pub bg_input: Color32,
     pub border_subtle: Color32,
     pub border_card: Color32,
+    pub slider_track: Color32,
 
-    // Accents & Gradients
-    pub accent_purple: Color32,
-    pub accent_magenta: Color32,
-    pub accent_pink: Color32,
-    pub accent_violet: Color32,
-    pub accent_orange: Color32,
-    pub accent_blue: Color32,
+    // Accents
+    /// Primary jade fill: active navigation, primary buttons, progress.
+    pub accent: Color32,
+    /// Mint/teal highlight for icon strokes, selected labels and focus.
+    pub accent_highlight: Color32,
+    /// Amber secondary: favourites, ratings, warm status accents.
+    pub accent_warm: Color32,
+    /// Informational blue.
+    pub info: Color32,
 
     // Text colors
     pub text_primary: Color32,
@@ -46,7 +132,7 @@ pub struct Theme {
     pub destructive: Color32,
     /// Translucent scrim drawn over artwork on hover.
     pub overlay_scrim: Color32,
-    /// Background of the \"scanning…\" information banner.
+    /// Background of the "scanning…" information banner.
     pub scan_banner_bg: Color32,
     /// Sun / light-mode accent.
     pub sun_accent: Color32,
@@ -54,86 +140,84 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self {
-            is_light: false,
-            bg_app: Color32::from_rgb(3, 9, 23), // #030917 Ultra-dark obsidian navy
-            bg_sidebar: Color32::from_rgb(9, 14, 28), // #090e1c Deep dark sidebar
-            bg_card: Color32::from_rgb(11, 18, 34), // #0b1222 Deep dark card surface
-            bg_card_hover: Color32::from_rgb(22, 30, 48), // #161e30 Card hover
-            bg_card_active: Color32::from_rgb(19, 23, 57), // #131739 Active row indigo glow
-            bg_pill: Color32::from_rgb(8, 13, 27), // #080d1b Pill background
-            bg_pill_hover: Color32::from_rgb(19, 27, 50), // #131b32 Pill hover
-            bg_input: Color32::from_rgb(12, 19, 34), // #0c1322 Search input
-            border_subtle: Color32::from_rgb(19, 27, 44), // #131b2c Subtle border
-            border_card: Color32::from_rgb(25, 35, 56), // #192338 Card border
-
-            accent_purple: Color32::from_rgb(54, 42, 207), // #362acf Electric royal indigo
-            accent_magenta: Color32::from_rgb(129, 140, 248), // #818cf8 Luminous soft indigo
-            accent_pink: Color32::from_rgb(236, 72, 153),  // #ec4899 Rose pink
-            accent_violet: Color32::from_rgb(54, 42, 207), // #362acf Primary active indigo
-            accent_orange: Color32::from_rgb(249, 115, 22), // #f97316 Amber orange
-            accent_blue: Color32::from_rgb(59, 130, 246),  // #3b82f6 Sky blue
-
-            text_primary: Color32::from_rgb(248, 249, 250), // #f8f9fa Crisp off-white
-            text_secondary: Color32::from_rgb(203, 213, 225), // #cbd5e1 Soft slate
-            text_muted: Color32::from_rgb(148, 163, 184),   // #94a3b8 Slate text
-            text_dim: Color32::from_rgb(100, 116, 139),     // #64748b Deep slate
-
-            bit_perfect_green: Color32::from_rgb(52, 211, 153),
-            warning_yellow: Color32::from_rgb(251, 191, 36),
-
-            bg_active_row: Color32::from_rgb(19, 23, 57),
-            border_active_row: Color32::from_rgb(54, 42, 207),
-            artwork_placeholder: Color32::from_rgb(30, 24, 48),
-            destructive: Color32::from_rgb(244, 63, 94),
-            overlay_scrim: Color32::from_rgba_unmultiplied(0, 0, 0, 150),
-            scan_banner_bg: Color32::from_rgb(38, 20, 64),
-            sun_accent: Color32::from_rgb(245, 158, 11),
-        }
+        Self::dark()
     }
 }
 
 impl Theme {
     pub fn dark() -> Self {
-        Self::default()
+        Self {
+            is_light: false,
+            bg_app: Color32::from_rgb(11, 15, 16), // #0B0F10
+            bg_sidebar: Color32::from_rgb(14, 20, 22), // #0E1416
+            bg_card: Color32::from_rgb(18, 24, 26), // #12181A
+            bg_card_hover: Color32::from_rgb(25, 33, 36), // #192124
+            bg_card_active: Color32::from_rgb(16, 48, 43), // #10302B
+            bg_pill: Color32::from_rgb(21, 28, 30), // #151C1E
+            bg_pill_hover: Color32::from_rgb(32, 43, 46), // #202B2E
+            bg_input: Color32::from_rgb(16, 22, 25), // #101619
+            border_subtle: Color32::from_rgb(32, 43, 46), // #202B2E
+            border_card: Color32::from_rgb(42, 54, 57), // #2A3639
+            slider_track: Color32::from_rgb(43, 56, 59), // #2B383B
+
+            accent: Color32::from_rgb(15, 118, 110), // #0F766E jade
+            accent_highlight: Color32::from_rgb(94, 234, 212), // #5EEAD4 mint
+            accent_warm: Color32::from_rgb(245, 158, 11), // #F59E0B amber
+            info: Color32::from_rgb(56, 189, 248),   // #38BDF8 sky
+
+            text_primary: Color32::from_rgb(242, 246, 245), // #F2F6F5
+            text_secondary: Color32::from_rgb(185, 199, 196), // #B9C7C4
+            text_muted: Color32::from_rgb(131, 145, 142),   // #83918E
+            text_dim: Color32::from_rgb(100, 113, 110),     // #64716E
+
+            bit_perfect_green: Color32::from_rgb(52, 211, 153), // #34D399
+            warning_yellow: Color32::from_rgb(251, 191, 36),    // #FBBF24
+
+            bg_active_row: Color32::from_rgb(16, 48, 43), // #10302B
+            border_active_row: Color32::from_rgb(45, 212, 191), // #2DD4BF
+            artwork_placeholder: Color32::from_rgb(26, 36, 38), // #1A2426
+            destructive: Color32::from_rgb(251, 113, 133), // #FB7185
+            overlay_scrim: Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            scan_banner_bg: Color32::from_rgb(16, 43, 40), // #102B28
+            sun_accent: Color32::from_rgb(245, 158, 11),
+        }
     }
 
     pub fn light() -> Self {
         Self {
             is_light: true,
-            bg_app: Color32::from_rgb(243, 244, 248),
-            bg_sidebar: Color32::from_rgb(234, 237, 244),
+            bg_app: Color32::from_rgb(244, 247, 246), // #F4F7F6
+            bg_sidebar: Color32::from_rgb(236, 242, 240), // #ECF2F0
             bg_card: Color32::from_rgb(255, 255, 255),
-            bg_card_hover: Color32::from_rgb(238, 242, 252),
-            bg_card_active: Color32::from_rgb(233, 226, 250),
-            bg_pill: Color32::from_rgb(228, 233, 245),
-            bg_pill_hover: Color32::from_rgb(218, 225, 240),
-            bg_input: Color32::from_rgb(240, 243, 250),
-            border_subtle: Color32::from_rgb(212, 220, 235),
-            border_card: Color32::from_rgb(204, 214, 232),
+            bg_card_hover: Color32::from_rgb(239, 245, 243), // #EFF5F3
+            bg_card_active: Color32::from_rgb(223, 243, 238), // #DFF3EE
+            bg_pill: Color32::from_rgb(232, 239, 237),       // #E8EFED
+            bg_pill_hover: Color32::from_rgb(220, 231, 227), // #DCE7E3
+            bg_input: Color32::from_rgb(241, 245, 244),      // #F1F5F4
+            border_subtle: Color32::from_rgb(217, 226, 223), // #D9E2DF
+            border_card: Color32::from_rgb(202, 216, 211),   // #CAD8D3
+            slider_track: Color32::from_rgb(201, 214, 210),  // #C9D6D2
 
-            accent_purple: Color32::from_rgb(147, 51, 234),
-            accent_magenta: Color32::from_rgb(225, 29, 72),
-            accent_pink: Color32::from_rgb(236, 72, 153),
-            accent_violet: Color32::from_rgb(109, 40, 217),
-            accent_orange: Color32::from_rgb(249, 115, 22),
-            accent_blue: Color32::from_rgb(14, 165, 233),
+            accent: Color32::from_rgb(15, 118, 110), // #0F766E jade
+            accent_highlight: Color32::from_rgb(13, 148, 136), // #0D9488
+            accent_warm: Color32::from_rgb(180, 83, 9), // #B45309
+            info: Color32::from_rgb(3, 105, 161),    // #0369A1
 
-            text_primary: Color32::from_rgb(15, 23, 42),
-            text_secondary: Color32::from_rgb(51, 65, 85),
-            text_muted: Color32::from_rgb(100, 116, 139),
-            text_dim: Color32::from_rgb(148, 163, 184),
+            text_primary: Color32::from_rgb(16, 32, 29), // #10201D
+            text_secondary: Color32::from_rgb(56, 75, 71), // #384B47
+            text_muted: Color32::from_rgb(95, 113, 108), // #5F716C
+            text_dim: Color32::from_rgb(132, 147, 143),  // #84938F
 
-            bit_perfect_green: Color32::from_rgb(22, 163, 74),
-            warning_yellow: Color32::from_rgb(202, 138, 4),
+            bit_perfect_green: Color32::from_rgb(21, 128, 61), // #15803D
+            warning_yellow: Color32::from_rgb(180, 83, 9),     // #B45309
 
-            bg_active_row: Color32::from_rgb(233, 226, 250),
-            border_active_row: Color32::from_rgb(147, 51, 234),
-            artwork_placeholder: Color32::from_rgb(228, 231, 240),
-            destructive: Color32::from_rgb(220, 38, 38),
+            bg_active_row: Color32::from_rgb(223, 243, 238), // #DFF3EE
+            border_active_row: Color32::from_rgb(15, 118, 110), // #0F766E
+            artwork_placeholder: Color32::from_rgb(227, 235, 232), // #E3EBE8
+            destructive: Color32::from_rgb(190, 18, 60),     // #BE123C
             overlay_scrim: Color32::from_rgba_unmultiplied(255, 255, 255, 170),
-            scan_banner_bg: Color32::from_rgb(240, 236, 252),
-            sun_accent: Color32::from_rgb(217, 119, 6),
+            scan_banner_bg: Color32::from_rgb(226, 244, 239), // #E2F4EF
+            sun_accent: Color32::from_rgb(180, 83, 9),
         }
     }
 
@@ -145,7 +229,11 @@ impl Theme {
         }
     }
 
-    /// Apply theme styles to egui context
+    /// Apply theme styles to egui context.
+    ///
+    /// The app calls this only when the theme actually changes; calling it every
+    /// frame made egui rebuild style-dependent layout and tessellation work for
+    /// no visual benefit.
     pub fn apply(&self, ctx: &egui::Context) {
         let mut visuals = if self.is_light {
             egui::Visuals::light()
@@ -157,41 +245,53 @@ impl Theme {
         visuals.window_fill = self.bg_card;
         visuals.faint_bg_color = self.bg_card;
         visuals.extreme_bg_color = self.bg_app;
+        visuals.hyperlink_color = self.accent_highlight;
+        visuals.warn_fg_color = self.warning_yellow;
+        visuals.error_fg_color = self.destructive;
 
+        let rounding = CornerRadius::same(10);
         visuals.widgets.noninteractive.bg_fill = self.bg_card;
         visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, self.border_subtle);
         visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, self.text_primary);
-        visuals.widgets.noninteractive.corner_radius = CornerRadius::same(10);
+        visuals.widgets.noninteractive.corner_radius = rounding;
 
         visuals.widgets.inactive.bg_fill = self.bg_pill;
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, self.border_subtle);
         visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, self.text_secondary);
-        visuals.widgets.inactive.corner_radius = CornerRadius::same(10);
+        visuals.widgets.inactive.corner_radius = rounding;
 
         visuals.widgets.hovered.bg_fill = self.bg_pill_hover;
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, self.accent_magenta);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, self.accent_highlight);
         visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, self.text_primary);
-        visuals.widgets.hovered.corner_radius = CornerRadius::same(10);
+        visuals.widgets.hovered.corner_radius = rounding;
 
-        visuals.widgets.active.bg_fill = self.accent_violet;
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, self.accent_magenta);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, self.text_primary);
-        visuals.widgets.active.corner_radius = CornerRadius::same(10);
+        visuals.widgets.active.bg_fill = self.accent;
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, self.accent_highlight);
+        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
+        visuals.widgets.active.corner_radius = rounding;
 
-        visuals.selection.bg_fill = self.accent_violet;
-        visuals.selection.stroke = Stroke::new(1.0_f32, self.accent_magenta);
+        visuals.selection.bg_fill = self.accent;
+        visuals.selection.stroke = Stroke::new(1.0_f32, self.accent_highlight);
 
-        // Customize window frame
-        visuals.window_corner_radius = CornerRadius::same(16);
+        visuals.window_corner_radius = CornerRadius::same(14);
         visuals.window_stroke = Stroke::new(1.0_f32, self.border_card);
+        visuals.menu_corner_radius = CornerRadius::same(12);
 
         ctx.set_visuals(visuals);
 
-        // Typography styling
         let mut style = (*ctx.style_of(ctx.theme())).clone();
-        style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-        style.spacing.window_margin = Margin::same(16);
-        style.spacing.button_padding = Vec2::new(12.0, 8.0);
+        style.spacing.item_spacing = Vec2::new(10.0, 10.0);
+        style.spacing.window_margin = Margin::same(20);
+        style.spacing.button_padding = Vec2::new(14.0, 8.0);
+        style.spacing.interact_size.y = 36.0;
+        style.text_styles = [
+            (TextStyle::Small, font(10.5)),
+            (TextStyle::Body, font(13.0)),
+            (TextStyle::Button, font(13.0)),
+            (TextStyle::Heading, font(21.0)),
+            (TextStyle::Monospace, mono_font(12.0)),
+        ]
+        .into();
         ctx.set_style_of(ctx.theme(), style);
     }
 }

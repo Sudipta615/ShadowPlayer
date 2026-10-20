@@ -24,6 +24,14 @@ pub struct AppState {
     pub is_grid_view: bool,
     pub right_tab: RightTab,
     pub visualizer_mode: VisualizerMode,
+    /// Wide layout: show the queue/lyrics drawer as a column.
+    pub right_panel_visible: bool,
+    /// Narrow layout: show the queue/lyrics drawer as a temporary overlay.
+    pub right_overlay_open: bool,
+    /// Single-window compact player mode.
+    pub mini_player: bool,
+    /// Keep the mini player above other windows (best-effort on Wayland).
+    pub mini_always_on_top: bool,
 
     pub volume: f32,
     pub is_muted: bool,
@@ -60,6 +68,10 @@ impl Default for AppState {
             is_grid_view: false,
             right_tab: RightTab::Queue,
             visualizer_mode: VisualizerMode::Spectrum,
+            right_panel_visible: true,
+            right_overlay_open: false,
+            mini_player: false,
+            mini_always_on_top: true,
 
             volume: 0.60,
             is_muted: false,

@@ -8,6 +8,7 @@ pub mod genres_view;
 pub mod help_modal;
 pub mod icons;
 pub mod info_box;
+pub mod mini_player;
 pub mod now_playing;
 pub mod right_panel;
 pub mod settings_tab;

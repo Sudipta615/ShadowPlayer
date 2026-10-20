@@ -6,7 +6,7 @@ use config::{
 };
 use domain::ids::ScanRootId;
 use domain::models::ScanRoot;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 use engine::AudioSource;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -332,49 +332,37 @@ pub fn dual_tone_slider(
         }
     }
 
-    // Background track
+    // Background track (clearly visible in both dark & light modes)
     let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
     ui.painter()
-        .rect_filled(track_rect, CornerRadius::same(2), theme.bg_input);
+        .rect_filled(track_rect, CornerRadius::same(2), theme.slider_track);
 
-    // Active dual-tone filled track
+    // Active single-hue filled track
     let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
     let thumb_x = rect.left() + thumb_t * rect.width();
     let filled_w = (thumb_x - track_rect.min.x).max(0.0);
     if filled_w > 0.0 {
-        let num_slices = (filled_w / 3.0).clamp(1.0, 40.0) as usize;
-        for i in 0..num_slices {
-            let t0 = i as f32 / num_slices as f32;
-            let t1 = (i + 1) as f32 / num_slices as f32;
-            let x0 = track_rect.min.x + filled_w * t0;
-            let x1 = track_rect.min.x + filled_w * t1;
-            let r = (236.0 * (1.0 - t0) + 129.0 * t0) as u8;
-            let g = (72.0 * (1.0 - t0) + 140.0 * t0) as u8;
-            let b = (153.0 * (1.0 - t0) + 248.0 * t0) as u8;
-            let col = Color32::from_rgb(r, g, b);
-            let slice_rect = Rect::from_min_max(
-                Pos2::new(x0, track_rect.min.y),
-                Pos2::new(x1, track_rect.max.y),
-            );
-            ui.painter().rect_filled(
-                slice_rect,
-                CornerRadius::same(if i == 0 { 2 } else { 0 }),
-                col,
-            );
-        }
+        let fill_rect = Rect::from_min_max(
+            Pos2::new(track_rect.min.x, track_rect.min.y),
+            Pos2::new(track_rect.min.x + filled_w, track_rect.max.y),
+        );
+        ui.painter()
+            .rect_filled(fill_rect, CornerRadius::same(2), theme.accent_highlight);
     }
 
-    // White thumb knob
+    // Thumb knob
     let thumb_pos = Pos2::new(thumb_x, rect.center().y);
     let is_hovered = resp.hovered() || resp.dragged();
     ui.painter().circle_filled(
         thumb_pos,
         if is_hovered { 7.5 } else { 6.0 },
-        Color32::from_rgba_premultiplied(129, 140, 248, if is_hovered { 80 } else { 40 }),
+        theme
+            .accent_highlight
+            .gamma_multiply(if is_hovered { 0.35 } else { 0.18 }),
     );
     ui.painter().circle_filled(thumb_pos, 5.0, Color32::WHITE);
     ui.painter()
-        .circle_stroke(thumb_pos, 5.0, Stroke::new(1.2, theme.accent_magenta));
+        .circle_stroke(thumb_pos, 5.0, Stroke::new(1.2, theme.accent_highlight));
 
     changed
 }
@@ -599,14 +587,14 @@ fn render_category_bar(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &
 
                 let p = ui.painter_at(tab_rect);
                 let bg = if is_active {
-                    theme.accent_violet
+                    theme.accent
                 } else if resp.hovered() {
                     theme.bg_pill_hover
                 } else {
                     theme.bg_pill
                 };
                 let border = if is_active {
-                    theme.accent_magenta
+                    theme.accent_highlight
                 } else {
                     Color32::TRANSPARENT
                 };
@@ -641,7 +629,7 @@ fn render_category_bar(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &
                     Pos2::new(tab_rect.min.x + 26.0, tab_rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     cat.title(),
-                    FontId::proportional(12.0),
+                    crate::theme::font(12.0),
                     text_color,
                 );
             }
@@ -668,8 +656,8 @@ fn render_playback_category(
             "Adjust playback rate and pitch using high-precision time-stretching or vintage varispeed",
             Some((
                 if state.speed == 1.0 && state.pitch_semitones == 0.0 { "NORMAL" } else { "MODIFIED" },
-                if state.speed == 1.0 && state.pitch_semitones == 0.0 { theme.bg_pill } else { theme.accent_violet.linear_multiply(0.3) },
-                if state.speed == 1.0 && state.pitch_semitones == 0.0 { theme.text_muted } else { theme.accent_pink },
+                if state.speed == 1.0 && state.pitch_semitones == 0.0 { theme.bg_pill } else { theme.accent.linear_multiply(0.3) },
+                if state.speed == 1.0 && state.pitch_semitones == 0.0 { theme.text_muted } else { theme.accent_warm },
             )),
             theme,
         );
@@ -750,7 +738,7 @@ fn render_playback_category(
                     TransitionMode::Stop => "HARD STOP",
                 },
                 theme.bg_pill,
-                theme.accent_violet,
+                theme.accent,
             )),
             theme,
         );
@@ -898,7 +886,7 @@ fn render_output_category(
             crate::components::icons::draw_speaker(
                 ui,
                 icon_rect.shrink2(Vec2::splat(6.0)),
-                if state.bit_perfect { Color32::WHITE } else { theme.accent_magenta },
+                if state.bit_perfect { Color32::WHITE } else { theme.accent_highlight },
                 false,
             );
 
@@ -907,7 +895,7 @@ fn render_output_category(
                     ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                     ui.label(
                         egui::RichText::new("Audiophile Bit-Perfect Direct Stream")
-                            .font(FontId::proportional(15.0))
+                            .font(crate::theme::font(15.0))
                             .strong()
                             .color(if state.bit_perfect { theme.bit_perfect_green } else { theme.text_primary }),
                     );
@@ -926,7 +914,7 @@ fn render_output_category(
                             "Enable to guarantee 100% bit-exact transmission to external DACs (disables DSP, EQ, and software volume)."
                         }
                     )
-                    .font(FontId::proportional(11.5))
+                    .font(crate::theme::font(11.5))
                     .color(theme.text_muted),
                 );
             });
@@ -998,7 +986,7 @@ fn render_output_category(
                 let edit = egui::TextEdit::singleline(&mut state.output_device)
                     .hint_text("Default output device...")
                     .desired_width(180.0)
-                    .font(FontId::proportional(12.0));
+                    .font(crate::theme::font(12.0));
                 ui.add(edit);
                 if ui.add(pill_btn("Apply Device", false, theme)).clicked() {
                     let dev = if state.output_device.is_empty() {
@@ -1274,7 +1262,7 @@ fn render_spatial_category(
                 let edit = egui::TextEdit::singleline(&mut state.hrtf_profile)
                     .hint_text("Default KEMAR...")
                     .desired_width(180.0)
-                    .font(FontId::proportional(12.0));
+                    .font(crate::theme::font(12.0));
                 ui.add(edit);
                 if ui.add(pill_btn("Apply Profile", false, theme)).clicked() {
                     actions.hrtf_profile_changed = Some(state.hrtf_profile.clone());
@@ -1324,7 +1312,7 @@ fn render_spatial_category(
             Some((
                 if state.room_enabled { "REVERB ACTIVE" } else { "BYPASSED" },
                 theme.bg_pill,
-                if state.room_enabled { theme.accent_violet } else { theme.text_muted },
+                if state.room_enabled { theme.accent } else { theme.text_muted },
             )),
             theme,
         );
@@ -1475,13 +1463,13 @@ fn render_chain_presets_card(
                     egui::TextEdit::singleline(chain_preset_draft_name)
                         .hint_text("Profile name...")
                         .desired_width(136.0)
-                        .font(FontId::proportional(12.0)),
+                        .font(crate::theme::font(12.0)),
                 );
                 ui.add(
                     egui::TextEdit::singleline(chain_preset_draft_note)
                         .hint_text("Note (optional)...")
                         .desired_width(150.0)
-                        .font(FontId::proportional(12.0)),
+                        .font(crate::theme::font(12.0)),
                 );
                 let can_save = !chain_preset_draft_name.trim().is_empty();
                 if ui
@@ -1501,7 +1489,7 @@ fn render_chain_presets_card(
                 egui::RichText::new(
                     "No chain presets yet. Dial in a curve, a crossfeed stage or a crossover, then save it above.",
                 )
-                .font(FontId::proportional(11.5))
+                .font(crate::theme::font(11.5))
                 .color(theme.text_dim),
             );
             return;
@@ -1520,19 +1508,19 @@ fn render_chain_presets_card(
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
                     ui.label(
                         egui::RichText::new(&preset.name)
-                            .font(FontId::proportional(13.0))
+                            .font(crate::theme::font(13.0))
                             .strong()
                             .color(theme.text_primary),
                     );
                     ui.label(
                         egui::RichText::new(preset.summary())
-                            .font(FontId::proportional(11.0))
+                            .font(crate::theme::font(11.0))
                             .color(theme.text_muted),
                     );
                     if !preset.note.is_empty() {
                         ui.label(
                             egui::RichText::new(&preset.note)
-                                .font(FontId::proportional(10.5))
+                                .font(crate::theme::font(10.5))
                                 .italics()
                                 .color(theme.text_dim),
                         );
@@ -1563,7 +1551,7 @@ fn render_chain_presets_card(
                         egui::TextEdit::singleline(chain_preset_rename_buffer)
                             .hint_text("New name...")
                             .desired_width(180.0)
-                            .font(FontId::proportional(12.0)),
+                            .font(crate::theme::font(12.0)),
                     );
                     let can_commit = !chain_preset_rename_buffer.trim().is_empty();
                     if ui
@@ -1641,7 +1629,7 @@ fn render_mixbus_category(
                 let edit = egui::TextEdit::singleline(&mut state.add_track_path)
                     .hint_text("Absolute path to audio stem...")
                     .desired_width(180.0)
-                    .font(FontId::proportional(12.0));
+                    .font(crate::theme::font(12.0));
                 ui.add(edit);
                 if ui.add(pill_btn("+ Add Stem", false, theme)).clicked()
                     && !state.add_track_path.is_empty()
@@ -2196,7 +2184,7 @@ fn render_clap_plugin_card(
             |ui| {
                 ui.label(
                     egui::RichText::new(state.clap.status_line())
-                        .font(FontId::proportional(11.5))
+                        .font(crate::theme::font(11.5))
                         .color(if state.clap.error.is_some() {
                             theme.destructive
                         } else if state.clap.loaded {
@@ -2263,7 +2251,7 @@ fn render_tools_category(
                 let edit = egui::TextEdit::singleline(&mut state.capture_path)
                     .hint_text("capture.wav...")
                     .desired_width(180.0)
-                    .font(FontId::proportional(12.0));
+                    .font(crate::theme::font(12.0));
                 ui.add(edit);
             },
         );
@@ -2277,7 +2265,7 @@ fn render_tools_category(
                 let edit = egui::TextEdit::singleline(&mut state.capture_device)
                     .hint_text("Default capture endpoint...")
                     .desired_width(180.0)
-                    .font(FontId::proportional(12.0));
+                    .font(crate::theme::font(12.0));
                 ui.add(edit);
             },
         );
@@ -2292,11 +2280,11 @@ fn render_tools_category(
                     .add(
                         egui::Button::new(
                             egui::RichText::new("Start Capture")
-                                .font(FontId::proportional(12.0))
+                                .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(theme.accent_violet)
+                        .fill(theme.accent)
                         .corner_radius(CornerRadius::same(8)),
                     )
                     .clicked()
@@ -2308,7 +2296,7 @@ fn render_tools_category(
                     .add(
                         egui::Button::new(
                             egui::RichText::new("Stop Capture")
-                                .font(FontId::proportional(12.0))
+                                .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
                         )
@@ -2343,7 +2331,7 @@ fn render_tools_category(
                 let edit = egui::TextEdit::singleline(&mut state.loudness_tag_path)
                     .hint_text("/path/to/song.flac…")
                     .desired_width(180.0)
-                    .font(FontId::proportional(12.0));
+                    .font(crate::theme::font(12.0));
                 ui.add(edit);
                 if ui.add(pill_btn("Write Tags", false, theme)).clicked()
                     && !state.loudness_tag_path.is_empty()
@@ -2396,7 +2384,7 @@ fn render_tools_category(
         if !extra.loudness_current.is_empty() {
             ui.label(
                 egui::RichText::new(extra.loudness_current)
-                    .font(FontId::proportional(11.0))
+                    .font(crate::theme::font(11.0))
                     .color(theme.text_muted),
             );
         }
@@ -2423,11 +2411,11 @@ fn render_tools_category(
                     .add(
                         egui::Button::new(
                             egui::RichText::new("Recover Stream & Re-arm")
-                                .font(FontId::proportional(12.0))
+                                .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(theme.accent_violet)
+                        .fill(theme.accent)
                         .corner_radius(CornerRadius::same(8)),
                     )
                     .clicked()
@@ -2527,15 +2515,15 @@ fn render_library_category(
             ui,
             crate::components::icons::draw_moon,
             "Theme & Visual Aesthetics",
-            "Customize the color scheme, dark glassmorphism effects, and interface styling",
+            "Obsidian surfaces, jade highlights, and typography for the player shell",
             Some((
                 if extra.is_dark_theme {
-                    "DARK GLASS"
+                    "OBSIDIAN"
                 } else {
                     "LIGHT MODE"
                 },
                 theme.bg_pill,
-                theme.accent_violet,
+                theme.accent,
             )),
             theme,
         );
@@ -2543,7 +2531,7 @@ fn render_library_category(
         setting_item(
             ui,
             "Theme Palette",
-            "Switch between Dark Glassmorphic and Clean Light mode",
+            "Switch between Obsidian dark and Jade light mode",
             theme,
             |ui| {
                 let lbl = if extra.is_dark_theme {
@@ -2555,11 +2543,11 @@ fn render_library_category(
                     .add(
                         egui::Button::new(
                             egui::RichText::new(lbl)
-                                .font(FontId::proportional(12.5))
+                                .font(crate::theme::font(12.5))
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(theme.accent_violet)
+                        .fill(theme.accent)
                         .corner_radius(CornerRadius::same(8))
                         .min_size(Vec2::new(160.0, 30.0)),
                     )
@@ -2573,12 +2561,12 @@ fn render_library_category(
         setting_item(
             ui,
             "Signature Palette",
-            "Curated colors: Violet (#8B5CF6), Magenta (#EC4899), Pink (#F43F5E), Emerald (#10B981)",
+            "Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)",
             theme,
             |ui| {
-                color_dot(ui, theme.accent_violet, "Violet");
-                color_dot(ui, theme.accent_magenta, "Magenta");
-                color_dot(ui, theme.accent_pink, "Pink");
+                color_dot(ui, theme.accent, "Jade");
+                color_dot(ui, theme.accent_highlight, "Mint");
+                color_dot(ui, theme.accent_warm, "Amber");
                 color_dot(ui, theme.bit_perfect_green, "Emerald");
             },
         );
@@ -2598,7 +2586,7 @@ fn render_library_category(
                     "READY"
                 },
                 if extra.is_scanning {
-                    theme.accent_magenta.linear_multiply(0.4)
+                    theme.accent_highlight.linear_multiply(0.4)
                 } else {
                     theme.bg_pill
                 },
@@ -2643,7 +2631,7 @@ fn render_library_category(
                         if extra.import_active {
                             ui.label(
                                 egui::RichText::new("waiting for file picker…")
-                                    .font(FontId::proportional(11.5))
+                                    .font(crate::theme::font(11.5))
                                     .color(theme.text_muted),
                             );
                         }
@@ -2673,7 +2661,7 @@ fn render_library_category(
                 let edit = egui::TextEdit::singleline(&mut state.new_scan_path)
                     .hint_text("/home/user/Music...")
                     .desired_width(200.0)
-                    .font(FontId::proportional(12.0));
+                    .font(crate::theme::font(12.0));
                 ui.add(edit);
                 if ui.add(pill_btn("+ Add & Scan", false, theme)).clicked()
                     && !state.new_scan_path.is_empty()
@@ -2691,7 +2679,7 @@ fn render_library_category(
             ui.add_space(4.0);
             ui.label(
                 egui::RichText::new("Imported File Locations:")
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .strong()
                     .color(theme.text_secondary),
             );
@@ -2700,10 +2688,10 @@ fn render_library_category(
                     ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
                     let (folder_rect, _) =
                         ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
-                    crate::components::icons::draw_folder(ui, folder_rect, theme.accent_pink);
+                    crate::components::icons::draw_folder(ui, folder_rect, theme.accent_warm);
                     ui.label(
                         egui::RichText::new(dir.to_string_lossy())
-                            .font(FontId::proportional(12.0))
+                            .font(crate::theme::font(12.0))
                             .color(theme.text_primary),
                     );
                 });
@@ -2714,7 +2702,7 @@ fn render_library_category(
             ui.add_space(4.0);
             ui.label(
                 egui::RichText::new("Monitored Music Folders:")
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .strong()
                     .color(theme.text_secondary),
             );
@@ -2724,10 +2712,10 @@ fn render_library_category(
                     ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
                     let (folder_rect, _) =
                         ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
-                    crate::components::icons::draw_folder(ui, folder_rect, theme.accent_violet);
+                    crate::components::icons::draw_folder(ui, folder_rect, theme.accent);
                     ui.label(
                         egui::RichText::new(root.path.to_string_lossy())
-                            .font(FontId::proportional(12.0))
+                            .font(crate::theme::font(12.0))
                             .color(theme.text_primary),
                     );
 
@@ -2778,7 +2766,7 @@ fn render_library_category(
             Some((
                 concat!("v", env!("CARGO_PKG_VERSION")),
                 theme.bg_pill,
-                theme.accent_violet,
+                theme.accent,
             )),
             theme,
         );
@@ -2791,14 +2779,14 @@ fn render_library_category(
             crate::components::icons::draw_logo(
                 ui,
                 logo_rect.shrink2(Vec2::splat(6.0)),
-                theme.accent_pink,
+                theme.accent_warm,
             );
 
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
                 ui.label(
                     egui::RichText::new("ShadowPlayer")
-                        .font(FontId::proportional(15.0))
+                        .font(crate::theme::font(15.0))
                         .strong()
                         .color(theme.text_primary),
                 );
@@ -2806,7 +2794,7 @@ fn render_library_category(
                     egui::RichText::new(
                         "Music for a better you - Audiophile Local Desktop Music Player",
                     )
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_secondary),
                 );
                 ui.label(
@@ -2815,7 +2803,7 @@ fn render_library_category(
                         engine::NAME,
                         engine::VERSION
                     ))
-                    .font(FontId::proportional(11.0))
+                    .font(crate::theme::font(11.0))
                     .color(theme.text_muted),
                 );
             });
@@ -2870,7 +2858,7 @@ pub fn card_header_with_info(
         icon_fn(
             ui,
             icon_rect.shrink2(Vec2::splat(7.0)),
-            theme.accent_magenta,
+            theme.accent_highlight,
         );
 
         ui.vertical(|ui| {
@@ -2879,7 +2867,7 @@ pub fn card_header_with_info(
                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                 ui.label(
                     egui::RichText::new(title)
-                        .font(FontId::proportional(14.5))
+                        .font(crate::theme::font(14.5))
                         .strong()
                         .color(theme.text_primary),
                 );
@@ -2901,7 +2889,7 @@ pub fn card_header_with_info(
                         .show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new(badge_text)
-                                    .font(FontId::proportional(10.5))
+                                    .font(crate::theme::font(10.5))
                                     .strong()
                                     .color(fg),
                             );
@@ -2911,7 +2899,7 @@ pub fn card_header_with_info(
             if !subtitle.is_empty() {
                 ui.label(
                     egui::RichText::new(subtitle)
-                        .font(FontId::proportional(11.5))
+                        .font(crate::theme::font(11.5))
                         .color(theme.text_muted),
                 );
             }
@@ -2956,7 +2944,7 @@ pub fn setting_item_with_info(
                     ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                     ui.label(
                         egui::RichText::new(label)
-                            .font(FontId::proportional(13.0))
+                            .font(crate::theme::font(13.0))
                             .strong()
                             .color(theme.text_primary),
                     );
@@ -2973,16 +2961,16 @@ pub fn setting_item_with_info(
                 if !description.is_empty() {
                     ui.label(
                         egui::RichText::new(description)
-                            .font(FontId::proportional(11.0))
+                            .font(crate::theme::font(11.0))
                             .color(theme.text_muted),
                     );
                 }
             },
         );
 
-        // Column 2: Controls flow left-to-right naturally!
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+        // Column 2: Controls flow left-to-right naturally and wrap when constrained
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
             add_control(ui);
         });
     });
@@ -2998,14 +2986,14 @@ pub fn toggle_switch(ui: &mut egui::Ui, value: &mut bool, theme: &Theme) -> bool
     }
     let painter = ui.painter_at(rect);
     let bg_color = if *value {
-        theme.accent_violet
+        theme.accent
     } else if resp.hovered() {
         theme.bg_pill.linear_multiply(1.2)
     } else {
         theme.bg_pill
     };
     let border_stroke = if *value {
-        Stroke::new(1.0, theme.accent_magenta)
+        Stroke::new(1.0, theme.accent_highlight)
     } else {
         Stroke::new(1.0, theme.border_card)
     };
@@ -3041,26 +3029,22 @@ pub fn segment_picker<T: Clone + PartialEq>(
     theme: &Theme,
 ) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
         for (val, lbl) in options {
             let is_sel = selected == val;
             let btn = egui::Button::new(
                 egui::RichText::new(*lbl)
-                    .font(FontId::proportional(11.8))
+                    .font(crate::theme::font(11.8))
                     .color(if is_sel {
                         Color32::WHITE
                     } else {
                         theme.text_secondary
                     }),
             )
-            .fill(if is_sel {
-                theme.accent_violet
-            } else {
-                theme.bg_pill
-            })
+            .fill(if is_sel { theme.accent } else { theme.bg_pill })
             .stroke(if is_sel {
-                Stroke::new(1.0, theme.accent_magenta)
+                Stroke::new(1.0, theme.accent_highlight)
             } else {
                 Stroke::new(1.0, theme.border_card)
             })
@@ -3079,7 +3063,7 @@ pub fn segment_picker<T: Clone + PartialEq>(
 fn pill_btn(label: &str, selected: bool, theme: &Theme) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(label.to_owned())
-            .font(FontId::proportional(11.5))
+            .font(crate::theme::font(11.5))
             .color(if selected {
                 Color32::WHITE
             } else {
@@ -3087,7 +3071,7 @@ fn pill_btn(label: &str, selected: bool, theme: &Theme) -> egui::Button<'static>
             }),
     )
     .fill(if selected {
-        theme.accent_violet
+        theme.accent
     } else {
         theme.bg_pill
     })
@@ -3106,7 +3090,7 @@ fn badge_label(ui: &mut egui::Ui, text: impl Into<String>, theme: &Theme) {
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(t)
-                    .font(FontId::proportional(11.5))
+                    .font(crate::theme::font(11.5))
                     .strong()
                     .color(theme.text_primary),
             );

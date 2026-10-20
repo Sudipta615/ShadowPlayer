@@ -6,12 +6,14 @@ use database::{
     AlbumRepo, ArtistRepo, Database, FavoritesRepo, GenreRepo, HistoryRepo, PlaylistRepo,
     ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
 };
-use eframe::egui::{self, Margin, Vec2};
+use eframe::egui::{self, Color32, Margin, Pos2, Rect, Sense, Vec2};
 use playback::PlaybackCoordinator;
 use search::SearchEngine;
 
 use crate::components::clap_rack_panel::show_clap_rack_panel;
+use crate::components::mini_player::MiniPlayer;
 use crate::components::sidebar::NavItem;
+use crate::components::topbar::{render_action_button, TopbarAction};
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
     show_autoeq_modal, show_bit_perfect_modal, show_duplicates_modal, show_edit_track_modal,
@@ -60,6 +62,10 @@ pub struct ShadowPlayerApp {
     help_state: HelpState,
     smart_playlist_editor: SmartPlaylistEditorState,
     theme: Theme,
+    /// The theme variant currently installed in the egui context. `None` means
+    /// no style has been applied yet; the app only rebuilds egui's style when
+    /// this differs from `theme.is_light`.
+    applied_theme: Option<bool>,
     settings_dirty: bool,
 
     /// Tracks belonging to the playlist currently selected in the manager.
@@ -109,6 +115,11 @@ pub struct ShadowPlayerApp {
     /// persisted, so the next launch opens where the user left it instead of
     /// at the hard-coded default.
     window_size: (f32, f32),
+    /// Size to restore when leaving the mini player. Mini mode never persists
+    /// its 320x110 geometry as the normal window size.
+    normal_window_size: (f32, f32),
+    /// Whether the viewport commands for mini mode have been sent.
+    mini_applied: bool,
 }
 
 /// How many frames the app keeps asking for the CLAP rack view after startup.
@@ -139,6 +150,7 @@ impl ShadowPlayerApp {
         db: Database,
     ) -> Self {
         egui_extras::install_image_loaders(&_cc.egui_ctx);
+        crate::theme::install_fonts(&_cc.egui_ctx);
 
         let track_repo = TrackRepo::new(db.clone());
         let playlist_repo = PlaylistRepo::new(db.clone());
@@ -190,6 +202,7 @@ impl ShadowPlayerApp {
             help_state: HelpState::default(),
             smart_playlist_editor: SmartPlaylistEditorState::default(),
             theme: Theme::default(),
+            applied_theme: None,
             settings_dirty: false,
 
             playlist_editor_tracks: Vec::new(),
@@ -212,6 +225,8 @@ impl ShadowPlayerApp {
             clap_eval: None,
             toasts: crate::components::toasts::ToastState::default(),
             window_size: (1280.0, 800.0),
+            normal_window_size: (1280.0, 800.0),
+            mini_applied: false,
         };
 
         // Load all persistent settings (normal, theme, EQ, DSP)
@@ -355,6 +370,8 @@ impl ShadowPlayerApp {
             self.dsp_state.clap_rack.is_open = false;
         } else if self.dsp_state.eq_panel.is_open {
             self.dsp_state.eq_panel.is_open = false;
+        } else if self.app_state.right_overlay_open {
+            self.app_state.right_overlay_open = false;
         } else if !self.app_state.search_query.is_empty() {
             self.app_state.search_query.clear();
             self.refresh_view();
@@ -374,8 +391,8 @@ impl ShadowPlayerApp {
             self.app_state.current_sort_order = app_settings.sort_order;
             self.app_state.is_grid_view = app_settings.view_mode == domain::models::ViewMode::Grid;
             self.window_size = (
-                app_settings.window_width.max(1024.0),
-                app_settings.window_height.max(682.0),
+                app_settings.window_width.max(640.0),
+                app_settings.window_height.max(360.0),
             );
             self.coordinator.set_shuffle(app_settings.shuffle);
             self.coordinator.set_repeat_mode(app_settings.repeat_mode);
@@ -494,8 +511,16 @@ impl ShadowPlayerApp {
             bit_perfect_enabled: self.dsp_state.settings_tab.bit_perfect,
             // Read from the live window, not a fixed pair of numbers: the value
             // written here is what the next launch restores.
-            window_width: self.window_size.0,
-            window_height: self.window_size.1,
+            window_width: if self.app_state.mini_player {
+                self.normal_window_size.0
+            } else {
+                self.window_size.0
+            },
+            window_height: if self.app_state.mini_player {
+                self.normal_window_size.1
+            } else {
+                self.window_size.1
+            },
         };
         if let Err(e) = self.settings_repo.save(&app_settings) {
             log::warn!("Could not persist app settings: {e}");
@@ -1476,6 +1501,67 @@ impl ShadowPlayerApp {
         self.prev_playing = self.session.is_playing();
     }
 
+    /// Top-bar queue/theme/mini actions. Returns nothing; each button updates
+    /// the state it owns. Kept in one place so Settings and Help get the same
+    /// controls as library views.
+    fn render_topbar_actions(&mut self, ui: &mut egui::Ui, window_w: f32) {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let wide = window_w >= 1100.0;
+        let queue_active = if wide {
+            self.app_state.right_panel_visible
+        } else {
+            self.app_state.right_overlay_open
+        };
+        if render_action_button(
+            ui,
+            TopbarAction::Queue,
+            queue_active,
+            &self.theme,
+            "Queue & lyrics",
+        ) {
+            if wide {
+                self.app_state.right_panel_visible = !self.app_state.right_panel_visible;
+            } else {
+                self.app_state.right_overlay_open = !self.app_state.right_overlay_open;
+            }
+        }
+        // The right drawer already carries the sun/moon pill when it is a
+        // column. Only duplicate it in the top bar for the narrow layout,
+        // where the drawer is an overlay.
+        if !wide
+            && render_action_button(
+                ui,
+                TopbarAction::Theme,
+                false,
+                &self.theme,
+                if self.theme.is_light {
+                    "Switch to dark theme"
+                } else {
+                    "Switch to light theme"
+                },
+            )
+        {
+            self.theme.toggle();
+            self.settings_dirty = true;
+        }
+        if render_action_button(
+            ui,
+            TopbarAction::MiniPlayer,
+            self.app_state.mini_player,
+            &self.theme,
+            "Mini player",
+        ) {
+            self.set_mini_player(!self.app_state.mini_player);
+        }
+    }
+
+    /// Switch between the normal library shell and the compact mini player.
+    /// The viewport resize itself is applied in the frame loop so it can be
+    /// undone cleanly when the user restores the normal window.
+    fn set_mini_player(&mut self, enabled: bool) {
+        self.app_state.mini_player = enabled;
+    }
+
     /// Opens the native OS picker on a worker thread for files or a folder.
     pub fn request_import(&mut self, kind: ImportKind) {
         match kind {
@@ -1492,14 +1578,46 @@ impl ShadowPlayerApp {
 }
 
 impl eframe::App for ShadowPlayerApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.theme.apply(&ctx);
+        // Windows/macOS create their SMTC/Now Playing objects from the HWND
+        // (or NSWindow) on the first frame; Linux's MPRIS backend is already
+        // running from `new()`.
+        self.mpris_service.attach_window(frame);
+        if self.applied_theme != Some(self.theme.is_light) {
+            self.theme.apply(&ctx);
+            self.applied_theme = Some(self.theme.is_light);
+        }
 
         // Remember the live window size: this is what the next launch restores.
         let size = ctx.content_rect().size();
         if size.x > 0.0 && size.y > 0.0 {
             self.window_size = (size.x, size.y);
+        }
+
+        // Mini-player viewport transition. The normal geometry is kept aside so
+        // restoring never lands at the mini player's 320x110 floor.
+        if self.app_state.mini_player && !self.mini_applied {
+            self.normal_window_size =
+                (self.window_size.0.max(640.0), self.window_size.1.max(360.0));
+            self.mini_applied = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(320.0, 110.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(320.0, 110.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                egui::WindowLevel::AlwaysOnTop,
+            ));
+        } else if !self.app_state.mini_player && self.mini_applied {
+            self.mini_applied = false;
+            let (w, h) = self.normal_window_size;
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(640.0, 360.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
+                w.max(640.0),
+                h.max(360.0),
+            )));
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                egui::WindowLevel::Normal,
+            ));
+            self.settings_dirty = true;
         }
 
         // 1. Poll Coordinator & Session events
@@ -1626,6 +1744,9 @@ impl eframe::App for ShadowPlayerApp {
         self.app_state.frame_count += 1;
         #[cfg(feature = "eval-tools")]
         if std::env::var("SHADOWPLAYER_EVAL").is_ok() {
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_MINI").is_ok() {
+                self.app_state.mini_player = true;
+            }
             if self.app_state.frame_count == 1
                 && std::env::var("SHADOWPLAYER_EVAL_SETTINGS").is_ok()
             {
@@ -2280,19 +2401,85 @@ impl eframe::App for ShadowPlayerApp {
             .as_ref()
             .and_then(|t| self.lyrics_service.source(&t.id));
 
+        // Mini player: a dedicated 320x110 shell instead of squeezing the
+        // library chrome into a window that cannot hold it.
+        if self.app_state.mini_player {
+            let art = current_track
+                .as_ref()
+                .and_then(|t| self.artwork_service.get_texture(&t.id))
+                .cloned();
+            let mini_events = MiniPlayer {
+                title: current_track
+                    .as_ref()
+                    .map(|t| t.title.as_str())
+                    .unwrap_or("Nothing playing"),
+                artist: current_track
+                    .as_ref()
+                    .map(|t| t.artist.as_str())
+                    .unwrap_or("ShadowPlayer"),
+                artwork: art.as_ref(),
+                is_playing,
+                position_secs: telemetry.position_secs,
+                duration_secs: telemetry.duration_secs,
+                theme: &self.theme,
+            }
+            .show(ui);
+
+            if mini_events.toggle_play {
+                self.coordinator.toggle_play_pause();
+            }
+            if mini_events.previous {
+                self.coordinator.previous();
+            }
+            if mini_events.next {
+                self.coordinator.next();
+            }
+            if let Some(seek) = mini_events.seek_secs {
+                self.session.seek(seek as f32);
+            }
+            if mini_events.restore {
+                self.set_mini_player(false);
+            }
+
+            if !eval_holds_persistence() && self.settings_dirty {
+                self.save_persisted_settings();
+                self.settings_dirty = false;
+            }
+            return;
+        }
+
         // 8. Render Left Sidebar
+        let window_w = ctx.content_rect().width();
+        let sidebar_rail = window_w < 720.0;
+        let sidebar_w = if sidebar_rail {
+            60.0
+        } else if window_w < 1100.0 {
+            // Wide enough for "Help & Feedback" without clipping, narrow
+            // enough to leave the table usable on a 900px tiled window.
+            200.0
+        } else {
+            208.0
+        };
         let mut nav_to_select = None;
         let mut create_playlist_req = false;
         let mut create_smart_playlist_req = false;
+        let mut delete_playlist_id = None;
+        let mut delete_smart_playlist_id = None;
+        let mut edit_smart_playlist_id = None;
         render_sidebar(
             ui,
             self.app_state.active_nav,
             &self.library_state.playlists,
             &self.library_state.smart_playlists,
             &self.theme,
+            sidebar_rail,
+            sidebar_w,
             |nav| nav_to_select = Some(nav),
             || create_playlist_req = true,
             || create_smart_playlist_req = true,
+            |id| delete_playlist_id = Some(id),
+            |id| delete_smart_playlist_id = Some(id),
+            |id| edit_smart_playlist_id = Some(id),
         );
 
         if let Some(nav) = nav_to_select {
@@ -2311,6 +2498,35 @@ impl eframe::App for ShadowPlayerApp {
         if create_smart_playlist_req {
             self.smart_playlist_editor.open_new();
         }
+        if let Some(id) = delete_playlist_id {
+            if let Err(e) = self.playlist_repo.delete(&id) {
+                log::warn!("Could not delete playlist: {e}");
+            }
+            if self.app_state.active_nav == NavItem::Playlist(id) {
+                self.app_state.active_nav = NavItem::Home;
+            }
+            self.reload_library();
+        }
+        if let Some(id) = delete_smart_playlist_id {
+            if let Err(e) = self.smart_playlist_repo.delete(&id) {
+                log::warn!("Could not delete smart playlist: {e}");
+            }
+            if self.app_state.active_nav == NavItem::SmartPlaylist(id) {
+                self.app_state.active_nav = NavItem::Home;
+            }
+            self.reload_library();
+        }
+        if let Some(id) = edit_smart_playlist_id {
+            if let Some(sp) = self
+                .library_state
+                .smart_playlists
+                .iter()
+                .find(|s| s.id == id)
+                .cloned()
+            {
+                self.smart_playlist_editor.open_existing(&sp);
+            }
+        }
 
         // 9. Render Central Panel (Main Views + Right Drawer)
         egui::CentralPanel::default()
@@ -2324,242 +2540,361 @@ impl eframe::App for ShadowPlayerApp {
                         bottom: 14,
                     }),
             )
-            .show(ui, |ui| {
-                let avail_w = ui.available_width();
-                let avail_h = ui.available_height();
+            .show(ui, |root_ui| {
+                let full_rect = root_ui.available_rect_before_wrap();
+                let avail_w = full_rect.width();
+                let avail_h = full_rect.height();
                 let is_help_view = self.app_state.active_nav == NavItem::Help;
-                let show_right_panel = !is_help_view && avail_w > 420.0;
-                let right_w = if show_right_panel { 285.0 } else { 0.0 };
-                let center_w = if show_right_panel {
-                    (avail_w - right_w - 16.0).max(300.0)
+                let show_right_panel = !is_help_view
+                    && self.app_state.active_nav != NavItem::Settings
+                    && window_w >= 1100.0
+                    && self.app_state.right_panel_visible;
+                let right_w = if show_right_panel {
+                    if window_w >= 1280.0 {
+                        300.0
+                    } else {
+                        272.0
+                    }
                 } else {
-                    avail_w
+                    0.0
                 };
+                let spacing = if show_right_panel { 16.0 } else { 0.0 };
+                let center_w = (avail_w - right_w - spacing).max(0.0);
 
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
+                let center_rect = Rect::from_min_size(full_rect.min, Vec2::new(center_w, avail_h));
+                let right_rect = Rect::from_min_size(
+                    Pos2::new(full_rect.max.x - right_w, full_rect.min.y),
+                    Vec2::new(right_w, avail_h),
+                );
 
-                    // A. Center View Column
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(center_w, avail_h),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
+                // A. Center View Column
+                let mut center_ui = root_ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(center_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                center_ui.set_clip_rect(center_rect);
+                center_ui.set_width(center_w);
+                center_ui.set_max_width(center_w);
+                let ui = &mut center_ui;
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 
-                            // Top Search Bar (Only shown for library views; hidden in Help and Settings)
-                            if !is_help_view && self.app_state.active_nav != NavItem::Settings {
-                                let mut search_buf = self.app_state.search_query.clone();
-                                if crate::components::topbar::render_search_input(
+                // Top bar: search plus queue/theme/mini actions. On
+                // Settings and Help the search is replaced by the
+                // page title, but the actions stay reachable.
+                if !is_help_view && self.app_state.active_nav != NavItem::Settings {
+                    let mut search_buf = self.app_state.search_query.clone();
+                    let mut search_changed = false;
+                    ui.horizontal(|ui| {
+                        let actions_w = 34.0 * 3.0 + 12.0;
+                        let search_w = (ui.available_width() - actions_w - 8.0).max(160.0);
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(search_w, 38.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                search_changed = crate::components::topbar::render_search_input(
                                     ui,
                                     &mut search_buf,
                                     &self.theme,
-                                ) {
-                                    self.app_state.search_query = search_buf;
-                                    self.refresh_view();
-                                }
-                            }
+                                );
+                            },
+                        );
+                        self.render_topbar_actions(ui, window_w);
+                    });
+                    if search_changed {
+                        self.app_state.search_query = search_buf;
+                        self.refresh_view();
+                    }
+                } else {
+                    let title = if is_help_view {
+                        "Help & Feedback"
+                    } else {
+                        "Settings"
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(title)
+                                .font(crate::theme::font(18.0))
+                                .strong()
+                                .color(self.theme.text_primary),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.render_topbar_actions(ui, window_w)
+                        });
+                    });
+                }
 
-                            // View Switcher
-                            match self.app_state.active_nav {
-                                NavItem::Albums => {
-                                    render_albums_view(
-                                        ui,
-                                        &mut self.library_state,
-                                        &mut self.coordinator,
-                                        &self.artwork_service,
-                                        current_track.as_ref(),
-                                        is_playing,
-                                        &self.theme,
-                                        &self.album_repo,
-                                        &self.favorites_repo,
-                                    );
-                                }
-                                NavItem::Artists => {
-                                    render_artists_view(
-                                        ui,
-                                        &mut self.library_state,
-                                        &mut self.coordinator,
-                                        current_track.as_ref(),
-                                        is_playing,
-                                        &self.theme,
-                                        &self.artist_repo,
-                                        &self.favorites_repo,
-                                    );
-                                }
-                                NavItem::Genres => {
-                                    render_genres_view(
-                                        ui,
-                                        &mut self.library_state,
-                                        &mut self.coordinator,
-                                        current_track.as_ref(),
-                                        is_playing,
-                                        &self.theme,
-                                        &self.genre_repo,
-                                        &self.favorites_repo,
-                                    );
-                                }
-                                NavItem::Folders => {
-                                    let mut scan_to_start = None;
-                                    let mut import_req = None;
-                                    let import_active = self.import_service.is_active();
-                                    render_folders_view(
-                                        ui,
-                                        &mut self.library_state,
-                                        &mut self.scanner_service,
-                                        &mut self.coordinator,
-                                        current_track.as_ref(),
-                                        &self.theme,
-                                        &self.scan_roots_repo,
-                                        &self.track_repo,
-                                        &self.favorites_repo,
-                                        import_active,
-                                        |path| scan_to_start = Some(path),
-                                        |kind| import_req = Some(kind),
-                                    );
-                                    if let Some(path) = scan_to_start {
-                                        self.start_scan(path);
-                                    }
-                                    if let Some(kind) = import_req {
-                                        self.request_import(kind);
-                                    }
-                                }
-                                NavItem::Settings => {
-                                    let prev_light = self.theme.is_light;
-                                    let mut scan_to_start = None;
-                                    let mut import_req = None;
-                                    let is_scanning = self.scanner_service.is_scanning();
-                                    let import_active = self.import_service.is_active();
-                                    let sv_actions = render_settings_view(
-                                        ui,
-                                        &mut self.dsp_state,
-                                        &self.session,
-                                        &mut self.theme,
-                                        &self.scan_roots_repo,
-                                        &self.track_repo,
-                                        is_scanning,
-                                        import_active,
-                                        &self.app_state.imported_dirs,
-                                        self.loudness_service.progress(),
-                                        |path| scan_to_start = Some(path),
-                                        |kind| import_req = Some(kind),
-                                    );
-                                    if self.theme.is_light != prev_light {
-                                        self.settings_dirty = true;
-                                    }
-                                    // Settings view can mutate settings_tab directly
-                                    self.settings_dirty = true;
-                                    if let Some(path) = scan_to_start {
-                                        self.start_scan(path);
-                                    }
-                                    if let Some(kind) = import_req {
-                                        self.request_import(kind);
-                                    }
-                                    if sv_actions.start_loudness_scan {
-                                        let write_tags =
-                                            self.dsp_state.settings_tab.loudness_write_tags;
-                                        self.loudness_service.start(write_tags);
-                                    }
-                                    if sv_actions.cancel_loudness_scan {
-                                        self.loudness_service.cancel();
-                                    }
-                                    if sv_actions.find_duplicates {
-                                        self.scan_duplicates();
-                                    }
-                                }
-                                NavItem::Help => {
-                                    render_help_view(
-                                        ui,
-                                        &mut self.help_state,
-                                        &self.theme,
-                                        &mut self.app_state,
-                                        &mut self.dsp_state,
-                                    );
-                                }
-                                _ => {
-                                    let view_action = render_main_playback_view(
-                                        ui,
-                                        &mut self.app_state,
-                                        &mut self.library_state,
-                                        &mut self.coordinator,
-                                        &self.session,
-                                        &mut self.artwork_service,
-                                        &telemetry,
-                                        current_track.as_ref(),
-                                        &self.theme,
-                                        &self.track_repo,
-                                        &self.playlist_repo,
-                                        &self.favorites_repo,
-                                        self.dsp_state.eq_panel.is_open,
-                                    );
-                                    if let Some(nav) = view_action.switch_nav {
-                                        self.app_state.active_nav = nav;
-                                        self.library_state.selected_album = None;
-                                        self.library_state.selected_artist = None;
-                                        self.library_state.selected_genre = None;
-                                        self.library_state.selected_folder = None;
-                                        self.refresh_view();
-                                    }
-                                    if view_action.create_playlist {
-                                        self.app_state.open_playlist_editor = true;
-                                    }
-                                    if view_action.open_eq_panel {
-                                        self.dsp_state.eq_panel.is_open =
-                                            !self.dsp_state.eq_panel.is_open;
-                                        self.settings_dirty = true;
-                                    }
-                                    if view_action.needs_reload {
-                                        self.refresh_view();
-                                    }
-                                    if view_action.removed_track {
-                                        self.reload_library();
-                                    }
-                                    if let Some(sp_id) = view_action.edit_smart_playlist {
-                                        if let Some(sp) = self
-                                            .library_state
-                                            .smart_playlists
-                                            .iter()
-                                            .find(|s| s.id == sp_id)
-                                            .cloned()
-                                        {
-                                            self.smart_playlist_editor.open_existing(&sp);
-                                        }
-                                    }
-                                    if let Some(tracks) = view_action.organize_tracks {
-                                        self.open_organize(tracks, "Selection".to_string());
-                                    }
-                                }
-                            }
-                        },
-                    );
-
-                    // B. Right Column Drawer
-                    if show_right_panel {
-                        let prev_light = self.theme.is_light;
-                        let prev_vol = self.app_state.volume;
-                        let prev_muted = self.app_state.is_muted;
-                        render_right_drawer(
+                // View Switcher
+                match self.app_state.active_nav {
+                    NavItem::Albums => {
+                        render_albums_view(
                             ui,
-                            &ctx,
-                            right_w,
-                            avail_h,
+                            &mut self.library_state,
+                            &mut self.coordinator,
+                            &self.artwork_service,
+                            current_track.as_ref(),
+                            is_playing,
+                            &self.theme,
+                            &self.album_repo,
+                            &self.favorites_repo,
+                        );
+                    }
+                    NavItem::Artists => {
+                        render_artists_view(
+                            ui,
+                            &mut self.library_state,
+                            &mut self.coordinator,
+                            current_track.as_ref(),
+                            is_playing,
+                            &self.theme,
+                            &self.artist_repo,
+                            &self.favorites_repo,
+                        );
+                    }
+                    NavItem::Genres => {
+                        render_genres_view(
+                            ui,
+                            &mut self.library_state,
+                            &mut self.coordinator,
+                            current_track.as_ref(),
+                            is_playing,
+                            &self.theme,
+                            &self.genre_repo,
+                            &self.favorites_repo,
+                        );
+                    }
+                    NavItem::Folders => {
+                        let mut scan_to_start = None;
+                        let mut import_req = None;
+                        let import_active = self.import_service.is_active();
+                        render_folders_view(
+                            ui,
+                            &mut self.library_state,
+                            &mut self.scanner_service,
+                            &mut self.coordinator,
+                            current_track.as_ref(),
+                            &self.theme,
+                            &self.scan_roots_repo,
+                            &self.track_repo,
+                            &self.favorites_repo,
+                            import_active,
+                            |path| scan_to_start = Some(path),
+                            |kind| import_req = Some(kind),
+                        );
+                        if let Some(path) = scan_to_start {
+                            self.start_scan(path);
+                        }
+                        if let Some(kind) = import_req {
+                            self.request_import(kind);
+                        }
+                    }
+                    NavItem::Settings => {
+                        let prev_light = self.theme.is_light;
+                        let mut scan_to_start = None;
+                        let mut import_req = None;
+                        let is_scanning = self.scanner_service.is_scanning();
+                        let import_active = self.import_service.is_active();
+                        let sv_actions = render_settings_view(
+                            ui,
+                            &mut self.dsp_state,
+                            &self.session,
+                            &mut self.theme,
+                            &self.scan_roots_repo,
+                            &self.track_repo,
+                            is_scanning,
+                            import_active,
+                            &self.app_state.imported_dirs,
+                            self.loudness_service.progress(),
+                            |path| scan_to_start = Some(path),
+                            |kind| import_req = Some(kind),
+                        );
+                        if self.theme.is_light != prev_light {
+                            self.settings_dirty = true;
+                        }
+                        // Settings view can mutate settings_tab directly
+                        self.settings_dirty = true;
+                        if let Some(path) = scan_to_start {
+                            self.start_scan(path);
+                        }
+                        if let Some(kind) = import_req {
+                            self.request_import(kind);
+                        }
+                        if sv_actions.start_loudness_scan {
+                            let write_tags = self.dsp_state.settings_tab.loudness_write_tags;
+                            self.loudness_service.start(write_tags);
+                        }
+                        if sv_actions.cancel_loudness_scan {
+                            self.loudness_service.cancel();
+                        }
+                        if sv_actions.find_duplicates {
+                            self.scan_duplicates();
+                        }
+                    }
+                    NavItem::Help => {
+                        render_help_view(
+                            ui,
+                            &mut self.help_state,
+                            &self.theme,
                             &mut self.app_state,
+                            &mut self.dsp_state,
+                        );
+                    }
+                    _ => {
+                        let mut view_action = render_main_playback_view(
+                            ui,
+                            &mut self.app_state,
+                            &mut self.library_state,
                             &mut self.coordinator,
                             &self.session,
                             &mut self.artwork_service,
-                            &active_lyrics,
-                            plain_lyrics.as_deref(),
-                            lyrics_source,
-                            active_lyric_idx,
-                            &mut self.theme,
+                            &telemetry,
+                            current_track.as_ref(),
+                            &self.theme,
+                            &self.track_repo,
+                            &self.playlist_repo,
+                            &self.favorites_repo,
+                            self.dsp_state.eq_panel.is_open,
                         );
-                        if self.theme.is_light != prev_light
-                            || (self.app_state.volume - prev_vol).abs() > 0.001
-                            || self.app_state.is_muted != prev_muted
-                        {
+                        if let Some(q) = view_action.search_query.take() {
+                            self.app_state.search_query = q;
+                            self.refresh_view();
+                        }
+                        if let Some(nav) = view_action.switch_nav {
+                            self.app_state.active_nav = nav;
+                            self.library_state.selected_album = None;
+                            self.library_state.selected_artist = None;
+                            self.library_state.selected_genre = None;
+                            self.library_state.selected_folder = None;
+                            self.refresh_view();
+                        }
+                        if view_action.create_playlist {
+                            self.app_state.open_playlist_editor = true;
+                        }
+                        if view_action.open_eq_panel {
+                            self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
                             self.settings_dirty = true;
                         }
+                        if view_action.needs_reload {
+                            self.refresh_view();
+                        }
+                        if view_action.removed_track {
+                            self.reload_library();
+                        }
+                        if let Some(sp_id) = view_action.edit_smart_playlist {
+                            if let Some(sp) = self
+                                .library_state
+                                .smart_playlists
+                                .iter()
+                                .find(|s| s.id == sp_id)
+                                .cloned()
+                            {
+                                self.smart_playlist_editor.open_existing(&sp);
+                            }
+                        }
+                        if let Some(tracks) = view_action.organize_tracks {
+                            self.open_organize(tracks, "Selection".to_string());
+                        }
                     }
-                });
+                }
+                // B. Right Column Drawer
+                if show_right_panel {
+                    let mut right_ui = root_ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(right_rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    right_ui.set_clip_rect(right_rect);
+                    let prev_light = self.theme.is_light;
+                    let prev_vol = self.app_state.volume;
+                    let prev_muted = self.app_state.is_muted;
+                    render_right_drawer(
+                        &mut right_ui,
+                        &ctx,
+                        right_w,
+                        avail_h,
+                        &mut self.app_state,
+                        &mut self.coordinator,
+                        &self.session,
+                        &mut self.artwork_service,
+                        &active_lyrics,
+                        plain_lyrics.as_deref(),
+                        lyrics_source,
+                        active_lyric_idx,
+                        &mut self.theme,
+                        true,
+                    );
+                    if self.theme.is_light != prev_light
+                        || (self.app_state.volume - prev_vol).abs() > 0.001
+                        || self.app_state.is_muted != prev_muted
+                    {
+                        self.settings_dirty = true;
+                    }
+                }
+
+                // Narrow layout: the same drawer becomes a temporary
+                // overlay anchored below the top bar, leaving the queue button
+                // reachable. Escape closes it as well.
+                if !is_help_view
+                    && self.app_state.active_nav != NavItem::Settings
+                    && window_w < 1100.0
+                    && self.app_state.right_overlay_open
+                {
+                    let overlay_w = (avail_w - 16.0).clamp(240.0, 320.0);
+                    let top = full_rect.min.y + 50.0;
+                    let overlay_rect = Rect::from_min_max(
+                        Pos2::new(full_rect.max.x - overlay_w, top),
+                        Pos2::new(full_rect.max.x, full_rect.max.y),
+                    );
+                    // The overlay is a floating card with transparent margins
+                    // around it. Paint the column background first so table
+                    // content cannot bleed through below the card.
+                    root_ui
+                        .painter()
+                        .rect_filled(overlay_rect, 0.0, self.theme.bg_app);
+                    // A soft scrim makes the drawer read as foreground without
+                    // hiding the top-bar controls.
+                    root_ui.painter().rect_filled(
+                        Rect::from_min_max(
+                            Pos2::new(full_rect.min.x, top),
+                            Pos2::new(overlay_rect.min.x, full_rect.max.y),
+                        ),
+                        0.0,
+                        Color32::from_black_alpha(if self.theme.is_light { 24 } else { 80 }),
+                    );
+                    let mut overlay_ui = root_ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(overlay_rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    overlay_ui.set_clip_rect(overlay_rect);
+                    let prev_light = self.theme.is_light;
+                    let prev_vol = self.app_state.volume;
+                    let prev_muted = self.app_state.is_muted;
+                    render_right_drawer(
+                        &mut overlay_ui,
+                        &ctx,
+                        overlay_w,
+                        overlay_rect.height(),
+                        &mut self.app_state,
+                        &mut self.coordinator,
+                        &self.session,
+                        &mut self.artwork_service,
+                        &active_lyrics,
+                        plain_lyrics.as_deref(),
+                        lyrics_source,
+                        active_lyric_idx,
+                        &mut self.theme,
+                        false,
+                    );
+                    if self.theme.is_light != prev_light
+                        || (self.app_state.volume - prev_vol).abs() > 0.001
+                        || self.app_state.is_muted != prev_muted
+                    {
+                        self.settings_dirty = true;
+                    }
+                }
+
+                root_ui.allocate_rect(full_rect, Sense::hover());
             });
 
         // 10. Modals Execution
@@ -2681,7 +3016,11 @@ impl eframe::App for ShadowPlayerApp {
         let mut pl_changed = false;
         if let Some(name) = pl_actions.create {
             match self.playlist_repo.create(&name, None) {
-                Ok(_) => pl_changed = true,
+                Ok(new_pl) => {
+                    self.app_state.playlist_editor.selected = Some(new_pl.id);
+                    self.playlist_editor_tracks.clear();
+                    pl_changed = true;
+                }
                 Err(e) => log::warn!("Could not create playlist: {}", e),
             }
         }
@@ -2711,6 +3050,13 @@ impl eframe::App for ShadowPlayerApp {
         if let Some((pl, tr)) = pl_actions.remove_track {
             if let Err(e) = self.playlist_repo.remove_track(&pl, &tr) {
                 log::warn!("Could not remove the track from the playlist: {e}");
+            }
+            self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &pl);
+            pl_changed = true;
+        }
+        if let Some((pl, from, to)) = pl_actions.move_track {
+            if let Err(e) = self.playlist_repo.move_track(&pl, from, to) {
+                log::warn!("Could not reorder the playlist: {e}");
             }
             self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &pl);
             pl_changed = true;
@@ -2801,10 +3147,10 @@ impl eframe::App for ShadowPlayerApp {
             self.reload_library();
         }
 
-        // 11. Event-driven & periodic settings persistence across sessions
-        if !eval_holds_persistence()
-            && (self.settings_dirty || self.app_state.frame_count.is_multiple_of(120))
-        {
+        // 11. Event-driven settings persistence across sessions. Window size,
+        // theme and transport changes mark the state dirty; writing on every
+        // 120th frame made an otherwise idle app wake the disk twice a second.
+        if !eval_holds_persistence() && self.settings_dirty {
             self.save_persisted_settings();
             self.settings_dirty = false;
         }

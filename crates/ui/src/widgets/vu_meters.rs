@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Vec2};
+use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
 /// Dual Analog Ballistic Needle VU Meter Widget
 pub struct VuMeterWidget<'a> {
@@ -157,7 +157,7 @@ impl<'a> VuMeterWidget<'a> {
                     p_txt,
                     egui::Align2::CENTER_CENTER,
                     label,
-                    FontId::proportional(8.5),
+                    crate::theme::font(8.5),
                     tick_col,
                 );
             }
@@ -183,7 +183,7 @@ impl<'a> VuMeterWidget<'a> {
         let needle_color = if needle_db >= 0.0 {
             Color32::from_rgb(255, 80, 80)
         } else {
-            theme.accent_magenta
+            theme.accent_highlight
         };
         painter.line_segment([pivot, needle_tip], Stroke::new(1.5_f32, needle_color));
 
@@ -195,7 +195,7 @@ impl<'a> VuMeterWidget<'a> {
             Pos2::new(rect.left() + 8.0, rect.top() + 6.0),
             egui::Align2::LEFT_TOP,
             format!("{} VU", channel),
-            FontId::proportional(9.0),
+            crate::theme::font(9.0),
             theme.text_secondary,
         );
 

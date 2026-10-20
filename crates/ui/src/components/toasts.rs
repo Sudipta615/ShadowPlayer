@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Vec2};
 
 use crate::theme::Theme;
 
@@ -23,9 +23,9 @@ pub enum ToastKind {
 impl ToastKind {
     fn accent(self, theme: &Theme) -> Color32 {
         match self {
-            ToastKind::Info => theme.accent_blue,
+            ToastKind::Info => theme.info,
             ToastKind::Success => theme.bit_perfect_green,
-            ToastKind::Warning => theme.accent_orange,
+            ToastKind::Warning => theme.accent_warm,
         }
     }
 }
@@ -143,7 +143,7 @@ impl ToastState {
                             .show(ui, |ui| {
                                 ui.label(
                                     egui::RichText::new(&t.message)
-                                        .font(FontId::proportional(12.5))
+                                        .font(crate::theme::font(12.5))
                                         .color(text),
                                 );
                             });

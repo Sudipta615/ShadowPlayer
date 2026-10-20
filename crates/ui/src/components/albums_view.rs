@@ -2,7 +2,7 @@ use crate::theme::Theme;
 use domain::ids::TrackId;
 use domain::models::{Album, Track};
 use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
+    self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
 };
 use std::collections::HashMap;
 
@@ -40,8 +40,8 @@ impl<'a> AlbumsView<'a> {
 
                 let back_btn = egui::Button::new(
                     egui::RichText::new("‹ Back to Albums")
-                        .font(FontId::proportional(13.5))
-                        .color(self.theme.accent_purple),
+                        .font(crate::theme::font(13.5))
+                        .color(self.theme.accent_highlight),
                 )
                 .fill(self.theme.bg_pill)
                 .corner_radius(CornerRadius::same(8));
@@ -87,7 +87,7 @@ impl<'a> AlbumsView<'a> {
                         crate::components::icons::draw_disc(
                             ui,
                             art_rect.shrink2(Vec2::new(24.0, 24.0)),
-                            self.theme.accent_pink,
+                            self.theme.accent_warm,
                         );
                     }
 
@@ -95,19 +95,19 @@ impl<'a> AlbumsView<'a> {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
                         ui.label(
                             egui::RichText::new("ALBUM")
-                                .font(FontId::proportional(11.0))
+                                .font(crate::theme::font(11.0))
                                 .strong()
-                                .color(self.theme.accent_magenta),
+                                .color(self.theme.accent_highlight),
                         );
                         ui.label(
                             egui::RichText::new(&sel_title)
-                                .font(FontId::proportional(22.0))
+                                .font(crate::theme::font(22.0))
                                 .strong()
                                 .color(self.theme.text_primary),
                         );
                         ui.label(
                             egui::RichText::new(&sel_artist)
-                                .font(FontId::proportional(14.0))
+                                .font(crate::theme::font(14.0))
                                 .color(self.theme.text_secondary),
                         );
 
@@ -120,7 +120,7 @@ impl<'a> AlbumsView<'a> {
                                 self.album_tracks.len(),
                                 dur_m
                             ))
-                            .font(FontId::proportional(12.0))
+                            .font(crate::theme::font(12.0))
                             .color(self.theme.text_muted),
                         );
 
@@ -128,10 +128,10 @@ impl<'a> AlbumsView<'a> {
                         ui.horizontal(|ui| {
                             let play_all_btn = egui::Button::new(
                                 egui::RichText::new("Play All")
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .color(Color32::WHITE),
                             )
-                            .fill(self.theme.accent_violet)
+                            .fill(self.theme.accent)
                             .corner_radius(CornerRadius::same(8));
 
                             if ui.add(play_all_btn).clicked() {
@@ -140,7 +140,7 @@ impl<'a> AlbumsView<'a> {
 
                             let queue_all_btn = egui::Button::new(
                                 egui::RichText::new("Queue All")
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .color(self.theme.text_primary),
                             )
                             .fill(self.theme.bg_pill)
@@ -201,7 +201,7 @@ impl<'a> AlbumsView<'a> {
                             Pos2::new(row_rect.min.x + 10.0, cy),
                             egui::Align2::LEFT_CENTER,
                             format!("{:02}", trk_num),
-                            FontId::proportional(12.0),
+                            crate::theme::font(12.0),
                             self.theme.text_muted,
                         );
 
@@ -209,7 +209,7 @@ impl<'a> AlbumsView<'a> {
                             Pos2::new(row_rect.min.x + 44.0, cy),
                             egui::Align2::LEFT_CENTER,
                             &track.title,
-                            FontId::proportional(13.2),
+                            crate::theme::font(13.2),
                             if is_cur {
                                 Color32::WHITE
                             } else {
@@ -222,7 +222,7 @@ impl<'a> AlbumsView<'a> {
                             Pos2::new(row_rect.max.x - 48.0, cy),
                             egui::Align2::RIGHT_CENTER,
                             &dur_s,
-                            FontId::proportional(12.0),
+                            crate::theme::font(12.0),
                             self.theme.text_muted,
                         );
 
@@ -232,7 +232,7 @@ impl<'a> AlbumsView<'a> {
                         );
                         let fav_hover = ui.rect_contains_pointer(fav_rect);
                         let heart_col = if is_fav {
-                            self.theme.accent_pink
+                            self.theme.accent_warm
                         } else if fav_hover {
                             self.theme.text_primary
                         } else {
@@ -251,13 +251,13 @@ impl<'a> AlbumsView<'a> {
                 ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
                 ui.label(
                     egui::RichText::new("Albums")
-                        .font(FontId::proportional(24.0))
+                        .font(crate::theme::font(24.0))
                         .strong()
                         .color(self.theme.text_primary),
                 );
                 ui.label(
                     egui::RichText::new(format!("{} albums", self.albums.len()))
-                        .font(FontId::proportional(13.5))
+                        .font(crate::theme::font(13.5))
                         .color(self.theme.text_muted),
                 );
             });
@@ -269,14 +269,14 @@ impl<'a> AlbumsView<'a> {
                     ui.add_space(40.0);
                     ui.label(
                         egui::RichText::new("No albums found in library")
-                            .font(FontId::proportional(15.0))
+                            .font(crate::theme::font(15.0))
                             .color(self.theme.text_muted),
                     );
                     ui.label(
                         egui::RichText::new(
                             "Add a music folder from 'Folders' to scan your music collection",
                         )
-                        .font(FontId::proportional(12.5))
+                        .font(crate::theme::font(12.5))
                         .color(self.theme.text_dim),
                     );
                 });
@@ -326,13 +326,13 @@ impl<'a> AlbumsView<'a> {
                                     crate::components::icons::draw_disc(
                                         ui,
                                         cover_rect.shrink2(Vec2::new(32.0, 32.0)),
-                                        self.theme.accent_pink,
+                                        self.theme.accent_warm,
                                     );
 
                                     // Title & Artist
                                     let title_galley = p.layout_no_wrap(
                                         album.title.clone(),
-                                        FontId::proportional(13.0),
+                                        crate::theme::font(13.0),
                                         self.theme.text_primary,
                                     );
                                     p.galley(
@@ -343,7 +343,7 @@ impl<'a> AlbumsView<'a> {
 
                                     let artist_galley = p.layout_no_wrap(
                                         album.artist.clone(),
-                                        FontId::proportional(11.5),
+                                        crate::theme::font(11.5),
                                         self.theme.text_muted,
                                     );
                                     p.galley(
@@ -357,7 +357,7 @@ impl<'a> AlbumsView<'a> {
                                         Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 37.0),
                                         egui::Align2::LEFT_TOP,
                                         &sub_str,
-                                        FontId::proportional(10.5),
+                                        crate::theme::font(10.5),
                                         self.theme.text_dim,
                                     );
 

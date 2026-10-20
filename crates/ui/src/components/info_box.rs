@@ -1,7 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Key, Margin, Pos2, Rect, Sense, Stroke, Vec2,
-};
+use eframe::egui::{self, Color32, CornerRadius, Key, Margin, Pos2, Sense, Stroke, Vec2};
 
 /// Rich structured information explaining an audiophile or player setting
 #[derive(Clone, Copy, Debug)]
@@ -26,7 +24,7 @@ pub fn render_info_icon_button(
     let popup_id = ui.make_persistent_id(id_source);
     let key_id = egui::Id::NULL.with(ACTIVE_INFO_BOX_KEY);
 
-    let current_open: Option<egui::Id> = ui.ctx().data(|d| d.get_temp(key_id));
+    let current_open: Option<u64> = ui.ctx().data(|d| d.get_temp(key_id));
     let eval_match = if let Ok(target) = std::env::var("SHADOWPLAYER_EVAL_INFO_NAME") {
         content
             .title
@@ -35,7 +33,7 @@ pub fn render_info_icon_button(
     } else {
         false
     };
-    let is_open = current_open == Some(popup_id) || eval_match;
+    let is_open = current_open == Some(popup_id.value()) || eval_match;
 
     // Allocate 16x16 interactive area
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
@@ -48,12 +46,12 @@ pub fn render_info_icon_button(
 
     let (bg_col, stroke_col, fg_col) = if is_open {
         (
-            theme.accent_violet.linear_multiply(0.3),
-            theme.accent_pink,
-            theme.accent_pink,
+            theme.accent.linear_multiply(0.3),
+            theme.accent_warm,
+            theme.accent_warm,
         )
     } else if is_hovered {
-        (theme.bg_card_hover, theme.accent_violet, theme.text_primary)
+        (theme.bg_card_hover, theme.accent, theme.text_primary)
     } else {
         (Color32::TRANSPARENT, theme.border_subtle, theme.text_muted)
     };
@@ -80,12 +78,12 @@ pub fn render_info_icon_button(
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
             ui.label(
                 egui::RichText::new("ℹ")
-                    .font(FontId::proportional(11.0))
-                    .color(theme.accent_pink),
+                    .font(crate::theme::font(11.0))
+                    .color(theme.accent_warm),
             );
             ui.label(
                 egui::RichText::new(format!("Click for details on {}", content.title))
-                    .font(FontId::proportional(11.0))
+                    .font(crate::theme::font(11.0))
                     .color(theme.text_primary),
             );
         });
@@ -95,25 +93,31 @@ pub fn render_info_icon_button(
     if resp.clicked() {
         ui.ctx().data_mut(|d| {
             if is_open {
-                d.insert_temp(key_id, None::<egui::Id>);
+                d.remove_temp::<u64>(key_id);
             } else {
-                d.insert_temp(key_id, Some(popup_id));
+                d.insert_temp(key_id, popup_id.value());
             }
         });
+        ui.ctx().request_repaint();
     }
 
     // Dismiss with Escape key
     if is_open && ui.input(|i| i.key_pressed(Key::Escape)) {
-        ui.ctx()
-            .data_mut(|d| d.insert_temp(key_id, None::<egui::Id>));
+        ui.ctx().data_mut(|d| {
+            d.remove_temp::<u64>(key_id);
+        });
+        ui.ctx().request_repaint();
     }
 
     // If active, render the floating info card in the Foreground layer
     if is_open {
-        let screen_rect = ui
-            .ctx()
-            .input(|i| i.raw.screen_rect)
-            .unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0)));
+        let screen_rect =
+            ui.ctx()
+                .input(|i| i.raw.screen_rect)
+                .unwrap_or(eframe::egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1280.0, 830.0),
+                ));
         let box_width = 330.0_f32.min(screen_rect.width() - 40.0);
 
         // Position: prefer below-left of icon, clamped safely inside viewport
@@ -140,7 +144,7 @@ pub fn render_info_icon_button(
             .show(ui.ctx(), |ui| {
                 let frame = egui::Frame::NONE
                     .fill(theme.bg_card)
-                    .stroke(Stroke::new(1.0, theme.accent_violet.linear_multiply(0.6)))
+                    .stroke(Stroke::new(1.0, theme.accent.linear_multiply(0.6)))
                     .corner_radius(CornerRadius::same(12))
                     .shadow(egui::epaint::Shadow {
                         offset: [0, 8],
@@ -165,39 +169,39 @@ pub fn render_info_icon_button(
                         bp.circle_filled(
                             badge_r.center(),
                             7.0,
-                            theme.accent_pink.linear_multiply(0.2),
+                            theme.accent_warm.linear_multiply(0.2),
                         );
                         bp.circle_stroke(
                             badge_r.center(),
                             7.0,
-                            Stroke::new(1.0, theme.accent_pink),
+                            Stroke::new(1.0, theme.accent_warm),
                         );
                         bp.circle_filled(
                             Pos2::new(badge_r.center().x, badge_r.center().y - 3.0),
                             0.9,
-                            theme.accent_pink,
+                            theme.accent_warm,
                         );
                         bp.line_segment(
                             [
                                 Pos2::new(badge_r.center().x, badge_r.center().y - 1.0),
                                 Pos2::new(badge_r.center().x, badge_r.center().y + 3.0),
                             ],
-                            Stroke::new(1.1, theme.accent_pink),
+                            Stroke::new(1.1, theme.accent_warm),
                         );
 
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
                             ui.label(
                                 egui::RichText::new(content.title)
-                                    .font(FontId::proportional(13.0))
+                                    .font(crate::theme::font(13.0))
                                     .strong()
                                     .color(theme.text_primary),
                             );
                             if !content.subtitle.is_empty() {
                                 ui.label(
                                     egui::RichText::new(content.subtitle)
-                                        .font(FontId::proportional(10.5))
-                                        .color(theme.accent_pink),
+                                        .font(crate::theme::font(10.5))
+                                        .color(theme.accent_warm),
                                 );
                             }
                         });
@@ -243,7 +247,7 @@ pub fn render_info_icon_button(
                     // 2. Main Explanation Description
                     ui.label(
                         egui::RichText::new(content.description)
-                            .font(FontId::proportional(11.5))
+                            .font(crate::theme::font(11.5))
                             .color(theme.text_secondary),
                     );
 
@@ -260,14 +264,14 @@ pub fn render_info_icon_button(
                                     ui.horizontal(|ui| {
                                         ui.label(
                                             egui::RichText::new("ENGINE & DSP DYNAMICS")
-                                                .font(FontId::proportional(9.5))
+                                                .font(crate::theme::font(9.5))
                                                 .strong()
-                                                .color(theme.accent_violet),
+                                                .color(theme.accent),
                                         );
                                     });
                                     ui.label(
                                         egui::RichText::new(content.technical_note)
-                                            .font(FontId::proportional(10.5))
+                                            .font(crate::theme::font(10.5))
                                             .color(theme.text_muted),
                                     );
                                 });
@@ -277,8 +281,8 @@ pub fn render_info_icon_button(
                     // 4. Audiophile Pro-Tip / Recommendation Pill
                     if !content.recommendation.is_empty() {
                         egui::Frame::NONE
-                            .fill(theme.accent_violet.linear_multiply(0.12))
-                            .stroke(Stroke::new(1.0, theme.accent_violet.linear_multiply(0.3)))
+                            .fill(theme.accent.linear_multiply(0.12))
+                            .stroke(Stroke::new(1.0, theme.accent.linear_multiply(0.3)))
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(Margin::symmetric(10, 6))
                             .show(ui, |ui| {
@@ -286,13 +290,13 @@ pub fn render_info_icon_button(
                                     ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
                                     ui.label(
                                         egui::RichText::new("RECOMMENDED:")
-                                            .font(FontId::proportional(9.5))
+                                            .font(crate::theme::font(9.5))
                                             .strong()
-                                            .color(theme.accent_pink),
+                                            .color(theme.accent_warm),
                                     );
                                     ui.label(
                                         egui::RichText::new(content.recommendation)
-                                            .font(FontId::proportional(10.5))
+                                            .font(crate::theme::font(10.5))
                                             .color(theme.text_primary),
                                     );
                                 });
@@ -302,7 +306,7 @@ pub fn render_info_icon_button(
 
                 // Detect clicking outside both the info box and the trigger button to dismiss
                 if ui.input(|i| i.pointer.any_pressed()) {
-                    if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+                    if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
                         if !frame_resp.response.rect.contains(pos) && !rect.contains(pos) {
                             close_requested = true;
                         }
@@ -311,8 +315,10 @@ pub fn render_info_icon_button(
             });
 
         if close_requested {
-            ui.ctx()
-                .data_mut(|d| d.insert_temp(key_id, None::<egui::Id>));
+            ui.ctx().data_mut(|d| {
+                d.remove_temp::<u64>(key_id);
+            });
+            ui.ctx().request_repaint();
         }
     }
 

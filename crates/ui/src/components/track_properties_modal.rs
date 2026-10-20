@@ -1,6 +1,6 @@
 use crate::theme::Theme;
 use domain::models::Track;
-use eframe::egui::{self, CornerRadius, FontId, Stroke, Vec2, Window};
+use eframe::egui::{self, CornerRadius, Stroke, Vec2, Window};
 
 pub fn show_track_properties_modal(
     ctx: &egui::Context,
@@ -137,12 +137,12 @@ pub fn show_track_properties_modal(
 
                     ui.label(
                         egui::RichText::new("File Path:")
-                            .font(FontId::proportional(11.5))
+                            .font(crate::theme::font(11.5))
                             .color(theme.text_muted),
                     );
                     ui.label(
                         egui::RichText::new(track.path.to_string_lossy())
-                            .font(FontId::monospace(11.0))
+                            .font(crate::theme::mono_font(11.0))
                             .color(theme.text_secondary),
                     );
                 });
@@ -156,13 +156,13 @@ fn render_property_row(ui: &mut egui::Ui, label: &str, value: &str, theme: &Them
             [110.0, 18.0],
             egui::Label::new(
                 egui::RichText::new(label)
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
             ),
         );
         ui.label(
             egui::RichText::new(value)
-                .font(FontId::proportional(12.5))
+                .font(crate::theme::font(12.5))
                 .color(theme.text_primary),
         );
     });

@@ -138,14 +138,14 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         disc_number: row.get("disc_number")?,
         duration_secs: row.get("duration_secs")?,
         sample_rate: row.get("sample_rate")?,
-        channels: row.get("channels")?,
+        channels: row.get::<_, i64>("channels")? as usize,
         format: row.get("format")?,
         bitrate_kbps: row.get("bitrate_kbps")?,
         is_lossless: is_lossless_int != 0,
         replaygain_track_db: row.get("replaygain_track_db")?,
         replaygain_track_peak: row.get("replaygain_track_peak")?,
         r128_loudness_lufs: row.get("r128_loudness_lufs")?,
-        file_size_bytes: row.get("file_size_bytes")?,
+        file_size_bytes: row.get::<_, i64>("file_size_bytes")? as u64,
         mtime_unix_secs: row.get("mtime_unix_secs")?,
         mtime_nanos: row.get::<_, Option<i64>>("mtime_nanos")?.unwrap_or(0) as u32,
         content_hash: row.get("content_hash")?,
@@ -208,14 +208,14 @@ impl TrackRepo {
                     track.disc_number,
                     track.duration_secs,
                     track.sample_rate,
-                    track.channels,
+                    track.channels as i64,
                     track.format,
                     track.bitrate_kbps,
                     if track.is_lossless { 1 } else { 0 },
                     track.replaygain_track_db,
                     track.replaygain_track_peak,
                     track.r128_loudness_lufs,
-                    track.file_size_bytes,
+                    track.file_size_bytes as i64,
                     track.mtime_unix_secs,
                     track.mtime_nanos,
                     track.content_hash,
@@ -360,8 +360,10 @@ impl TrackRepo {
     }
 
     pub fn count(&self) -> Result<usize> {
-        self.db
-            .with_conn(|conn| conn.query_row("SELECT COUNT(*) FROM tracks;", [], |r| r.get(0)))
+        self.db.with_conn(|conn| {
+            let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks;", [], |r| r.get(0))?;
+            Ok(count.max(0) as usize)
+        })
     }
 
     pub fn list(&self, sort: SortField, order: SortOrder) -> Result<Vec<Track>> {
@@ -681,7 +683,7 @@ impl PlaylistRepo {
             .unwrap_or_default()
             .as_secs() as i64;
         self.db.with_conn(|conn| {
-            let next_pos: usize = conn.query_row(
+            let next_pos: i64 = conn.query_row(
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?1;",
                 params![playlist_id.to_string()],
                 |r| r.get(0),
@@ -701,6 +703,50 @@ impl PlaylistRepo {
                 "UPDATE playlists SET updated_at = ?1 WHERE id = ?2;",
                 params![now, playlist_id.to_string()],
             )?;
+            Ok(())
+        })
+    }
+
+    /// Move a playlist track from one position to another, then renumber the
+    /// remaining rows so the stored order stays contiguous.
+    pub fn move_track(&self, playlist_id: &PlaylistId, from: usize, to: usize) -> Result<()> {
+        if from == to {
+            return Ok(());
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            let mut row_ids: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM playlist_tracks
+                     WHERE playlist_id = ?1
+                     ORDER BY position ASC, id ASC;",
+                )?;
+                let rows = stmt.query_map(params![playlist_id.to_string()], |row| {
+                    row.get::<_, String>(0)
+                })?;
+                rows.collect::<Result<Vec<_>>>()?
+            };
+            if from >= row_ids.len() || to >= row_ids.len() {
+                return Ok(());
+            }
+            let moved = row_ids.remove(from);
+            row_ids.insert(to, moved);
+            {
+                let mut update =
+                    tx.prepare("UPDATE playlist_tracks SET position = ?1 WHERE id = ?2;")?;
+                for (position, row_id) in row_ids.iter().enumerate() {
+                    update.execute(params![position as i64, row_id])?;
+                }
+            }
+            tx.execute(
+                "UPDATE playlists SET updated_at = ?1 WHERE id = ?2;",
+                params![now, playlist_id.to_string()],
+            )?;
+            tx.commit()?;
             Ok(())
         })
     }

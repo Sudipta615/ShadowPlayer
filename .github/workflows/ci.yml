@@ -75,3 +75,42 @@ jobs:
 
       - name: Tests
         run: cargo test
+
+      # The engine's optional MPRIS interface uses zbus directly; compile it
+      # so it cannot rot behind the default feature set.
+      - name: MPRIS feature check
+        run: cargo check --features mpris
+
+      # The player workspace enables tag-write, but it is not in the engine's
+      # default features. Build and run the tag write-back tests explicitly.
+      - name: Tag write-back tests
+        run: cargo test --features tag-write decode::tags
+
+  desktop-targets:
+    name: ${{ matrix.name }} compile
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: macOS
+            os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Native target check, not a Linux cross-build: this is where the
+      # Windows SMTC and macOS Now Playing implementations actually compile.
+      - name: Compile desktop player
+        run: cargo check -p shadowplayer --target ${{ matrix.target }}

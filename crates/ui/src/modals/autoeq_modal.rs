@@ -1,5 +1,5 @@
 use audio_session::AudioSession;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Stroke, Vec2, Window};
+use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2, Window};
 use engine::dsp::autoeq::{AutoEq, AutoEqParams, AutoEqResult, FrequencyResponse, TargetCurve};
 
 use crate::components::eq_panel::{EqPanelState, ParametricBand};
@@ -334,7 +334,7 @@ pub fn show_autoeq_modal(
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
-                .stroke(Stroke::new(1.5_f32, theme.accent_magenta))
+                .stroke(Stroke::new(1.5_f32, theme.accent_highlight))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(egui::Margin::same(18)),
         )
@@ -343,7 +343,7 @@ pub fn show_autoeq_modal(
 
             ui.label(
                 egui::RichText::new("Auto-compensate frequency response using the AutoEQ database")
-                    .font(FontId::proportional(12.5))
+                    .font(crate::theme::font(12.5))
                     .color(theme.text_secondary),
             );
 
@@ -351,7 +351,7 @@ pub fn show_autoeq_modal(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Search:")
-                        .font(FontId::proportional(13.0))
+                        .font(crate::theme::font(13.0))
                         .color(theme.text_primary),
                 );
                 ui.add(
@@ -368,7 +368,7 @@ pub fn show_autoeq_modal(
                 ui.spacing_mut().item_spacing = Vec2::new(16.0, 0.0);
                 ui.label(
                     egui::RichText::new("Target Curve:")
-                        .font(FontId::proportional(12.0))
+                        .font(crate::theme::font(12.0))
                         .color(theme.text_secondary),
                 );
 
@@ -382,7 +382,7 @@ pub fn show_autoeq_modal(
 
                 ui.label(
                     egui::RichText::new("Max Boost:")
-                        .font(FontId::proportional(12.0))
+                        .font(crate::theme::font(12.0))
                         .color(theme.text_secondary),
                 );
                 ui.add(
@@ -420,18 +420,14 @@ pub fn show_autoeq_modal(
 
                         let btn = egui::Button::new(
                             egui::RichText::new(display_text)
-                                .font(FontId::proportional(12.5))
+                                .font(crate::theme::font(12.5))
                                 .color(if is_sel {
                                     Color32::WHITE
                                 } else {
                                     theme.text_primary
                                 }),
                         )
-                        .fill(if is_sel {
-                            theme.accent_violet
-                        } else {
-                            theme.bg_pill
-                        })
+                        .fill(if is_sel { theme.accent } else { theme.bg_pill })
                         .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::new(ui.available_width(), 26.0));
 
@@ -477,7 +473,7 @@ pub fn show_autoeq_modal(
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(format!("• Profile Ready: {}", prof_name))
-                            .font(FontId::proportional(13.0))
+                            .font(crate::theme::font(13.0))
                             .strong()
                             .color(theme.bit_perfect_green),
                     );
@@ -486,7 +482,7 @@ pub fn show_autoeq_modal(
                             "Preamp: {:+0.1} dB | Fit RMS Error: {:.2} dB",
                             res.preamp_db, res.rms_error_db
                         ))
-                        .font(FontId::proportional(11.5))
+                        .font(crate::theme::font(11.5))
                         .color(theme.text_secondary),
                     );
                 });
@@ -494,11 +490,11 @@ pub fn show_autoeq_modal(
                 ui.horizontal(|ui| {
                     let apply_btn = egui::Button::new(
                         egui::RichText::new("Apply Calibration to Audio Engine")
-                            .font(FontId::proportional(13.0))
+                            .font(crate::theme::font(13.0))
                             .strong()
                             .color(Color32::WHITE),
                     )
-                    .fill(theme.accent_magenta)
+                    .fill(theme.accent)
                     .corner_radius(CornerRadius::same(8))
                     .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
 

@@ -1,6 +1,6 @@
 use audio_session::AudioSession;
 use domain::models::Track;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2, Window};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2, Window};
 use engine::diagnostics::BitPerfectCause;
 
 use crate::state::DspState;
@@ -37,7 +37,7 @@ pub fn show_bit_perfect_modal(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(
                     1.5_f32,
-                    if is_bit_perfect { theme.bit_perfect_green } else { theme.accent_violet },
+                    if is_bit_perfect { theme.bit_perfect_green } else { theme.accent },
                 ))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(egui::Margin::same(20)),
@@ -49,12 +49,12 @@ pub fn show_bit_perfect_modal(
             let banner_color = if is_bit_perfect {
                 theme.bit_perfect_green.linear_multiply(0.18)
             } else {
-                theme.accent_violet.linear_multiply(0.18)
+                theme.accent.linear_multiply(0.18)
             };
             let banner_stroke = if is_bit_perfect {
                 theme.bit_perfect_green
             } else {
-                theme.accent_violet
+                theme.accent
             };
 
             egui::Frame::NONE
@@ -70,24 +70,24 @@ pub fn show_bit_perfect_modal(
                             ui.vertical(|ui| {
                                 ui.label(
                                     egui::RichText::new("SIGNAL PATH IS 100% BIT-PERFECT")
-                                        .font(FontId::proportional(14.0))
+                                        .font(crate::theme::font(14.0))
                                         .strong()
                                         .color(theme.bit_perfect_green),
                                 );
                                 ui.label(
                                     egui::RichText::new("Direct unmolested bitstream to audio hardware DAC. Zero DSP coloration.")
-                                        .font(FontId::proportional(11.5))
+                                        .font(crate::theme::font(11.5))
                                         .color(theme.text_secondary),
                                 );
                             });
                         } else {
-                            paint_warning_triangle(ui, theme.accent_purple);
+                            paint_warning_triangle(ui, theme.accent_highlight);
                             ui.vertical(|ui| {
                                 ui.label(
                                     egui::RichText::new("DSP SIGNAL ALTERATION ACTIVE")
-                                        .font(FontId::proportional(14.0))
+                                        .font(crate::theme::font(14.0))
                                         .strong()
-                                        .color(theme.accent_purple),
+                                        .color(theme.accent_highlight),
                                 );
                                 let cause_text = match cause {
                                     Some(BitPerfectCause::VolumeNotUnity) => "Software volume / balance is modifying sample values (< 0 dB).",
@@ -102,7 +102,7 @@ pub fn show_bit_perfect_modal(
                                 };
                                 ui.label(
                                     egui::RichText::new(cause_text)
-                                        .font(FontId::proportional(11.5))
+                                        .font(crate::theme::font(11.5))
                                         .color(theme.text_secondary),
                                 );
                             });
@@ -113,7 +113,7 @@ pub fn show_bit_perfect_modal(
             // 2. Visual Signal Path Diagram
             ui.label(
                 egui::RichText::new("AUDIO SIGNAL FLOW")
-                    .font(FontId::proportional(11.0))
+                    .font(crate::theme::font(11.0))
                     .strong()
                     .color(theme.text_muted),
             );
@@ -181,7 +181,7 @@ pub fn show_bit_perfect_modal(
                 let (bg_col, stroke_col) = if *bit_clean {
                     (theme.bit_perfect_green.linear_multiply(0.18), theme.bit_perfect_green)
                 } else {
-                    (theme.accent_purple.linear_multiply(0.18), theme.accent_purple)
+                    (theme.accent_highlight.linear_multiply(0.18), theme.accent_highlight)
                 };
 
                 painter.rect_filled(node_rect, CornerRadius::same(6), bg_col);
@@ -191,7 +191,7 @@ pub fn show_bit_perfect_modal(
                     node_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     label,
-                    FontId::proportional(10.5),
+                    crate::theme::font(10.5),
                     Color32::WHITE,
                 );
 
@@ -223,7 +223,7 @@ pub fn show_bit_perfect_modal(
             // 3. Detailed Signal Path Telemetry Table
             ui.label(
                 egui::RichText::new("SIGNAL SPECIFICATIONS")
-                    .font(FontId::proportional(11.0))
+                    .font(crate::theme::font(11.0))
                     .strong()
                     .color(theme.text_muted),
             );
@@ -251,13 +251,13 @@ pub fn show_bit_perfect_modal(
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new(label)
-                                .font(FontId::proportional(12.0))
+                                .font(crate::theme::font(12.0))
                                 .color(theme.text_secondary),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
                                 egui::RichText::new(val)
-                                    .font(FontId::monospace(11.5))
+                                    .font(crate::theme::mono_font(11.5))
                                     .color(theme.text_primary),
                             );
                         });
@@ -271,7 +271,7 @@ pub fn show_bit_perfect_modal(
             ui.horizontal(|ui| {
                 let pure_direct_btn = egui::Button::new(
                     egui::RichText::new("Enable Bit-Perfect Pure Direct")
-                        .font(FontId::proportional(12.5))
+                        .font(crate::theme::font(12.5))
                         .strong()
                         .color(Color32::WHITE),
                 )

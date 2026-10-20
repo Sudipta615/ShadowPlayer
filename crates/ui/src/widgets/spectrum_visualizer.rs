@@ -40,7 +40,7 @@ impl<'a> SpectrumVisualizerWidget<'a> {
         let painter = ui.painter_at(rect);
 
         // Dark background
-        painter.rect_filled(rect, 8.0, Color32::from_rgba_premultiplied(10, 11, 20, 220));
+        painter.rect_filled(rect, 8.0, self.theme.bg_card);
         painter.rect_stroke(
             rect,
             8.0,
@@ -95,13 +95,13 @@ impl<'a> SpectrumVisualizerWidget<'a> {
 
             let bar_rect = Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1, y1));
 
-            // Color gradient across frequencies: Cyan at bass/mids -> Magenta/Violet at highs
+            // Jade at the low/mid bands, mint at the highs. No violet ramp.
             let color = if t < 0.4 {
-                self.theme.accent_blue
+                self.theme.info
             } else if t < 0.75 {
-                self.theme.accent_violet
+                self.theme.accent
             } else {
-                self.theme.accent_magenta
+                self.theme.accent_highlight
             };
 
             // Glow cap

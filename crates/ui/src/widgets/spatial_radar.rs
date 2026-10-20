@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, Stroke, Vec2};
+use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
 /// Interactive 2D/3D Soundstage and Spatial Radar Canvas
 pub struct SpatialRadarWidget<'a> {
@@ -83,7 +83,7 @@ impl<'a> SpatialRadarWidget<'a> {
                 "Virtual Room: {:.1}m × {:.1}m",
                 self.room_width_m, self.room_depth_m
             ),
-            FontId::proportional(9.5),
+            crate::theme::font(9.5),
             self.theme.text_muted,
         );
 
@@ -97,7 +97,7 @@ impl<'a> SpatialRadarWidget<'a> {
                     Pos2::new(center.x + 4.0, center.y - r + 2.0),
                     egui::Align2::LEFT_TOP,
                     format!("{:.0}m", dist),
-                    FontId::proportional(8.5),
+                    crate::theme::font(8.5),
                     self.theme.text_muted,
                 );
             }
@@ -122,7 +122,7 @@ impl<'a> SpatialRadarWidget<'a> {
         // 4. Draw Listener Head (Center)
         // Listener body circle
         painter.circle_filled(center, 9.0, Color32::from_rgb(45, 55, 75));
-        painter.circle_stroke(center, 9.0, Stroke::new(1.5_f32, self.theme.accent_violet));
+        painter.circle_stroke(center, 9.0, Stroke::new(1.5_f32, self.theme.accent));
 
         // Listener nose / direction pointer
         let yaw_rad = (self.listener_yaw_deg - 90.0).to_radians();
@@ -130,10 +130,7 @@ impl<'a> SpatialRadarWidget<'a> {
             center.x + 14.0 * yaw_rad.cos(),
             center.y + 14.0 * yaw_rad.sin(),
         );
-        painter.line_segment(
-            [center, nose_tip],
-            Stroke::new(2.5_f32, self.theme.accent_violet),
-        );
+        painter.line_segment([center, nose_tip], Stroke::new(2.5_f32, self.theme.accent));
 
         // 5. Handle Dragging of the Virtual Centre
         let mouse_pos = ui.input(|i| i.pointer.hover_pos());
@@ -165,16 +162,29 @@ impl<'a> SpatialRadarWidget<'a> {
         // Ray line from listener to source
         painter.line_segment(
             [center, source_pos],
-            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(236, 72, 153, 80)),
+            Stroke::new(
+                1.0_f32,
+                Color32::from_rgba_unmultiplied(
+                    self.theme.accent_highlight.r(),
+                    self.theme.accent_highlight.g(),
+                    self.theme.accent_highlight.b(),
+                    80,
+                ),
+            ),
         );
 
         // Pulsing glow around sound source
         painter.circle_filled(
             source_pos,
             12.0,
-            Color32::from_rgba_premultiplied(236, 72, 153, 40),
+            Color32::from_rgba_unmultiplied(
+                self.theme.accent_highlight.r(),
+                self.theme.accent_highlight.g(),
+                self.theme.accent_highlight.b(),
+                40,
+            ),
         );
-        painter.circle_filled(source_pos, 7.0, self.theme.accent_magenta);
+        painter.circle_filled(source_pos, 7.0, self.theme.accent_highlight);
         painter.circle_stroke(source_pos, 7.0, Stroke::new(1.5_f32, Color32::WHITE));
 
         // Source Label & Telemetry
@@ -183,7 +193,7 @@ impl<'a> SpatialRadarWidget<'a> {
             Pos2::new(source_pos.x, source_pos.y - 12.0),
             egui::Align2::CENTER_BOTTOM,
             source_info,
-            FontId::proportional(10.0),
+            crate::theme::font(10.0),
             self.theme.text_primary,
         );
 

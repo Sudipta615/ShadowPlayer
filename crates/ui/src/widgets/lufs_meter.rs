@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
 use engine::dsp::ProfessionalMeterSnapshot;
 
 /// Broadcast-style loudness & true-peak meter.
@@ -79,7 +79,7 @@ impl<'a> LufsMeterWidget<'a> {
                 Pos2::new(b_rect.left() + 8.0, b_rect.top() + 6.0),
                 egui::Align2::LEFT_TOP,
                 label,
-                FontId::proportional(8.5),
+                crate::theme::font(8.5),
                 self.theme.text_muted,
             );
 
@@ -97,16 +97,16 @@ impl<'a> LufsMeterWidget<'a> {
                     self.theme.bit_perfect_green
                 }
             } else if *val > *target {
-                self.theme.accent_magenta
+                self.theme.accent_highlight
             } else {
-                self.theme.accent_blue
+                self.theme.info
             };
 
             painter.text(
                 Pos2::new(b_rect.left() + 8.0, b_rect.top() + 20.0),
                 egui::Align2::LEFT_TOP,
                 display_val,
-                FontId::proportional(15.0),
+                crate::theme::font(15.0),
                 val_color,
             );
 
@@ -114,7 +114,7 @@ impl<'a> LufsMeterWidget<'a> {
                 Pos2::new(b_rect.right() - 8.0, b_rect.top() + 24.0),
                 egui::Align2::RIGHT_TOP,
                 unit,
-                FontId::proportional(9.0),
+                crate::theme::font(9.0),
                 self.theme.text_secondary,
             );
 

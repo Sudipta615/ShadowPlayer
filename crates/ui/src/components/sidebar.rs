@@ -2,7 +2,7 @@ use crate::theme::Theme;
 use domain::ids::PlaylistId;
 use domain::models::Playlist;
 use domain::smart::SmartPlaylist;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Ui, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavItem {
@@ -29,61 +29,105 @@ pub struct SideBar<'a> {
     pub playlists: &'a [Playlist],
     pub smart_playlists: &'a [SmartPlaylist],
     pub theme: &'a Theme,
+    /// Icon-only navigation for narrow windows. Every item keeps its tooltip
+    /// and the playlist shortcuts remain reachable.
+    pub rail: bool,
     pub on_select: Box<dyn FnMut(NavItem) + 'a>,
     pub on_create_playlist: Box<dyn FnMut() + 'a>,
     pub on_create_smart_playlist: Box<dyn FnMut() + 'a>,
+    pub on_delete_playlist: Box<dyn FnMut(PlaylistId) + 'a>,
+    pub on_delete_smart_playlist: Box<dyn FnMut(PlaylistId) + 'a>,
+    pub on_edit_smart_playlist: Box<dyn FnMut(PlaylistId) + 'a>,
 }
 
 impl<'a> SideBar<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         active_item: NavItem,
         playlists: &'a [Playlist],
         smart_playlists: &'a [SmartPlaylist],
         theme: &'a Theme,
+        rail: bool,
         on_select: impl FnMut(NavItem) + 'a,
         on_create_playlist: impl FnMut() + 'a,
         on_create_smart_playlist: impl FnMut() + 'a,
+        on_delete_playlist: impl FnMut(PlaylistId) + 'a,
+        on_delete_smart_playlist: impl FnMut(PlaylistId) + 'a,
+        on_edit_smart_playlist: impl FnMut(PlaylistId) + 'a,
     ) -> Self {
         Self {
             active_item,
             playlists,
             smart_playlists,
             theme,
+            rail,
             on_select: Box::new(on_select),
             on_create_playlist: Box::new(on_create_playlist),
             on_create_smart_playlist: Box::new(on_create_smart_playlist),
+            on_delete_playlist: Box::new(on_delete_playlist),
+            on_delete_smart_playlist: Box::new(on_delete_smart_playlist),
+            on_edit_smart_playlist: Box::new(on_edit_smart_playlist),
         }
     }
 
     pub fn show(mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
-            ui.set_width(168.0);
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
-
-            // 1. Branding: Glowing Logo + Title + Subtitle
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
-
-                let (logo_rect, _) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::hover());
-                crate::components::icons::draw_logo(ui, logo_rect, self.theme.accent_pink);
-
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
-                    ui.label(
-                        egui::RichText::new("ShadowPlayer")
-                            .font(FontId::proportional(19.0))
-                            .strong()
-                            .color(self.theme.text_primary),
-                    );
-                    ui.label(
-                        egui::RichText::new("Music for a better you")
-                            .font(FontId::proportional(11.5))
-                            .color(self.theme.text_muted),
-                    );
-                });
+            ui.set_width(if self.rail {
+                40.0
+            } else {
+                ui.available_width().max(120.0)
             });
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, if self.rail { 6.0 } else { 4.0 });
 
-            ui.add_space(16.0);
+            // 1. Branding: logo + title + subtitle in the full sidebar, just
+            // the mark in the rail.
+            if self.rail {
+                let (logo_rect, _) = ui.allocate_exact_size(Vec2::new(34.0, 34.0), Sense::hover());
+                crate::components::icons::draw_logo(
+                    ui,
+                    Rect::from_center_size(logo_rect.center(), Vec2::splat(28.0)),
+                    self.theme.accent_warm,
+                );
+            } else {
+                // The compact sidebar is 184px wide. At the full display size
+                // the wordmark is a few pixels too wide there, so step the
+                // brand type down instead of truncating "ShadowPla...".
+                let compact_brand = ui.available_width() < 180.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+
+                    let (logo_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::hover());
+                    crate::components::icons::draw_logo(ui, logo_rect, self.theme.accent_warm);
+
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new("ShadowPlayer")
+                                    .font(crate::theme::font(if compact_brand {
+                                        15.0
+                                    } else {
+                                        17.0
+                                    }))
+                                    .strong()
+                                    .color(self.theme.text_primary),
+                            )
+                            .truncate(),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new("Music for a better you")
+                                    .font(crate::theme::font(10.5))
+                                    .color(self.theme.text_muted),
+                            )
+                            .truncate(),
+                        );
+                    });
+                });
+            }
+
+            ui.add_space(if self.rail { 8.0 } else { 16.0 });
 
             // 2. Primary Navigation
             self.render_nav_item(ui, NavItem::Home, "Home");
@@ -92,115 +136,121 @@ impl<'a> SideBar<'a> {
             self.render_nav_item(ui, NavItem::Genres, "Genres");
             self.render_nav_item(ui, NavItem::Folders, "Folders");
 
-            // Collections: quality-based views over the whole library.
-            ui.add_space(16.0);
-            ui.label(
-                egui::RichText::new("Collections")
-                    .font(FontId::proportional(13.0))
-                    .color(self.theme.text_muted),
-            );
-            ui.add_space(4.0);
-            self.render_nav_item(ui, NavItem::RecentlyAdded, "Recently Added");
-            self.render_nav_item(ui, NavItem::Lossless, "Lossless Only");
-            self.render_nav_item(ui, NavItem::HiRes, "Hi-Res Masters");
-
-            ui.add_space(10.0);
+            // Collections section removed per user request
 
             // 3. Playlists Header with Circular "+" Button
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Playlists")
-                        .font(FontId::proportional(13.0))
-                        .color(self.theme.text_muted),
+            ui.add_space(if self.rail { 8.0 } else { 16.0 });
+            if self.rail {
+                let (plus_rect, plus_resp) =
+                    ui.allocate_exact_size(Vec2::new(40.0, 30.0), Sense::click());
+                let plus_color = if plus_resp.hovered() {
+                    self.theme.text_primary
+                } else {
+                    self.theme.text_muted
+                };
+                crate::components::icons::draw_plus_circle(
+                    ui,
+                    Rect::from_center_size(plus_rect.center(), Vec2::splat(18.0)),
+                    plus_color,
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (plus_rect, plus_resp) =
-                        ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::click());
-                    let plus_color = if plus_resp.hovered() {
-                        self.theme.text_primary
-                    } else {
-                        self.theme.text_muted
-                    };
-                    crate::components::icons::draw_plus_circle(ui, plus_rect, plus_color);
-                    if plus_resp.clicked() {
-                        (self.on_create_playlist)();
-                    }
+                if plus_resp.on_hover_text("New playlist").clicked() {
+                    (self.on_create_playlist)();
+                }
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Playlists")
+                            .font(crate::theme::font(13.0))
+                            .color(self.theme.text_muted),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let plus_id = ui.make_persistent_id("add_playlist_popup_btn");
+                        let mut menu_open: bool =
+                            ui.ctx().data(|d| d.get_temp(plus_id).unwrap_or(false));
+                        let (plus_rect, plus_resp) =
+                            ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::click());
+                        let plus_color = if plus_resp.hovered() || menu_open {
+                            self.theme.text_primary
+                        } else {
+                            self.theme.text_muted
+                        };
+                        crate::components::icons::draw_plus_circle(ui, plus_rect, plus_color);
+                        if plus_resp.clicked() {
+                            menu_open = !menu_open;
+                            ui.ctx().data_mut(|d| d.insert_temp(plus_id, menu_open));
+                        }
+                        if menu_open {
+                            let popup_pos = plus_rect.left_bottom() + Vec2::new(0.0, 4.0);
+                            let mut close = false;
+                            let mut popup_rect: Option<Rect> = None;
+                            egui::Area::new(plus_id.with("popup"))
+                                .order(egui::Order::Foreground)
+                                .fixed_pos(popup_pos)
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.set_min_width(140.0);
+                                        if ui.button("Standard Playlist").clicked() {
+                                            (self.on_create_playlist)();
+                                            close = true;
+                                        }
+                                        if ui.button("Smart Playlist").clicked() {
+                                            (self.on_create_smart_playlist)();
+                                            close = true;
+                                        }
+                                    });
+                                    popup_rect = Some(ui.min_rect());
+                                });
+
+                            let clicked_elsewhere = ui.input(|i| i.pointer.any_click())
+                                && !plus_resp.hovered()
+                                && !popup_rect
+                                    .map(|r| ui.rect_contains_pointer(r))
+                                    .unwrap_or(false);
+                            if close || clicked_elsewhere {
+                                ui.ctx().data_mut(|d| d.insert_temp(plus_id, false));
+                            }
+                        }
+                    });
                 });
-            });
+            }
 
             ui.add_space(4.0);
 
-            // 4. Playlist Special Items with Colored Badges (matching mockup)
+            // 4. Playlist Special Items with Colored Badges
             self.render_playlist_badge_item(
                 ui,
                 NavItem::Favorites,
                 "Favorites",
-                self.theme.accent_magenta,
+                self.theme.accent_highlight,
             );
             self.render_playlist_badge_item(
                 ui,
                 NavItem::RecentlyPlayed,
                 "Recently Played",
-                self.theme.accent_violet,
+                self.theme.accent,
             );
             self.render_playlist_badge_item(
                 ui,
                 NavItem::MostPlayed,
                 "Most Played",
-                self.theme.accent_orange,
+                self.theme.accent_warm,
             );
 
-            // User Custom Playlists
-            if !self.playlists.is_empty() {
-                ui.add_space(6.0);
+            // Merged User Custom Playlists and Smart Playlists
+            if !self.playlists.is_empty() || !self.smart_playlists.is_empty() {
+                ui.add_space(4.0);
                 for pl in self.playlists {
                     self.render_user_playlist_item(ui, pl);
                 }
-            }
-
-            // Smart (rule-based) Playlists
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Smart Playlists")
-                        .font(FontId::proportional(13.0))
-                        .color(self.theme.text_muted),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (plus_rect, plus_resp) =
-                        ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::click());
-                    let plus_color = if plus_resp.hovered() {
-                        self.theme.text_primary
-                    } else {
-                        self.theme.text_muted
-                    };
-                    crate::components::icons::draw_plus_circle(ui, plus_rect, plus_color);
-                    if plus_resp.clicked() {
-                        (self.on_create_smart_playlist)();
-                    }
-                });
-            });
-            ui.add_space(4.0);
-
-            if self.smart_playlists.is_empty() {
-                ui.label(
-                    egui::RichText::new("  e.g. FLAC · played > 5")
-                        .font(FontId::proportional(11.0))
-                        .color(self.theme.text_muted),
-                );
-            } else {
                 for sp in self.smart_playlists {
                     self.render_smart_playlist_item(ui, sp);
                 }
             }
 
-            // 5. Anchor Settings & Help to the bottom
-            let remaining_h = ui.available_height() - 94.0;
-            if remaining_h > 0.0 {
-                ui.add_space(remaining_h);
-            }
-
-            // Bottom items
+            // 5. Settings and Help follow the content rather than being
+            // absolutely anchored. In short windows the sidebar scrolls, so an
+            // anchor would simply overlap the playlists.
+            ui.add_space(if self.rail { 8.0 } else { 16.0 });
             self.render_nav_item(ui, NavItem::Settings, "Settings");
             self.render_nav_item(ui, NavItem::Help, "Help & Feedback");
             ui.add_space(4.0);
@@ -209,12 +259,56 @@ impl<'a> SideBar<'a> {
 
     fn render_smart_playlist_item(&mut self, ui: &mut Ui, playlist: &SmartPlaylist) {
         let item = NavItem::SmartPlaylist(playlist.id);
+        if self.rail {
+            let is_active = self.active_item == item;
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::click());
+            if response.clicked() {
+                (self.on_select)(item);
+            }
+            let painter = ui.painter_at(rect);
+            if is_active {
+                painter.rect_filled(rect, CornerRadius::same(9), self.theme.accent);
+            } else if response.hovered() {
+                painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
+            }
+            crate::components::icons::draw_filter(
+                ui,
+                Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
+                if is_active {
+                    Color32::WHITE
+                } else {
+                    self.theme.info
+                },
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::Role::Button,
+                    true,
+                    is_active,
+                    format!("Smart playlist: {}", playlist.name),
+                )
+            });
+            let _ = response.on_hover_text(format!("Smart playlist: {}", playlist.name));
+            return;
+        }
         let is_active = self.active_item == item;
         let height = 34.0;
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
 
-        if response.clicked() {
+        let trash_rect = Rect::from_center_size(
+            Pos2::new(rect.max.x - 12.0, rect.center().y),
+            Vec2::new(16.0, 16.0),
+        );
+        let trash_id = ui.make_persistent_id(format!("del_sp_{}", playlist.id));
+        let trash_resp = ui
+            .interact(trash_rect, trash_id, Sense::click())
+            .on_hover_text("Delete smart playlist");
+
+        if trash_resp.clicked() {
+            (self.on_delete_smart_playlist)(playlist.id);
+        } else if response.clicked() {
             (self.on_select)(item);
         }
 
@@ -222,7 +316,7 @@ impl<'a> SideBar<'a> {
         let is_hovered = response.hovered();
 
         if is_active {
-            painter.rect_filled(rect, CornerRadius::same(7), self.theme.accent_blue);
+            painter.rect_filled(rect, CornerRadius::same(7), self.theme.info);
         } else if is_hovered {
             painter.rect_filled(rect, CornerRadius::same(7), self.theme.bg_card_hover);
         }
@@ -237,36 +331,96 @@ impl<'a> SideBar<'a> {
         crate::components::icons::draw_filter(
             ui,
             Rect::from_center_size(
-                Pos2::new(rect.min.x + 16.0, rect.center().y),
+                Pos2::new(rect.min.x + 14.0, rect.center().y),
                 Vec2::new(13.0, 13.0),
             ),
             if is_active {
                 Color32::WHITE
             } else {
-                self.theme.accent_blue
+                self.theme.info
             },
         );
 
-        let label_pos = Pos2::new(rect.min.x + 30.0, rect.center().y);
-        let galley = painter.layout_no_wrap(
+        // Delete trash icon
+        let trash_color = if trash_resp.hovered() {
+            self.theme.accent_warm
+        } else if is_hovered || is_active {
+            self.theme.text_secondary
+        } else {
+            self.theme.text_muted.gamma_multiply(0.6)
+        };
+        crate::components::icons::draw_trash(ui, trash_rect, trash_color);
+
+        // Smart playlist name
+        let max_label_w = (rect.width() - 28.0 - 24.0).max(20.0);
+        let mut job = egui::text::LayoutJob::simple_singleline(
             playlist.name.clone(),
-            FontId::proportional(12.8),
+            crate::theme::font(12.5),
             text_color,
         );
+        job.wrap.max_width = max_label_w;
+        job.wrap.break_anywhere = false;
+        job.wrap.overflow_character = Some('…');
+        let galley = painter.layout_job(job);
         painter.galley(
-            Pos2::new(label_pos.x, rect.center().y - galley.size().y * 0.5),
+            Pos2::new(rect.min.x + 26.0, rect.center().y - galley.size().y * 0.5),
             galley,
             text_color,
         );
     }
 
     fn render_user_playlist_item(&mut self, ui: &mut Ui, playlist: &Playlist) {
-        let is_active = self.active_item == NavItem::Playlist(playlist.id);
+        let item = NavItem::Playlist(playlist.id);
+        if self.rail {
+            let is_active = self.active_item == item;
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::click());
+            if response.clicked() {
+                (self.on_select)(item);
+            }
+            let painter = ui.painter_at(rect);
+            if is_active {
+                painter.rect_filled(rect, CornerRadius::same(9), self.theme.accent);
+            } else if response.hovered() {
+                painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
+            }
+            crate::components::icons::draw_list_icon(
+                ui,
+                Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
+                if is_active {
+                    Color32::WHITE
+                } else {
+                    self.theme.accent_warm
+                },
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::Role::Button,
+                    true,
+                    is_active,
+                    format!("Playlist: {}", playlist.name),
+                )
+            });
+            let _ = response.on_hover_text(format!("Playlist: {}", playlist.name));
+            return;
+        }
+        let is_active = self.active_item == item;
         let height = 34.0;
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
 
-        if response.clicked() {
+        let trash_rect = Rect::from_center_size(
+            Pos2::new(rect.max.x - 12.0, rect.center().y),
+            Vec2::new(16.0, 16.0),
+        );
+        let trash_id = ui.make_persistent_id(format!("del_pl_{}", playlist.id));
+        let trash_resp = ui
+            .interact(trash_rect, trash_id, Sense::click())
+            .on_hover_text("Delete playlist");
+
+        if trash_resp.clicked() {
+            (self.on_delete_playlist)(playlist.id);
+        } else if response.clicked() {
             (self.on_select)(NavItem::Playlist(playlist.id));
         }
 
@@ -274,7 +428,7 @@ impl<'a> SideBar<'a> {
         let is_hovered = response.hovered();
 
         if is_active {
-            painter.rect_filled(rect, CornerRadius::same(7), self.theme.accent_violet);
+            painter.rect_filled(rect, CornerRadius::same(7), self.theme.accent);
         } else if is_hovered {
             painter.rect_filled(rect, CornerRadius::same(7), self.theme.bg_card_hover);
         }
@@ -287,8 +441,8 @@ impl<'a> SideBar<'a> {
 
         // Icon
         let pl_icon_rect = Rect::from_center_size(
-            Pos2::new(rect.min.x + 16.0, rect.center().y),
-            Vec2::new(14.0, 14.0),
+            Pos2::new(rect.min.x + 14.0, rect.center().y),
+            Vec2::new(13.0, 13.0),
         );
         crate::components::icons::draw_list_icon(
             ui,
@@ -296,40 +450,56 @@ impl<'a> SideBar<'a> {
             if is_active {
                 Color32::WHITE
             } else {
-                self.theme.accent_pink
+                self.theme.accent_warm
             },
         );
 
-        // Playlist name
-        let label_pos = Pos2::new(rect.min.x + 30.0, rect.center().y);
-        let galley = painter.layout_no_wrap(
-            playlist.name.clone(),
-            FontId::proportional(12.8),
-            text_color,
-        );
-        painter.galley(
-            Pos2::new(label_pos.x, rect.center().y - galley.size().y * 0.5),
-            galley,
-            text_color,
-        );
+        // Delete trash icon
+        let trash_color = if trash_resp.hovered() {
+            self.theme.accent_warm
+        } else if is_hovered || is_active {
+            self.theme.text_secondary
+        } else {
+            self.theme.text_muted.gamma_multiply(0.6)
+        };
+        crate::components::icons::draw_trash(ui, trash_rect, trash_color);
 
         // Count badge
+        let count_str = format!("{}", playlist.track_count);
+        let count_pos = Pos2::new(rect.max.x - 24.0, rect.center().y);
         painter.text(
-            Pos2::new(rect.max.x - 8.0, rect.center().y),
+            count_pos,
             egui::Align2::RIGHT_CENTER,
-            format!("{}", playlist.track_count),
-            FontId::proportional(11.0),
+            count_str,
+            crate::theme::font(10.5),
             if is_active {
                 Color32::WHITE
             } else {
                 self.theme.text_muted
             },
         );
+
+        // Playlist name
+        let max_label_w = (rect.width() - 28.0 - 46.0).max(20.0);
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            playlist.name.clone(),
+            crate::theme::font(12.5),
+            text_color,
+        );
+        job.wrap.max_width = max_label_w;
+        job.wrap.break_anywhere = false;
+        job.wrap.overflow_character = Some('…');
+        let galley = painter.layout_job(job);
+        painter.galley(
+            Pos2::new(rect.min.x + 26.0, rect.center().y - galley.size().y * 0.5),
+            galley,
+            text_color,
+        );
     }
 
     fn render_nav_item(&mut self, ui: &mut Ui, item: NavItem, label: &str) {
         let is_active = self.active_item == item;
-        let height = 38.0;
+        let height = if self.rail { 40.0 } else { 38.0 };
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
 
@@ -341,7 +511,7 @@ impl<'a> SideBar<'a> {
         let is_hovered = response.hovered();
 
         if is_active {
-            painter.rect_filled(rect, CornerRadius::same(9), self.theme.accent_violet);
+            painter.rect_filled(rect, CornerRadius::same(9), self.theme.accent);
         } else if is_hovered {
             painter.rect_filled(rect, CornerRadius::same(9), self.theme.bg_card_hover);
         }
@@ -353,10 +523,12 @@ impl<'a> SideBar<'a> {
         };
 
         // Render Icon
-        let icon_rect = Rect::from_center_size(
-            Pos2::new(rect.min.x + 22.0, rect.center().y),
-            Vec2::new(20.0, 20.0),
-        );
+        let icon_center = if self.rail {
+            rect.center()
+        } else {
+            Pos2::new(rect.min.x + 22.0, rect.center().y)
+        };
+        let icon_rect = Rect::from_center_size(icon_center, Vec2::new(20.0, 20.0));
         match item {
             NavItem::Home => crate::components::icons::draw_home(ui, icon_rect, text_color),
             NavItem::Albums => crate::components::icons::draw_disc(ui, icon_rect, text_color),
@@ -368,15 +540,21 @@ impl<'a> SideBar<'a> {
             _ => {}
         }
 
-        // Render Label
-        let label_pos = Pos2::new(rect.min.x + 44.0, rect.center().y);
-        painter.text(
-            label_pos,
-            egui::Align2::LEFT_CENTER,
-            label,
-            FontId::proportional(13.8),
-            text_color,
-        );
+        response
+            .widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, is_active, label));
+        if self.rail {
+            let _ = response.on_hover_text(label);
+        } else {
+            // Render Label
+            let label_pos = Pos2::new(rect.min.x + 44.0, rect.center().y);
+            painter.text(
+                label_pos,
+                egui::Align2::LEFT_CENTER,
+                label,
+                crate::theme::font(13.8),
+                text_color,
+            );
+        }
     }
 
     fn render_playlist_badge_item(
@@ -387,7 +565,7 @@ impl<'a> SideBar<'a> {
         badge_color: Color32,
     ) {
         let is_active = self.active_item == item;
-        let height = 38.0;
+        let height = if self.rail { 40.0 } else { 38.0 };
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
 
@@ -405,10 +583,12 @@ impl<'a> SideBar<'a> {
         }
 
         // Draw colored rounded square badge
-        let badge_rect = Rect::from_center_size(
-            Pos2::new(rect.min.x + 22.0, rect.center().y),
-            Vec2::new(24.0, 24.0),
-        );
+        let badge_center = if self.rail {
+            rect.center()
+        } else {
+            Pos2::new(rect.min.x + 22.0, rect.center().y)
+        };
+        let badge_rect = Rect::from_center_size(badge_center, Vec2::new(24.0, 24.0));
         painter.rect_filled(badge_rect, CornerRadius::same(7), badge_color);
         let icon_sub_rect = badge_rect.shrink2(Vec2::new(4.5, 4.5));
         match item {
@@ -426,6 +606,13 @@ impl<'a> SideBar<'a> {
             }
         }
 
+        response
+            .widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, is_active, label));
+        if self.rail {
+            let _ = response.on_hover_text(label);
+            return;
+        }
+
         // Label
         let text_color = if is_active || is_hovered {
             self.theme.text_primary
@@ -437,7 +624,7 @@ impl<'a> SideBar<'a> {
             Pos2::new(rect.min.x + 44.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            FontId::proportional(13.8),
+            crate::theme::font(13.8),
             text_color,
         );
     }

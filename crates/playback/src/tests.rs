@@ -90,6 +90,40 @@ mod unit {
         // Verify DB persistence of queue
         let persisted = queue_repo.load_queue().unwrap();
         assert_eq!(persisted.len(), 4);
+
+        // 5. Reorder upcoming tracks only. The queue is now
+        // [Track 1, Track 2, Track 3, Track End].
+        coord.move_in_queue(3, 1);
+        assert_eq!(
+            coord
+                .queue()
+                .iter()
+                .map(|t| t.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Track 1", "Track End", "Track 2", "Track 3"]
+        );
+        assert_eq!(coord.current_index(), Some(0));
+
+        // Moving the current (or an already-played) track must be refused.
+        coord.move_in_queue(1, 0);
+        assert_eq!(
+            coord
+                .queue()
+                .iter()
+                .map(|t| t.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Track 1", "Track End", "Track 2", "Track 3"]
+        );
+
+        // The new order is persisted, not just held in memory.
+        let persisted = queue_repo.load_queue().unwrap();
+        assert_eq!(
+            persisted
+                .iter()
+                .map(|t| t.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Track 1", "Track End", "Track 2", "Track 3"]
+        );
     }
 
     /// Clearing the queue must not leave a "current track" behind.

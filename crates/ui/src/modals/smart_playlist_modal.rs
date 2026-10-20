@@ -4,7 +4,7 @@
 use domain::ids::PlaylistId;
 use domain::models::Track;
 use domain::smart::{SmartField, SmartOp, SmartPlaylist, SmartRule};
-use eframe::egui::{self, Color32, FontId, Vec2};
+use eframe::egui::{self, Color32, Vec2};
 
 use crate::theme::Theme;
 
@@ -89,7 +89,7 @@ pub fn show_smart_playlist_editor(
                     |ui| {
                         ui.label(
                             egui::RichText::new("Saved")
-                                .font(FontId::proportional(13.5))
+                                .font(crate::theme::font(13.5))
                                 .strong()
                                 .color(theme.text_primary),
                         );
@@ -102,7 +102,7 @@ pub fn show_smart_playlist_editor(
                                 if playlists.is_empty() {
                                     ui.label(
                                         egui::RichText::new("None yet.")
-                                            .font(FontId::proportional(11.5))
+                                            .font(crate::theme::font(11.5))
                                             .color(theme.text_muted),
                                     );
                                 }
@@ -113,7 +113,7 @@ pub fn show_smart_playlist_editor(
                                             .selectable_label(
                                                 is_sel,
                                                 egui::RichText::new(sp.name.clone())
-                                                    .font(FontId::proportional(12.5)),
+                                                    .font(crate::theme::font(12.5)),
                                             )
                                             .clicked()
                                         {
@@ -139,7 +139,7 @@ pub fn show_smart_playlist_editor(
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new("Name")
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .color(theme.text_secondary),
                             );
                             if ui
@@ -162,7 +162,7 @@ pub fn show_smart_playlist_editor(
                                         })
                                         .color(Color32::WHITE),
                                     )
-                                    .fill(theme.accent_violet),
+                                    .fill(theme.accent),
                                 )
                                 .clicked()
                                 && !state.draft.name.trim().is_empty()
@@ -175,7 +175,7 @@ pub fn show_smart_playlist_editor(
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new("Match:")
-                                    .font(FontId::proportional(12.0))
+                                    .font(crate::theme::font(12.0))
                                     .color(theme.text_secondary),
                             );
                             if ui
@@ -293,7 +293,7 @@ pub fn show_smart_playlist_editor(
                                 }
                                 ui.label(
                                     egui::RichText::new("tracks")
-                                        .font(FontId::proportional(11.5))
+                                        .font(crate::theme::font(11.5))
                                         .color(theme.text_muted),
                                 );
                             }
@@ -302,7 +302,7 @@ pub fn show_smart_playlist_editor(
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new("Sort by")
-                                    .font(FontId::proportional(12.0))
+                                    .font(crate::theme::font(12.0))
                                     .color(theme.text_secondary),
                             );
                             let label = state
@@ -352,9 +352,9 @@ pub fn show_smart_playlist_editor(
                         ui.separator();
                         ui.label(
                             egui::RichText::new(format!("Matches: {} track(s)", matches.len()))
-                                .font(FontId::proportional(13.0))
+                                .font(crate::theme::font(13.0))
                                 .strong()
-                                .color(theme.accent_blue),
+                                .color(theme.info),
                         );
                         egui::ScrollArea::vertical()
                             .id_salt("smart_preview")
@@ -364,7 +364,7 @@ pub fn show_smart_playlist_editor(
                                 for t in matches.iter().take(100) {
                                     ui.label(
                                         egui::RichText::new(format!("{} — {}", t.title, t.artist))
-                                            .font(FontId::proportional(11.5))
+                                            .font(crate::theme::font(11.5))
                                             .color(theme.text_secondary),
                                     );
                                 }

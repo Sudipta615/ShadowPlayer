@@ -1,6 +1,6 @@
 [package]
 name = "metadata"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 
 [dependencies]
@@ -11,4 +11,4 @@ thiserror = "2.0"
 # Reads embedded lyrics. Symphonia's readers surface Vorbis comments but no
 # ID3, so anything MP3/WAV/MP4 needs a real tag library. Same crate+version the
 # engine already pulls in for tag write-back, so it costs no extra build.
-lofty = "0.22"
+lofty = "0.25"

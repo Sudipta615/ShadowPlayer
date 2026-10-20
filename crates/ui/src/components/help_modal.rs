@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, CornerRadius, FontId, Stroke, Vec2, Window};
+use eframe::egui::{self, CornerRadius, Stroke, Vec2, Window};
 
 pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
     if !*is_open {
@@ -26,7 +26,7 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
                     ui.label(
                         egui::RichText::new(concat!("ShadowPlayer v", env!("CARGO_PKG_VERSION")))
-                            .font(FontId::proportional(16.0))
+                            .font(crate::theme::font(16.0))
                             .strong()
                             .color(theme.text_primary),
                     );
@@ -35,7 +35,7 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
                             "Audiophile Local Desktop Music Player • Audio Engine v{}",
                             engine::VERSION
                         ))
-                            .font(FontId::proportional(12.0))
+                            .font(crate::theme::font(12.0))
                             .color(theme.text_secondary),
                     );
                 });
@@ -44,9 +44,9 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
             // Keyboard Shortcuts Section
             ui.label(
                 egui::RichText::new("Audiophile Keyboard Shortcuts")
-                    .font(FontId::proportional(14.0))
+                    .font(crate::theme::font(14.0))
                     .strong()
-                    .color(theme.accent_magenta),
+                    .color(theme.accent_highlight),
             );
 
             let shortcuts = [
@@ -87,13 +87,13 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
                                 badge_rect.center(),
                                 egui::Align2::CENTER_CENTER,
                                 key,
-                                FontId::monospace(11.5),
-                                theme.accent_purple,
+                                crate::theme::mono_font(11.5),
+                                theme.accent_highlight,
                             );
 
                             ui.label(
                                 egui::RichText::new(desc)
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .color(theme.text_secondary),
                             );
                         });
@@ -104,16 +104,16 @@ pub fn show_help_modal(ctx: &egui::Context, is_open: &mut bool, theme: &Theme) {
             // Supported Codecs Section
             ui.label(
                 egui::RichText::new("Supported Audiophile Codecs & Formats")
-                    .font(FontId::proportional(14.0))
+                    .font(crate::theme::font(14.0))
                     .strong()
-                    .color(theme.accent_purple),
+                    .color(theme.accent_highlight),
             );
 
             let codecs_info = "Lossless: FLAC, ALAC, WAV (PCM), AIFF, APE, WavPack (WV), TTA, DSD (DSF/DFF)\nLossy: MP3, AAC/M4A, OGG Vorbis, Opus\nFeatures: 64-bit float mixing, Rubato sinc resampler, EBU R128 loudness, Parametric EQ, Bit-perfect direct stream.";
 
             ui.label(
                 egui::RichText::new(codecs_info)
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
             );
         });

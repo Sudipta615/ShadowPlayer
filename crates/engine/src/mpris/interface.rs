@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use zbus::interface;
-use zbus::zvariant::{ObjectPath, Value};
+use zbus::{ObjectPath, Variant};
 
 use crate::engine::EngineHandle;
 use crate::playback_info::PlaybackState;
@@ -160,29 +160,29 @@ impl MediaPlayer2Player {
     fn set_shuffle(&self, _shuffle: bool) {}
 
     #[zbus(property)]
-    fn metadata(&self) -> HashMap<String, Value<'_>> {
+    fn metadata(&self) -> HashMap<String, Variant<'static>> {
         let mut map = HashMap::new();
         let info = self.handle.playback_info();
         let track_id =
             ObjectPath::try_from("/org/mpris/MediaPlayer2/Track/0").unwrap_or_else(|_| {
                 ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/Track/0")
             });
-        map.insert("mpris:trackid".to_string(), Value::from(track_id));
+        map.insert("mpris:trackid".to_string(), Variant::from(track_id));
 
         let duration_us = (info.duration_secs * 1_000_000.0) as i64;
-        map.insert("mpris:length".to_string(), Value::from(duration_us));
+        map.insert("mpris:length".to_string(), Variant::from(duration_us));
 
         if let Some(ref source) = info.current_source {
             let s = source.display_name();
             if let Some(path) = source.as_path() {
                 map.insert(
                     "xesam:url".to_string(),
-                    Value::from(format!("file://{}", path.display())),
+                    Variant::from(format!("file://{}", path.display())),
                 );
             } else {
-                map.insert("xesam:url".to_string(), Value::from(s.clone()));
+                map.insert("xesam:url".to_string(), Variant::from(s.clone()));
             }
-            map.insert("xesam:title".to_string(), Value::from(s));
+            map.insert("xesam:title".to_string(), Variant::from(s));
         }
         map
     }

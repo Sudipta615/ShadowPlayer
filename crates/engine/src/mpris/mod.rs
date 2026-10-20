@@ -31,16 +31,16 @@ impl MprisServer {
         let stop_worker = Arc::clone(&stop_signal);
 
         // Verify session bus connectivity before spawning the thread
-        let conn = zbus::blocking::connection::Builder::session()?
-            .name("org.mpris.MediaPlayer2.audio_engine")?
-            .serve_at("/org/mpris/MediaPlayer2", MediaPlayer2)?
+        let builder = zbus::connection::Builder::session()
+            .name("org.mpris.MediaPlayer2.audio_engine")
+            .serve_at("/org/mpris/MediaPlayer2", MediaPlayer2)
             .serve_at(
                 "/org/mpris/MediaPlayer2",
                 MediaPlayer2Player {
                     handle: Arc::clone(&handle),
                 },
-            )?
-            .build()?;
+            );
+        let conn = pollster::block_on(builder.build())?;
 
         let worker = std::thread::Builder::new()
             .name("mpris-bridge".to_string())
@@ -53,7 +53,7 @@ impl MprisServer {
                 while !stop_worker.load(Ordering::Acquire) {
                     let info = handle.playback_info();
                     let current_source = info.current_source.as_ref().map(|s| s.display_name());
-                    let mut changed: std::collections::HashMap<String, zbus::zvariant::Value> =
+                    let mut changed: std::collections::HashMap<String, zbus::Variant<'static>> =
                         std::collections::HashMap::new();
 
                     if prev_state != Some(info.state) {
@@ -64,7 +64,7 @@ impl MprisServer {
                         };
                         changed.insert(
                             "PlaybackStatus".to_string(),
-                            zbus::zvariant::Value::from(status_str),
+                            zbus::Variant::from(status_str),
                         );
                         prev_state = Some(info.state);
                     }
@@ -72,61 +72,56 @@ impl MprisServer {
                     if (prev_volume - info.volume).abs() > 0.005 {
                         changed.insert(
                             "Volume".to_string(),
-                            zbus::zvariant::Value::from(info.volume as f64),
+                            zbus::Variant::from(info.volume as f64),
                         );
                         prev_volume = info.volume;
                     }
 
                     if prev_source != current_source {
-                        let mut meta: std::collections::HashMap<String, zbus::zvariant::Value> =
+                        let mut meta: std::collections::HashMap<String, zbus::Variant<'static>> =
                             std::collections::HashMap::new();
                         let track_id =
-                            zbus::zvariant::ObjectPath::try_from("/org/mpris/MediaPlayer2/Track/0")
+                            zbus::ObjectPath::try_from("/org/mpris/MediaPlayer2/Track/0")
                                 .unwrap_or_else(|_| {
-                                    zbus::zvariant::ObjectPath::from_static_str_unchecked(
+                                    zbus::ObjectPath::from_static_str_unchecked(
                                         "/org/mpris/MediaPlayer2/Track/0",
                                     )
                                 });
-                        meta.insert(
-                            "mpris:trackid".to_string(),
-                            zbus::zvariant::Value::from(track_id),
-                        );
+                        meta.insert("mpris:trackid".to_string(), zbus::Variant::from(track_id));
                         let duration_us = (info.duration_secs * 1_000_000.0) as i64;
-                        meta.insert(
-                            "mpris:length".to_string(),
-                            zbus::zvariant::Value::from(duration_us),
-                        );
+                        meta.insert("mpris:length".to_string(), zbus::Variant::from(duration_us));
                         if let Some(ref source) = info.current_source {
                             let s = source.display_name();
                             if let Some(path) = source.as_path() {
                                 meta.insert(
                                     "xesam:url".to_string(),
-                                    zbus::zvariant::Value::from(format!(
-                                        "file://{}",
-                                        path.display()
-                                    )),
+                                    zbus::Variant::from(format!("file://{}", path.display())),
                                 );
                             } else {
                                 meta.insert(
                                     "xesam:url".to_string(),
-                                    zbus::zvariant::Value::from(s.clone()),
+                                    zbus::Variant::from(s.clone()),
                                 );
                             }
-                            meta.insert("xesam:title".to_string(), zbus::zvariant::Value::from(s));
+                            meta.insert("xesam:title".to_string(), zbus::Variant::from(s));
                         }
-                        changed.insert("Metadata".to_string(), zbus::zvariant::Value::from(meta));
+                        changed.insert("Metadata".to_string(), zbus::Variant::from(meta));
                         prev_source = current_source;
                     }
 
                     if !changed.is_empty() {
                         let invalidated: Vec<String> = Vec::new();
-                        let _ = conn.emit_signal(
+                        let emitted = pollster::block_on(conn.emit_signal(
                             None::<&str>,
                             "/org/mpris/MediaPlayer2",
                             "org.freedesktop.DBus.Properties",
                             "PropertiesChanged",
                             &("org.mpris.MediaPlayer2.Player", changed, invalidated),
-                        );
+                        ));
+                        if let Err(e) = emitted {
+                            log::warn!("MPRIS2 PropertiesChanged failed: {e}");
+                            break;
+                        }
                     }
 
                     std::thread::sleep(Duration::from_millis(100));

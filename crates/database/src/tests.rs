@@ -357,6 +357,47 @@ mod unit {
         assert_eq!(q_repo.load_queue().unwrap().len(), 0);
     }
 
+    #[test]
+    fn reordering_playlist_tracks_renumbers_positions() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let tracks = TrackRepo::new(db.clone());
+        let playlists = PlaylistRepo::new(db.clone());
+
+        let a = sample_track(TrackId::new(), "/music/a.flac", "A", "X", "Album");
+        let b = sample_track(TrackId::new(), "/music/b.flac", "B", "X", "Album");
+        let c = sample_track(TrackId::new(), "/music/c.flac", "C", "X", "Album");
+        for track in [&a, &b, &c] {
+            tracks.upsert(track).unwrap();
+        }
+
+        let playlist = playlists.create("Ordered", None).unwrap();
+        for track in [&a, &b, &c] {
+            playlists.add_track(&playlist.id, &track.id).unwrap();
+        }
+
+        playlists.move_track(&playlist.id, 2, 0).unwrap();
+        let order: Vec<_> = playlists
+            .get_tracks(&playlist.id)
+            .unwrap()
+            .into_iter()
+            .map(|track| track.title)
+            .collect();
+        assert_eq!(order, ["C", "A", "B"]);
+
+        playlists.move_track(&playlist.id, 0, 2).unwrap();
+        let order: Vec<_> = playlists
+            .get_tracks(&playlist.id)
+            .unwrap()
+            .into_iter()
+            .map(|track| track.title)
+            .collect();
+        assert_eq!(order, ["A", "B", "C"]);
+
+        // Out-of-range moves are a no-op rather than dropping a row.
+        playlists.move_track(&playlist.id, 9, 0).unwrap();
+        assert_eq!(playlists.get_tracks(&playlist.id).unwrap().len(), 3);
+    }
+
     /// A queued track that leaves the library must leave the queue: the row is
     /// a child of the track, and the queue used to keep a phantom entry that
     /// `load_queue` silently dropped.

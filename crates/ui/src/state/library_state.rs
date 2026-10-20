@@ -19,6 +19,9 @@ use domain::models::{SortField, SortOrder};
 pub struct LibraryState {
     pub all_tracks: Vec<Track>,
     pub displayed_tracks: Vec<Track>,
+    /// Non-track matches from the latest query, used for the grouped search
+    /// strip above the table.
+    pub search_result: search::SearchResult,
     pub favorite_ids: HashSet<TrackId>,
 
     pub playlists: Vec<Playlist>,
@@ -160,8 +163,11 @@ impl LibraryState {
         self.displayed_key = Some(key);
 
         let mut tracks = if !search_query.trim().is_empty() {
-            search_engine.search(search_query, 100).tracks
+            let result = search_engine.search(search_query, 100);
+            self.search_result = result.clone();
+            result.tracks
         } else {
+            self.search_result = search::SearchResult::default();
             match active_nav {
                 NavItem::Favorites => self
                     .all_tracks

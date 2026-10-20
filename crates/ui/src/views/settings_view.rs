@@ -1,6 +1,6 @@
 use audio_session::AudioSession;
 use database::{ScanRootsRepo, TrackRepo};
-use eframe::egui::{self, Color32, CornerRadius, FontId, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
 use std::path::PathBuf;
 
 use crate::components::settings_tab::{show_settings_tab_extended, SettingsExtraContext};
@@ -41,7 +41,7 @@ pub fn render_settings_view(
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new("Settings & Audio Studio")
-                    .font(FontId::proportional(22.0))
+                    .font(crate::theme::font(22.0))
                     .strong()
                     .color(theme.text_primary),
             );
@@ -62,7 +62,7 @@ pub fn render_settings_view(
                     (
                         "DSP Processing Active",
                         theme.bg_pill,
-                        theme.accent_magenta,
+                        theme.accent_highlight,
                         theme.border_card,
                     )
                 };
@@ -81,7 +81,7 @@ pub fn render_settings_view(
                                 .circle_filled(dot_rect.center(), 3.5, bp_fg);
                             ui.label(
                                 egui::RichText::new(bp_text)
-                                    .font(FontId::proportional(11.5))
+                                    .font(crate::theme::font(11.5))
                                     .strong()
                                     .color(bp_fg),
                             );
@@ -102,16 +102,16 @@ pub fn render_settings_view(
                             ui.painter_at(dot_rect).circle_filled(
                                 dot_rect.center(),
                                 3.5,
-                                theme.accent_pink,
+                                theme.accent_warm,
                             );
                             ui.label(
                                 egui::RichText::new(format!(
                                     "Engine {} Active (44.1 - 192kHz)",
                                     engine::VERSION
                                 ))
-                                .font(FontId::proportional(11.5))
+                                .font(crate::theme::font(11.5))
                                 .strong()
-                                .color(theme.accent_pink),
+                                .color(theme.accent_warm),
                             );
                         });
                     });
@@ -122,7 +122,7 @@ pub fn render_settings_view(
                 "Configure Audio Engine v{}, bit-perfect streaming, 3D acoustics, and library",
                 engine::VERSION
             ))
-            .font(FontId::proportional(12.5))
+            .font(crate::theme::font(12.5))
             .color(theme.text_muted),
         );
         ui.add_space(2.0);

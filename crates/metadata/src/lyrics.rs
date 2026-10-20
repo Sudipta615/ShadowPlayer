@@ -172,9 +172,10 @@ fn synchsafe_u32(bytes: &[u8]) -> Option<u32> {
 /// Pull a non-empty `Lyrics` item out of one tag.
 fn lyrics_in(tag: &Tag) -> Option<String> {
     let text = tag
-        .get_string(&ItemKey::Lyrics)
-        // Some taggers write the field without registering it as a known key.
-        .or_else(|| tag.get_string(&ItemKey::Unknown("UNSYNCEDLYRICS".to_string())))?;
+        .get_string(ItemKey::Lyrics)
+        // ID3v2 stores unsynchronised lyrics as USLT; lofty maps that to the
+        // distinct UnsyncLyrics key rather than Lyrics.
+        .or_else(|| tag.get_string(ItemKey::UnsyncLyrics))?;
 
     let trimmed = text.trim();
     if trimmed.is_empty() {

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use domain::models::Track;
-use eframe::egui::{self, Color32, FontId, Vec2};
+use eframe::egui::{self, Color32, Vec2};
 use library::organize::{
     build_plan, OrganizeEntry, OrganizePlan, DEFAULT_IN_PLACE_PATTERN, DEFAULT_TREE_PATTERN, TOKENS,
 };
@@ -168,7 +168,7 @@ pub fn show_organize_modal(
                     "{} · nothing is moved until you press Apply, and existing files are never overwritten.",
                     state.scope_label
                 ))
-                .font(FontId::proportional(12.0))
+                .font(crate::theme::font(12.0))
                 .color(theme.text_muted),
             );
 
@@ -178,14 +178,14 @@ pub fn show_organize_modal(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Naming pattern")
-                        .font(FontId::proportional(12.5))
+                        .font(crate::theme::font(12.5))
                         .strong()
                         .color(theme.text_primary),
                 );
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut state.pattern)
                         .desired_width(380.0)
-                        .font(FontId::proportional(12.5)),
+                        .font(crate::theme::font(12.5)),
                 );
                 if response.changed() {
                     state.plan_dirty = true;
@@ -200,7 +200,7 @@ pub fn show_organize_modal(
                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
                 ui.label(
                     egui::RichText::new("Tokens:")
-                        .font(FontId::proportional(11.0))
+                        .font(crate::theme::font(11.0))
                         .color(theme.text_muted),
                 );
                 for (token, description) in TOKENS {
@@ -219,7 +219,7 @@ pub fn show_organize_modal(
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Destination")
-                        .font(FontId::proportional(12.5))
+                        .font(crate::theme::font(12.5))
                         .strong()
                         .color(theme.text_primary),
                 );
@@ -240,7 +240,7 @@ pub fn show_organize_modal(
                 if let Some(ref dest) = state.destination {
                     ui.label(
                         egui::RichText::new(dest.display().to_string())
-                            .font(FontId::proportional(11.5))
+                            .font(crate::theme::font(11.5))
                             .color(theme.text_muted),
                     );
                     if ui.button("Change...").clicked() {
@@ -260,10 +260,10 @@ pub fn show_organize_modal(
                     egui::RichText::new(format!(
                         "{pending} to move · {conflicts} conflict(s) · {unchanged} already in place"
                     ))
-                    .font(FontId::proportional(12.5))
+                    .font(crate::theme::font(12.5))
                     .strong()
                     .color(if conflicts > 0 {
-                        theme.accent_magenta
+                        theme.accent_highlight
                     } else {
                         theme.text_primary
                     }),
@@ -274,7 +274,7 @@ pub fn show_organize_modal(
                             "· {} folder(s) will be used",
                             state.plan.destination_folders()
                         ))
-                        .font(FontId::proportional(11.5))
+                        .font(crate::theme::font(11.5))
                         .color(theme.text_muted),
                     );
                 }
@@ -283,7 +283,7 @@ pub fn show_organize_modal(
             if let Some(ref result) = state.result {
                 ui.label(
                     egui::RichText::new(result)
-                        .font(FontId::proportional(11.5))
+                        .font(crate::theme::font(11.5))
                         .color(theme.bit_perfect_green),
                 );
             }
@@ -296,7 +296,7 @@ pub fn show_organize_modal(
                     if state.tracks.is_empty() {
                         ui.label(
                             egui::RichText::new("Nothing in scope.")
-                                .font(FontId::proportional(12.0))
+                                .font(crate::theme::font(12.0))
                                 .color(theme.text_muted),
                         );
                         return;
@@ -310,7 +310,7 @@ pub fn show_organize_modal(
                                 "... and {} more (all of them will be moved)",
                                 state.plan.entries.len() - PREVIEW_ROWS
                             ))
-                            .font(FontId::proportional(11.0))
+                            .font(crate::theme::font(11.0))
                             .color(theme.text_muted),
                         );
                     }
@@ -329,7 +329,7 @@ pub fn show_organize_modal(
                     format!("Move {pending} files")
                 };
                 let btn = egui::Button::new(egui::RichText::new(label).color(Color32::WHITE))
-                    .fill(theme.accent_violet);
+                    .fill(theme.accent);
                 let response = ui.add_enabled(can_apply, btn);
                 if !plan_ready {
                     response.clone().on_hover_text("Waiting for the preview to finish");
@@ -340,7 +340,7 @@ pub fn show_organize_modal(
                 if pending == 0 && !state.plan_dirty {
                     ui.label(
                         egui::RichText::new("Nothing to do with this pattern.")
-                            .font(FontId::proportional(11.5))
+                            .font(crate::theme::font(11.5))
                             .color(theme.text_muted),
                     );
                 }
@@ -359,7 +359,7 @@ pub fn show_organize_modal(
 
 fn render_preview_row(ui: &mut egui::Ui, index: usize, entry: &OrganizeEntry, theme: &Theme) {
     let (marker, marker_color) = match (&entry.issue, entry.unchanged) {
-        (Some(_), _) => ("!", theme.accent_magenta),
+        (Some(_), _) => ("!", theme.accent_highlight),
         (None, true) => ("=", theme.text_muted),
         (None, false) => ("->", theme.bit_perfect_green),
     };
@@ -368,14 +368,14 @@ fn render_preview_row(ui: &mut egui::Ui, index: usize, entry: &OrganizeEntry, th
         ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
         ui.label(
             egui::RichText::new(marker)
-                .font(FontId::proportional(11.0))
+                .font(crate::theme::font(11.0))
                 .color(marker_color),
         );
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
             ui.label(
                 egui::RichText::new(entry.from.display().to_string())
-                    .font(FontId::proportional(11.0))
+                    .font(crate::theme::font(11.0))
                     .color(theme.text_muted),
             );
             let target = match &entry.issue {
@@ -384,9 +384,9 @@ fn render_preview_row(ui: &mut egui::Ui, index: usize, entry: &OrganizeEntry, th
             };
             ui.label(
                 egui::RichText::new(target)
-                    .font(FontId::proportional(11.5))
+                    .font(crate::theme::font(11.5))
                     .color(if entry.issue.is_some() {
-                        theme.accent_magenta
+                        theme.accent_highlight
                     } else if entry.unchanged {
                         theme.text_muted
                     } else {

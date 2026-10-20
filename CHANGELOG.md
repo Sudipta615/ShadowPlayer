@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0] - 2026-10-20
+
+### Added
+- **Obsidian & Jade visual identity**: an obsidian/graphite surface palette with jade actions, mint highlights, amber favourites and sky information accents; the purple/pink gradients and their remaining semantic names are gone. Both dark and light themes are covered.
+- **Responsive player shell**: a full right-hand drawer on wide windows, a temporary overlay below 1100 px, a 200 px compact sidebar and a 60 px icon rail below 720 px. The normal window can be tiled or manually resized down to 640×360.
+- **Compact mini-player**: a dedicated 320×110 always-on-top shell with transport, seek, drag-to-move and restore controls. Restoring returns to the previous normal geometry, and mini geometry is never persisted.
+- **Grouped search**: artists, albums and playlists are shown as first-class results above the song table. Artist/album chips narrow the query; a playlist chip opens that playlist and clears the search.
+- **Reorderable queues and playlists**: upcoming queue entries can be moved with hover controls while the current and already-played entries stay fixed; playlist rows get per-row move controls and stored positions are renumbered transactionally.
+- **Windows and macOS media integration**: System Media Transport Controls and macOS Now Playing are driven through `souvlaki`, with metadata, artwork, playback state and transport commands bridged into the UI loop. Linux keeps its native MPRIS2 backend.
+- **Accessibility**: AccessKit is enabled and transport controls, sliders, sidebar navigation, search chips, song and queue rows, and mini-player controls now carry accessible labels.
+- **Bundled Inter typography**: Inter Regular and Medium are shipped with the app, with a 1.08 type scale and a legibility floor instead of relying on system fonts.
+
+### Changed
+- **Dependency refresh**: `rusqlite 0.40`, `lofty 0.25`, `rfd 0.17`, `zbus 6`, `dirs 7`, `rand 0.10` and `pollster 1.0`, while eframe/egui_extras remain on the current 0.37 line. Linux-only D-Bus dependencies are now target-scoped so Windows/macOS builds do not compile an unusable stack.
+- **Linux MPRIS on zbus 6**: the D-Bus service moved to the async API, with workers driven by a small executor and transport commands still delivered through the UI command queue.
+- **Responsive layout polish**: the Songs header hides only when there is genuinely no table height left, compact-sidebar branding and long labels no longer truncate, the queue overlay no longer shows a duplicate theme toggle, and opaque overlay backing prevents table content bleeding through.
+- **Playback UI performance**: spectrum rendering repaints only during playback, artwork loading stays bounded, theme application happens only when the theme changes, queue rendering borrows the live queue, and media metadata/timeline publishing is throttled instead of running every frame.
+
+### Fixed
+- **Tag write-back with lofty 0.25**: R128 gain remains available for Vorbis-comment containers (FLAC/Ogg/Opus), while ID3v2/MP4/APE files retain standard ReplayGain 2.0 keys; the unsupported R128 peak no longer attempts to write an arbitrary vendor key.
+- **Queue and playlist movement semantics**: moving a track is refused for the current/already-played part of the queue, and playlist reordering preserves a complete 0-based position sequence even across repeated moves.
+- **CI coverage**: native Windows/macOS compile jobs, the engine's MPRIS feature check, and an explicit tag-write test job now cover integration paths that the default Linux test run cannot see.
+
+---
+
 ## [0.5.0] - 2026-10-19
 
 ### Added

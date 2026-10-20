@@ -24,6 +24,7 @@ pub fn render_right_drawer(
     lyrics_source: Option<crate::services::LyricsSource>,
     active_lyric_idx: Option<usize>,
     theme: &mut Theme,
+    show_theme_toggle: bool,
 ) {
     ui.allocate_ui_with_layout(
         Vec2::new(right_w, avail_h),
@@ -31,20 +32,24 @@ pub fn render_right_drawer(
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 
-            // 1. Top Window Controls + Theme Toggle
-            let win_resp = crate::components::topbar::render_window_controls(ui, theme);
-            if win_resp.close_requested {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-            if win_resp.maximize_requested {
-                let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!is_max));
-            }
-            if win_resp.minimize_requested {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-            if win_resp.theme_toggle_requested {
-                theme.toggle();
+            // 1. Theme Toggle (wide drawer only). In narrow layouts the
+            // top bar owns this control, so the overlay must not render a
+            // second one behind it.
+            if show_theme_toggle {
+                let win_resp = crate::components::topbar::render_window_controls(ui, theme);
+                if win_resp.close_requested {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                if win_resp.maximize_requested {
+                    let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!is_max));
+                }
+                if win_resp.minimize_requested {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
+                if win_resp.theme_toggle_requested {
+                    theme.toggle();
+                }
             }
 
             // 2. Right Panel (Queue / Lyrics / Volume)
@@ -71,6 +76,10 @@ pub fn render_right_drawer(
             }
             if let Some(q_idx) = right_action.play_queue_index {
                 coordinator.play_index(q_idx);
+            }
+            if let Some((from, delta)) = right_action.move_queue {
+                let to = (from as isize + delta).max(0) as usize;
+                coordinator.move_in_queue(from, to);
             }
             if let Some(del_idx) = right_action.remove_queue_index {
                 coordinator.remove_from_queue(del_idx);

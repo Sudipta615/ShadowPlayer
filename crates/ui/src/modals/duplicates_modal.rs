@@ -8,7 +8,7 @@
 
 use domain::ids::TrackId;
 use domain::models::Track;
-use eframe::egui::{self, Color32, FontId, Vec2};
+use eframe::egui::{self, Color32, Vec2};
 
 use crate::theme::Theme;
 
@@ -94,7 +94,7 @@ pub fn show_duplicates_modal(
                         "Tracks with identical audio content, found by content fingerprint \
                          (tags and file names are ignored).",
                     )
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -109,13 +109,13 @@ pub fn show_duplicates_modal(
             if !state.scanned {
                 ui.label(
                     egui::RichText::new("Press Rescan to look for duplicates.")
-                        .font(FontId::proportional(12.5))
+                        .font(crate::theme::font(12.5))
                         .color(theme.text_muted),
                 );
             } else if state.groups.is_empty() {
                 ui.label(
                     egui::RichText::new("No duplicates found. Your library is clean.")
-                        .font(FontId::proportional(12.5))
+                        .font(crate::theme::font(12.5))
                         .color(theme.text_muted),
                 );
             } else {
@@ -132,7 +132,7 @@ pub fn show_duplicates_modal(
                                         gi + 1,
                                         group.tracks.len()
                                     ))
-                                    .font(FontId::proportional(12.5))
+                                    .font(crate::theme::font(12.5))
                                     .strong()
                                     .color(theme.text_primary),
                                 );
@@ -155,7 +155,7 @@ pub fn show_duplicates_modal(
                                             );
                                             ui.label(
                                                 egui::RichText::new("keep")
-                                                    .font(FontId::proportional(11.0))
+                                                    .font(crate::theme::font(11.0))
                                                     .color(theme.bit_perfect_green),
                                             );
                                         } else {
@@ -170,7 +170,7 @@ pub fn show_duplicates_modal(
                                     });
                                     ui.label(
                                         egui::RichText::new(t.path.display().to_string())
-                                            .font(FontId::proportional(10.5))
+                                            .font(crate::theme::font(10.5))
                                             .color(theme.text_muted),
                                     );
                                 }
@@ -191,9 +191,9 @@ pub fn show_duplicates_modal(
                     format!("Remove {n} from library")
                 };
                 let fill = if state.delete_from_disk {
-                    theme.accent_magenta
+                    theme.accent_highlight
                 } else {
-                    theme.accent_violet
+                    theme.accent
                 };
                 let btn =
                     egui::Button::new(egui::RichText::new(label).color(Color32::WHITE)).fill(fill);
@@ -209,8 +209,8 @@ pub fn show_duplicates_modal(
                 if state.delete_from_disk {
                     ui.label(
                         egui::RichText::new("This cannot be undone.")
-                            .font(FontId::proportional(11.0))
-                            .color(theme.accent_magenta),
+                            .font(crate::theme::font(11.0))
+                            .color(theme.accent_highlight),
                     );
                 }
             });

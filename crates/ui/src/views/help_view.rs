@@ -1,6 +1,6 @@
 use crate::state::{AppState, DspState};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -136,15 +136,15 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
             ui.painter_at(icon_rect).rect_filled(
                 icon_rect,
                 CornerRadius::same(12),
-                theme.accent_violet.linear_multiply(0.2),
+                theme.accent.linear_multiply(0.2),
             );
             ui.painter_at(icon_rect).rect_stroke(
                 icon_rect,
                 CornerRadius::same(12),
-                Stroke::new(1.5, theme.accent_magenta),
+                Stroke::new(1.5, theme.accent_highlight),
                 egui::StrokeKind::Inside,
             );
-            crate::components::icons::draw_help(ui, icon_rect.shrink2(Vec2::splat(10.0)), theme.accent_pink);
+            crate::components::icons::draw_help(ui, icon_rect.shrink2(Vec2::splat(10.0)), theme.accent_warm);
 
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
@@ -152,7 +152,7 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
                     ui.label(
                         egui::RichText::new("ShadowPlayer Master Manual & Audio Knowledge Base")
-                            .font(FontId::proportional(17.5))
+                            .font(crate::theme::font(17.5))
                             .strong()
                             .color(theme.text_primary),
                     );
@@ -163,7 +163,7 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                             env!("CARGO_PKG_VERSION"),
                             engine::VERSION
                         ),
-                        theme.accent_violet,
+                        theme.accent,
                         Color32::WHITE,
                     );
                 });
@@ -171,7 +171,7 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     egui::RichText::new(
                         "An exhaustive reference manual explaining every audio pipeline stage, DSP algorithm, DAC driver, and acoustic feature."
                     )
-                    .font(FontId::proportional(12.5))
+                    .font(crate::theme::font(12.5))
                     .color(theme.text_secondary),
                 );
             });
@@ -200,10 +200,10 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     .hint_text(
                         egui::RichText::new("Search manual, settings, DSP topics, shortcuts (e.g. LUFS, ASIO, HRTF, Biquad, Dither, Varispeed)...")
                             .color(theme.text_muted)
-                            .font(FontId::proportional(13.0)),
+                            .font(crate::theme::font(13.0)),
                     )
                     .text_color(theme.text_primary)
-                    .font(FontId::proportional(13.5))
+                    .font(crate::theme::font(13.5))
                     .desired_width(input_w)
                     .frame(egui::Frame::NONE);
 
@@ -213,7 +213,7 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     && ui.add(
                         egui::Button::new(
                             egui::RichText::new("x")
-                                .font(FontId::proportional(13.0))
+                                .font(crate::theme::font(13.0))
                                 .color(theme.text_muted),
                         )
                         .fill(Color32::TRANSPARENT)
@@ -249,9 +249,9 @@ fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &The
             let is_active = state.active_tab == tab;
             let (bg, fg, stroke) = if is_active {
                 (
-                    theme.accent_violet,
+                    theme.accent,
                     Color32::WHITE,
-                    Stroke::new(1.0, theme.accent_magenta),
+                    Stroke::new(1.0, theme.accent_highlight),
                 )
             } else {
                 (
@@ -264,7 +264,7 @@ fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &The
             let resp = ui.add(
                 egui::Button::new(
                     egui::RichText::new(label)
-                        .font(FontId::proportional(12.0))
+                        .font(crate::theme::font(12.0))
                         .color(fg)
                         .strong(),
                 )
@@ -299,7 +299,7 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
             egui::RichText::new(
                 "ShadowPlayer is not a typical consumer music player. It was engineered from the ground up in Rust to treat your digital audio library with studio-grade mathematical fidelity. Traditional operating system media players push your audio through noisy OS audio mixers, degrade dynamic range through digital bit-truncation, and force hidden sample rate conversions. ShadowPlayer provides direct bit-perfect transport to external Digital-to-Analog Converters (DACs) alongside a 64-bit floating point DSP suite."
             )
-            .font(FontId::proportional(13.5))
+            .font(crate::theme::font(13.5))
             .color(theme.text_secondary),
         );
 
@@ -343,9 +343,11 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
             theme,
         );
 
+        let avail_w = ui.available_width();
+        let img_h = avail_w * (768.0 / 1376.0);
         let img = egui::Image::new(egui::include_image!("../../assets/help/audio_flow.jpg"))
             .corner_radius(CornerRadius::same(12))
-            .max_width(ui.available_width());
+            .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
         ui.add_space(6.0);
@@ -372,20 +374,20 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
         for (name, desc) in layout_points {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
-                ui.label(egui::RichText::new("•").color(theme.accent_pink));
+                ui.label(egui::RichText::new("•").color(theme.accent_warm));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
                     ui.label(
                         egui::RichText::new(name)
                             .strong()
                             .color(theme.text_primary)
-                            .font(FontId::proportional(13.0)),
+                            .font(crate::theme::font(13.0)),
                     );
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(desc)
                                 .color(theme.text_secondary)
-                                .font(FontId::proportional(12.5)),
+                                .font(crate::theme::font(12.5)),
                         )
                         .wrap(),
                     );
@@ -427,21 +429,21 @@ fn render_signal_path_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Them
             egui::RichText::new(
                 "When audio processing modifies samples (such as applying +3 dB of bass or cutting 1 kHz), rounding errors inevitably accumulate in digital arithmetic. Standard 16-bit processing causes audible quantization distortion. 32-bit float offers a theoretical noise floor of -144 dBFS, while ShadowPlayer's internal 64-bit double precision engine provides a staggering -300+ dBFS dynamic range. This means you can chain multiple biquad filters, shelving curves, spatializers, and gain offsets without losing a single micro-fraction of resolution."
             )
-            .font(FontId::proportional(13.0))
+            .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
         );
 
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {
-            spec_badge(ui, "PRECISION", "64-bit IEEE Float", theme.accent_violet);
+            spec_badge(ui, "PRECISION", "64-bit IEEE Float", theme.accent);
             spec_badge(ui, "BUFFER JITTER", "< 0.05 ms", theme.bit_perfect_green);
-            spec_badge(ui, "INTERNAL NOISE FLOOR", "-310 dBFS", theme.accent_pink);
+            spec_badge(ui, "INTERNAL NOISE FLOOR", "-310 dBFS", theme.accent_warm);
             spec_badge(
                 ui,
                 "THREAD LOCKS",
                 "0 (Lock-Free Atomics)",
-                theme.accent_magenta,
+                theme.accent_highlight,
             );
         });
     });
@@ -474,9 +476,9 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
             let is_selected = state.selected_signal_block == Some(block);
             let (bg, border, fg) = if is_selected {
                 (
-                    theme.accent_violet.linear_multiply(0.3),
-                    theme.accent_magenta,
-                    theme.accent_pink,
+                    theme.accent.linear_multiply(0.3),
+                    theme.accent_highlight,
+                    theme.accent_warm,
                 )
             } else {
                 (theme.bg_card_hover, theme.border_card, theme.text_primary)
@@ -497,14 +499,14 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
                 Pos2::new(rect.center().x, rect.top() + 16.0),
                 egui::Align2::CENTER_CENTER,
                 title,
-                FontId::proportional(12.5),
+                crate::theme::font(12.5),
                 fg,
             );
             painter.text(
                 Pos2::new(rect.center().x, rect.top() + 36.0),
                 egui::Align2::CENTER_CENTER,
                 subtitle,
-                FontId::proportional(10.5),
+                crate::theme::font(10.5),
                 theme.text_muted,
             );
 
@@ -518,7 +520,7 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
 fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &Theme) {
     let inspect_frame = egui::Frame::NONE
         .fill(theme.bg_pill.linear_multiply(0.8))
-        .stroke(Stroke::new(1.2, theme.accent_violet))
+        .stroke(Stroke::new(1.2, theme.accent))
         .corner_radius(CornerRadius::same(12))
         .inner_margin(egui::Margin::symmetric(18, 14));
 
@@ -584,7 +586,7 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
 
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
-            ui.label(egui::RichText::new(title).font(FontId::proportional(15.0)).strong().color(theme.accent_pink));
+            ui.label(egui::RichText::new(title).font(crate::theme::font(15.0)).strong().color(theme.accent_warm));
             ui.separator();
 
             ui.horizontal_top(|ui| {
@@ -601,14 +603,14 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
                 badge(ui, "PLAIN ENGLISH", theme.bit_perfect_green.linear_multiply(0.2), theme.bit_perfect_green);
                 ui.label(egui::RichText::new("Function Overview:").strong().color(theme.bit_perfect_green));
             });
-            ui.add(egui::Label::new(egui::RichText::new(plain_desc).font(FontId::proportional(12.5)).color(theme.text_secondary)).wrap());
+            ui.add(egui::Label::new(egui::RichText::new(plain_desc).font(crate::theme::font(12.5)).color(theme.text_secondary)).wrap());
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                badge(ui, "DSP SPECS", theme.accent_violet.linear_multiply(0.2), theme.accent_pink);
-                ui.label(egui::RichText::new("Engineering & Mathematics:").strong().color(theme.accent_pink));
+                badge(ui, "DSP SPECS", theme.accent.linear_multiply(0.2), theme.accent_warm);
+                ui.label(egui::RichText::new("Engineering & Mathematics:").strong().color(theme.accent_warm));
             });
-            ui.add(egui::Label::new(egui::RichText::new(tech_desc).font(FontId::proportional(12.0)).color(theme.text_muted)).wrap());
+            ui.add(egui::Label::new(egui::RichText::new(tech_desc).font(crate::theme::font(12.0)).color(theme.text_muted)).wrap());
         });
     });
 }
@@ -626,11 +628,13 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
             theme,
         );
 
+        let avail_w = ui.available_width();
+        let img_h = avail_w * (768.0 / 1376.0);
         let img = egui::Image::new(egui::include_image!(
             "../../assets/help/equalizer_bands.jpg"
         ))
         .corner_radius(CornerRadius::same(12))
-        .max_width(ui.available_width());
+        .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
         ui.add_space(6.0);
@@ -657,7 +661,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                     ui.label(
                         egui::RichText::new("Simulated Controls:")
                             .strong()
-                            .color(theme.accent_pink),
+                            .color(theme.accent_warm),
                     );
 
                     ui.horizontal(|ui| {
@@ -762,21 +766,21 @@ fn render_frequency_response_curve_painter(
         Pos2::new(rect.left() + 8.0, y_zero - 6.0),
         egui::Align2::LEFT_BOTTOM,
         "0 dB",
-        FontId::monospace(9.5),
+        crate::theme::mono_font(9.5),
         theme.text_muted,
     );
     p.text(
         Pos2::new(rect.left() + 8.0, y_plus12 + 2.0),
         egui::Align2::LEFT_TOP,
         "+12 dB",
-        FontId::monospace(9.5),
+        crate::theme::mono_font(9.5),
         theme.text_muted,
     );
     p.text(
         Pos2::new(rect.left() + 8.0, y_minus12 - 2.0),
         egui::Align2::LEFT_BOTTOM,
         "-12 dB",
-        FontId::monospace(9.5),
+        crate::theme::mono_font(9.5),
         theme.text_muted,
     );
 
@@ -816,7 +820,7 @@ fn render_frequency_response_curve_painter(
     for i in 0..points.len() - 1 {
         p.line_segment(
             [points[i], points[i + 1]],
-            Stroke::new(2.5, theme.accent_pink),
+            Stroke::new(2.5, theme.accent_warm),
         );
     }
 }
@@ -829,9 +833,11 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     manual_card(ui, theme, |ui| {
         card_title(ui, "1. Bit-Perfect Direct Hardware Streaming", "Why operating system audio mixers degrade sound and how ShadowPlayer achieves pure direct bitstream", theme);
 
+        let avail_w = ui.available_width();
+        let img_h = avail_w * (768.0 / 1376.0);
         let img = egui::Image::new(egui::include_image!("../../assets/help/bitperfect_dac.jpg"))
             .corner_radius(CornerRadius::same(12))
-            .max_width(ui.available_width());
+            .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
         ui.add_space(6.0);
@@ -904,9 +910,11 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
         card_title(ui, "1. 3D Binaural HRTF & Virtual Room Acoustics", "How Head-Related Transfer Function impulse responses recreate realistic three-dimensional sound on headphones", theme);
 
+        let avail_w = ui.available_width();
+        let img_h = avail_w * (768.0 / 1376.0);
         let img = egui::Image::new(egui::include_image!("../../assets/help/spatial_3d.jpg"))
             .corner_radius(CornerRadius::same(12))
-            .max_width(ui.available_width());
+            .fit_to_exact_size(Vec2::new(avail_w, img_h));
         ui.add(img);
 
         ui.add_space(6.0);
@@ -933,7 +941,7 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     ui.label(
                         egui::RichText::new("Acoustic Coordinates:")
                             .strong()
-                            .color(theme.accent_pink),
+                            .color(theme.accent_warm),
                     );
 
                     ui.horizontal(|ui| {
@@ -1049,14 +1057,14 @@ fn render_radar_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme:
     );
 
     // Listener Head in center
-    p.circle_filled(center, 9.0, theme.accent_violet);
+    p.circle_filled(center, 9.0, theme.accent);
     // Ears
-    p.circle_filled(Pos2::new(center.x - 11.0, center.y), 3.0, theme.accent_pink);
-    p.circle_filled(Pos2::new(center.x + 11.0, center.y), 3.0, theme.accent_pink);
+    p.circle_filled(Pos2::new(center.x - 11.0, center.y), 3.0, theme.accent_warm);
+    p.circle_filled(Pos2::new(center.x + 11.0, center.y), 3.0, theme.accent_warm);
     // Nose pointer (facing North)
     p.line_segment(
         [center, Pos2::new(center.x, center.y - 14.0)],
-        Stroke::new(2.0, theme.accent_magenta),
+        Stroke::new(2.0, theme.accent_highlight),
     );
 
     // Source position
@@ -1069,7 +1077,7 @@ fn render_radar_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, theme:
     // Connecting line & speaker dot
     p.line_segment(
         [center, src_pos],
-        Stroke::new(1.5, theme.accent_magenta.linear_multiply(0.5)),
+        Stroke::new(1.5, theme.accent_highlight.linear_multiply(0.5)),
     );
     p.circle_filled(src_pos, 7.0, theme.bit_perfect_green);
     p.circle_stroke(src_pos, 11.0, Stroke::new(1.2, theme.bit_perfect_green));
@@ -1092,7 +1100,7 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
             egui::RichText::new(
                 "When you speed up audio, two physical approaches exist. Varispeed acts like speeding up the motor of an analog tape machine or vinyl record: playing 1.5x faster shifts all frequencies up proportionally. This preserves 100% micro-phase coherency with zero digital artifacts. In contrast, TimeStretch uses a phase vocoder to keep musical pitch fixed while altering speed."
             )
-            .font(FontId::proportional(13.0))
+            .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
         );
 
@@ -1106,7 +1114,7 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
             badge(
                 ui,
                 format!("Varispeed Pitch: {:+.2} semitones", semitones),
-                theme.accent_violet,
+                theme.accent,
                 Color32::WHITE,
             );
         });
@@ -1124,7 +1132,7 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
             ui.label(
                 egui::RichText::new("Crossfade Curve Type:")
                     .strong()
-                    .color(theme.accent_pink),
+                    .color(theme.accent_warm),
             );
 
             let curves = ["Constant Power (Equal Energy)", "Linear", "S-Curve"];
@@ -1141,7 +1149,7 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
             0 => "Constant Power (cos² + sin² = 1): Maintains constant acoustic energy across the entire blend. No dip in perceived volume.",
             1 => "Linear Crossfade: Summing two linear ramps creates a -3 dB volume dip in the middle of the transition.",
             _ => "S-Curve: Smooth ease-in and ease-out transitions, ideal for ambient soundscapes.",
-        }).font(FontId::proportional(12.0)).color(theme.text_secondary));
+        }).font(crate::theme::font(12.0)).color(theme.text_secondary));
 
         ui.add_space(8.0);
         // Painter for crossfade curves spanning full card width
@@ -1162,7 +1170,7 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
             egui::RichText::new(
                 "Different songs and albums are mastered at radically different volume levels. Switching from an older 1980s jazz album to modern pop music forces you to reach for the volume dial. ShadowPlayer implements the international broadcast standard EBU R128 (-14 LUFS) alongside ReplayGain 2.0. Unlike consumer peak normalizers that cause harsh digital clipping, EBU R128 uses K-weighted human perceptual loudness filters to calculate integrated loudness and apply transparent gain offsets."
             )
-            .font(FontId::proportional(13.0))
+            .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
         );
     });
@@ -1212,11 +1220,11 @@ fn render_crossfade_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, th
     for i in 0..steps - 1 {
         p.line_segment(
             [out_points[i], out_points[i + 1]],
-            Stroke::new(2.0, theme.accent_pink),
+            Stroke::new(2.0, theme.accent_warm),
         );
         p.line_segment(
             [in_points[i], in_points[i + 1]],
-            Stroke::new(2.0, theme.accent_violet),
+            Stroke::new(2.0, theme.accent),
         );
         p.line_segment(
             [sum_points[i], sum_points[i + 1]],
@@ -1228,21 +1236,21 @@ fn render_crossfade_painter(ui: &mut egui::Ui, rect: Rect, state: &HelpState, th
         Pos2::new(rect.left() + 10.0, y_top),
         egui::Align2::LEFT_TOP,
         "Fade Out (Track A)",
-        FontId::monospace(10.0),
-        theme.accent_pink,
+        crate::theme::mono_font(10.0),
+        theme.accent_warm,
     );
     p.text(
         Pos2::new(rect.right() - 10.0, y_top),
         egui::Align2::RIGHT_TOP,
         "Fade In (Track B)",
-        FontId::monospace(10.0),
-        theme.accent_violet,
+        crate::theme::mono_font(10.0),
+        theme.accent,
     );
     p.text(
         Pos2::new(rect.center().x, y_top),
         egui::Align2::CENTER_TOP,
         "Summed Perceived Energy",
-        FontId::monospace(10.0),
+        crate::theme::mono_font(10.0),
         theme.bit_perfect_green,
     );
 }
@@ -1264,7 +1272,7 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
             egui::RichText::new(
                 "ShadowPlayer includes a multi-track mixing engine allowing you to inject auxiliary stems, click tracks, or commentary channels alongside your primary music. Each channel slot provides independent float gain (0.0x to 2.0x), true stereo pan balancing (-1.0 Left to +1.0 Right), and instantaneous mute toggling."
             )
-            .font(FontId::proportional(13.0))
+            .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
         );
     });
@@ -1281,7 +1289,7 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
             egui::RichText::new(
                 "When broadcasting or listening with a voice channel active, manual volume fading is cumbersome. The Sidechain Ducking Compressor monitors a designated trigger slot (such as microphone input or voice stems). When audio exceeds the Threshold (dB), it smoothly attenuates the music by the Duck Depth (dB) at the specified Attack speed, restoring full volume over the Release envelope once speech stops."
             )
-            .font(FontId::proportional(13.0))
+            .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
         );
     });
@@ -1298,7 +1306,7 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
             egui::RichText::new(
                 "Need to capture an uncompressed reference recording of live audio? The Stream Capture engine taps directly into the post-DSP master ringbuffer, writing pure 32-bit floating point PCM audio to a `.wav` file on your local storage with zero generation loss."
             )
-            .font(FontId::proportional(13.0))
+            .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
         );
     });
@@ -1363,14 +1371,14 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
                         badge_rect.center(),
                         egui::Align2::CENTER_CENTER,
                         key,
-                        FontId::monospace(12.0),
-                        theme.accent_pink,
+                        crate::theme::mono_font(12.0),
+                        theme.accent_warm,
                     );
 
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(desc)
-                                .font(FontId::proportional(13.0))
+                                .font(crate::theme::font(13.0))
                                 .color(theme.text_secondary),
                         )
                         .wrap(),
@@ -1468,14 +1476,14 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
                             ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
                             ui.label(
                                 egui::RichText::new(title)
-                                    .font(FontId::proportional(14.0))
+                                    .font(crate::theme::font(14.0))
                                     .strong()
-                                    .color(theme.accent_pink),
+                                    .color(theme.accent_warm),
                             );
                             ui.add(
                                 egui::Label::new(
                                     egui::RichText::new(snippet)
-                                        .font(FontId::proportional(12.5))
+                                        .font(crate::theme::font(12.5))
                                         .color(theme.text_secondary),
                                 )
                                 .wrap(),
@@ -1491,11 +1499,11 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
                                 .add(
                                     egui::Button::new(
                                         egui::RichText::new("Jump to Section >>")
-                                            .font(FontId::proportional(11.5))
+                                            .font(crate::theme::font(11.5))
                                             .strong()
                                             .color(Color32::WHITE),
                                     )
-                                    .fill(theme.accent_violet)
+                                    .fill(theme.accent)
                                     .corner_radius(CornerRadius::same(6))
                                     .min_size(Vec2::new(135.0, 26.0)),
                                 )
@@ -1545,14 +1553,14 @@ fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str, theme: &Theme) {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
         ui.label(
             egui::RichText::new(title)
-                .font(FontId::proportional(16.0))
+                .font(crate::theme::font(16.0))
                 .strong()
                 .color(theme.text_primary),
         );
         if !subtitle.is_empty() {
             ui.label(
                 egui::RichText::new(subtitle)
-                    .font(FontId::proportional(12.0))
+                    .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
             );
         }
@@ -1574,14 +1582,14 @@ fn feature_pillar_card(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
             ui.label(
                 egui::RichText::new(title)
-                    .font(FontId::proportional(13.5))
+                    .font(crate::theme::font(13.5))
                     .strong()
-                    .color(theme.accent_pink),
+                    .color(theme.accent_warm),
             );
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(desc)
-                        .font(FontId::proportional(12.0))
+                        .font(crate::theme::font(12.0))
                         .color(theme.text_secondary),
                 )
                 .wrap(),
@@ -1598,14 +1606,14 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
             ui.label(
                 egui::RichText::new(title)
-                    .font(FontId::proportional(13.5))
+                    .font(crate::theme::font(13.5))
                     .strong()
-                    .color(theme.accent_pink),
+                    .color(theme.accent_warm),
             );
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(desc)
-                        .font(FontId::proportional(12.5))
+                        .font(crate::theme::font(12.5))
                         .color(theme.text_secondary),
                 )
                 .wrap(),
@@ -1625,7 +1633,7 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(title)
-                                .font(FontId::proportional(13.0))
+                                .font(crate::theme::font(13.0))
                                 .strong()
                                 .color(theme.text_primary),
                         )
@@ -1641,7 +1649,7 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(desc)
-                                .font(FontId::proportional(12.5))
+                                .font(crate::theme::font(12.5))
                                 .color(theme.text_secondary),
                         )
                         .wrap(),
@@ -1656,11 +1664,11 @@ fn feature_card_row(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme) {
 fn caption_box(ui: &mut egui::Ui, text: &str, theme: &Theme) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
-        badge(ui, "DIAGRAM", theme.bg_pill, theme.accent_pink);
+        badge(ui, "DIAGRAM", theme.bg_pill, theme.accent_warm);
         ui.add(
             egui::Label::new(
                 egui::RichText::new(text)
-                    .font(FontId::proportional(11.5))
+                    .font(crate::theme::font(11.5))
                     .italics()
                     .color(theme.text_muted),
             )
@@ -1677,7 +1685,7 @@ fn badge(ui: &mut egui::Ui, text: impl Into<String>, bg: Color32, fg: Color32) {
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(text.into())
-                    .font(FontId::proportional(10.5))
+                    .font(crate::theme::font(10.5))
                     .strong()
                     .color(fg),
             );
@@ -1695,13 +1703,13 @@ fn spec_badge(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {
                 ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
                 ui.label(
                     egui::RichText::new(label)
-                        .font(FontId::proportional(10.0))
+                        .font(crate::theme::font(10.0))
                         .strong()
                         .color(color),
                 );
                 ui.label(
                     egui::RichText::new(value)
-                        .font(FontId::proportional(11.0))
+                        .font(crate::theme::font(11.0))
                         .strong()
                         .color(Color32::WHITE),
                 );

@@ -1,7 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
-};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 #[derive(Default)]
 pub struct WindowControlsResponse {
@@ -41,10 +39,10 @@ pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bo
                         .hint_text(
                             egui::RichText::new(hint)
                                 .color(theme.text_muted)
-                                .font(FontId::proportional(13.0)),
+                                .font(crate::theme::font(13.0)),
                         )
                         .text_color(theme.text_primary)
-                        .font(FontId::proportional(13.5))
+                        .font(crate::theme::font(13.5))
                         .desired_width((width - 56.0).max(80.0))
                         .frame(egui::Frame::NONE);
 
@@ -70,48 +68,7 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
         Vec2::new(width, 38.0),
         egui::Layout::right_to_left(egui::Align::Center),
         |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(14.0, 0.0);
-
-            // Window close, maximize, minimize
-            let (close_rect, close_resp) =
-                ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
-            let close_col = if close_resp.hovered() {
-                theme.destructive
-            } else {
-                theme.text_secondary
-            };
-            crate::components::icons::draw_window_close(ui, close_rect, close_col);
-            if close_resp.clicked() {
-                resp.close_requested = true;
-            }
-
-            let (max_rect, max_resp) =
-                ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
-            let max_col = if max_resp.hovered() {
-                theme.text_primary
-            } else {
-                theme.text_secondary
-            };
-            crate::components::icons::draw_window_max(ui, max_rect, max_col);
-            if max_resp.clicked() {
-                resp.maximize_requested = true;
-            }
-
-            let (min_rect, min_resp) =
-                ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
-            let min_col = if min_resp.hovered() {
-                theme.text_primary
-            } else {
-                theme.text_secondary
-            };
-            crate::components::icons::draw_window_min(ui, min_rect, min_col);
-            if min_resp.clicked() {
-                resp.minimize_requested = true;
-            }
-
-            ui.add_space(8.0);
-
-            // Theme Toggle Capsule (Sun / Moon)
+            // Theme Toggle Capsule (Sun / Moon) - Window controls removed as OS titlebar provides them
             let (toggle_rect, toggle_resp) =
                 ui.allocate_exact_size(Vec2::new(56.0, 28.0), Sense::click());
             let painter = ui.painter_at(toggle_rect);
@@ -143,12 +100,78 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
                 // Sun icon (dim) on left
                 crate::components::icons::draw_sun(ui, sun_rect, theme.text_muted);
 
-                // Active dark mode Moon with glowing purple circle on right
-                painter.circle_filled(moon_center, 11.0, theme.accent_violet);
+                // Active dark mode Moon with glowing jade circle on right
+                painter.circle_filled(moon_center, 11.0, theme.accent);
                 crate::components::icons::draw_moon(ui, moon_rect, Color32::WHITE);
             }
         },
     );
 
     resp
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TopbarAction {
+    Queue,
+    Theme,
+    MiniPlayer,
+}
+
+/// A compact top-bar action button shared by the full and narrow layouts.
+pub fn render_action_button(
+    ui: &mut Ui,
+    action: TopbarAction,
+    active: bool,
+    theme: &Theme,
+    tooltip: &str,
+) -> bool {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
+    let clicked = response.clicked();
+    let hovered = response.hovered();
+
+    if active {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(9), theme.bg_card_active);
+    } else if hovered {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(9), theme.bg_card_hover);
+    }
+
+    let color = if active {
+        theme.accent_highlight
+    } else if hovered {
+        theme.text_primary
+    } else {
+        theme.text_muted
+    };
+    let icon = Rect::from_center_size(rect.center(), Vec2::splat(17.0));
+    match action {
+        TopbarAction::Queue => crate::components::icons::draw_list_icon(ui, icon, color),
+        TopbarAction::Theme => {
+            if theme.is_light {
+                crate::components::icons::draw_sun(ui, icon, color);
+            } else {
+                crate::components::icons::draw_moon(ui, icon, color);
+            }
+        }
+        TopbarAction::MiniPlayer => {
+            let p = ui.painter_at(rect);
+            let outer = Rect::from_center_size(rect.center(), Vec2::new(18.0, 13.0));
+            p.rect_stroke(
+                outer,
+                CornerRadius::same(3),
+                Stroke::new(1.4_f32, color),
+                StrokeKind::Inside,
+            );
+            let inner =
+                Rect::from_center_size(outer.center() + Vec2::new(1.0, 1.0), Vec2::new(9.0, 6.0));
+            p.rect_filled(inner, CornerRadius::same(1), color);
+        }
+    }
+
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), active, tooltip)
+    });
+    let _ = response.on_hover_text(tooltip);
+    clicked
 }
