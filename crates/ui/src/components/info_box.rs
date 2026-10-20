@@ -224,13 +224,13 @@ pub fn render_info_icon_button(
                                 ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
                             let cp = ui.painter_at(c_rect);
                             let bg = if c_resp.hovered() {
-                                Color32::from_rgba_unmultiplied(239, 68, 68, 50)
+                                theme.destructive.gamma_multiply(0.2)
                             } else {
                                 theme.bg_pill
                             };
                             cp.rect_filled(c_rect, CornerRadius::same(theme.radius_sm), bg);
                             let cross_col = if c_resp.hovered() {
-                                Color32::from_rgb(248, 113, 113)
+                                theme.destructive
                             } else {
                                 theme.text_muted
                             };

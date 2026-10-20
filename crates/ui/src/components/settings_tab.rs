@@ -871,7 +871,7 @@ fn render_output_category(
         theme.border_card
     };
     let bp_fill = if state.bit_perfect {
-        Color32::from_rgba_premultiplied(16, 185, 129, 20)
+        theme.bit_perfect_green.gamma_multiply(0.12)
     } else {
         theme.bg_card
     };
@@ -2337,7 +2337,7 @@ fn render_tools_category(
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(Color32::from_rgb(220, 38, 38))
+                        .fill(theme.destructive)
                         .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
                     .clicked()

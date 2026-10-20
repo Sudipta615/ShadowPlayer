@@ -1,6 +1,6 @@
 use audio_session::AudioSession;
 use database::{ScanRootsRepo, TrackRepo};
-use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Sense, Stroke, Vec2};
 use std::path::PathBuf;
 
 use crate::components::settings_tab::{show_settings_tab_extended, SettingsExtraContext};
@@ -54,7 +54,7 @@ pub fn render_settings_view(
                 let (bp_text, bp_bg, bp_fg, bp_border) = if dsp_state.settings_tab.bit_perfect {
                     (
                         "Bit-Perfect Direct Stream",
-                        Color32::from_rgba_premultiplied(16, 185, 129, 35),
+                        theme.bit_perfect_green.gamma_multiply(0.16),
                         theme.bit_perfect_green,
                         theme.bit_perfect_green,
                     )

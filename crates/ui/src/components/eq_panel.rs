@@ -604,7 +604,7 @@ pub fn show_eq_panel(
                 ui.painter().rect_filled(
                     overlay_rect,
                     CornerRadius::same(theme.radius_xl),
-                    Color32::from_rgba_unmultiplied(10, 15, 30, 140),
+                    theme.overlay_scrim,
                 );
 
                 let badge_pos = overlay_rect.center();
@@ -706,13 +706,13 @@ fn render_header(
             let _ = close_resp.clone().on_hover_text("Close the DSP studio");
             let cp = ui.painter_at(close_rect);
             let close_bg = if close_resp.hovered() {
-                Color32::from_rgba_premultiplied(239, 68, 68, 50)
+                theme.destructive.gamma_multiply(0.2)
             } else {
                 theme.bg_pill
             };
             cp.rect_filled(close_rect, CornerRadius::same(theme.radius_sm), close_bg);
             let icon_col = if close_resp.hovered() {
-                Color32::from_rgb(248, 113, 113)
+                theme.destructive
             } else {
                 theme.text_secondary
             };
@@ -908,7 +908,7 @@ fn render_graphic_eq_tab(
                 let del_btn = egui::Button::new(
                     egui::RichText::new("Delete")
                         .font(crate::theme::font(11.0))
-                        .color(Color32::from_rgb(248, 113, 113)),
+                        .color(theme.destructive),
                 )
                 .fill(theme.bg_pill)
                 .stroke(Stroke::NONE)
@@ -1178,9 +1178,9 @@ fn render_spline_eq_canvas(
 
         // Gridline across the plot
         let stroke_color = if is_zero {
-            Color32::from_rgba_premultiplied(90, 100, 140, 130)
+            theme.meter_grid
         } else {
-            Color32::from_rgba_premultiplied(45, 52, 75, 80)
+            theme.meter_grid.gamma_multiply(0.55)
         };
         let stroke = Stroke::new(if is_zero { 1.2 } else { 1.0 }, stroke_color);
         draw_dashed_line(
