@@ -80,13 +80,8 @@ pub fn show_duplicates_modal(
 
     let mut is_open = state.is_open;
 
-    egui::Window::new("Duplicate Tracks")
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(620.0, 460.0)))
-        .min_size(crate::dialog::min_dialog_size())
-        .show(ctx, |ui| {
+    let closed =
+        crate::dialog::show_modal(ctx, "duplicates", "Duplicate Tracks", 620.0, theme, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
 
             ui.horizontal(|ui| {
@@ -216,6 +211,9 @@ pub fn show_duplicates_modal(
                 }
             });
         });
+    if closed {
+        is_open = false;
+    }
 
     state.is_open = is_open;
     actions

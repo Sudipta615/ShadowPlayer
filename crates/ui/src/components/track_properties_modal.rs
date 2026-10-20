@@ -1,6 +1,6 @@
 use crate::theme::Theme;
 use domain::models::Track;
-use eframe::egui::{self, CornerRadius, Stroke, Vec2, Window};
+use eframe::egui::{self, CornerRadius, Stroke, Vec2};
 
 pub fn show_track_properties_modal(
     ctx: &egui::Context,
@@ -14,13 +14,13 @@ pub fn show_track_properties_modal(
 
     let track = track.unwrap();
 
-    Window::new("Track Properties & Audio Details")
-        .open(is_open)
-        .resizable(true)
-        .collapsible(false)
-        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(520.0, 420.0)))
-        .min_size(crate::dialog::min_dialog_size())
-        .show(ctx, |ui| {
+    let closed = crate::dialog::show_modal(
+        ctx,
+        "track_properties",
+        "Track Properties & Audio Details",
+        520.0,
+        theme,
+        |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 
             let card_frame = egui::Frame::NONE
@@ -148,7 +148,11 @@ pub fn show_track_properties_modal(
                     );
                 });
             });
-        });
+        },
+    );
+    if closed {
+        *is_open = false;
+    }
 }
 
 fn render_property_row(ui: &mut egui::Ui, label: &str, value: &str, theme: &Theme) {

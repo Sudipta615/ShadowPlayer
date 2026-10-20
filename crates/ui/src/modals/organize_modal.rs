@@ -155,16 +155,10 @@ pub fn show_organize_modal(
     // in-body Close button needs its own flag to avoid borrowing twice.
     let mut close_requested = false;
 
-    egui::Window::new("Organize Files")
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(860.0, 620.0)))
-        .min_size(crate::dialog::min_dialog_size())
-        .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+    let closed = crate::dialog::show_modal(ctx, "organize", "Organize Files", 860.0, theme, |ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
 
-            ui.label(
+        ui.label(
                 egui::RichText::new(format!(
                     "{} · nothing is moved until you press Apply, and existing files are never overwritten.",
                     state.scope_label
@@ -173,183 +167,184 @@ pub fn show_organize_modal(
                 .color(theme.text_muted),
             );
 
-            ui.separator();
+        ui.separator();
 
-            // ── Pattern ────────────────────────────────────────────────
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Naming pattern")
-                        .font(crate::theme::font(12.5))
-                        .strong()
-                        .color(theme.text_primary),
-                );
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut state.pattern)
-                        .desired_width(380.0)
-                        .font(crate::theme::font(12.5)),
-                );
-                if response.changed() {
-                    state.plan_dirty = true;
-                }
-                if ui.button("Reset").clicked() {
-                    actions.reset_pattern = true;
-                }
-            });
-
-            // Token palette: click to append, so the syntax is discoverable.
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-                ui.label(
-                    egui::RichText::new("Tokens:")
-                        .font(crate::theme::font(11.0))
-                        .color(theme.text_muted),
-                );
-                for (token, description) in TOKENS {
-                    if ui
-                        .small_button(*token)
-                        .on_hover_text(*description)
-                        .clicked()
-                    {
-                        state.pattern.push_str(token);
-                        state.plan_dirty = true;
-                    }
-                }
-            });
-
-            // ── Destination ────────────────────────────────────────────
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Destination")
-                        .font(crate::theme::font(12.5))
-                        .strong()
-                        .color(theme.text_primary),
-                );
-                let in_place = state.destination.is_none();
-                if ui
-                    .selectable_label(in_place, "Keep in current folder")
-                    .clicked()
-                {
-                    actions.clear_destination = true;
-                }
-                if ui
-                    .selectable_label(!in_place, "Move into folder")
-                    .clicked()
-                    && in_place
-                {
-                    actions.pick_destination = true;
-                }
-                if let Some(ref dest) = state.destination {
-                    ui.label(
-                        egui::RichText::new(dest.display().to_string())
-                            .font(crate::theme::font(11.5))
-                            .color(theme.text_muted),
-                    );
-                    if ui.button("Change...").clicked() {
-                        actions.pick_destination = true;
-                    }
-                }
-            });
-
-            ui.separator();
-
-            // ── Preview ────────────────────────────────────────────────
-            ui.horizontal(|ui| {
-                let pending = state.plan.pending_count();
-                let conflicts = state.plan.conflict_count();
-                let unchanged = state.plan.unchanged_count();
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{pending} to move · {conflicts} conflict(s) · {unchanged} already in place"
-                    ))
+        // ── Pattern ────────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Naming pattern")
                     .font(crate::theme::font(12.5))
                     .strong()
-                    .color(if conflicts > 0 {
-                        theme.accent_highlight
-                    } else {
-                        theme.text_primary
-                    }),
+                    .color(theme.text_primary),
+            );
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut state.pattern)
+                    .desired_width(380.0)
+                    .font(crate::theme::font(12.5)),
+            );
+            if response.changed() {
+                state.plan_dirty = true;
+            }
+            if ui.button("Reset").clicked() {
+                actions.reset_pattern = true;
+            }
+        });
+
+        // Token palette: click to append, so the syntax is discoverable.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+            ui.label(
+                egui::RichText::new("Tokens:")
+                    .font(crate::theme::font(11.0))
+                    .color(theme.text_muted),
+            );
+            for (token, description) in TOKENS {
+                if ui
+                    .small_button(*token)
+                    .on_hover_text(*description)
+                    .clicked()
+                {
+                    state.pattern.push_str(token);
+                    state.plan_dirty = true;
+                }
+            }
+        });
+
+        // ── Destination ────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Destination")
+                    .font(crate::theme::font(12.5))
+                    .strong()
+                    .color(theme.text_primary),
+            );
+            let in_place = state.destination.is_none();
+            if ui
+                .selectable_label(in_place, "Keep in current folder")
+                .clicked()
+            {
+                actions.clear_destination = true;
+            }
+            if ui.selectable_label(!in_place, "Move into folder").clicked() && in_place {
+                actions.pick_destination = true;
+            }
+            if let Some(ref dest) = state.destination {
+                ui.label(
+                    egui::RichText::new(dest.display().to_string())
+                        .font(crate::theme::font(11.5))
+                        .color(theme.text_muted),
                 );
-                if pending > 0 {
+                if ui.button("Change...").clicked() {
+                    actions.pick_destination = true;
+                }
+            }
+        });
+
+        ui.separator();
+
+        // ── Preview ────────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            let pending = state.plan.pending_count();
+            let conflicts = state.plan.conflict_count();
+            let unchanged = state.plan.unchanged_count();
+            ui.label(
+                egui::RichText::new(format!(
+                    "{pending} to move · {conflicts} conflict(s) · {unchanged} already in place"
+                ))
+                .font(crate::theme::font(12.5))
+                .strong()
+                .color(if conflicts > 0 {
+                    theme.accent_highlight
+                } else {
+                    theme.text_primary
+                }),
+            );
+            if pending > 0 {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "· {} folder(s) will be used",
+                        state.plan.destination_folders()
+                    ))
+                    .font(crate::theme::font(11.5))
+                    .color(theme.text_muted),
+                );
+            }
+        });
+
+        if let Some(ref result) = state.result {
+            ui.label(
+                egui::RichText::new(result)
+                    .font(crate::theme::font(11.5))
+                    .color(theme.bit_perfect_green),
+            );
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt("organize_preview")
+            .auto_shrink([false, false])
+            .max_height(340.0)
+            .show(ui, |ui| {
+                if state.tracks.is_empty() {
+                    ui.label(
+                        egui::RichText::new("Nothing in scope.")
+                            .font(crate::theme::font(12.0))
+                            .color(theme.text_muted),
+                    );
+                    return;
+                }
+                for (i, entry) in state.plan.entries.iter().take(PREVIEW_ROWS).enumerate() {
+                    render_preview_row(ui, i, entry, theme);
+                }
+                if state.plan.entries.len() > PREVIEW_ROWS {
                     ui.label(
                         egui::RichText::new(format!(
-                            "· {} folder(s) will be used",
-                            state.plan.destination_folders()
+                            "... and {} more (all of them will be moved)",
+                            state.plan.entries.len() - PREVIEW_ROWS
                         ))
-                        .font(crate::theme::font(11.5))
+                        .font(crate::theme::font(11.0))
                         .color(theme.text_muted),
                     );
                 }
             });
 
-            if let Some(ref result) = state.result {
+        ui.separator();
+
+        // ── Apply ──────────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            let pending = state.plan.pending_count();
+            let plan_ready = !state.plan_dirty;
+            let can_apply = pending > 0 && plan_ready;
+            let label = if pending == 1 {
+                "Move 1 file".to_string()
+            } else {
+                format!("Move {pending} files")
+            };
+            let btn = egui::Button::new(egui::RichText::new(label).color(Color32::WHITE))
+                .fill(theme.accent);
+            let response = ui.add_enabled(can_apply, btn);
+            if !plan_ready {
+                response
+                    .clone()
+                    .on_hover_text("Waiting for the preview to finish");
+            }
+            if response.clicked() {
+                actions.apply = true;
+            }
+            if pending == 0 && !state.plan_dirty {
                 ui.label(
-                    egui::RichText::new(result)
+                    egui::RichText::new("Nothing to do with this pattern.")
                         .font(crate::theme::font(11.5))
-                        .color(theme.bit_perfect_green),
+                        .color(theme.text_muted),
                 );
             }
-
-            egui::ScrollArea::vertical()
-                .id_salt("organize_preview")
-                .auto_shrink([false, false])
-                .max_height(340.0)
-                .show(ui, |ui| {
-                    if state.tracks.is_empty() {
-                        ui.label(
-                            egui::RichText::new("Nothing in scope.")
-                                .font(crate::theme::font(12.0))
-                                .color(theme.text_muted),
-                        );
-                        return;
-                    }
-                    for (i, entry) in state.plan.entries.iter().take(PREVIEW_ROWS).enumerate() {
-                        render_preview_row(ui, i, entry, theme);
-                    }
-                    if state.plan.entries.len() > PREVIEW_ROWS {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "... and {} more (all of them will be moved)",
-                                state.plan.entries.len() - PREVIEW_ROWS
-                            ))
-                            .font(crate::theme::font(11.0))
-                            .color(theme.text_muted),
-                        );
-                    }
-                });
-
-            ui.separator();
-
-            // ── Apply ──────────────────────────────────────────────────
-            ui.horizontal(|ui| {
-                let pending = state.plan.pending_count();
-                let plan_ready = !state.plan_dirty;
-                let can_apply = pending > 0 && plan_ready;
-                let label = if pending == 1 {
-                    "Move 1 file".to_string()
-                } else {
-                    format!("Move {pending} files")
-                };
-                let btn = egui::Button::new(egui::RichText::new(label).color(Color32::WHITE))
-                    .fill(theme.accent);
-                let response = ui.add_enabled(can_apply, btn);
-                if !plan_ready {
-                    response.clone().on_hover_text("Waiting for the preview to finish");
-                }
-                if response.clicked() {
-                    actions.apply = true;
-                }
-                if pending == 0 && !state.plan_dirty {
-                    ui.label(
-                        egui::RichText::new("Nothing to do with this pattern.")
-                            .font(crate::theme::font(11.5))
-                            .color(theme.text_muted),
-                    );
-                }
-                if ui.button("Close").clicked() {
-                    close_requested = true;
-                }
-            });
+            if ui.button("Close").clicked() {
+                close_requested = true;
+            }
         });
+    });
+    if closed {
+        is_open = false;
+    }
 
     if close_requested {
         is_open = false;

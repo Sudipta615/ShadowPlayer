@@ -19,6 +19,9 @@ pub struct PlaylistEditorState {
     pub search: String,
     /// Cache of the last search string so filtering only runs when it changes.
     search_cache: String,
+    /// Whether the studio was open last frame. Used to move the keyboard
+    /// focus into the name field exactly once, when it opens.
+    was_open: bool,
     /// Indices into the library slice matching the current search.
     results: Vec<usize>,
 }
@@ -66,21 +69,25 @@ pub fn show_playlist_editor(
     }
 
     let mut is_open = state.is_open;
+    // A stable id, so the keyboard focus can be parked in the name field when
+    // the studio opens.
+    let new_name_field_id = egui::Id::unique("playlist_editor_new_name");
 
-    egui::Window::new("Playlist Studio")
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(760.0, 540.0)))
-        .min_size(crate::dialog::min_dialog_size())
-        .show(ctx, |ui| {
+    let closed = crate::dialog::show_modal(
+        ctx,
+        "playlist_editor",
+        "Playlist Studio",
+        760.0,
+        theme,
+        |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 10.0);
 
             // ── 1. Top Branded Header ──────────────────────────────────────────
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
                 let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(28.0, 28.0), Sense::hover());
-                ui.painter().rect_filled(icon_rect, CornerRadius::same(8), theme.accent);
+                ui.painter()
+                    .rect_filled(icon_rect, CornerRadius::same(8), theme.accent);
                 crate::components::icons::draw_list_icon(
                     ui,
                     icon_rect.shrink2(Vec2::splat(5.0)),
@@ -96,9 +103,11 @@ pub fn show_playlist_editor(
                             .color(theme.text_primary),
                     );
                     ui.label(
-                        egui::RichText::new("Create custom playlists and curate tracks from your library")
-                            .font(crate::theme::font(11.5))
-                            .color(theme.text_muted),
+                        egui::RichText::new(
+                            "Create custom playlists and curate tracks from your library",
+                        )
+                        .font(crate::theme::font(11.5))
+                        .color(theme.text_muted),
                     );
                 });
             });
@@ -114,16 +123,25 @@ pub fn show_playlist_editor(
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
-                    let (plus_rect, _) = ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::hover());
-                    crate::components::icons::draw_plus_circle(ui, plus_rect, theme.accent_highlight);
+                    let (plus_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::hover());
+                    crate::components::icons::draw_plus_circle(
+                        ui,
+                        plus_rect,
+                        theme.accent_highlight,
+                    );
 
                     let edit = egui::TextEdit::singleline(&mut state.new_name)
-                        .hint_text("Enter new playlist name (e.g. Audiophile Favorites, Late Night)...")
+                        .id(new_name_field_id)
+                        .hint_text(
+                            "Enter new playlist name (e.g. Audiophile Favorites, Late Night)...",
+                        )
                         .desired_width(ui.available_width() - 130.0)
                         .font(crate::theme::font(13.0));
                     let edit_resp = ui.add(edit);
 
-                    let enter_pressed = edit_resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                    let enter_pressed =
+                        edit_resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
 
                     let btn = egui::Button::new(
                         egui::RichText::new("+ Create Playlist")
@@ -135,7 +153,8 @@ pub fn show_playlist_editor(
                     .corner_radius(CornerRadius::same(8))
                     .min_size(Vec2::new(115.0, 30.0));
 
-                    if (ui.add(btn).clicked() || enter_pressed) && !state.new_name.trim().is_empty() {
+                    if (ui.add(btn).clicked() || enter_pressed) && !state.new_name.trim().is_empty()
+                    {
                         actions.create = Some(state.new_name.trim().to_string());
                         state.new_name.clear();
                     }
@@ -586,7 +605,18 @@ pub fn show_playlist_editor(
                     },
                 );
             });
-        });
+        },
+    );
+    if closed {
+        is_open = false;
+    }
+
+    // Move the focus into the dialog when it opens, so the user can start
+    // typing a name straight away.
+    if is_open && !state.was_open {
+        ctx.memory_mut(|m| m.request_focus(new_name_field_id));
+    }
+    state.was_open = is_open;
 
     state.is_open = is_open;
     actions

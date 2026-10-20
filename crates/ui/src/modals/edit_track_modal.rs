@@ -8,6 +8,9 @@ use crate::theme::Theme;
 #[derive(Default)]
 pub struct EditTrackState {
     pub is_open: bool,
+    /// Whether the dialog was open last frame. Used to move the keyboard
+    /// focus into the dialog exactly once, when it opens.
+    was_open: bool,
     editing: Option<Track>,
     title: String,
     artist: String,
@@ -67,16 +70,21 @@ pub fn show_edit_track_modal(
     let mut cancel = false;
     let mut save = false;
 
-    egui::Window::new("Edit Song Info")
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(380.0, 300.0)))
-        .min_size(crate::dialog::min_dialog_size())
-        .show(ctx, |ui| {
+    // The fields need stable ids so the keyboard focus can be parked in the
+    // first one when the dialog opens.
+    let title_field_id = egui::Id::unique("edit_track_title");
+    let artist_field_id = egui::Id::unique("edit_track_artist");
+    let album_field_id = egui::Id::unique("edit_track_album");
+    let genre_field_id = egui::Id::unique("edit_track_genre");
+    let year_field_id = egui::Id::unique("edit_track_year");
+    let track_number_field_id = egui::Id::unique("edit_track_track_number");
+    let disc_number_field_id = egui::Id::unique("edit_track_disc_number");
+
+    let closed =
+        crate::dialog::show_modal(ctx, "edit_track", "Edit Song Info", 380.0, theme, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, 7.0);
 
-            let field = |ui: &mut egui::Ui, label: &str, buf: &mut String| {
+            let field = |ui: &mut egui::Ui, label: &str, buf: &mut String, id: egui::Id| {
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(
                         Vec2::new(90.0, 22.0),
@@ -89,17 +97,26 @@ pub fn show_edit_track_modal(
                             );
                         },
                     );
-                    ui.add(egui::TextEdit::singleline(buf).desired_width(ui.available_width()));
+                    ui.add(
+                        egui::TextEdit::singleline(buf)
+                            .id(id)
+                            .desired_width(ui.available_width()),
+                    );
                 });
             };
 
-            field(ui, "Title", &mut state.title);
-            field(ui, "Artist", &mut state.artist);
-            field(ui, "Album", &mut state.album);
-            field(ui, "Genre", &mut state.genre);
-            field(ui, "Year", &mut state.year);
-            field(ui, "Track #", &mut state.track_number);
-            field(ui, "Disc #", &mut state.disc_number);
+            field(ui, "Title", &mut state.title, title_field_id);
+            field(ui, "Artist", &mut state.artist, artist_field_id);
+            field(ui, "Album", &mut state.album, album_field_id);
+            field(ui, "Genre", &mut state.genre, genre_field_id);
+            field(ui, "Year", &mut state.year, year_field_id);
+            field(
+                ui,
+                "Track #",
+                &mut state.track_number,
+                track_number_field_id,
+            );
+            field(ui, "Disc #", &mut state.disc_number, disc_number_field_id);
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -113,6 +130,16 @@ pub fn show_edit_track_modal(
                 }
             });
         });
+    if closed {
+        cancel = true;
+    }
+
+    // Move the focus into the dialog when it opens, so the user can start
+    // typing straight away instead of hunting for the field.
+    if is_open && !state.was_open {
+        ctx.memory_mut(|m| m.request_focus(title_field_id));
+    }
+    state.was_open = is_open;
 
     if save {
         if let Some(mut track) = state.editing.take() {

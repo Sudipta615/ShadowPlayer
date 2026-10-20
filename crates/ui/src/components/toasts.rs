@@ -141,11 +141,21 @@ impl ToastState {
                             .corner_radius(CornerRadius::same(9))
                             .inner_margin(egui::Margin::symmetric(14, 9))
                             .show(ui, |ui| {
-                                ui.label(
+                                let resp = ui.add(egui::Label::new(
                                     egui::RichText::new(&t.message)
                                         .font(crate::theme::font(12.5))
                                         .color(text),
-                                );
+                                ));
+                                // An alert role, so a screen reader announces
+                                // the message instead of leaving it as a
+                                // silent label on the page.
+                                resp.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::Role::Alert,
+                                        true,
+                                        t.message.clone(),
+                                    )
+                                });
                             });
                     }
                 });

@@ -1,6 +1,6 @@
 use audio_session::AudioSession;
 use domain::models::Track;
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2, Window};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
 use engine::diagnostics::BitPerfectCause;
 
 use crate::state::DspState;
@@ -27,26 +27,19 @@ pub fn show_bit_perfect_modal(
     let mut open = *is_open;
     let mut close_clicked = false;
 
-    Window::new("Bit-Perfect Signal Path Inspector")
-        .open(&mut open)
-        .resizable(true)
-        .collapsible(false)
-        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(620.0, 520.0)))
-        .min_size(crate::dialog::min_dialog_size())
-        .frame(
-            egui::Frame::window(&ctx.style_of(ctx.theme()))
-                .fill(theme.bg_card)
-                .stroke(Stroke::new(
-                    1.5_f32,
-                    if is_bit_perfect { theme.bit_perfect_green } else { theme.accent },
-                ))
-                .corner_radius(CornerRadius::same(16))
-                .inner_margin(egui::Margin::same(20)),
-        )
-        .show(ctx, |ui| {
+    let closed = crate::dialog::show_modal(
+        ctx,
+        "bit_perfect",
+        "Bit-Perfect Signal Path Inspector",
+        620.0,
+        theme,
+        |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("bit_perfect_body")
                 .auto_shrink([false, false])
+                .max_height(
+                    (crate::dialog::viewport_rect(ctx).height() - 140.0).max(160.0),
+                )
                 .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 14.0);
 
@@ -307,7 +300,11 @@ pub fn show_bit_perfect_modal(
                     }
                 });
                 });
-        });
+        },
+    );
+    if closed {
+        open = false;
+    }
 
     if close_clicked {
         open = false;

@@ -1,5 +1,5 @@
 use audio_session::AudioSession;
-use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2, Window};
+use eframe::egui::{self, Color32, CornerRadius, Vec2};
 use engine::dsp::autoeq::{AutoEq, AutoEqParams, AutoEqResult, FrequencyResponse, TargetCurve};
 
 use crate::components::eq_panel::{EqPanelState, ParametricBand};
@@ -323,26 +323,20 @@ pub fn show_autoeq_modal(
         state.max_gain_db = 12.0;
     }
 
-    let mut is_open = state.is_open;
+    let is_open = state.is_open;
     let profiles = get_curated_autoeq_profiles();
 
-    Window::new("AutoEQ Headphone & IEM Calibration")
-        .open(&mut is_open)
-        .resizable(true)
-        .collapsible(false)
-        .default_size(crate::dialog::fit_to_viewport(ctx, Vec2::new(580.0, 520.0)))
-        .min_size(crate::dialog::min_dialog_size())
-        .frame(
-            egui::Frame::window(&ctx.style_of(ctx.theme()))
-                .fill(theme.bg_card)
-                .stroke(Stroke::new(1.5_f32, theme.accent_highlight))
-                .corner_radius(CornerRadius::same(16))
-                .inner_margin(egui::Margin::same(18)),
-        )
-        .show(ctx, |ui| {
+    let closed = crate::dialog::show_modal(
+        ctx,
+        "autoeq",
+        "AutoEQ Headphone & IEM Calibration",
+        580.0,
+        theme,
+        |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("autoeq_body")
                 .auto_shrink([false, false])
+                .max_height((crate::dialog::viewport_rect(ctx).height() - 140.0).max(160.0))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 12.0);
 
@@ -537,7 +531,11 @@ pub fn show_autoeq_modal(
                         });
                     }
                 });
-        });
+        },
+    );
+    if closed {
+        state.is_open = false;
+    }
 
     state.is_open = is_open;
 }
