@@ -36,6 +36,80 @@ pub fn min_dialog_size() -> Vec2 {
     Vec2::new(320.0, 200.0)
 }
 
+/// Show a modal dialog whose body scrolls.
+///
+/// A dialog taller than the viewport is anchored in the middle, so its top
+/// ends up off-screen and unreachable. This variant gives the body a scroll
+/// area sized to the viewport, so the whole dialog always fits.
+pub fn show_modal_scrollable(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    width: f32,
+    theme: &Theme,
+    body: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let mut close_requested = false;
+    let screen = viewport_rect(ctx);
+    // The title row, the separator and the frame's margins.
+    let max_body_h = (screen.height() - 110.0).max(120.0);
+
+    egui::Modal::new(egui::Id::unique(id))
+        .frame(
+            egui::Frame::popup(&ctx.style_of(ctx.theme()))
+                .fill(theme.bg_card)
+                .stroke(Stroke::new(1.0, theme.border_card))
+                .corner_radius(CornerRadius::same(theme.radius_lg))
+                .inner_margin(egui::Margin::same(16)),
+        )
+        .backdrop_color(if theme.is_light {
+            Color32::from_black_alpha(56)
+        } else {
+            Color32::from_black_alpha(128)
+        })
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.set_max_width(width);
+
+            // ── Title row ───────────────────────────────────────────────────
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(title)
+                        .font(crate::theme::font(15.5))
+                        .strong()
+                        .color(theme.text_primary),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
+                    let color = if resp.hovered() {
+                        theme.text_primary
+                    } else {
+                        theme.text_muted
+                    };
+                    crate::components::icons::draw_window_close(ui, rect.shrink(5.0), color);
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, "Close")
+                    });
+                    let _ = resp.clone().on_hover_text("Close");
+                    if resp.clicked() {
+                        close_requested = true;
+                    }
+                });
+            });
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            egui::ScrollArea::vertical()
+                .id_salt("modal_body_scroll")
+                .auto_shrink([false, false])
+                .max_height(max_body_h)
+                .show(ui, body);
+        });
+
+    close_requested
+}
+
 /// Show a modal dialog with no title row.
 ///
 /// A command palette is the case for this: the title bar of a modal is

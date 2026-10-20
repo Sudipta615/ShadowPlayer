@@ -35,6 +35,8 @@ pub struct AppState {
     pub command_palette_open: bool,
     /// The loudness inspector.
     pub loudness_modal: crate::modals::loudness_modal::LoudnessModalState,
+    /// The library statistics.
+    pub library_stats_modal: crate::modals::library_stats_modal::LibraryStatsModalState,
     /// The command palette's own state: its query and the highlighted row.
     pub command_palette: crate::components::command_palette::CommandPaletteState,
     /// Single-window compact player mode.
@@ -81,6 +83,7 @@ impl Default for AppState {
             focus_search: false,
             command_palette_open: false,
             loudness_modal: Default::default(),
+            library_stats_modal: Default::default(),
             command_palette: Default::default(),
             mini_player: false,
             mini_always_on_top: true,

@@ -35,6 +35,8 @@ pub enum PaletteAction {
     OpenBitPerfect,
     /// Open the loudness inspector.
     OpenLoudness,
+    /// Open the library statistics.
+    OpenLibraryStats,
     /// Open the duplicate-track finder.
     OpenDuplicates,
     /// Open the batch organiser.

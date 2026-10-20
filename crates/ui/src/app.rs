@@ -679,6 +679,12 @@ impl ShadowPlayerApp {
             PaletteAction::OpenLoudness,
         ));
         entries.push(PaletteEntry::new(
+            "Library",
+            "Library statistics",
+            "formats, resolution and listening",
+            PaletteAction::OpenLibraryStats,
+        ));
+        entries.push(PaletteEntry::new(
             "Panel",
             "Duplicate tracks",
             "find identical audio",
@@ -797,6 +803,9 @@ impl ShadowPlayerApp {
             PaletteAction::OpenLoudness => {
                 self.open_loudness_inspector();
             }
+            PaletteAction::OpenLibraryStats => {
+                self.open_library_stats();
+            }
             PaletteAction::OpenDuplicates => {
                 self.scan_duplicates();
             }
@@ -858,6 +867,18 @@ impl ShadowPlayerApp {
                 .collect()
         };
         self.app_state.loudness_modal.is_open = true;
+    }
+
+    /// Open the library statistics.
+    ///
+    /// The summary is computed here rather than per frame, so opening the
+    /// view does not walk the whole library on every redraw.
+    fn open_library_stats(&mut self) {
+        self.app_state.library_stats_modal.stats =
+            crate::modals::library_stats_modal::LibraryStats::from_tracks(
+                &self.library_state.all_tracks,
+            );
+        self.app_state.library_stats_modal.is_open = true;
     }
 
     /// Move the keyboard focus to the search field.
@@ -2638,6 +2659,9 @@ impl eframe::App for ShadowPlayerApp {
                     self.reload_library();
                 }
             }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_STATS").is_ok() {
+                self.open_library_stats();
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_EDIT").is_ok() {
                 if let Some(track) = self.library_state.all_tracks.first().cloned() {
                     self.app_state.edit_track.open_with(&track);
@@ -3130,7 +3154,7 @@ impl eframe::App for ShadowPlayerApp {
                         let mut scan_to_start = None;
                         let mut import_req = None;
                         let import_active = self.import_service.is_active();
-                        render_folders_view(
+                        let show_stats = render_folders_view(
                             ui,
                             &mut self.library_state,
                             &mut self.scanner_service,
@@ -3149,6 +3173,9 @@ impl eframe::App for ShadowPlayerApp {
                         }
                         if let Some(kind) = import_req {
                             self.request_import(kind);
+                        }
+                        if show_stats {
+                            self.open_library_stats();
                         }
                     }
                     NavItem::Settings => {
@@ -3637,6 +3664,13 @@ impl eframe::App for ShadowPlayerApp {
             }
             self.reload_library();
         }
+
+        // The library statistics.
+        crate::modals::library_stats_modal::show_library_stats_modal(
+            &ctx,
+            &mut self.app_state.library_stats_modal,
+            &self.theme,
+        );
 
         // The loudness inspector.
         crate::modals::loudness_modal::show_loudness_modal(

@@ -16,6 +16,8 @@ pub struct FoldersViewAction {
     pub browse_folder: bool,
     /// User pressed "Import Songs…" to open the native file picker.
     pub import_files: bool,
+    /// User pressed "Library statistics".
+    pub show_stats: bool,
 }
 
 pub struct FoldersView<'a> {
@@ -44,6 +46,7 @@ impl<'a> FoldersView<'a> {
             toggle_favorite: None,
             browse_folder: false,
             import_files: false,
+            show_stats: false,
         };
 
         if let Some(sel_path) = self.selected_folder.clone() {
@@ -340,6 +343,9 @@ impl<'a> FoldersView<'a> {
                         }
                         if ui.add_enabled(!self.import_active, browse_btn("Import Songs…", self.theme)).clicked() {
                             action.import_files = true;
+                        }
+                        if ui.add(browse_btn("Library statistics", self.theme)).clicked() {
+                            action.show_stats = true;
                         }
                         if self.import_active {
                             ui.label(

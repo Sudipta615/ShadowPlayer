@@ -24,7 +24,7 @@ pub fn render_folders_view(
     import_active: bool,
     on_start_scan: impl FnOnce(PathBuf),
     mut on_import: impl FnMut(ImportKind),
-) {
+) -> bool {
     let fld_action = FoldersView {
         scan_roots: &library_state.scan_roots,
         selected_folder: &mut library_state.selected_folder,
@@ -39,6 +39,7 @@ pub fn render_folders_view(
     }
     .show(ui);
 
+    let show_stats = fld_action.show_stats;
     if fld_action.browse_folder {
         on_import(ImportKind::Folder);
     }
@@ -80,4 +81,6 @@ pub fn render_folders_view(
     if let Some(fav_id) = fld_action.toggle_favorite {
         library_state.toggle_favorite(favorites_repo, fav_id);
     }
+
+    show_stats
 }
