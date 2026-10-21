@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-21
+
 ### Changed
 - **Settings and Help now share the app's shell.** Both had drifted into looking like a different product: a 22px page heading printed directly under the topbar's own title, a second row of engine badges that belonged with the machine's state, cards with different margins in each page, and two different tab strips — Settings had an evenly-divided segmented control, Help a wrapped row of free-floating buttons, and the queue/lyrics panel a third. There is now one page shell (`components/page.rs`) and one strip; both pages are the same few parts as every other page.
 - **The Help manual's 230px hero is gone.** An icon block, a two-line title, a version badge and a second row just for the search field pushed the actual manual below the fold on a laptop. The lead line, the search field and the section strip now take about a third of the space and the search sits exactly where a reader last left it.
