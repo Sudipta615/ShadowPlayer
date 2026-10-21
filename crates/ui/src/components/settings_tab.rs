@@ -1,3 +1,4 @@
+use crate::components::page::PageTab;
 use crate::theme::Theme;
 use config::{
     AudioBackend, BassManagementConfig, ChannelMixConfig, ChannelMixTemplate, CrossfadeCurve,
@@ -47,6 +48,18 @@ impl SettingsCategory {
         }
     }
 
+    /// The icon as a plain function, for the shared tab strip.
+    pub fn draw_icon_fn(&self) -> fn(&egui::Ui, Rect, Color32) {
+        match self {
+            Self::Playback => crate::components::icons::draw_disc,
+            Self::Output => draw_speaker_tab_icon,
+            Self::Spatial => crate::components::icons::draw_bar_chart,
+            Self::MixBus => crate::components::icons::draw_equalizer_sliders,
+            Self::Tools => crate::components::icons::draw_gear,
+            Self::Library => crate::components::icons::draw_folder,
+        }
+    }
+
     pub fn draw_icon(&self, ui: &egui::Ui, rect: Rect, color: Color32) {
         match self {
             Self::Playback => crate::components::icons::draw_disc(ui, rect, color),
@@ -57,6 +70,11 @@ impl SettingsCategory {
             Self::Library => crate::components::icons::draw_folder(ui, rect, color),
         }
     }
+}
+
+/// The speaker icon, adapted to the tab strip's plain-function signature.
+fn draw_speaker_tab_icon(ui: &egui::Ui, rect: Rect, color: Color32) {
+    crate::components::icons::draw_speaker(ui, rect, color, false);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -309,6 +327,14 @@ pub fn dual_tone_slider(
     width: f32,
     theme: &Theme,
 ) -> bool {
+    // A width of zero means "as wide as the row allows": the settings rows
+    // give the slider everything except the value badge beside it, so its
+    // right-hand end lands on the card's edge.
+    let width = if width <= 0.0 {
+        (ui.available_width() - 96.0).max(120.0)
+    } else {
+        width
+    };
     let desired_size = Vec2::new(width, 20.0);
     let (rect, resp) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
     let mut changed = false;
@@ -527,8 +553,26 @@ pub fn show_settings_tab_extended(
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
 
-        // 1. Top Category Segmented Tabs
-        render_category_bar(ui, state, theme);
+        // 1. The section strip. One definition of a tab strip for the whole
+        // app (`components::page`), not a second one that only Settings has.
+        let tabs: Vec<PageTab<'_>> = SettingsCategory::ALL
+            .iter()
+            .map(|c| PageTab::with_icon(c.title(), SettingsCategory::draw_icon_fn(c)))
+            .collect();
+        let selected = SettingsCategory::ALL
+            .iter()
+            .position(|c| *c == state.active_category)
+            .unwrap_or(0);
+        if let Some(picked) = crate::components::page::tab_strip(
+            ui,
+            theme,
+            "settings_categories",
+            &tabs,
+            selected,
+            true,
+        ) {
+            state.active_category = SettingsCategory::ALL[picked];
+        }
 
         // 2. Active Category Content in a smooth vertical scroll
         egui::ScrollArea::vertical()
@@ -569,84 +613,6 @@ pub fn show_settings_tab_extended(
 // Category Bar
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn render_category_bar(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &Theme) {
-    let container_frame = egui::Frame::NONE
-        .fill(theme.bg_card)
-        .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(5, 5));
-
-    container_frame.show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
-            let num_cats = SettingsCategory::ALL.len() as f32;
-            let tab_w = ((ui.available_width() - (num_cats - 1.0) * 5.0) / num_cats).max(80.0);
-
-            for cat in SettingsCategory::ALL {
-                let is_active = state.active_category == cat;
-
-                let (tab_rect, resp) =
-                    ui.allocate_exact_size(Vec2::new(tab_w, 34.0), Sense::click());
-                resp.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::Role::Button, true, is_active, cat.title())
-                });
-                let _ = resp.clone().on_hover_text(cat.title());
-                if resp.clicked() && !is_active {
-                    state.active_category = cat;
-                }
-
-                let p = ui.painter_at(tab_rect);
-                let bg = if is_active {
-                    theme.accent
-                } else if resp.hovered() {
-                    theme.bg_pill_hover
-                } else {
-                    theme.bg_pill
-                };
-                let border = if is_active {
-                    theme.accent_highlight
-                } else {
-                    Color32::TRANSPARENT
-                };
-
-                p.rect(
-                    tab_rect,
-                    CornerRadius::same(theme.radius_md),
-                    bg,
-                    Stroke::new(1.0, border),
-                    egui::StrokeKind::Inside,
-                );
-
-                let icon_color = if is_active {
-                    Color32::WHITE
-                } else {
-                    theme.text_secondary
-                };
-                let text_color = if is_active {
-                    Color32::WHITE
-                } else {
-                    theme.text_primary
-                };
-
-                // Center icon + text horizontally
-                let icon_rect = Rect::from_center_size(
-                    Pos2::new(tab_rect.min.x + 14.0, tab_rect.center().y),
-                    Vec2::splat(14.0),
-                );
-                cat.draw_icon(ui, icon_rect, icon_color);
-
-                p.text(
-                    Pos2::new(tab_rect.min.x + 26.0, tab_rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    cat.title(),
-                    crate::theme::font(12.0),
-                    text_color,
-                );
-            }
-        });
-    });
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Category 1: Playback & Engine
 // ─────────────────────────────────────────────────────────────────────────────
@@ -680,7 +646,7 @@ fn render_playback_category(
             theme,
             |ui| {
                 let mut v = state.speed;
-                if dual_tone_slider(ui, &mut v, 0.25..=4.0, 0.05, 180.0, theme) {
+                if dual_tone_slider(ui, &mut v, 0.25..=4.0, 0.05, 0.0, theme) {
                     state.speed = v;
                     actions.speed_changed = Some(v);
                 }
@@ -700,7 +666,7 @@ fn render_playback_category(
             theme,
             |ui| {
                 let mut v = state.pitch_semitones;
-                if dual_tone_slider(ui, &mut v, -24.0..=24.0, 0.5, 180.0, theme) {
+                if dual_tone_slider(ui, &mut v, -24.0..=24.0, 0.5, 0.0, theme) {
                     state.pitch_semitones = v;
                     actions.pitch_changed = Some(v);
                 }
@@ -790,7 +756,7 @@ fn render_playback_category(
                     theme,
                     |ui| {
                         let mut v = state.crossfade_duration_secs;
-                        if dual_tone_slider(ui, &mut v, 0.5..=15.0, 0.1, 160.0, theme) {
+                        if dual_tone_slider(ui, &mut v, 0.5..=15.0, 0.1, 0.0, theme) {
                             state.crossfade_duration_secs = v;
                             actions.crossfade_config_changed = true;
                         }
@@ -1210,7 +1176,7 @@ fn render_spatial_category(
             theme,
             |ui| {
                 let mut yaw = state.listener_yaw_deg;
-                if dual_tone_slider(ui, &mut yaw, -180.0..=180.0, 1.0, 240.0, theme) {
+                if dual_tone_slider(ui, &mut yaw, -180.0..=180.0, 1.0, 0.0, theme) {
                     state.listener_yaw_deg = yaw;
                     actions.spatial_listener_changed = true;
                 }
@@ -1288,7 +1254,7 @@ fn render_spatial_category(
             theme,
             |ui| {
                 let mut v = state.listener_smoothing_ms;
-                if dual_tone_slider(ui, &mut v, 0.0..=500.0, 5.0, 160.0, theme) {
+                if dual_tone_slider(ui, &mut v, 0.0..=500.0, 5.0, 0.0, theme) {
                     state.listener_smoothing_ms = v;
                     actions.listener_tracking_changed = true;
                 }
@@ -1303,7 +1269,7 @@ fn render_spatial_category(
             theme,
             |ui| {
                 let mut r = state.listener_max_rate;
-                if dual_tone_slider(ui, &mut r, 0.0..=720.0, 10.0, 160.0, theme) {
+                if dual_tone_slider(ui, &mut r, 0.0..=720.0, 10.0, 0.0, theme) {
                     state.listener_max_rate = r;
                     actions.listener_tracking_changed = true;
                 }
@@ -1360,7 +1326,7 @@ fn render_spatial_category(
                     theme,
                     |ui| {
                         let mut v = state.room_wet;
-                        if dual_tone_slider(ui, &mut v, 0.0..=1.0, 0.01, 160.0, theme) {
+                        if dual_tone_slider(ui, &mut v, 0.0..=1.0, 0.01, 0.0, theme) {
                             state.room_wet = v;
                             actions.spatial_room_changed = true;
                         }
@@ -1375,7 +1341,7 @@ fn render_spatial_category(
                     theme,
                     |ui| {
                         let mut v = state.room_rt60_ms;
-                        if dual_tone_slider(ui, &mut v, 50.0..=3000.0, 25.0, 160.0, theme) {
+                        if dual_tone_slider(ui, &mut v, 50.0..=3000.0, 25.0, 0.0, theme) {
                             state.room_rt60_ms = v;
                             actions.spatial_room_changed = true;
                         }
@@ -1697,7 +1663,7 @@ fn render_mixbus_category(
             |ui| {
                 ui.label("Gain:");
                 let mut g = state.track_gain;
-                if dual_tone_slider(ui, &mut g, 0.0..=2.0, 0.01, 110.0, theme) {
+                if dual_tone_slider(ui, &mut g, 0.0..=2.0, 0.01, 0.0, theme) {
                     state.track_gain = g;
                     actions.track_gain_changed = Some((state.track_slot, g));
                 }
@@ -1705,7 +1671,7 @@ fn render_mixbus_category(
 
                 ui.label("Pan:");
                 let mut p = state.track_pan;
-                if dual_tone_slider(ui, &mut p, -1.0..=1.0, 0.02, 110.0, theme) {
+                if dual_tone_slider(ui, &mut p, -1.0..=1.0, 0.02, 0.0, theme) {
                     state.track_pan = p;
                     actions.track_pan_changed = Some((state.track_slot, p));
                 }
@@ -1887,7 +1853,7 @@ fn render_mixbus_category(
                 if state.aux_enabled {
                     ui.label("Return Gain:");
                     let mut v = state.aux_return_gain;
-                    if dual_tone_slider(ui, &mut v, 0.0..=2.0, 0.01, 120.0, theme) {
+                    if dual_tone_slider(ui, &mut v, 0.0..=2.0, 0.01, 0.0, theme) {
                         state.aux_return_gain = v;
                         actions.aux_changed = true;
                     }
@@ -1932,7 +1898,7 @@ fn render_mixbus_category(
                 theme,
                 |ui| {
                     let mut v = state.bass_management.crossover_hz;
-                    if dual_tone_slider(ui, &mut v, 40.0..=200.0, 1.0, 140.0, theme) {
+                    if dual_tone_slider(ui, &mut v, 40.0..=200.0, 1.0, 0.0, theme) {
                         state.bass_management.crossover_hz = v;
                         changed = true;
                     }
@@ -1980,7 +1946,7 @@ fn render_mixbus_category(
                 theme,
                 |ui| {
                     let mut v = state.bass_management.q;
-                    if dual_tone_slider(ui, &mut v, 0.4..=1.4, 0.01, 120.0, theme) {
+                    if dual_tone_slider(ui, &mut v, 0.4..=1.4, 0.01, 0.0, theme) {
                         state.bass_management.q = v;
                         changed = true;
                     }
@@ -2009,7 +1975,7 @@ fn render_mixbus_category(
                 theme,
                 |ui| {
                     let mut v = state.bass_management.sub_delay_ms;
-                    if dual_tone_slider(ui, &mut v, 0.0..=50.0, 0.1, 130.0, theme) {
+                    if dual_tone_slider(ui, &mut v, 0.0..=50.0, 0.1, 0.0, theme) {
                         state.bass_management.sub_delay_ms = v;
                         changed = true;
                     }
@@ -2028,7 +1994,7 @@ fn render_mixbus_category(
                 theme,
                 |ui| {
                     let mut v = state.bass_management.sub_phase_degrees;
-                    if dual_tone_slider(ui, &mut v, 0.0..=180.0, 1.0, 130.0, theme) {
+                    if dual_tone_slider(ui, &mut v, 0.0..=180.0, 1.0, 0.0, theme) {
                         state.bass_management.sub_phase_degrees = v;
                         changed = true;
                     }
@@ -2095,7 +2061,7 @@ fn render_mixbus_category(
                 theme,
                 |ui| {
                     let mut v = state.lfe.gain_db;
-                    if dual_tone_slider(ui, &mut v, -20.0..=20.0, 0.5, 140.0, theme) {
+                    if dual_tone_slider(ui, &mut v, -20.0..=20.0, 0.5, 0.0, theme) {
                         state.lfe.gain_db = v;
                         changed = true;
                     }
@@ -2116,7 +2082,7 @@ fn render_mixbus_category(
                     }
                     if lp_on {
                         let mut hz = lp_hz;
-                        if dual_tone_slider(ui, &mut hz, 40.0..=200.0, 1.0, 130.0, theme) {
+                        if dual_tone_slider(ui, &mut hz, 40.0..=200.0, 1.0, 0.0, theme) {
                             lp_hz = hz;
                             changed = true;
                         }
@@ -2975,7 +2941,11 @@ pub fn setting_item_with_info(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
         let avail_w = ui.available_width();
-        let label_w = 240.0_f32.min(avail_w * 0.40);
+        // The label column grows with the window instead of staying at a
+        // fixed 240, so a wide window does not leave the control floating in
+        // the middle of the card with a gutter after it.
+        let label_w = (avail_w * 0.30).clamp(200.0, 340.0);
+        let control_w = (avail_w - label_w - theme.space_xl).max(160.0);
 
         // Column 1: Label + info icon + description
         ui.allocate_ui_with_layout(
@@ -3011,9 +2981,15 @@ pub fn setting_item_with_info(
             },
         );
 
-        // Column 2: Controls flow left-to-right naturally and wrap when constrained
+        // Column 2: the controls fill the rest of the row. Sliders are given
+        // the full width they can have, so their right-hand end lands on the
+        // card's right edge and the row reads as two columns rather than a
+        // label with a control abandoned beside it.
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
+            // The value box beside a slider takes about 74px; the slider
+            // gets what is left.
+            ui.spacing_mut().slider_width = (control_w - 86.0).clamp(120.0, 620.0);
             add_control(ui);
         });
     });

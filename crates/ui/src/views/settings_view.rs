@@ -1,6 +1,6 @@
 use audio_session::AudioSession;
 use database::{ScanRootsRepo, TrackRepo};
-use eframe::egui::{self, CornerRadius, Sense, Stroke, Vec2};
+use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
 
 use crate::components::settings_tab::{show_settings_tab_extended, SettingsExtraContext};
@@ -37,95 +37,17 @@ pub fn render_settings_view(
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
 
-        // ── 1. Page Header with Title, Description, and Live Badges ────────
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Settings & Audio Studio")
-                    .font(crate::theme::font(22.0))
-                    .strong()
-                    .color(theme.text_primary),
-            );
-
-            // Right-aligned status pills
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
-
-                // Bit-Perfect Indicator Pill
-                let (bp_text, bp_bg, bp_fg, bp_border) = if dsp_state.settings_tab.bit_perfect {
-                    (
-                        "Bit-Perfect Direct Stream",
-                        theme.bit_perfect_green.gamma_multiply(0.16),
-                        theme.bit_perfect_green,
-                        theme.bit_perfect_green,
-                    )
-                } else {
-                    (
-                        "DSP Processing Active",
-                        theme.bg_pill,
-                        theme.accent_highlight,
-                        theme.border_card,
-                    )
-                };
-
-                egui::Frame::NONE
-                    .fill(bp_bg)
-                    .stroke(Stroke::new(1.0, bp_border))
-                    .corner_radius(CornerRadius::same(theme.radius_sm))
-                    .inner_margin(egui::Margin::symmetric(10, 5))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
-                            let (dot_rect, _) =
-                                ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                            ui.painter_at(dot_rect)
-                                .circle_filled(dot_rect.center(), 3.5, bp_fg);
-                            ui.label(
-                                egui::RichText::new(bp_text)
-                                    .font(crate::theme::font(11.5))
-                                    .strong()
-                                    .color(bp_fg),
-                            );
-                        });
-                    });
-
-                // Engine Status Pill
-                egui::Frame::NONE
-                    .fill(theme.bg_pill)
-                    .stroke(Stroke::new(1.0, theme.border_card))
-                    .corner_radius(CornerRadius::same(theme.radius_sm))
-                    .inner_margin(egui::Margin::symmetric(10, 5))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
-                            let (dot_rect, _) =
-                                ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                            ui.painter_at(dot_rect).circle_filled(
-                                dot_rect.center(),
-                                3.5,
-                                theme.accent_warm,
-                            );
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "Engine {} Active (44.1 - 192kHz)",
-                                    engine::VERSION
-                                ))
-                                .font(crate::theme::font(11.5))
-                                .strong()
-                                .color(theme.accent_warm),
-                            );
-                        });
-                    });
-            });
-        });
-        ui.label(
-            egui::RichText::new(format!(
+        // ── 1. Lead line ───────────────────────────────────────────────────
+        // The page's title is the topbar's, which is sticky; a second
+        // 22px heading here was the same words twice.
+        crate::components::page::page_lead(
+            ui,
+            theme,
+            &format!(
                 "Configure Audio Engine v{}, bit-perfect streaming, 3D acoustics, and library",
                 engine::VERSION
-            ))
-            .font(crate::theme::font(12.5))
-            .color(theme.text_muted),
+            ),
         );
-        ui.add_space(2.0);
 
         // ── 2. Render Settings Content with Extra Context ──────────────────
         let scan_roots = scan_roots_repo.list().unwrap_or_default();

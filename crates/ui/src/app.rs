@@ -3362,7 +3362,41 @@ impl eframe::App for ShadowPlayerApp {
                                 .color(self.theme.text_primary),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            self.render_topbar_actions(ui, window_w)
+                            self.render_topbar_actions(ui, window_w);
+
+                            // The engine's state belongs with the page's
+                            // title, not in a second heading row below it.
+                            // Right-to-left reads back to front, so these
+                            // land to the left of the actions.
+                            if !is_help_view {
+                                let bit_perfect = self.dsp_state.settings_tab.bit_perfect;
+                                crate::components::page::status_pill(
+                                    ui,
+                                    &self.theme,
+                                    if bit_perfect {
+                                        "Bit-Perfect"
+                                    } else {
+                                        "DSP Active"
+                                    },
+                                    if bit_perfect {
+                                        self.theme.bit_perfect_green
+                                    } else {
+                                        self.theme.accent_highlight
+                                    },
+                                    if bit_perfect {
+                                        self.theme.bit_perfect_green
+                                    } else {
+                                        self.theme.text_secondary
+                                    },
+                                );
+                                crate::components::page::status_pill(
+                                    ui,
+                                    &self.theme,
+                                    &format!("Engine {}", engine::VERSION),
+                                    self.theme.accent_warm,
+                                    self.theme.text_secondary,
+                                );
+                            }
                         });
                     });
                 }

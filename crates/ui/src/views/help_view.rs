@@ -84,13 +84,24 @@ pub fn render_help_view(
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
-            // 1. Hero Banner with Manual Title & Search Bar
-            render_hero_banner(ui, state, theme);
+            // 1. The lead line. The page's title is the topbar's, which is
+            // sticky; the 230px hero that used to sit here was the same
+            // information twice, and it pushed the manual below the fold.
+            crate::components::page::page_lead(
+                ui,
+                theme,
+                "Every stage of the audio pipeline, what it does, and why. Search it, or pick a section.",
+            );
 
-            // 2. Navigation Tab Switcher Bar
+            // 2. The search field
+            render_manual_search(ui, state, theme);
+            ui.add_space(theme.space_md);
+
+            // 3. The section strip — the app's one tab-strip component
             render_category_nav_bar(ui, state, theme);
+            ui.add_space(theme.space_lg);
 
             // 3. Search Results Overlay or Active Category Tab
             if !state.search_query.trim().is_empty() {
@@ -114,117 +125,64 @@ pub fn render_help_view(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Hero Header & Quick Search Bar
+// 1. The manual's search field
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
-    let frame = egui::Frame::NONE
-        .fill(theme.bg_card)
-        .stroke(Stroke::new(1.0, theme.border_card))
+/// A single-line field, the same height as the library's search box.
+///
+/// The hero it replaces was 230px tall: a 44px icon block, a two-line title,
+/// a version badge and a second row for the field. A manual is for reading,
+/// so the chrome gets out of the way and the field stays where the reader
+/// left it.
+fn render_manual_search(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
+    egui::Frame::NONE
+        .fill(theme.bg_input)
+        .stroke(Stroke::new(1.0, theme.border_input))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(24, 18));
-
-    frame.show(ui, |ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xl);
-
-        // Top Row: Glowing Icon + Title + Version Badge + Subtitle
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(theme.space_2xl, 0.0);
-
-            // Glowing Manual Icon Badge
-            let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(44.0, 44.0), Sense::hover());
-            ui.painter_at(icon_rect).rect_filled(
-                icon_rect,
-                CornerRadius::same(theme.radius_lg),
-                theme.accent.linear_multiply(0.2),
-            );
-            ui.painter_at(icon_rect).rect_stroke(
-                icon_rect,
-                CornerRadius::same(theme.radius_lg),
-                Stroke::new(1.5, theme.accent_highlight),
-                egui::StrokeKind::Inside,
-            );
-            crate::components::icons::draw_help(ui, icon_rect.shrink2(Vec2::splat(10.0)), theme.accent_warm);
-
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
-                    ui.label(
-                        egui::RichText::new("ShadowPlayer Master Manual & Audio Knowledge Base")
-                            .font(crate::theme::font(17.5))
-                            .strong()
-                            .color(theme.text_primary),
-                    );
-                    badge(
-                        ui,
-                        format!(
-                            "v{} • CORE v{}",
-                            env!("CARGO_PKG_VERSION"),
-                            engine::VERSION
-                        ),
-                        theme.accent,
-                        Color32::WHITE,
-                        theme,
-                    );
-                });
-                ui.label(
-                    egui::RichText::new(
-                        "An exhaustive reference manual explaining every audio pipeline stage, DSP algorithm, DAC driver, and acoustic feature."
-                    )
-                    .font(crate::theme::font(12.5))
-                    .color(theme.text_secondary),
-                );
-            });
-        });
-
-        // Dedicated Full-Width Search Input Row
-        let search_frame = egui::Frame::NONE
-            .fill(theme.bg_input)
-            .stroke(Stroke::new(1.0_f32, theme.border_input))
-            .corner_radius(CornerRadius::same(theme.radius_xl))
-            .inner_margin(egui::Margin::symmetric(14, 8));
-
-        search_frame.show(ui, |ui| {
+        .inner_margin(egui::Margin::symmetric(12, 7))
+        .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
-                // Search Icon
-                let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(18.0, 18.0), Sense::hover());
+                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
                 crate::components::icons::draw_search(ui, icon_rect, theme.text_muted);
 
                 let has_query = !state.search_query.is_empty();
-                let clear_btn_w = if has_query { 32.0 } else { 0.0 };
-                let input_w = (ui.available_width() - clear_btn_w - 8.0).max(80.0);
+                let clear_w = if has_query { 28.0 } else { 0.0 };
+                let input_w = (ui.available_width() - clear_w - 6.0).max(80.0);
 
-                let search_edit = egui::TextEdit::singleline(&mut state.search_query)
-                    .hint_text(
-                        egui::RichText::new("Search manual, settings, DSP topics, shortcuts (e.g. LUFS, ASIO, HRTF, Biquad, Dither, Varispeed)...")
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.search_query)
+                        .hint_text(
+                            egui::RichText::new(
+                                "Search the manual — LUFS, ASIO, HRTF, Biquad, Dither…",
+                            )
                             .color(theme.text_muted)
-                            .font(crate::theme::font(13.0)),
-                    )
-                    .text_color(theme.text_primary)
-                    .font(crate::theme::font(13.5))
-                    .desired_width(input_w)
-                    .frame(egui::Frame::NONE);
-
-                ui.add(search_edit);
+                            .font(crate::theme::font(12.5)),
+                        )
+                        .text_color(theme.text_primary)
+                        .font(crate::theme::font(13.0))
+                        .desired_width(input_w)
+                        .frame(egui::Frame::NONE),
+                );
 
                 if has_query
-                    && ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("x")
-                                .font(crate::theme::font(13.0))
-                                .color(theme.text_muted),
+                    && ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("\u{00d7}")
+                                    .font(crate::theme::font(14.0))
+                                    .color(theme.text_muted),
+                            )
+                            .fill(Color32::TRANSPARENT)
+                            .frame(false),
                         )
-                        .fill(Color32::TRANSPARENT)
-                        .frame(false),
-                    ).clicked() {
-                        state.search_query.clear();
-                    }
+                        .clicked()
+                {
+                    state.search_query.clear();
+                }
             });
         });
-    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,54 +191,40 @@ fn render_hero_banner(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
 
 fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     let tabs = [
-        (HelpTab::QuickStart, "Overview & Guide"),
-        (HelpTab::SignalPath, "Audio Signal Chain"),
-        (HelpTab::EqualizerAcoustics, "Equalizer & Filters"),
+        (HelpTab::QuickStart, "Overview"),
+        (HelpTab::SignalPath, "Signal Chain"),
+        (HelpTab::EqualizerAcoustics, "EQ & Filters"),
         (HelpTab::BitPerfectDac, "Bit-Perfect & DACs"),
-        (HelpTab::SpatialBinaural, "Spatial 3D & HRTF"),
-        (HelpTab::PlaybackDsp, "Playback, Pitch & Norm"),
-        (HelpTab::MixBusStudio, "Mix Bus & Tools"),
+        (HelpTab::SpatialBinaural, "Spatial & HRTF"),
+        (HelpTab::PlaybackDsp, "Playback & DSP"),
+        (HelpTab::MixBusStudio, "Mix Bus"),
         (HelpTab::KeyboardShortcuts, "Shortcuts"),
-        (HelpTab::Glossary, "Audiophile Glossary"),
+        (HelpTab::Glossary, "Glossary"),
     ];
 
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, theme.space_md);
-        for (tab, label) in tabs {
-            let is_active = state.active_tab == tab;
-            let (bg, fg, stroke) = if is_active {
-                (
-                    theme.accent,
-                    Color32::WHITE,
-                    Stroke::new(1.0, theme.accent_highlight),
-                )
-            } else {
-                (
-                    theme.bg_card,
-                    theme.text_secondary,
-                    Stroke::new(1.0, theme.border_card),
-                )
-            };
+    let page_tabs: Vec<crate::components::page::PageTab<'_>> = tabs
+        .iter()
+        .map(|(_, label)| crate::components::page::PageTab::new(label))
+        .collect();
+    let selected = tabs
+        .iter()
+        .position(|(tab, _)| *tab == state.active_tab)
+        .unwrap_or(0);
 
-            let resp = ui.add(
-                egui::Button::new(
-                    egui::RichText::new(label)
-                        .font(crate::theme::font(12.0))
-                        .color(fg)
-                        .strong(),
-                )
-                .fill(bg)
-                .stroke(stroke)
-                .corner_radius(CornerRadius::same(theme.radius_md))
-                .min_size(Vec2::new(0.0, 30.0)),
-            );
-
-            if resp.clicked() {
-                state.active_tab = tab;
-                state.search_query.clear();
-            }
-        }
-    });
+    // Nine sections do not fit across a narrow window, so the strip wraps
+    // rather than overflowing.
+    if let Some(picked) = crate::components::page::tab_strip_wrapping(
+        ui,
+        theme,
+        "help_sections",
+        &page_tabs,
+        selected,
+        false,
+        true,
+    ) {
+        state.active_tab = tabs[picked].0;
+        state.search_query.clear();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1448,9 +1392,19 @@ fn render_glossary_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme)
             ("ASIO (Audio Stream Input/Output)", "A proprietary low-latency driver protocol created by Steinberg that connects audio software directly to soundcard hardware, bypassing the Windows operating system audio stack."),
         ];
 
-        for (term, definition) in glossary {
-            feature_card_row(ui, term, definition, theme);
-        }
+        // Alphabetical, so the glossary can be scanned rather than read, and
+        // in two columns so a long definition does not turn the page into a
+        // single ribbon of text.
+        let mut glossary = glossary;
+        glossary.sort_by_key(|(term, _)| term.to_ascii_lowercase());
+
+        ui.columns(2, |columns| {
+            let half = glossary.len().div_ceil(2);
+            for (index, (term, definition)) in glossary.iter().enumerate() {
+                let column = if index < half { 0 } else { 1 };
+                feature_card_row(&mut columns[column], term, definition, theme);
+            }
+        });
     });
 }
 
@@ -1568,28 +1522,39 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
 // Reusable Visual Styling Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The manual's cards use the same card as every other page.
 fn manual_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(&mut egui::Ui)) {
-    let frame = egui::Frame::NONE
-        .fill(theme.bg_card)
-        .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(theme.radius_xl))
-        .inner_margin(egui::Margin::symmetric(22, 18));
-
-    frame.show(ui, |ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
-        add_contents(ui);
-    });
+    crate::components::page::page_card_with_padding(ui, theme, (22, 18), add_contents);
 }
 
 fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str, theme: &Theme) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
-        ui.label(
-            egui::RichText::new(title)
-                .font(crate::theme::font(16.0))
-                .strong()
-                .color(theme.text_primary),
-        );
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+            // The interactive sections say so, so a reader knows the card
+            // below is something to use and not another paragraph.
+            if title.contains("Interactive") || title.contains("Simulator") {
+                egui::Frame::NONE
+                    .fill(theme.accent.linear_multiply(0.18))
+                    .corner_radius(CornerRadius::same(theme.radius_sm))
+                    .inner_margin(egui::Margin::symmetric(7, 2))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("TRY IT")
+                                .font(crate::theme::font(9.5))
+                                .strong()
+                                .color(theme.accent_highlight),
+                        );
+                    });
+            }
+            ui.label(
+                egui::RichText::new(title)
+                    .font(crate::theme::font(16.0))
+                    .strong()
+                    .color(theme.text_primary),
+            );
+        });
         if !subtitle.is_empty() {
             ui.label(
                 egui::RichText::new(subtitle)
