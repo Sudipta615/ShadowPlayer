@@ -10,7 +10,7 @@
 //! - **direct-vs-reflected energy ratio** — the source's direct path gain
 //!   vs its room send scaled by the wall reflection coefficient;
 //! - **occlusion severity** — the applied broadband attenuation + low-pass
-//!   cutoff from the source's [`Occlusion`];
+//!   cutoff from the source's `Occlusion`;
 //! - **phase risk** — inter-channel decorrelation measured on the master
 //!   output (cross-energy), and per-source heuristics (spread / extreme
 //!   pan) that predict decorrelation.

@@ -104,7 +104,10 @@ pub fn show_track_dsp_modal(
         let state_card = egui::Frame::NONE
             .fill(theme.bg_card_hover)
             .corner_radius(CornerRadius::same(theme.radius_md))
-            .inner_margin(egui::Margin::symmetric(12, 10));
+            .inner_margin(egui::Margin::symmetric(
+                theme.space_xl as i8,
+                theme.space_lg as i8,
+            ));
         state_card.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
@@ -135,7 +138,10 @@ pub fn show_track_dsp_modal(
             let card = egui::Frame::NONE
                 .fill(theme.bg_card_hover)
                 .corner_radius(CornerRadius::same(theme.radius_md))
-                .inner_margin(egui::Margin::symmetric(12, 8));
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_xl as i8,
+                    theme.space_md as i8,
+                ));
             card.show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("track_dsp_overrides")

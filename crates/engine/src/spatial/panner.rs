@@ -210,7 +210,7 @@ impl BasicPanner {
     }
 
     /// Return the current (smoothed) total gain for an object/speaker path.
-    /// Indexed by the object's **stable store slot** [`ObjectId`]
+    /// Indexed by the object's **stable store slot** `ObjectId`
     /// (`crate::spatial::object::ObjectId`) and `spk` (0..channels). Exposed
     /// for symmetry/discontinuity tests. Out-of-range returns 0.
     pub fn coefficient(&self, obj_slot: usize, spk: usize) -> f32 {

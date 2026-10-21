@@ -112,7 +112,7 @@ pub enum HrtfNormalize {
 /// Controls HRTF loading: tap length, target sample rate, and normalization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HrtfLoadOptions {
-    /// Impulse-response length in taps (<= [`MAX_HRTF_TAPS`]); shorter IRs are zero-padded.
+    /// Impulse-response length in taps (<= `MAX_HRTF_TAPS`); shorter IRs are zero-padded.
     pub taps: usize,
     /// Sample rate to render at; IRs are resampled if `corpus.sample_rate` differs.
     pub target_sample_rate: u32,

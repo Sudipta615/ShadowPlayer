@@ -89,7 +89,10 @@ pub fn show_import_playlists_modal(
                 let card = egui::Frame::NONE
                     .fill(theme.bg_card_hover)
                     .corner_radius(CornerRadius::same(theme.radius_md))
-                    .inner_margin(egui::Margin::symmetric(12, 8));
+                    .inner_margin(egui::Margin::symmetric(
+                        theme.space_xl as i8,
+                        theme.space_md as i8,
+                    ));
                 card.show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);

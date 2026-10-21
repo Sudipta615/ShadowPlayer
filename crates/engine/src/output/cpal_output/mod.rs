@@ -804,8 +804,8 @@ impl CpalOutput {
     /// access state of the **actually-opened stream** (derived from the
     /// backend, negotiated device and fallback state in
     /// [`Self::output_info`]) is overlaid onto the snapshot. This is what
-    /// makes [`OutputAccessState::is_bit_perfect`] and
-    /// [`OutputCapabilities::validate_stream`] with `require_direct`
+    /// makes `OutputAccessState::is_bit_perfect` and
+    /// `OutputCapabilities::validate_stream` with `require_direct`
     /// trustworthy when called on a live output.
     pub fn capabilities(&self) -> super::capabilities::OutputCapabilities {
         let mut caps = super::capabilities::OutputCapabilities::query(&self.device);

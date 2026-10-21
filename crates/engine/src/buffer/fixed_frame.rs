@@ -67,7 +67,7 @@ impl<T: Copy + Default + Send + Sync + 'static> FixedFrameBuffer<T> {
     ///
     /// This is the *true* occupancy: `pcm.available()` is the sample count and
     /// the divide is by the width in use. It deliberately does **not** clamp to
-    /// [`frame_capacity`].
+    /// `frame_capacity`.
     ///
     /// It used to, and the clamp was a lie with three consumers. The ring is
     /// sized for [`MAX_CHANNELS`] width (see [`FixedFrameBuffer::new`]), so a

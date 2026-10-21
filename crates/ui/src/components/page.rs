@@ -115,7 +115,10 @@ pub fn status_pill(ui: &mut egui::Ui, theme: &Theme, label: &str, dot: Color32, 
         .fill(theme.bg_pill)
         .stroke(Stroke::new(1.0, theme.border_card))
         .corner_radius(CornerRadius::same(theme.radius_sm))
-        .inner_margin(egui::Margin::symmetric(10, 5))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_lg as i8,
+            theme.space_sm as i8,
+        ))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);

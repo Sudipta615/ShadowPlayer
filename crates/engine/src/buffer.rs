@@ -1,6 +1,6 @@
 //! Audio buffer primitives and their public compatibility façade.
 //!
-//! Implementations are split by responsibility under [`buffer`]: frames and
+//! Implementations are split by responsibility under `buffer`: frames and
 //! chunks, the PCM ring, native-DSD bytes, and the fixed frame handle each
 //! have their own module. This file owns only shared limits/errors and the
 //! stable `crate::buffer::*` API.

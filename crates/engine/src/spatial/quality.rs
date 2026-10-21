@@ -18,7 +18,7 @@
 //!   budget headroom.
 //!
 //! [`SpatialQuality`] is serializable so it can live in an
-//! [`crate::config`]-like host surface and a scene file.
+//! `crate::config`-like host surface and a scene file.
 
 use serde::{Deserialize, Serialize};
 

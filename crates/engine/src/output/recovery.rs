@@ -1,7 +1,7 @@
 //! Output-recovery helper types.
 //!
 //! The device recovery workflow itself is **not** implemented here. It lives in
-//! [`crate::engine::recovery`], which is the only place a device disappearance
+//! `crate::engine::recovery`, which is the only place a device disappearance
 //! is actually observed and acted on: it preserves the playhead by retaining
 //! engine state and rescaling the clock rather than re-seeking, walks a
 //! native-DSD → DoP → PCM fallback ladder, and halts playback rather than
@@ -18,7 +18,7 @@
 //! it to validate. A `#[test]` that walks the controller through the six phases
 //! in order asserts only that a struct's field equals the value the test just
 //! wrote into it, so it read as coverage of recovery without observing any.
-//! Those types are gone; [`crate::engine::recovery`] is the recovery path.
+//! Those types are gone; `crate::engine::recovery` is the recovery path.
 
 /// Rescale an output frame count when output sample rate changes across device recovery.
 ///

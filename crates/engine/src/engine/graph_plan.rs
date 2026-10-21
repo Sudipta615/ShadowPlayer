@@ -368,7 +368,7 @@ impl AudioEngine {
     /// The stop is *queued*, not applied inline: the engine's tick loop is its
     /// single thread of execution, so a command only takes effect when the loop
     /// next processes commands. A single-threaded caller with no pump running
-    /// can drain it with [`Self::drain_queued_control`](AudioEngine::drain_queued_control);
+    /// can drain it with `Self::drain_queued_control`;
     /// a host with a pump thread gets it at its next tick.
     ///
     /// The queue is bounded, so the submit is non-blocking: a saturated command

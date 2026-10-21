@@ -24,7 +24,7 @@ use super::clock::AudioClock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EventId(pub u64);
 
-/// When an event should fire — before [`Timeline::schedule`] resolves it.
+/// When an event should fire — before `Timeline::schedule` resolves it.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum EventTime {
     /// An absolute sample position on the monotonic master timeline.

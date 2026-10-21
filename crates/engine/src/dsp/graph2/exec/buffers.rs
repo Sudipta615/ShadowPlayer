@@ -5,8 +5,8 @@
 //! queues, overlap-add accumulators, interpolation history). Both executors
 //! share them: the offline executor grows them lazily, while the realtime
 //! executor (`crate::dsp::graph2::rt`) preallocates every queue at plan
-//! build time — but the math in [`ConvState::push_and_emit`] and
-//! [`windowed_sinc`] is one implementation, the shared-kernel contract.
+//! build time — but the math in `ConvState::push_and_emit` and
+//! `windowed_sinc` is one implementation, the shared-kernel contract.
 
 use std::collections::VecDeque;
 

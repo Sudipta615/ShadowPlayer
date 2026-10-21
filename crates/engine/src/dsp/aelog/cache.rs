@@ -151,7 +151,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 }
 
 /// Deterministic hash of a log's **render-relevant** content: FNV-1a over
-/// the canonical JSON of [`RenderKey`]. Identical sessions hash
+/// the canonical JSON of `RenderKey`. Identical sessions hash
 /// identically; any command (or sample-rate / block) difference changes
 /// the hash; the label and format version do not. This is the primary
 /// cache-key component.
@@ -191,7 +191,7 @@ struct AddressKey {
 }
 
 /// The **content address** of a (log, graph, sink) entry: a SHA-256 over
-/// the canonical JSON of its [`AddressKey`], hex-encoded (64 chars). Because
+/// the canonical JSON of its `AddressKey`, hex-encoded (64 chars). Because
 /// the render is a pure function of that identity, two machines rendering
 /// the same session through the same graph derive *the same name* for the
 /// *same stored bytes* — the property that makes cache directories

@@ -316,7 +316,7 @@ impl Default for BakePolicy {
 /// control/offline-path and heap-happy by design.
 ///
 /// Serde (v3.37): the scene serializes **deterministically** — the response
-/// map is a [`BTreeMap`] so iteration order is stable, and the solver world
+/// map is a `BTreeMap` so iteration order is stable, and the solver world
 /// is skipped (`#[serde(skip)]` — rebuilds need it, rendering never does),
 /// keeping a logged scene to the flat response data it renders from. This
 /// is what lets aelog embed an animated world's scene snapshots and hash

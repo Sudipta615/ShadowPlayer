@@ -166,7 +166,7 @@ impl DsdTransportReport {
 
 /// A chunk of raw (still 1-bit) native DSD payload.
 ///
-/// Carried as a sidecar on [`DecodedChunk`] when the DSD decoder runs in
+/// Carried as a sidecar on `DecodedChunk` when the DSD decoder runs in
 /// native-DSD transport mode: `samples` is empty and `raw_dsd` holds the
 /// de-interleaved, bit-order-normalized (LSB-first) per-channel byte planes.
 /// The engine routes these bytes to the negotiated DSD transport — they must
@@ -187,7 +187,7 @@ pub struct RawDsdChunk {
 
 /// Full audio format descriptor for a decoded stream.
 ///
-/// Supersedes the lean [`DecodeInfo`] struct for richer UI display and
+/// Supersedes the lean `DecodeInfo` struct for richer UI display and
 /// bit-perfect chain verification.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AudioFormatInfo {

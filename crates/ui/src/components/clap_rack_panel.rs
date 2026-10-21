@@ -57,7 +57,10 @@ pub fn show_clap_rack_panel(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(Margin::symmetric(18, 14)),
+                .inner_margin(Margin::symmetric(
+                    theme.space_4xl as i8,
+                    theme.space_2xl as i8,
+                )),
         )
         .show(ctx, |ui| {
             render_header(ui, state, view, theme, &mut actions);
@@ -127,7 +130,7 @@ fn render_header(
         .fill(theme.bg_input)
         .stroke(Stroke::new(1.0, theme.border_subtle))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(Margin::symmetric(12, 10))
+        .inner_margin(Margin::symmetric(theme.space_xl as i8, theme.space_lg as i8))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
 
@@ -311,7 +314,10 @@ fn render_unloaded(
         egui::Frame::NONE
             .fill(theme.bg_pill)
             .corner_radius(CornerRadius::same(theme.radius_md))
-            .inner_margin(Margin::symmetric(10, 8))
+            .inner_margin(Margin::symmetric(
+                theme.space_lg as i8,
+                theme.space_md as i8,
+            ))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
@@ -558,7 +564,10 @@ fn render_preset_row(
     egui::Frame::NONE
         .fill(background)
         .corner_radius(CornerRadius::same(theme.radius_md))
-        .inner_margin(Margin::symmetric(10, 6))
+        .inner_margin(Margin::symmetric(
+            theme.space_lg as i8,
+            theme.space_sm as i8,
+        ))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {

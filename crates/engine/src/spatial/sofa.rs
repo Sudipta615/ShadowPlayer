@@ -7,8 +7,8 @@
 //! container. This module imports the data the HRTF renderer needs
 //! (`SourcePosition` grid + `Data.IR` + sampling rate) and reduces it to the
 //! engine's normalized [`HrtfCorpus`], which then feeds the existing
-//! validation/resampling pipeline ([`HrtfDataset::from_corpus`]) and the
-//! [`HrtfCorpusProvider`] seam (§60–61).
+//! validation/resampling pipeline (`HrtfDataset::from_corpus`) and the
+//! `HrtfCorpusProvider` seam (§60–61).
 //!
 //! ## Format support & the purity rule
 //!
@@ -51,7 +51,7 @@
 //! (`+X` right, `+Y` front, `+Z` up): SOFA azimuth is measured
 //! counter-clockwise from front (positive *toward the left* when viewed from
 //! above), so the engine azimuth — positive *toward the right* — is its
-//! negation (see [`source_position_direction`]).
+//! negation (see `source_position_direction`).
 //!
 //! It is deliberately honest: it refuses (with a typed error) any file it
 //! cannot be sure it read correctly rather than silently producing wrong
@@ -122,7 +122,7 @@ impl std::error::Error for SofaImportError {}
 /// The corpus is the engine's normalized representation: every source
 /// measurement gets a unit `direction` (`+X` right, `+Y` front, `+Z` up) and
 /// left/right impulse responses at the recorded rate. Hand rejection to
-/// [`HrtfDataset::from_corpus`] later applies tap trim / resample / mesh
+/// `HrtfDataset::from_corpus` later applies tap trim / resample / mesh
 /// validation. `Conventions` and every data field referenced above must
 /// validate, or a typed [`SofaImportError`] is returned — an invalid HRTF
 /// must never reach the audio thread (spec §62 seam).

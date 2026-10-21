@@ -38,7 +38,7 @@ pub struct CorrectionValidationReport {
     pub headroom_satisfied: bool,
     /// Whether all filter taps and states are finite and numerically stable.
     pub filter_stable: bool,
-    /// L1 norm sum(|h[n]|) of the impulse response.
+    /// L1 norm sum(|h\[n\]|) of the impulse response.
     pub l1_norm: f64,
     /// Peak-to-peak group delay variation across the passband (ms).
     pub group_delay_variation_ms: f64,

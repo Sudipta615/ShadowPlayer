@@ -1,6 +1,6 @@
 //! Helpers shared by the app's floating dialogs.
 
-use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Sense, Stroke, Vec2};
 
 use crate::theme::Theme;
 
@@ -60,13 +60,9 @@ pub fn show_modal_scrollable(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(egui::Margin::same(16)),
+                .inner_margin(egui::Margin::same(theme.space_3xl as i8)),
         )
-        .backdrop_color(if theme.is_light {
-            Color32::from_black_alpha(56)
-        } else {
-            Color32::from_black_alpha(128)
-        })
+        .backdrop_color(theme.modal_backdrop)
         .show(ctx, |ui| {
             ui.set_width(width);
             ui.set_max_width(width);
@@ -136,13 +132,9 @@ pub fn show_modal_bare(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(egui::Margin::same(10)),
+                .inner_margin(egui::Margin::same(theme.space_lg as i8)),
         )
-        .backdrop_color(if theme.is_light {
-            Color32::from_black_alpha(56)
-        } else {
-            Color32::from_black_alpha(128)
-        })
+        .backdrop_color(theme.modal_backdrop)
         .show(ctx, |ui| {
             ui.set_width(width);
             ui.set_max_width(width);
@@ -178,13 +170,9 @@ pub fn show_modal(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_xl))
-                .inner_margin(egui::Margin::same(16)),
+                .inner_margin(egui::Margin::same(theme.space_3xl as i8)),
         )
-        .backdrop_color(if theme.is_light {
-            Color32::from_black_alpha(56)
-        } else {
-            Color32::from_black_alpha(128)
-        })
+        .backdrop_color(theme.modal_backdrop)
         .show(ctx, |ui| {
             ui.set_width(width);
             ui.set_max_width(width);

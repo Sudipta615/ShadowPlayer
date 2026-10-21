@@ -13,7 +13,7 @@
 //! of those happened.
 //!
 //! [`EngineSettings`] is the authoritative answer, snapshotted on the same
-//! telemetry cadence as [`PlaybackInfo`] and published in the same
+//! telemetry cadence as `PlaybackInfo` and published in the same
 //! `ArcSwap`, so a UI thread reads it without touching the engine or
 //! allocating a lock.
 //!
@@ -24,7 +24,7 @@
 //! * Fields whose DSP component stores derived values (coefficients,
 //!   linear gains) are reported in the units the host supplied. See
 //!   [`MultibandCompressor::band_settings`](crate::dsp::multiband_compressor::MultibandCompressor::band_settings).
-//! * Controls that live only in [`EngineConfig`] and have no live node state
+//! * Controls that live only in `EngineConfig` and have no live node state
 //!   (channel routing matrices, LFE config, bass management) are reported
 //!   from the engine's own config, which the command handlers write back to.
 //! * The snapshot lags a command by at most one telemetry interval. It is a
@@ -114,7 +114,7 @@ pub struct AuxSettings {
 /// A complete read-back of the engine's user-settable state.
 ///
 /// Constructed on the engine thread at the telemetry cadence and published
-/// inside [`PlaybackInfo::settings`]. Every field is `Copy` or a small
+/// inside `PlaybackInfo::settings`. Every field is `Copy` or a small
 /// `Vec`, so cloning the snapshot is cheap enough for a 30–60 Hz UI poll.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EngineSettings {
@@ -158,7 +158,7 @@ pub struct EngineSettings {
     pub eq_headroom_db: f32,
     pub eq_bands: Vec<EqBandSetting>,
     /// The dynamic-EQ corrective layer. `enabled` is `false` whenever no
-    /// bands are configured — see [`EqNode::set_dynamic_enabled`].
+    /// bands are configured — see `EqNode::set_dynamic_enabled`.
     pub dynamic_eq_enabled: bool,
     pub dynamic_eq_bands: Vec<DynamicEqBandSetting>,
     /// Dedicated bass shelf gain in dB.

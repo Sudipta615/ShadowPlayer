@@ -6,7 +6,7 @@
 //! output for the same audio, so they can be submitted directly to the
 //! AcoustID API (`chromaprint` + `duration` fields).
 //!
-//! The engine decodes the file through its normal [`Decoder`] chain (so every
+//! The engine decodes the file through its normal `Decoder` chain (so every
 //! supported codec works, not just PCM/WAV), downmixes to mono for the
 //! fingerprinter, and feeds 16-bit PCM in blocks. This is a CPU-bound offline
 //! operation — call it from a background thread, not the realtime path.

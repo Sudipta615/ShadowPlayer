@@ -1,3 +1,4 @@
+use crate::components::text::truncated_galley;
 use crate::services::ArtworkService;
 use crate::theme::Theme;
 use domain::ids::TrackId;
@@ -64,7 +65,7 @@ impl<'a> AlbumsView<'a> {
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
                 .corner_radius(CornerRadius::same(self.theme.radius_lg))
-                .inner_margin(egui::Margin::same(16));
+                .inner_margin(egui::Margin::same(self.theme.space_3xl as i8));
 
             header_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -405,10 +406,12 @@ impl<'a> AlbumsView<'a> {
                                     }
 
                                     // Title & Artist
-                                    let title_galley = p.layout_no_wrap(
+                                    let title_galley = truncated_galley(
+                                        &p,
                                         album.title.clone(),
                                         crate::theme::font(13.0),
                                         self.theme.text_primary,
+                                        rect.width() - 16.0,
                                     );
                                     p.galley(
                                         Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 6.0),
@@ -416,10 +419,12 @@ impl<'a> AlbumsView<'a> {
                                         self.theme.text_primary,
                                     );
 
-                                    let artist_galley = p.layout_no_wrap(
+                                    let artist_galley = truncated_galley(
+                                        &p,
                                         album.artist.clone(),
                                         crate::theme::font(11.5),
                                         self.theme.text_muted,
+                                        rect.width() - 16.0,
                                     );
                                     p.galley(
                                         Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 22.0),

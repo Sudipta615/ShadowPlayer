@@ -158,7 +158,7 @@ impl TransitionCrossfader {
         start_remaining - self.frames_remaining
     }
 
-    /// Stereo blend variant used by [`DspGraph::process_block`] where `old`, `new`,
+    /// Stereo blend variant used by `DspGraph::process_block` where `old`, `new`,
     /// and `dst` all reside in **separate, caller-owned slices** — avoiding any aliasing
     /// borrow conflict that [`Self::crossfade_block`] would introduce when old/new
     /// live in scratch and dst is the caller's output buffer.
@@ -266,7 +266,7 @@ impl ContinuousParameterSmoother {
     }
 }
 
-/// Measure maximum first-difference $|\Delta x[n]| = |x[n] - x[n-1]|$ in a signal buffer.
+/// Measure maximum first-difference `|\Delta x[n]| = |x[n] - x[n-1]|` in a signal buffer.
 /// Used to verify that transitions produce no step discontinuities (clicks).
 pub fn measure_max_discontinuity(samples: &[f32]) -> f32 {
     if samples.len() < 2 {

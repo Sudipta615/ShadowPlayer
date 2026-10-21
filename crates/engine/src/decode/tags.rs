@@ -1,6 +1,6 @@
 //! Loudness metadata tag write-back (`tag-write` feature).
 //!
-//! Reads/writes EBU R128 and ReplayGain 2.0 tags using [`lofty`] — the same
+//! Reads/writes EBU R128 and ReplayGain 2.0 tags using `lofty` — the same
 //! pure-Rust metadata library the Symphonia decoder path already uses
 //! indirectly — so the values written here match exactly what
 //! [`crate::decode::extract_loudness_metadata`] reads back on the next load.
@@ -32,7 +32,7 @@ use lofty::{
 #[cfg(feature = "tag-write")]
 use crate::dsp::LoudnessMetadata;
 
-/// Error returned by [`write_loudness_tags`].
+/// Error returned by `write_loudness_tags`.
 #[derive(Debug, thiserror::Error)]
 pub enum TagWriteError {
     #[error("unsupported container for tag write-back: {0}")]

@@ -108,7 +108,11 @@ pub fn show_loudness_modal(
                     Pos2::new(to_x(lo), bar.min.y + 1.0),
                     Pos2::new(to_x(hi), bar.max.y - 1.0),
                 );
-                painter.rect_filled(band, CornerRadius::same(3), theme.info.gamma_multiply(0.3));
+                painter.rect_filled(
+                    band,
+                    CornerRadius::same(theme.radius_xs),
+                    theme.info.gamma_multiply(0.3),
+                );
             }
 
             // The two reference targets.

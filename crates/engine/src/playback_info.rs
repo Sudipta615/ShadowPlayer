@@ -192,7 +192,7 @@ pub struct PlaybackInfo {
     /// engine tick.
     pub settings: Arc<EngineSettings>,
 
-    /// The live [`EngineConfig`], published on the same cadence as
+    /// The live `EngineConfig`, published on the same cadence as
     /// [`Self::settings`] and for the same reasons.
     ///
     /// Added in 0.9.0. [`EngineSettings`] is a *curated* read-back: it covers

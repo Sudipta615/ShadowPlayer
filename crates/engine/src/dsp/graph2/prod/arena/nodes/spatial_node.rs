@@ -269,10 +269,10 @@ impl SpatialNode {
     ///
     /// This is the piece that was missing for multichannel support, and it is
     /// *control path* only — the audio thread never consults it, it reads the
-    /// pre-resolved [`Self::mc_prepared`] flag.
+    /// pre-resolved `Self::mc_prepared` flag.
     ///
     /// Given a layout, the node derives the matching speaker geometry and
-    /// prepares [`Self::mc_renderer`] against it, so a >2-plane block can be
+    /// prepares `Self::mc_renderer` against it, so a >2-plane block can be
     /// routed role-to-speaker instead of being declined. Given nothing (or a
     /// layout whose geometry is degenerate), `mc_prepared` stays `false` and
     /// multichannel blocks keep passing through **bit-exact** — an unknown

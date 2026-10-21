@@ -414,7 +414,7 @@ impl Playlist {
     }
 
     /// Move back to the previous track.  The history stack depth is bounded
-    /// by [`Self::HISTORY_MAX`].
+    /// by `Self::HISTORY_MAX`.
     pub fn previous(&mut self) -> Option<AudioSource> {
         let prev = self.history.pop()?;
         self.current = Some(prev);

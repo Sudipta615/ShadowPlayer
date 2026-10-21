@@ -123,7 +123,10 @@ pub fn show_playlist_editor(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(Margin::symmetric(14, 12));
+                .inner_margin(Margin::symmetric(
+                    theme.space_2xl as i8,
+                    theme.space_xl as i8,
+                ));
 
             create_card.show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -212,7 +215,7 @@ pub fn show_playlist_editor(
                             let empty_frame = egui::Frame::NONE
                                 .fill(theme.bg_card)
                                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                                .inner_margin(Margin::same(14));
+                                .inner_margin(Margin::same(theme.space_2xl as i8));
                             empty_frame.show(ui, |ui| {
                                 ui.label(
                                     egui::RichText::new("No custom playlists yet.\nType a name above and click Create.")
@@ -366,7 +369,7 @@ pub fn show_playlist_editor(
                             let empty_card = egui::Frame::NONE
                                 .fill(theme.bg_card)
                                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                                .inner_margin(Margin::same(24));
+                                .inner_margin(Margin::same(theme.space_5xl as i8));
                             empty_card.show(ui, |ui| {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(20.0);

@@ -137,7 +137,7 @@ pub fn scratch_bytes() -> usize {
 ///
 /// ## What it is and is not
 ///
-/// This mirrors the *structure* of [`measure_generation`] — node arena, plan
+/// This mirrors the *structure* of `measure_generation` — node arena, plan
 /// set, scratch, plus a separate compilation peak — so that when the real
 /// measurement arrives the two are comparable, and the difference is a reportable
 /// discrepancy rather than two unrelated numbers.
@@ -292,7 +292,7 @@ impl PreparedGraph2 {
     }
 
     /// Attach a reservation, for a caller that reserved on the generation's
-    /// behalf rather than through [`Self::prepare_chain`].
+    /// behalf rather than through `Self::prepare_chain`.
     pub fn with_reservation(
         mut self,
         reservation: Arc<dyn crate::governance::GraphReservation>,

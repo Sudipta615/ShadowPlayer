@@ -116,7 +116,7 @@ pub struct SpatialScene {
     pub room: Room,
     pub sample_rate: u32,
     /// Named trigger cues (v4.4.0): the runtime cue bank —
-    /// control-built, audio-read (see [`cue`]).
+    /// control-built, audio-read (see `cue`).
     pub cue_bank: crate::spatial::cue::CueBank,
 }
 

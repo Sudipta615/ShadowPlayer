@@ -1,3 +1,4 @@
+use crate::components::text::truncated_galley;
 use crate::services::ArtworkService;
 use crate::theme::Theme;
 use domain::ids::TrackId;
@@ -64,7 +65,7 @@ impl<'a> ArtistsView<'a> {
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
                 .corner_radius(CornerRadius::same(self.theme.radius_lg))
-                .inner_margin(egui::Margin::same(16));
+                .inner_margin(egui::Margin::same(self.theme.space_3xl as i8));
 
             header_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -392,10 +393,12 @@ impl<'a> ArtistsView<'a> {
                                     );
 
                                     // Artist Name
-                                    let name_galley = p.layout_no_wrap(
+                                    let name_galley = truncated_galley(
+                                        &p,
                                         artist.name.clone(),
                                         crate::theme::font(13.2),
                                         self.theme.text_primary,
+                                        rect.width() - 12.0,
                                     );
                                     p.galley(
                                         Pos2::new(

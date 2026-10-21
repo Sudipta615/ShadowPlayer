@@ -15,7 +15,7 @@
 //! biquad + a smoothed cutoff). Coefficients are recomputed at block rate
 //! and the cutoff is one-pole smoothed, so automated occlusion changes ramp
 //! instead of zippering; per-sample processing is a plain
-//! [`BiquadState::process`] — no allocation, no locks. The filter runs on
+//! `BiquadState::process` — no allocation, no locks. The filter runs on
 //! the object's input *before* panning (spec §43: occlude before VBAP/HOA/
 //! HRTF), and its output feeds both the pan paths and the LFE send.
 

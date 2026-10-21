@@ -165,7 +165,7 @@ pub enum Decoder {
     /// The one arm that is *not* finite: it has no duration, returns silence
     /// rather than stalling when the group is quiet, and reports
     /// `EndOfStream` only once its receiver has stopped. See
-    /// [`Aes67Decoder`](crate::decode::aes67_source::Aes67Decoder) for the
+    /// [`Aes67Decoder`] for the
     /// underrun policy.
     Aes67(Aes67Decoder),
     #[cfg(feature = "codec-ape")]
@@ -338,7 +338,7 @@ impl Decoder {
         SymphoniaDecoder::open_from_source(source).map(Self::Symphonia)
     }
 
-    /// Open an [`AudioSource`] for decoding.
+    /// Open an `AudioSource` for decoding.
     pub fn open_source(source: &crate::source::AudioSource) -> Result<Self, DecodeError> {
         match source {
             crate::source::AudioSource::File(path) => Self::open(path),

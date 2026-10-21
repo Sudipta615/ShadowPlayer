@@ -85,7 +85,7 @@ pub struct MixInput {
     /// Per-input balance in [-1, 1] (0 = center). Shapes the front L/R pair.
     pub balance: f32,
     /// Per-input pan in [-1, 1]: -1 hard left, 0 center,
-    /// +1 hard right, shaped by [`pan_law`]. Compounds with `balance` on the
+    /// +1 hard right, shaped by `pan_law`. Compounds with `balance` on the
     /// front pair; pan = 0 yields a (1, 1) pair so the existing `balance`
     /// paths stay bit-exact.
     pub pan: f32,
@@ -270,7 +270,7 @@ pub enum MixInputCmd {
     ApplyLoudnessMetadata(LoudnessMetadata),
 }
 
-/// Node-level transition commands, mirroring [`TrackMixer`]'s start_* API.
+/// Node-level transition commands, mirroring `TrackMixer`'s start_* API.
 #[derive(Clone, Copy, Debug)]
 pub enum MixTransitionCmd {
     /// Input 0 at unity, secondary inputs silent.
@@ -563,7 +563,7 @@ fn pan_gains(pan: f32, law: PanLaw) -> (f32, f32) {
 /// The mix bus: N per-input pre-mix chains summed into the master planes.
 pub struct MixBusNode {
     pub inputs: Vec<MixInput>,
-    /// Transition envelope state — mirrors [`TrackMixer`] for bit-exactness.
+    /// Transition envelope state — mirrors `TrackMixer` for bit-exactness.
     pub state: MixerState,
     pub crossfade_pos: usize,
     pub crossfade_duration_frames: usize,

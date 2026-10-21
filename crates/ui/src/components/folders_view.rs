@@ -74,7 +74,7 @@ impl<'a> FoldersView<'a> {
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
                 .corner_radius(CornerRadius::same(self.theme.radius_lg))
-                .inner_margin(egui::Margin::same(16));
+                .inner_margin(egui::Margin::same(self.theme.space_3xl as i8));
 
             header_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -322,7 +322,7 @@ impl<'a> FoldersView<'a> {
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
                 .corner_radius(CornerRadius::same(self.theme.radius_lg))
-                .inner_margin(egui::Margin::same(14));
+                .inner_margin(egui::Margin::same(self.theme.space_2xl as i8));
 
             add_frame.show(ui, |ui| {
                 ui.vertical(|ui| {
@@ -425,7 +425,10 @@ impl<'a> FoldersView<'a> {
                     .fill(self.theme.scan_banner_bg)
                     .stroke(Stroke::new(1.0_f32, self.theme.accent_highlight))
                     .corner_radius(CornerRadius::same(self.theme.radius_md))
-                    .inner_margin(egui::Margin::symmetric(14, 8));
+                    .inner_margin(egui::Margin::symmetric(
+                        self.theme.space_2xl as i8,
+                        self.theme.space_md as i8,
+                    ));
 
                 scan_frame.show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -468,7 +471,10 @@ impl<'a> FoldersView<'a> {
                                 .fill(self.theme.bg_card)
                                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
                                 .corner_radius(CornerRadius::same(self.theme.radius_lg))
-                                .inner_margin(egui::Margin::symmetric(14, 10));
+                                .inner_margin(egui::Margin::symmetric(
+                                    self.theme.space_2xl as i8,
+                                    self.theme.space_lg as i8,
+                                ));
 
                             item_frame.show(ui, |ui| {
                                 ui.horizontal(|ui| {

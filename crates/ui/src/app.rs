@@ -7,7 +7,7 @@ use database::{
     ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
 };
 use domain::models::Track;
-use eframe::egui::{self, Color32, Margin, Pos2, Rect, Sense, Vec2};
+use eframe::egui::{self, Margin, Pos2, Rect, Sense, Vec2};
 use playback::PlaybackCoordinator;
 use search::SearchEngine;
 
@@ -1128,6 +1128,19 @@ impl ShadowPlayerApp {
             self.session.set_volume(eff_vol);
         }
 
+        // 1b. Song-table layout: column shares and row density. Stored as its
+        // own JSON blob so adding a column in a later version does not make
+        // older settings fail to deserialize.
+        if let Ok(Some(json)) = self.settings_repo.get_value("song_table_prefs") {
+            match serde_json::from_str::<crate::components::songs_table::SongTablePrefs>(&json) {
+                Ok(prefs) => {
+                    self.app_state.column_widths = prefs.widths;
+                    self.app_state.row_density = prefs.density;
+                }
+                Err(e) => log::warn!("Could not read the saved song-table layout: {e}"),
+            }
+        }
+
         // 2. Persistent Eq Settings (EQ layout, bands, gains, preamp, tone controls, custom presets, window position)
         if let Ok(Some(json)) = self.settings_repo.get_value("eq_settings") {
             if let Ok(saved_eq) =
@@ -1296,6 +1309,17 @@ impl ShadowPlayerApp {
         if let Ok(json) = serde_json::to_string(&clap_prefs) {
             if let Err(e) = self.settings_repo.set_value("clap_rack", &json) {
                 log::warn!("Could not save the CLAP rack presets: {e}");
+            }
+        }
+
+        // 8. Song-table layout (column shares and row density)
+        let table_prefs = crate::components::songs_table::SongTablePrefs {
+            widths: self.app_state.column_widths,
+            density: self.app_state.row_density,
+        };
+        if let Ok(json) = serde_json::to_string(&table_prefs) {
+            if let Err(e) = self.settings_repo.set_value("song_table_prefs", &json) {
+                log::warn!("Could not save the song-table layout: {e}");
             }
         }
     }
@@ -3719,6 +3743,9 @@ impl eframe::App for ShadowPlayerApp {
                             self.dsp_state.eq_panel.is_open = !self.dsp_state.eq_panel.is_open;
                             self.settings_dirty = true;
                         }
+                        if view_action.settings_dirty {
+                            self.settings_dirty = true;
+                        }
                         if view_action.open_loudness {
                             self.open_loudness_inspector();
                         }
@@ -3807,7 +3834,7 @@ impl eframe::App for ShadowPlayerApp {
                             Pos2::new(overlay_rect.min.x, full_rect.max.y),
                         ),
                         0.0,
-                        Color32::from_black_alpha(if self.theme.is_light { 24 } else { 80 }),
+                        self.theme.drawer_scrim,
                     );
                     let mut overlay_ui = root_ui.new_child(
                         egui::UiBuilder::new()

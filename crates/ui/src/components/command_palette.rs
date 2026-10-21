@@ -246,7 +246,10 @@ pub fn show_command_palette(
                 .fill(theme.bg_input)
                 .stroke(Stroke::new(1.0, theme.border_input))
                 .corner_radius(CornerRadius::same(theme.radius_md))
-                .inner_margin(egui::Margin::symmetric(12, 7));
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_xl as i8,
+                    theme.space_md as i8,
+                ));
             field.show(ui, |ui| {
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut state.query)

@@ -544,7 +544,7 @@ impl MultibandCompressor {
     /// `None`.
     ///
     /// These come from a mirror of the values the host supplied, not from the
-    /// per-channel [`BandCompressor`]s. That distinction matters: the band
+    /// per-channel `BandCompressor`s. That distinction matters: the band
     /// compressors store *coefficients* (`attack_coeff`, `makeup_gain` as a
     /// linear factor, `threshold_db_cached` after clamping), which are what
     /// the audio path needs but are not what a UI should display. Inverting

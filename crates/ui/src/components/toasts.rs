@@ -120,26 +120,18 @@ impl ToastState {
                         let a = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
 
                         let accent = t.kind.accent(theme);
-                        let fill = Color32::from_rgba_unmultiplied(
-                            theme.bg_card.r(),
-                            theme.bg_card.g(),
-                            theme.bg_card.b(),
-                            a.saturating_sub(30),
-                        );
-                        let border =
-                            Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), a);
-                        let text = Color32::from_rgba_unmultiplied(
-                            theme.text_primary.r(),
-                            theme.text_primary.g(),
-                            theme.text_primary.b(),
-                            a,
-                        );
+                        let fill = crate::theme::with_alpha(theme.bg_card, a.saturating_sub(30));
+                        let border = crate::theme::with_alpha(accent, a);
+                        let text = crate::theme::with_alpha(theme.text_primary, a);
 
                         egui::Frame::NONE
                             .fill(fill)
                             .stroke(egui::Stroke::new(1.0, border))
                             .corner_radius(CornerRadius::same(theme.radius_md))
-                            .inner_margin(egui::Margin::symmetric(14, 9))
+                            .inner_margin(egui::Margin::symmetric(
+                                theme.space_2xl as i8,
+                                theme.space_lg as i8,
+                            ))
                             .show(ui, |ui| {
                                 let resp = ui.add(egui::Label::new(
                                     egui::RichText::new(&t.message)

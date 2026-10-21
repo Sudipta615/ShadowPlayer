@@ -361,7 +361,7 @@ pub struct NodeCapabilities {
 
 /// Where an `HRTF` node draws its per-ear impulse responses from: the node's
 /// own hand-authored `left`/`right` tabs, or the real binaural renderer's
-/// **measured** head-related impulse responses from a [`HrtfDataset`]
+/// **measured** head-related impulse responses from a `HrtfDataset`
 /// (crate::spatial::hrtf::HrtfDataset) attached to the executor
 /// (`OfflineExecutor::set_hrtf_dataset`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -430,7 +430,7 @@ pub enum NodeParams {
     /// out). Both ears are delayed by the *longer* IR so the pair stays
     /// aligned; the node reports that length as its taps. `source` selects
     /// whether the IRs are the embedded `left`/`right` tabs or the real
-    /// measured responses from an executor [`HrtfDataset`]
+    /// measured responses from an executor `HrtfDataset`
     /// (crate::spatial::hrtf::HrtfDataset) at an azimuth/elevation:
     /// `HrtfSource::Inline` reproduces the classic hand-authored form;
     /// `HrtfSource::Dataset` renders measured HRIRs (graph-based binaural

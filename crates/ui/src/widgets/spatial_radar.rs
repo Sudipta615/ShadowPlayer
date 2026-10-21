@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
+use eframe::egui::{self, Pos2, Rect, Stroke, Vec2};
 
 /// Interactive 2D/3D Soundstage and Spatial Radar Canvas
 pub struct SpatialRadarWidget<'a> {
@@ -160,12 +160,7 @@ impl<'a> SpatialRadarWidget<'a> {
             [center, source_pos],
             Stroke::new(
                 1.0_f32,
-                Color32::from_rgba_unmultiplied(
-                    self.theme.accent_highlight.r(),
-                    self.theme.accent_highlight.g(),
-                    self.theme.accent_highlight.b(),
-                    80,
-                ),
+                crate::theme::with_alpha(self.theme.accent_highlight, 80),
             ),
         );
 
@@ -173,12 +168,7 @@ impl<'a> SpatialRadarWidget<'a> {
         painter.circle_filled(
             source_pos,
             12.0,
-            Color32::from_rgba_unmultiplied(
-                self.theme.accent_highlight.r(),
-                self.theme.accent_highlight.g(),
-                self.theme.accent_highlight.b(),
-                40,
-            ),
+            crate::theme::with_alpha(self.theme.accent_highlight, 40),
         );
         painter.circle_filled(source_pos, 7.0, self.theme.accent_highlight);
         painter.circle_stroke(

@@ -139,7 +139,7 @@ impl Spectrum {
     }
 
     /// Half-spectrum magnitude in dB (DC..=Nyquist, `n/2 + 1` bins),
-    /// floored at [`MAG_FLOOR_AMP`].
+    /// floored at `MAG_FLOOR_AMP`.
     pub fn magnitude_db(&self) -> Vec<f64> {
         (0..=self.n() / 2)
             .map(|j| magnitude_db(self.bins[j]))

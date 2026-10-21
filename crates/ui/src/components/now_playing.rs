@@ -117,7 +117,7 @@ impl<'a> NowPlayingCard<'a> {
                     painter.rect_filled(
                         art_rect,
                         CornerRadius::same(self.theme.radius_lg),
-                        Color32::BLACK,
+                        self.theme.bg_pill,
                     );
                     egui::Image::new(texture)
                         .corner_radius(CornerRadius::same(self.theme.radius_lg))

@@ -737,7 +737,7 @@ impl ParametricEq {
 
     /// Process an audio frame (alternative API)
     ///
-    /// to avoid out-of-bounds access on frame.channels[1].
+    /// to avoid out-of-bounds access on `frame.channels[1]`.
     pub fn process_frame(&mut self, frame: &mut AudioFrame) {
         if frame.num_channels <= 1 {
             // Mono: process the single channel through both L and R filters

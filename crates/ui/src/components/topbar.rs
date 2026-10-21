@@ -32,7 +32,10 @@ pub fn render_search_input(ui: &mut Ui, query: &mut String, theme: &Theme) -> bo
                 .fill(theme.bg_input)
                 .stroke(Stroke::new(1.0_f32, theme.border_input))
                 .corner_radius(CornerRadius::same(theme.radius_pill))
-                .inner_margin(egui::Margin::symmetric(14, 8));
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_2xl as i8,
+                    theme.space_md as i8,
+                ));
 
             frame.show(ui, |ui| {
                 ui.horizontal(|ui| {

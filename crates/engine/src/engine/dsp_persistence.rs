@@ -1,6 +1,6 @@
 //! Persistence for the DSP settings a user tunes by hand.
 //!
-//! The engine's own [`EngineConfig`] is the live control-path structure: it
+//! The engine's own `EngineConfig` is the live control-path structure: it
 //! changes on every slider move and is read by the audio graph on every
 //! reconfiguration. It is *not* the thing to write to disk on every tick.
 //!

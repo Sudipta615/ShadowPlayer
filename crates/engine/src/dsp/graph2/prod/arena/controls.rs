@@ -894,7 +894,7 @@ impl ControlBus {
 
 /// The control side of the graph: enqueue commands and publish generations
 /// from any thread that holds this handle (the engine's tick thread, or a
-/// test's control thread). Clone is cheap (shares the [`ControlBus`]).
+/// test's control thread). Clone is cheap (shares the `ControlBus`).
 #[derive(Clone)]
 pub struct GraphControlHandle {
     bus: Arc<ControlBus>,
@@ -1738,7 +1738,7 @@ impl DspGraph {
     /// and the decode loop), so it applies commands immediately after
     /// dispatch instead of waiting for the next audio block. Safe only when
     /// no other thread is processing audio; multi-threaded hosts must rely
-    /// on the block-boundary [`Self::control_tick`] instead.
+    /// on the block-boundary `Self::control_tick` instead.
     pub fn drain_queued_control(&mut self) {
         self.control_tick();
     }

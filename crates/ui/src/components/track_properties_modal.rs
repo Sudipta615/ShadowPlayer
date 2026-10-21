@@ -27,7 +27,7 @@ pub fn show_track_properties_modal(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(egui::Margin::same(14));
+                .inner_margin(egui::Margin::same(theme.space_2xl as i8));
 
             card_frame.show(ui, |ui| {
                 ui.vertical(|ui| {

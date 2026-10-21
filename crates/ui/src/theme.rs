@@ -20,6 +20,14 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
+/// The same colour with a different alpha.
+///
+/// A skin supplies opaque palette tokens; translucency is a rendering concern,
+/// so it lives here rather than in every glow and fade call site.
+pub fn with_alpha(color: Color32, alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+}
+
 /// The one knob that controls the UI type scale.
 ///
 /// Every explicit text size in the app goes through [`font`], so this is enough
@@ -154,6 +162,12 @@ pub struct Theme {
     pub destructive: Color32,
     /// Translucent scrim drawn over artwork on hover.
     pub overlay_scrim: Color32,
+    /// The dimmer drawn behind a modal dialog.
+    pub modal_backdrop: Color32,
+    /// The dimmer drawn behind the slide-over drawer.
+    pub drawer_scrim: Color32,
+    /// The colour of drop shadows behind popovers.
+    pub shadow: Color32,
     /// The background of the instrument panels — the VU meters, the LUFS
     /// meter and the spatial radar.
     ///
@@ -246,6 +260,9 @@ impl Theme {
             artwork_placeholder: Color32::from_rgb(26, 36, 38), // #1A2426
             destructive: Color32::from_rgb(251, 113, 133), // #FB7185
             overlay_scrim: Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            modal_backdrop: Color32::from_black_alpha(128),
+            drawer_scrim: Color32::from_black_alpha(80),
+            shadow: Color32::from_black_alpha(160),
             meter_bg: Color32::from_rgb(12, 14, 22), // #0C0E16
             meter_gutter: Color32::from_rgb(18, 20, 32), // #121420
             meter_grid: Color32::from_rgba_unmultiplied(100, 116, 139, 40),
@@ -308,6 +325,9 @@ impl Theme {
             artwork_placeholder: Color32::from_rgb(227, 235, 232), // #E3EBE8
             destructive: Color32::from_rgb(190, 18, 60),     // #BE123C
             overlay_scrim: Color32::from_rgba_unmultiplied(255, 255, 255, 170),
+            modal_backdrop: Color32::from_black_alpha(56),
+            drawer_scrim: Color32::from_black_alpha(24),
+            shadow: Color32::from_black_alpha(160),
             meter_bg: Color32::from_rgb(238, 243, 241), // #EEF3F1
             meter_gutter: Color32::from_rgb(220, 229, 226), // #DCE5E2
             meter_grid: Color32::from_rgba_unmultiplied(16, 32, 29, 30),

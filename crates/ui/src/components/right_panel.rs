@@ -1,3 +1,4 @@
+use crate::components::text::truncated_galley;
 use crate::services::{ArtworkService, LyricsSource};
 use crate::theme::Theme;
 use domain::models::{SyncedLyricLine, Track};
@@ -55,7 +56,10 @@ impl<'a> RightPanel<'a> {
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
                 .corner_radius(CornerRadius::same(self.theme.radius_xl))
-                .inner_margin(egui::Margin::symmetric(14, 14));
+                .inner_margin(egui::Margin::symmetric(
+                    self.theme.space_2xl as i8,
+                    self.theme.space_2xl as i8,
+                ));
 
             card_frame.show(ui, |ui| {
                 // Tab Switcher Pill — 2-way: Queue | Lyrics (matching mockup)
@@ -348,20 +352,34 @@ impl<'a> RightPanel<'a> {
                                         );
                                     }
 
-                                    // Stacked Title + Artist
+                                    // Stacked Title + Artist. The row reserves
+                                    // room on the right for the duration or the
+                                    // hover controls, so both labels elide before
+                                    // they can run underneath either.
                                     let text_left = rect.min.x + 64.0;
-                                    painter.text(
-                                        Pos2::new(text_left, cy - 7.0),
-                                        egui::Align2::LEFT_CENTER,
-                                        &track.title,
+                                    let text_w = (rect.max.x - 60.0 - text_left).max(0.0);
+                                    let title_g = truncated_galley(
+                                        &painter,
+                                        track.title.clone(),
                                         crate::theme::font(12.8),
                                         theme.text_primary,
+                                        text_w,
                                     );
-                                    painter.text(
-                                        Pos2::new(text_left, cy + 8.0),
-                                        egui::Align2::LEFT_CENTER,
-                                        &track.artist,
+                                    painter.galley(
+                                        Pos2::new(text_left, cy - 7.0 - title_g.size().y * 0.5),
+                                        title_g,
+                                        theme.text_primary,
+                                    );
+                                    let artist_g = truncated_galley(
+                                        &painter,
+                                        track.artist.clone(),
                                         crate::theme::font(11.2),
+                                        theme.text_muted,
+                                        text_w,
+                                    );
+                                    painter.galley(
+                                        Pos2::new(text_left, cy + 8.0 - artist_g.size().y * 0.5),
+                                        artist_g,
                                         theme.text_muted,
                                     );
 

@@ -43,7 +43,7 @@ pub enum DitherType {
     /// Uses a 9-tap error-feedback FIR with psychoacoustically optimised
     /// coefficients. Shibata published designs for exactly 44.1 kHz and
     /// 48 kHz; every other rate reuses the nearer table (see
-    /// [`shibata_design_rate`]) and [`Dither::with_sample_rate`] warns once
+    /// `shibata_design_rate`) and [`Dither::with_sample_rate`] warns once
     /// per process when that happens. At the two design rates this achieves
     /// the lowest perceptible noise floor of all modes.
     Shibata,
@@ -202,7 +202,7 @@ impl Dither {
     /// Create a dither processor with sample-rate-aware Shibata coefficients.
     ///
     /// Shibata published designs for exactly 44.1 and 48 kHz. Any other rate
-    /// reuses the nearer table (see [`shibata_design_rate`]) and this
+    /// reuses the nearer table (see `shibata_design_rate`) and this
     /// constructor logs a warning — once per process — when the selected
     /// type is [`DitherType::Shibata`], so the approximation is visible in
     /// diagnostics rather than silent.

@@ -1,3 +1,4 @@
+use crate::components::text::truncated_galley;
 use crate::services::ArtworkService;
 use crate::theme::Theme;
 use domain::ids::{PlaylistId, TrackId};
@@ -5,6 +6,7 @@ use domain::models::{Playlist, SortField, SortOrder, Track};
 use eframe::egui::{
     self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -50,6 +52,162 @@ impl QuickFilter {
     }
 }
 
+// ── Persisted table preferences ─────────────────────────────────────────────
+
+/// The flexible columns' shares of the table's width.
+///
+/// Stored as fractions rather than pixels so a wider window gives every column
+/// more room without changing their proportions. `title` is deliberately the
+/// largest share: it carries the artwork, the title and the playing indicator,
+/// and it is the column a user scans first.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColumnWidths {
+    pub title: f32,
+    pub artist: f32,
+    pub album: f32,
+}
+
+impl Default for ColumnWidths {
+    fn default() -> Self {
+        // Expressed as 42 : 26 : 26 and normalised so the shares sum to one.
+        Self {
+            title: 0.42,
+            artist: 0.26,
+            album: 0.26,
+        }
+        .normalized()
+    }
+}
+
+impl ColumnWidths {
+    /// The smallest share a column may be dragged to.
+    const MIN: f32 = 0.12;
+
+    /// Keep the three shares positive and summing to one.
+    ///
+    /// The defaults are written as 42 : 26 : 26 and normalised to sum to one.
+    /// Normalising also means a settings file written by an older build (or by
+    /// hand) can never make the columns overlap or leave a gap.
+    pub fn normalized(self) -> Self {
+        // Negative shares cannot come from the drag maths, but a hand-edited
+        // settings file is not required to be sane.
+        let raw = [
+            self.title.max(0.0),
+            self.artist.max(0.0),
+            self.album.max(0.0),
+        ];
+        let sum: f32 = raw.iter().sum();
+        if !sum.is_finite() || sum <= f32::EPSILON {
+            return Self::default();
+        }
+
+        let mut shares = [raw[0] / sum, raw[1] / sum, raw[2] / sum];
+        let deficit: f32 = shares
+            .iter()
+            .map(|share| (Self::MIN - share).max(0.0))
+            .sum();
+        if deficit > 0.0 {
+            // Lift every undersized share to MIN and take the difference from
+            // the columns that have room above MIN, in proportion to that
+            // room. Clamping and then re-normalising would push the small
+            // columns below MIN again when one column held almost everything.
+            let headroom: f32 = shares
+                .iter()
+                .map(|share| (share - Self::MIN).max(0.0))
+                .sum();
+            if headroom <= f32::EPSILON {
+                return Self::default();
+            }
+            for share in &mut shares {
+                *share = if *share < Self::MIN {
+                    Self::MIN
+                } else {
+                    *share - deficit * (*share - Self::MIN) / headroom
+                };
+            }
+        }
+
+        Self {
+            title: shares[0],
+            artist: shares[1],
+            album: shares[2],
+        }
+        .rebalance()
+    }
+
+    /// Re-normalise after clamping, so the three shares still sum to one.
+    fn rebalance(self) -> Self {
+        let sum = self.title + self.artist + self.album;
+        Self {
+            title: self.title / sum,
+            artist: self.artist / sum,
+            album: self.album / sum,
+        }
+    }
+
+    /// Drag the boundary after `column` (0 = title, 1 = artist) by `delta`
+    /// fractions of the flexible width.
+    pub fn drag(self, boundary: usize, delta: f32) -> Self {
+        let mut next = self.normalized();
+        let (left, right) = match boundary {
+            0 => (&mut next.title, &mut next.artist),
+            1 => (&mut next.artist, &mut next.album),
+            _ => return next,
+        };
+        let delta = delta.clamp(Self::MIN - *left, *right - Self::MIN);
+        *left += delta;
+        *right -= delta;
+        next.rebalance()
+    }
+}
+
+/// How tall a song-table row is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RowDensity {
+    /// Room for artwork and two readable lines.
+    #[default]
+    Comfortable,
+    /// More rows on screen, at the cost of the artwork.
+    Compact,
+}
+
+impl RowDensity {
+    /// The height of one row's slot, including its 2 px gap.
+    pub fn row_height(self) -> f32 {
+        match self {
+            Self::Comfortable => 36.0,
+            Self::Compact => 26.0,
+        }
+    }
+
+    /// The side of the artwork thumbnail.
+    pub fn thumb_size(self) -> f32 {
+        (self.row_height() - 12.0).clamp(14.0, 26.0)
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Comfortable => Self::Compact,
+            Self::Compact => Self::Comfortable,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Comfortable => "Comfortable rows",
+            Self::Compact => "Compact rows",
+        }
+    }
+}
+
+/// Everything the table remembers between launches.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SongTablePrefs {
+    pub widths: ColumnWidths,
+    pub density: RowDensity,
+}
+
 // ── Table geometry ──────────────────────────────────────────────────────────
 
 /// Width of the row-number column (checkbox + track number).
@@ -62,8 +220,8 @@ const COL_FAV_W: f32 = 32.0;
 const COL_MENU_W: f32 = 26.0;
 /// Horizontal gap between two columns.
 const COL_GAP: f32 = 8.0;
-/// The artwork thumbnail plus the gap between it and the title text.
-const ART_INSET: f32 = 44.0;
+/// The gap between the artwork thumbnail and the title text.
+const ART_GAP: f32 = 8.0;
 
 /// The horizontal layout of the songs table.
 ///
@@ -80,6 +238,8 @@ struct TableColumns {
     title_text_x: f32,
     /// Width available for the title text.
     title_text_w: f32,
+    /// Thumbnail width plus the gap before the title text.
+    art_inset: f32,
     /// Left edge and width of the artist column.
     artist_x: f32,
     artist_w: f32,
@@ -92,17 +252,23 @@ struct TableColumns {
     favorite_x: f32,
     /// Left edge of the overflow-menu column.
     menu_x: f32,
+    /// The width shared by title, artist and album.
+    flexible_w: f32,
 }
 
 impl TableColumns {
     /// Lay the table out for a content area `full_width` wide.
-    fn new(full_width: f32) -> Self {
+    fn new(full_width: f32, widths: ColumnWidths, density: RowDensity) -> Self {
         let right_block = COL_TIME_W + COL_FAV_W + COL_MENU_W;
         let fixed = COL_NUM_W + right_block + COL_GAP * 3.0;
         let flexible = (full_width - fixed).max(180.0);
-        let title_w = flexible * 0.38;
-        let artist_w = flexible * 0.31;
-        let album_w = flexible * 0.31;
+        let weights = widths.normalized();
+        let title_w = flexible * weights.title;
+        let artist_w = flexible * weights.artist;
+        let album_w = flexible * weights.album;
+        // The artwork shrinks in compact mode, and the title text follows it
+        // rather than keeping a fixed inset that would waste its space.
+        let art_inset = density.thumb_size() + ART_GAP;
 
         let title_x = COL_NUM_W;
         let artist_x = title_x + title_w + COL_GAP;
@@ -111,8 +277,9 @@ impl TableColumns {
         Self {
             num_x: 0.0,
             title_x,
-            title_text_x: title_x + ART_INSET,
-            title_text_w: (title_w - ART_INSET).max(40.0),
+            title_text_x: title_x + art_inset,
+            title_text_w: (title_w - art_inset).max(40.0),
+            art_inset,
             artist_x,
             artist_w,
             album_x,
@@ -120,28 +287,9 @@ impl TableColumns {
             duration_x: full_width - right_block,
             favorite_x: full_width - COL_FAV_W - COL_MENU_W,
             menu_x: full_width - COL_MENU_W,
+            flexible_w: flexible,
         }
     }
-}
-
-/// Lay out a single line of text, truncating it with an ellipsis when it does
-/// not fit `max_width`.
-///
-/// The table used to paint artist, album and title with `Painter::text`,
-/// which never truncates — a long album name ran straight over the duration
-/// column.
-fn layout_truncated(
-    painter: &egui::Painter,
-    text: impl Into<String>,
-    font: egui::FontId,
-    color: egui::Color32,
-    max_width: f32,
-) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::simple_singleline(text.into(), font, color);
-    // `truncate_at_width` keeps the text on one row and elides it, where
-    // setting `max_width` alone would wrap it onto a second row.
-    job.wrap = egui::text::TextWrapping::truncate_at_width(max_width);
-    painter.layout_job(job)
 }
 
 /// The call to action offered by the empty state.
@@ -315,53 +463,18 @@ fn quick_filter_tooltip(filter: QuickFilter) -> &'static str {
     }
 }
 
-/// The width a quality tag needs, so the title can be truncated around it.
-fn quality_tag_width(painter: &egui::Painter, label: &str, theme: &Theme) -> f32 {
-    let galley = painter.layout_no_wrap(
-        label.to_owned(),
-        crate::theme::mono_font(9.0),
-        theme.text_primary,
-    );
-    galley.size().x + 14.0
-}
-
-/// Paint a small quality tag — `HI-RES` or `LOSSLESS` — and return its width.
+/// The colour of a track's quality marker.
 ///
-/// The tag sits at the right-hand end of the title column, so a column of
-/// mixed formats still reads as a tidy column of badges.
-fn paint_quality_tag(
-    painter: &egui::Painter,
-    right_x: f32,
-    cy: f32,
-    label: &str,
-    theme: &Theme,
-) -> f32 {
-    let color = if label == "HI-RES" {
+/// The tag used to be painted as a chip inside the title column, where it
+/// consumed the same width as several characters of the title. A 3 px marker
+/// on the row's leading edge says the same thing without taking any room; its
+/// tooltip carries the words.
+fn quality_marker_color(label: &str, theme: &Theme) -> Color32 {
+    if label == "HI-RES" {
         theme.bit_perfect_green
     } else {
         theme.info
-    };
-    let galley = painter.layout_no_wrap(label.to_owned(), crate::theme::mono_font(9.0), color);
-    let w = galley.size().x + 14.0;
-    let h = 15.0;
-    let rect = Rect::from_center_size(Pos2::new(right_x - w * 0.5, cy), Vec2::new(w, h));
-    painter.rect_filled(
-        rect,
-        CornerRadius::same(theme.radius_sm),
-        color.gamma_multiply(0.14),
-    );
-    painter.rect_stroke(
-        rect,
-        CornerRadius::same(theme.radius_sm),
-        Stroke::new(1.0, color.gamma_multiply(0.55)),
-        egui::StrokeKind::Inside,
-    );
-    painter.galley(
-        Pos2::new(rect.min.x + 7.0, cy - galley.size().y * 0.5),
-        galley,
-        color,
-    );
-    w
+    }
 }
 
 pub struct SongsTableAction {
@@ -375,6 +488,14 @@ pub struct SongsTableAction {
     pub sort_order_changed: Option<SortOrder>,
     /// User tapped a quality/format chip.
     pub quick_filter_changed: Option<QuickFilter>,
+    /// The user dragged a column separator to a new set of shares.
+    pub column_widths_changed: Option<ColumnWidths>,
+    /// The drag ended; this is the moment to persist the widths.
+    pub column_drag_finished: bool,
+    /// The density button was tapped.
+    pub toggle_density: bool,
+    /// "Reset columns" was chosen from the context menu.
+    pub reset_columns: bool,
     pub toggle_view_mode: bool,
     pub open_folder: Option<PathBuf>,
     pub show_properties: Option<TrackId>,
@@ -415,6 +536,10 @@ pub struct SongsTable<'a> {
     pub is_grid_view: bool,
     /// Active quality/format chip.
     pub quick_filter: QuickFilter,
+    /// The flexible columns' persisted shares.
+    pub column_widths: ColumnWidths,
+    /// Whether rows are comfortable or compact.
+    pub density: RowDensity,
     /// Multi-selection, shared with the app so it survives tab changes.
     pub selected_track_ids: &'a mut HashSet<TrackId>,
     /// Anchor for shift-range selection.
@@ -445,6 +570,10 @@ impl<'a> SongsTable<'a> {
             sort_field_changed: None,
             sort_order_changed: None,
             quick_filter_changed: None,
+            column_widths_changed: None,
+            column_drag_finished: false,
+            toggle_density: false,
+            reset_columns: false,
             toggle_view_mode: false,
             open_folder: None,
             show_properties: None,
@@ -475,6 +604,8 @@ impl<'a> SongsTable<'a> {
             sort_order,
             is_grid_view,
             quick_filter,
+            column_widths,
+            density,
             selected_track_ids,
             last_clicked_index,
             artwork,
@@ -592,6 +723,70 @@ impl<'a> SongsTable<'a> {
                     let _ = list_resp.clone().on_hover_text("Show tracks as a list");
                     if list_resp.clicked() && is_grid_view {
                         action.toggle_view_mode = true;
+                    }
+
+                    // Row density: three lines that get closer together in
+                    // compact mode. The icon is painted rather than typed so
+                    // it does not depend on a font glyph.
+                    let (density_rect, density_resp) =
+                        ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
+                    let density_bg = if matches!(density, RowDensity::Compact) {
+                        theme.accent
+                    } else if density_resp.hovered() {
+                        theme.bg_card_hover
+                    } else {
+                        theme.bg_pill
+                    };
+                    ui.painter().rect_filled(
+                        density_rect,
+                        CornerRadius::same(theme.radius_md),
+                        density_bg,
+                    );
+                    if !matches!(density, RowDensity::Compact) {
+                        ui.painter().rect_stroke(
+                            density_rect,
+                            CornerRadius::same(theme.radius_md),
+                            Stroke::new(1.0_f32, theme.border_subtle),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    let line_col = if matches!(density, RowDensity::Compact) {
+                        Color32::WHITE
+                    } else {
+                        theme.text_muted
+                    };
+                    let line_gap = if matches!(density, RowDensity::Compact) {
+                        4.0
+                    } else {
+                        6.0
+                    };
+                    for i in -1..=1 {
+                        let y = density_rect.center().y + i as f32 * line_gap;
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(density_rect.center().x - 6.0, y),
+                                Pos2::new(density_rect.center().x + 6.0, y),
+                            ],
+                            Stroke::new(1.5_f32, line_col),
+                        );
+                    }
+                    density_resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::Button,
+                            true,
+                            matches!(density, RowDensity::Compact),
+                            "Compact rows",
+                        )
+                    });
+                    if density_resp
+                        .on_hover_text(format!(
+                            "{} — click for {}",
+                            density.label(),
+                            density.toggled().label().to_lowercase()
+                        ))
+                        .clicked()
+                    {
+                        action.toggle_density = true;
                     }
 
                     ui.add_space(6.0);
@@ -871,12 +1066,12 @@ impl<'a> SongsTable<'a> {
                 });
         } else {
             // ── List View (virtualized, renders only visible rows) ──────────
-            let row_h = 48.0;
+            let row_h = density.row_height();
 
             // Static column headers, painted on the same column model the rows
             // use, so the two can never drift apart.
             let full_width = ui.available_width();
-            let cols = TableColumns::new(full_width);
+            let cols = TableColumns::new(full_width, column_widths, density);
 
             let (header_rect, _) =
                 ui.allocate_exact_size(Vec2::new(full_width, 20.0), Sense::hover());
@@ -931,8 +1126,12 @@ impl<'a> SongsTable<'a> {
             }
 
             // Column 2: title.
-            let title_h_resp =
-                header_cell(ui, "hdr_title", cols.title_x, cols.title_text_w + ART_INSET);
+            let title_h_resp = header_cell(
+                ui,
+                "hdr_title",
+                cols.title_x,
+                cols.title_text_w + cols.art_inset,
+            );
             let title_col = if current_sort == SortField::Title {
                 theme.accent_highlight
             } else {
@@ -1060,6 +1259,54 @@ impl<'a> SongsTable<'a> {
                 action.sort_field_changed = Some(SortField::Favorite);
             }
 
+            // ── Draggable column separators ─────────────────────────────────
+            // The separator is a real widget: it gets an accessible name, a
+            // resize cursor and a drag state, rather than being a painted line
+            // that happens to respond to the mouse.
+            for (boundary, x) in [
+                (0usize, cols.artist_x - COL_GAP * 0.5),
+                (1usize, cols.album_x - COL_GAP * 0.5),
+            ] {
+                let sep_rect = Rect::from_min_size(
+                    Pos2::new(header_rect.min.x + x - 4.0, header_rect.min.y),
+                    Vec2::new(8.0, 20.0),
+                );
+                let sep = ui.interact(
+                    sep_rect,
+                    ui.make_persistent_id(("column_separator", boundary)),
+                    Sense::click_and_drag(),
+                );
+                if sep.hovered() || sep.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    hp.line_segment(
+                        [
+                            Pos2::new(sep_rect.center().x, header_rect.min.y),
+                            Pos2::new(sep_rect.center().x, header_rect.max.y),
+                        ],
+                        Stroke::new(1.0_f32, theme.accent_highlight),
+                    );
+                }
+                sep.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        true,
+                        if boundary == 0 {
+                            "Resize the Title column"
+                        } else {
+                            "Resize the Artist column"
+                        },
+                    )
+                });
+                if sep.dragged() {
+                    let dx = ui.input(|i| i.pointer.delta().x);
+                    let next = column_widths.drag(boundary, dx / cols.flexible_w.max(1.0));
+                    action.column_widths_changed = Some(next);
+                }
+                if sep.drag_stopped() {
+                    action.column_drag_finished = true;
+                }
+            }
+
             ui.add_space(4.0);
 
             egui::ScrollArea::vertical()
@@ -1085,7 +1332,8 @@ impl<'a> SongsTable<'a> {
                                 format!("{} by {}", track.title, track.artist),
                             )
                         });
-                        // Visual row is 46px tall inside the 48px slot (2px gap).
+                        // The painted row sits one pixel inside each edge of
+                        // its density-sized slot, leaving a 2 px gap.
                         let vis_rect = Rect::from_min_max(
                             Pos2::new(row_rect.min.x, row_rect.min.y + 1.0),
                             Pos2::new(row_rect.max.x, row_rect.max.y - 1.0),
@@ -1224,15 +1472,16 @@ impl<'a> SongsTable<'a> {
                         }
 
                         // Column 2: Thumbnail + Title + Equalizer Indicator
-                        let thumb_rect = Rect::from_min_size(
-                            Pos2::new(vis_rect.min.x + cols.title_x, cy - 18.0),
-                            Vec2::new(36.0, 36.0),
+                        let thumb = density.thumb_size();
+                        let thumb_rect = Rect::from_center_size(
+                            Pos2::new(vis_rect.min.x + cols.title_x + thumb * 0.5, cy),
+                            Vec2::splat(thumb),
                         );
 
                         if let Some(tex) = art_for(artwork, &ctx, &mut art_budget, track) {
                             egui::Image::new(&tex)
                                 .corner_radius(CornerRadius::same(theme.radius_sm))
-                                .fit_to_exact_size(Vec2::new(36.0, 36.0))
+                                .fit_to_exact_size(thumb_rect.size())
                                 .paint_at(ui, thumb_rect);
                         } else {
                             painter.rect_filled(
@@ -1240,9 +1489,10 @@ impl<'a> SongsTable<'a> {
                                 CornerRadius::same(theme.radius_sm),
                                 theme.bg_card,
                             );
+                            let inset = (thumb * 0.22).max(3.0);
                             crate::components::icons::draw_disc(
                                 ui,
-                                thumb_rect.shrink2(Vec2::new(8.0, 8.0)),
+                                thumb_rect.shrink(inset),
                                 theme.accent_warm,
                             );
                         }
@@ -1257,21 +1507,36 @@ impl<'a> SongsTable<'a> {
                         };
                         let title_x = vis_rect.min.x + cols.title_text_x;
 
-                        // A quality tag — HI-RES or LOSSLESS — sits at the right
-                        // end of the title column. The title is truncated to
-                        // leave room for it, so the two can never collide.
-                        let quality_label = track.quality_tag();
-                        let tag_w = quality_label
-                            .map(|label| quality_tag_width(&painter, label, theme))
-                            .unwrap_or(0.0);
-                        let title_max_w = (cols.title_text_w - tag_w - 8.0).max(30.0);
+                        // The quality tag left the title column. A 3 px marker
+                        // on the leading edge carries the same information
+                        // without eating a dozen characters of the title.
+                        if let Some(label) = track.quality_tag() {
+                            let marker = Rect::from_min_max(
+                                Pos2::new(vis_rect.min.x + 1.0, vis_rect.min.y + 4.0),
+                                Pos2::new(vis_rect.min.x + 4.0, vis_rect.max.y - 4.0),
+                            );
+                            painter.rect_filled(
+                                marker,
+                                CornerRadius::same(theme.radius_xs),
+                                quality_marker_color(label, theme),
+                            );
+                            let marker_resp = ui.interact(
+                                Rect::from_min_size(marker.min, Vec2::new(10.0, marker.height())),
+                                ui.make_persistent_id(("quality_marker", track.id)),
+                                Sense::hover(),
+                            );
+                            marker_resp.on_hover_text(match label {
+                                "HI-RES" => "Hi-Res audio — above 48 kHz or 1000 kbps",
+                                _ => "Lossless audio — no generation loss",
+                            });
+                        }
 
-                        let title_galley = layout_truncated(
+                        let title_galley = truncated_galley(
                             &painter,
                             track.title.clone(),
                             crate::theme::font(13.8),
                             active_text,
-                            title_max_w,
+                            cols.title_text_w,
                         );
                         let title_w_actual = title_galley.size().x;
                         painter.galley(
@@ -1281,7 +1546,10 @@ impl<'a> SongsTable<'a> {
                         );
 
                         // Equalizer Indicator if currently playing
-                        if is_active && is_playing {
+                        if is_active
+                            && is_playing
+                            && title_x + title_w_actual + 40.0 < vis_rect.max.x
+                        {
                             let eq_x = title_x + title_w_actual + 10.0;
                             let bar_heights = [6.0, 14.0, 11.0, 7.0];
                             for (b, &bh) in bar_heights.iter().enumerate() {
@@ -1298,20 +1566,8 @@ impl<'a> SongsTable<'a> {
                             }
                         }
 
-                        // The quality tag itself, right-aligned in the title
-                        // column.
-                        if let Some(label) = quality_label {
-                            paint_quality_tag(
-                                &painter,
-                                vis_rect.min.x + cols.title_x + cols.title_text_w + ART_INSET - 4.0,
-                                cy,
-                                label,
-                                theme,
-                            );
-                        }
-
                         // Column 3: Artist
-                        let artist_galley = layout_truncated(
+                        let artist_galley = truncated_galley(
                             &painter,
                             track.artist.clone(),
                             crate::theme::font(12.8),
@@ -1336,7 +1592,7 @@ impl<'a> SongsTable<'a> {
                         );
 
                         // Column 4: Album
-                        let album_galley = layout_truncated(
+                        let album_galley = truncated_galley(
                             &painter,
                             if track.album.is_empty() {
                                 "—".to_string()
@@ -1697,19 +1953,17 @@ fn render_grid_card(
     }
 
     if resp.hovered() {
-        p.circle_filled(
-            art_rect.center(),
-            18.0,
-            Color32::from_rgba_premultiplied(0, 0, 0, 160),
-        );
+        p.circle_filled(art_rect.center(), 18.0, theme.overlay_scrim);
         let play_icon_rect = Rect::from_center_size(art_rect.center(), Vec2::new(16.0, 16.0));
         crate::components::icons::draw_play(ui, play_icon_rect, Color32::WHITE, true);
     }
 
-    let title_g = p.layout_no_wrap(
+    let title_g = truncated_galley(
+        &p,
         track.title.clone(),
         crate::theme::font(12.8),
         theme.text_primary,
+        rect.width() - 16.0,
     );
     p.galley(
         Pos2::new(rect.min.x + 8.0, art_rect.max.y + 6.0),
@@ -1717,10 +1971,12 @@ fn render_grid_card(
         theme.text_primary,
     );
 
-    let artist_g = p.layout_no_wrap(
+    let artist_g = truncated_galley(
+        &p,
         track.artist.clone(),
         crate::theme::font(11.2),
         theme.text_muted,
+        rect.width() - 16.0,
     );
     p.galley(
         Pos2::new(rect.min.x + 8.0, art_rect.max.y + 22.0),
@@ -1822,6 +2078,17 @@ fn render_track_context_menu(
     ui.separator();
 
     if ui
+        .button("Reset Columns")
+        .on_hover_text("Restore the default Title / Artist / Album widths")
+        .clicked()
+    {
+        action.reset_columns = true;
+        ui.close();
+    }
+
+    ui.separator();
+
+    if ui
         .button(egui::RichText::new("Remove from Library").color(theme.destructive))
         .clicked()
     {
@@ -1835,4 +2102,87 @@ fn format_duration(seconds: f64) -> String {
     let mins = s / 60;
     let secs = s % 60;
     format!("{}:{:02}", mins, secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_columns_sum_to_one_and_favour_the_title() {
+        let widths = ColumnWidths::default().normalized();
+        let sum = widths.title + widths.artist + widths.album;
+        assert!((sum - 1.0).abs() < 1e-6, "sum was {sum}");
+        assert!(widths.title > widths.artist);
+        assert!(widths.title > widths.album);
+    }
+
+    #[test]
+    fn dragging_a_separator_keeps_the_shares_non_negative() {
+        let widths = ColumnWidths::default().normalized();
+        // Try to drag the title boundary far past the artist column. The
+        // artist's minimum share is what stops it.
+        let next = widths.drag(0, 5.0);
+        assert!(next.artist >= ColumnWidths::MIN - 1e-6);
+        let sum = next.title + next.artist + next.album;
+        assert!((sum - 1.0).abs() < 1e-6, "sum was {sum}");
+        // The other boundary did not move.
+        assert!((next.album - widths.album).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_corrupt_settings_file_falls_back_to_the_defaults() {
+        let broken = ColumnWidths {
+            title: f32::NAN,
+            artist: 0.0,
+            album: 0.0,
+        };
+        assert_eq!(broken.normalized(), ColumnWidths::default().normalized());
+    }
+
+    #[test]
+    fn an_extreme_saved_share_still_respects_every_minimum() {
+        // A hand-edited file can starve two columns completely. The oversized
+        // column gives up just enough for both to remain draggable.
+        let lopsided = ColumnWidths {
+            title: 0.98,
+            artist: 0.01,
+            album: 0.01,
+        }
+        .normalized();
+        assert!(lopsided.artist >= ColumnWidths::MIN - 1e-6);
+        assert!(lopsided.album >= ColumnWidths::MIN - 1e-6);
+        let sum = lopsided.title + lopsided.artist + lopsided.album;
+        assert!((sum - 1.0).abs() < 1e-6, "sum was {sum}");
+    }
+
+    #[test]
+    fn density_moves_between_the_two_documented_heights() {
+        assert_eq!(RowDensity::Comfortable.row_height(), 36.0);
+        assert_eq!(RowDensity::Compact.row_height(), 26.0);
+        assert_eq!(RowDensity::Comfortable.toggled(), RowDensity::Compact);
+        assert!(RowDensity::Compact.thumb_size() < RowDensity::Comfortable.thumb_size());
+    }
+
+    #[test]
+    fn table_columns_use_the_persisted_shares() {
+        let wide_title = ColumnWidths {
+            title: 0.70,
+            artist: 0.15,
+            album: 0.15,
+        };
+        let cols = TableColumns::new(1200.0, wide_title, RowDensity::Comfortable);
+        assert!(cols.title_text_w > cols.artist_w);
+        assert!(cols.artist_x > cols.title_x);
+        assert!(cols.album_x > cols.artist_x);
+    }
+
+    #[test]
+    fn compact_rows_give_the_title_the_space_the_smaller_artwork_frees() {
+        let widths = ColumnWidths::default();
+        let comfortable = TableColumns::new(1200.0, widths, RowDensity::Comfortable);
+        let compact = TableColumns::new(1200.0, widths, RowDensity::Compact);
+        assert!(compact.title_text_w > comfortable.title_text_w);
+        assert!(compact.title_text_x < comfortable.title_text_x);
+    }
 }

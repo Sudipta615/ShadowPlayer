@@ -148,7 +148,10 @@ fn render_manual_search(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
         .fill(theme.bg_input)
         .stroke(Stroke::new(1.0, theme.border_input))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(12, 7))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_xl as i8,
+            theme.space_md as i8,
+        ))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
@@ -523,7 +526,10 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
         .fill(theme.bg_pill.linear_multiply(0.8))
         .stroke(Stroke::new(1.2, theme.accent))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(18, 14));
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_4xl as i8,
+            theme.space_2xl as i8,
+        ));
 
     inspect_frame.show(ui, |ui| {
         let backend_sentence = exclusive_backend_sentence();
@@ -1779,7 +1785,10 @@ fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str, theme: &Theme) {
                 egui::Frame::NONE
                     .fill(theme.accent.linear_multiply(0.18))
                     .corner_radius(CornerRadius::same(theme.radius_sm))
-                    .inner_margin(egui::Margin::symmetric(7, 2))
+                    .inner_margin(egui::Margin::symmetric(
+                        theme.space_md as i8,
+                        theme.space_xxs as i8,
+                    ))
                     .show(ui, |ui| {
                         ui.label(
                             egui::RichText::new("TRY IT")
@@ -1814,7 +1823,10 @@ fn feature_pillar_card(ui: &mut egui::Ui, title: &str, desc: &str, theme: &Theme
         .fill(theme.bg_pill.linear_multiply(0.7))
         .stroke(Stroke::new(1.0, theme.border_subtle))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(14, 12));
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_2xl as i8,
+            theme.space_xl as i8,
+        ));
 
     frame.show(ui, |ui| {
         ui.vertical(|ui| {
@@ -1920,7 +1932,10 @@ fn badge(ui: &mut egui::Ui, text: impl Into<String>, bg: Color32, fg: Color32, t
     egui::Frame::NONE
         .fill(bg)
         .corner_radius(CornerRadius::same(theme.radius_sm))
-        .inner_margin(egui::Margin::symmetric(7, 2))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_md as i8,
+            theme.space_xxs as i8,
+        ))
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(text.into())
@@ -1936,7 +1951,10 @@ fn spec_badge(ui: &mut egui::Ui, label: &str, value: &str, color: Color32, theme
         .fill(color.linear_multiply(0.15))
         .stroke(Stroke::new(1.0, color.linear_multiply(0.4)))
         .corner_radius(CornerRadius::same(theme.radius_md))
-        .inner_margin(egui::Margin::symmetric(10, 6))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_lg as i8,
+            theme.space_sm as i8,
+        ))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);

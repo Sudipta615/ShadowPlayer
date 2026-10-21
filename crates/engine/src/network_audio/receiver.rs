@@ -39,7 +39,7 @@
 //! - **The socket read is on another thread**, so a dead multicast group
 //!   costs that thread a timeout, never the engine tick.
 //! - **A short ring read is padded with silence**, never a stall and never
-//!   [`DecodeError::EndOfStream`] — which the decode loop would interpret as
+//!   `DecodeError::EndOfStream` — which the decode loop would interpret as
 //!   "track finished" and advance the playlist. A network stream has no end.
 //! - **Packet loss inside the stream is concealed by the jitter buffer's PLC**
 //!   (exponential decay from the last valid frame), before it ever reaches

@@ -79,7 +79,7 @@
 //!   role, [`SpatialBedStore`] (§13.1).
 //! - `field.rs` — [`SpatialField`] (diffuse content) encoded into the
 //!   ambisonic bus + decoded with `√N` compensation, per-speaker
-//!   decorrelation ([`AmbisonicFieldMixer`], §13.3, §33).
+//!   decorrelation (`AmbisonicFieldMixer`, §13.3, §33).
 //! - `ambisonic.rs` — the FOA core: [`sh_foa`] SH basis, plane-wave
 //!   encoder, order-1 bus rotation, [`DecoderPolicy`] (Basic / Max-rE),
 //!   [`AmbisonicDecoder`], and the [`AmbisonicRenderer`] (Part VI §32–37,

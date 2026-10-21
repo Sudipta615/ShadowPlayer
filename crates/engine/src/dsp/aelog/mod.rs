@@ -21,7 +21,7 @@
 //! ```
 //!
 //! Determinism contract: the log stores the *commands*, not their outcomes.
-//! Replaying applies them in order against a fresh [`Timeline`], so the
+//! Replaying applies them in order against a fresh `Timeline`, so the
 //! fired events and end clock state are pure functions of the log. Two
 //! identical recorder sessions serialize to byte-equal logs.
 //!

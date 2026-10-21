@@ -4,8 +4,8 @@
 //! by the pure-Rust [`ape-decoder`](https://crates.io/crates/ape-decoder)
 //! crate (range coder + per-compression-level predictor + CRC-verified frame
 //! reconstruction). This module is an **engine-facing adapter**: it wraps that
-//! decoder and exposes the same interface as [`SymphoniaDecoder`] and
-//! [`DsdDecoder`] so `.ape` / `.mac` files flow through the unified
+//! decoder and exposes the same interface as `SymphoniaDecoder` and
+//! `DsdDecoder` so `.ape` / `.mac` files flow through the unified
 //! [`crate::decode::Decoder`] dispatch.
 //!
 //! ## Scope

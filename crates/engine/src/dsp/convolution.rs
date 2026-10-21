@@ -1319,7 +1319,7 @@ impl ConvolutionEngine {
     }
 
     /// The sample rate the impulse-response file declared, when one was
-    /// loaded. `None` until a file load happens; see [`Self::ir_loaded_sample_rate`]
+    /// loaded. `None` until a file load happens; see `Self::ir_loaded_sample_rate`
     /// for the rate the partitions are valid for.
     pub fn ir_source_sample_rate(&self) -> Option<f32> {
         self.ir_source_sample_rate

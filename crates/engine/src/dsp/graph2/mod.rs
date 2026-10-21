@@ -227,7 +227,7 @@ impl Graph2 {
         self.add_acoustic_impl(name, position, None)
     }
 
-    /// A **scene-addressed** room-response node: like [`add_acoustic`], but
+    /// A **scene-addressed** room-response node: like `add_acoustic`, but
     /// the node renders from the executor's named scene registry entry for
     /// `scene_id` (`OfflineExecutor::set_scene`) rather than the global
     /// scene. A single graph can thereby render **distinct room responses
@@ -259,12 +259,12 @@ impl Graph2 {
     /// the mono `samples` one-shot (silence after the end) or looping on
     /// its single output port. When an external track is attached to the
     /// executor (`OfflineExecutor::set_external_input`) that track plays
-    /// instead. See [`add_buffer_channels`] for multi-channel clips.
+    /// instead. See `add_buffer_channels` for multi-channel clips.
     pub fn add_buffer(&mut self, name: &str, samples: Vec<f32>, looping: bool) -> NodeId {
         self.add_buffer_impl(name, None, vec![samples], looping)
     }
 
-    /// A **clip-addressed** recorded-clip source: like [`add_buffer`], but
+    /// A **clip-addressed** recorded-clip source: like `add_buffer`, but
     /// the node carries clip address `clip`, so the executor's per-clip
     /// track registered for that name
     /// (`OfflineExecutor::set_external_clip`) feeds *this* node — the
@@ -296,7 +296,7 @@ impl Graph2 {
     }
 
     /// A **clip-addressed multi-channel** recorded-clip source: like
-    /// [`add_buffer_channels`], but the node carries clip address `clip`
+    /// `add_buffer_channels`, but the node carries clip address `clip`
     /// so the executor's per-clip track (`set_external_clip`) feeds it.
     pub fn add_buffer_clip_channels(
         &mut self,
@@ -369,15 +369,15 @@ impl Graph2 {
     /// (`OfflineExecutor::set_hrtf_dataset`) — bilinearly interpolated at the
     /// source `azimuth_deg` / `elevation_deg` — instead of the classic
     /// hand-authored `add_hrtf` tabs. Renders with (and reports)
-    /// [`MAX_HRTF_TAPS`](crate::spatial::hrtf::MAX_HRTF_TAPS) taps, so a
+    /// [`MAX_HRTF_TAPS`] taps, so a
     /// graph-based binaural branch uses real head-related responses and
     /// aligns exactly like a `Delay` of that length.
     pub fn add_hrtf_dataset(&mut self, name: &str, azimuth_deg: f32, elevation_deg: f32) -> NodeId {
         self.add_hrtf_dataset_with_taps(name, azimuth_deg, elevation_deg, MAX_HRTF_TAPS as u32)
     }
 
-    /// [`add_hrtf_dataset`] with an explicit IR length (the node's reported
-    /// taps). Pass the dataset's own [`HrtfDataset::taps`] to render the
+    /// `add_hrtf_dataset` with an explicit IR length (the node's reported
+    /// taps). Pass the dataset's own `HrtfDataset::taps` to render the
     /// measured HRIRs without zero-padding.
     pub fn add_hrtf_dataset_with_taps(
         &mut self,
@@ -411,7 +411,7 @@ impl Graph2 {
         self.add_resampler_with_quality(name, ratio, RESAMPLER_DEFAULT_QUALITY)
     }
 
-    /// [`add_resampler`] with an explicit filter half-span (the node's
+    /// `add_resampler` with an explicit filter half-span (the node's
     /// reported taps). Higher `quality` → steeper anti-image roll-off.
     pub fn add_resampler_with_quality(&mut self, name: &str, ratio: f32, quality: u32) -> NodeId {
         self.add_node(

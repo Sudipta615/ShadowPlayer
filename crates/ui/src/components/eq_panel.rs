@@ -556,7 +556,10 @@ pub fn show_eq_panel(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_xl))
-                .inner_margin(Margin::symmetric(20, 16)),
+                .inner_margin(Margin::symmetric(
+                    theme.space_5xl as i8,
+                    theme.space_3xl as i8,
+                )),
         )
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
@@ -763,7 +766,10 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.border_card))
                     .corner_radius(CornerRadius::same(theme.radius_lg))
-                    .inner_margin(Margin::symmetric(5, 4))
+                    .inner_margin(Margin::symmetric(
+                        theme.space_sm as i8,
+                        theme.space_xs as i8,
+                    ))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(spacing, 0.0);
@@ -1025,7 +1031,10 @@ fn render_graphic_eq_tab(
             .fill(theme.bg_card_hover)
             .stroke(Stroke::new(1.0, theme.accent_highlight))
             .corner_radius(CornerRadius::same(theme.radius_md))
-            .inner_margin(Margin::symmetric(12, 6))
+            .inner_margin(Margin::symmetric(
+                theme.space_xl as i8,
+                theme.space_sm as i8,
+            ))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
@@ -1337,12 +1346,7 @@ fn render_spline_eq_canvas(
         painter.circle_filled(
             pos,
             halo_r,
-            Color32::from_rgba_unmultiplied(
-                theme.accent_highlight.r(),
-                theme.accent_highlight.g(),
-                theme.accent_highlight.b(),
-                if is_hovered { 90 } else { 45 },
-            ),
+            crate::theme::with_alpha(theme.accent_highlight, if is_hovered { 90 } else { 45 }),
         );
 
         // Center Node
@@ -1725,7 +1729,7 @@ fn render_advanced_tab(
             .fill(theme.bg_card_hover)
             .stroke(Stroke::new(1.0, theme.border_card))
             .corner_radius(CornerRadius::same(theme.radius_lg))
-            .inner_margin(Margin::symmetric(16, 12))
+            .inner_margin(Margin::symmetric(theme.space_3xl as i8, theme.space_xl as i8))
             .show(ui, |ui| {
                 ui.set_width(avail_w - 32.0);
                 ui.horizontal(|ui| {
@@ -1806,7 +1810,10 @@ fn render_advanced_toggle_card(
             },
         ))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(Margin::symmetric(14, 12))
+        .inner_margin(Margin::symmetric(
+            theme.space_2xl as i8,
+            theme.space_xl as i8,
+        ))
         .show(ui, |ui| {
             ui.set_width(width - 28.0);
             ui.vertical(|ui| {
@@ -1845,7 +1852,10 @@ fn render_advanced_toggle_card(
                     egui::Frame::NONE
                         .fill(badge_bg)
                         .corner_radius(CornerRadius::same(theme.radius_sm))
-                        .inner_margin(Margin::symmetric(6, 2))
+                        .inner_margin(Margin::symmetric(
+                            theme.space_sm as i8,
+                            theme.space_xxs as i8,
+                        ))
                         .show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new(badge_text)
@@ -1886,7 +1896,10 @@ fn render_slider_card(
         .fill(theme.bg_card_hover)
         .stroke(Stroke::new(1.0, theme.border_card))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(Margin::symmetric(14, 10))
+        .inner_margin(Margin::symmetric(
+            theme.space_2xl as i8,
+            theme.space_lg as i8,
+        ))
         .show(ui, |ui| {
             ui.set_width(width - 28.0);
             ui.vertical(|ui| {
@@ -1986,7 +1999,10 @@ fn render_footer_controls(
             .fill(theme.bg_card_hover)
             .stroke(Stroke::new(1.0, theme.border_card))
             .corner_radius(CornerRadius::same(theme.radius_lg))
-            .inner_margin(Margin::symmetric(14, 8))
+            .inner_margin(Margin::symmetric(
+                theme.space_2xl as i8,
+                theme.space_md as i8,
+            ))
             .show(ui, |ui| {
                 ui.set_width(preamp_card_w - 28.0);
                 ui.vertical(|ui| {
@@ -2296,10 +2312,7 @@ fn draw_vertical_gradient_line(
         let y0 = start.y + t0 * total_h;
         let y1 = start.y + t1 * total_h;
 
-        let r = (top_col.r() as f32 * (1.0 - t0) + bottom_col.r() as f32 * t0) as u8;
-        let g = (top_col.g() as f32 * (1.0 - t0) + bottom_col.g() as f32 * t0) as u8;
-        let b = (top_col.b() as f32 * (1.0 - t0) + bottom_col.b() as f32 * t0) as u8;
-        let col = Color32::from_rgb(r, g, b);
+        let col = crate::theme::lerp_color(top_col, bottom_col, t0);
 
         painter.line_segment(
             [Pos2::new(start.x, y0), Pos2::new(start.x, y1)],

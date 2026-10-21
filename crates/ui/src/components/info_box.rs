@@ -162,9 +162,12 @@ pub fn render_info_icon_button(
                         offset: [0, 8],
                         blur: 20,
                         spread: 0,
-                        color: Color32::from_black_alpha(160),
+                        color: theme.shadow,
                     })
-                    .inner_margin(Margin::symmetric(14, 12));
+                    .inner_margin(Margin::symmetric(
+                        theme.space_2xl as i8,
+                        theme.space_xl as i8,
+                    ));
 
                 let frame_resp = frame.show(ui, |ui| {
                     ui.set_width(box_width);
@@ -269,7 +272,10 @@ pub fn render_info_icon_button(
                             .fill(theme.bg_card_hover)
                             .stroke(Stroke::new(1.0, theme.border_subtle))
                             .corner_radius(CornerRadius::same(theme.radius_md))
-                            .inner_margin(Margin::symmetric(10, 6))
+                            .inner_margin(Margin::symmetric(
+                                theme.space_lg as i8,
+                                theme.space_sm as i8,
+                            ))
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
@@ -296,7 +302,10 @@ pub fn render_info_icon_button(
                             .fill(theme.accent.linear_multiply(0.12))
                             .stroke(Stroke::new(1.0, theme.accent.linear_multiply(0.3)))
                             .corner_radius(CornerRadius::same(theme.radius_md))
-                            .inner_margin(Margin::symmetric(10, 6))
+                            .inner_margin(Margin::symmetric(
+                                theme.space_lg as i8,
+                                theme.space_sm as i8,
+                            ))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);

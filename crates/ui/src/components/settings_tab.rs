@@ -1145,7 +1145,7 @@ fn render_settings_search(ui: &mut egui::Ui, state: &mut SettingsTabState, theme
         .fill(theme.bg_input)
         .stroke(Stroke::new(1.0, theme.border_input))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(12, 7))
+        .inner_margin(egui::Margin::symmetric(theme.space_xl as i8, theme.space_md as i8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
@@ -1235,7 +1235,10 @@ fn render_settings_search_results(ui: &mut egui::Ui, state: &mut SettingsTabStat
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.border_subtle))
                     .corner_radius(CornerRadius::same(theme.radius_md))
-                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .inner_margin(egui::Margin::symmetric(
+                        theme.space_xl as i8,
+                        theme.space_md as i8,
+                    ))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
@@ -1516,7 +1519,10 @@ fn render_playback_category(
                 .fill(theme.bg_pill.linear_multiply(0.6))
                 .stroke(Stroke::new(1.0, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(egui::Margin::symmetric(14, 12));
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_2xl as i8,
+                    theme.space_xl as i8,
+                ));
 
             sub_frame.show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
@@ -1704,7 +1710,10 @@ fn render_output_category(
         .fill(bp_fill)
         .stroke(Stroke::new(1.2, bp_border))
         .corner_radius(CornerRadius::same(theme.radius_xl))
-        .inner_margin(egui::Margin::symmetric(18, 16));
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_4xl as i8,
+            theme.space_3xl as i8,
+        ));
 
     bp_frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
@@ -2159,7 +2168,10 @@ fn render_spatial_category(
                 .fill(theme.bg_pill.linear_multiply(0.6))
                 .stroke(Stroke::new(1.0, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(egui::Margin::symmetric(14, 12));
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_2xl as i8,
+                    theme.space_xl as i8,
+                ));
 
             room_grid.show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
@@ -3671,7 +3683,10 @@ pub fn setting_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(
         .fill(theme.bg_card)
         .stroke(Stroke::new(1.0, theme.border_card))
         .corner_radius(CornerRadius::same(theme.radius_xl))
-        .inner_margin(egui::Margin::symmetric(20, 16));
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_5xl as i8,
+            theme.space_3xl as i8,
+        ));
 
     card_frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -3739,7 +3754,10 @@ pub fn card_header_with_info(
                         .fill(bg)
                         .stroke(Stroke::new(1.0, fg.linear_multiply(0.4)))
                         .corner_radius(CornerRadius::same(theme.radius_sm))
-                        .inner_margin(egui::Margin::symmetric(7, 2))
+                        .inner_margin(egui::Margin::symmetric(
+                            theme.space_md as i8,
+                            theme.space_xxs as i8,
+                        ))
                         .show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new(badge_text)
@@ -3958,7 +3976,10 @@ fn badge_label(ui: &mut egui::Ui, text: impl Into<String>, theme: &Theme) {
         .fill(theme.bg_pill)
         .stroke(Stroke::new(1.0, theme.border_card))
         .corner_radius(CornerRadius::same(theme.radius_sm))
-        .inner_margin(egui::Margin::symmetric(8, 3))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_md as i8,
+            theme.space_xxs as i8,
+        ))
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(t)

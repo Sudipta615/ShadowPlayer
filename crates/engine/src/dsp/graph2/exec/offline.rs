@@ -1,6 +1,6 @@
 //! The offline executor's node ops (v3.50 — moved from `exec.rs`).
 //!
-//! One `run_*` method per [`NodeKind`], dispatched from
+//! One `run_*` method per `NodeKind`, dispatched from
 //! [`OfflineExecutor::process_block`]. The math each op runs is the shared
 //! kernels in [`super::ops`] (gain, mix, delay, source, convolution,
 //! IR-taps), so the realtime executor (`crate::dsp::graph2::rt`) renders

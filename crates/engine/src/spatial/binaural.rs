@@ -37,7 +37,7 @@
 //!
 //! - Elevation cue: the analytic head model supplies the *amplitude-based*
 //!   elevation cue — a pinna [`ElevationNotch`] whose center and depth grow
-//!   with elevation ([`elevation_notch_hz`] / [`elevation_notch_depth_db`];
+//!   with elevation (`elevation_notch_hz` / `elevation_notch_depth_db`;
 //!   zero-depth at 0° so a horizontal source passes through). There is no
 //!   elevation-dependent ITD (the Woodworth delay is azimuth-only) and no
 //!   `cos(elevation)` level term, so an *analytic* source overhead keeps its

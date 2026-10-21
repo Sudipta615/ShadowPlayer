@@ -12,7 +12,7 @@
 //! the sweep orchestration) was already platform-neutral and only ever needed
 //! something that fills a ring with interleaved `f32`.
 //!
-//! So the seam is [`SystemCapture`]: a source of interleaved `f32` frames in
+//! So the seam is `SystemCapture`: a source of interleaved `f32` frames in
 //! a shared SPSC ring. Everything above it — `handle_capture_start`, the tick
 //! drain, `MeasureRoom` — is written once against the trait and works on every
 //! platform that has any implementation.
@@ -21,7 +21,7 @@
 //!
 //! | Kind | Platforms | Source |
 //! |---|---|---|
-//! | [`CpalInputCapture`] | Linux, macOS, Windows | a real microphone / line-in / interface input via cpal |
+//! | `CpalInputCapture` | Linux, macOS, Windows | a real microphone / line-in / interface input via cpal |
 //! | `WasapiLoopbackCapture` | Windows (`wasapi-native`) | the system mix ("what you hear") |
 //!
 //! `cpal` is not an optional extra — it is pulled in unconditionally by the

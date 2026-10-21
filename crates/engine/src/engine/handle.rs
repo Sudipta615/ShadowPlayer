@@ -19,7 +19,7 @@ use crate::engine::GraphBuildStats;
 use crate::events::{EngineEvent, OutputEvent};
 use crate::source::AudioSource;
 
-/// A thread-safe, cloneable client handle to an active [`AudioEngine`].
+/// A thread-safe, cloneable client handle to an active `AudioEngine`.
 #[derive(Clone)]
 pub struct EngineHandle {
     cmd_tx: Sender<EngineCommand>,
@@ -260,7 +260,7 @@ impl EngineHandle {
     /// every file a user opens.
     ///
     /// `pregap` decides where a track's `INDEX 00` pre-gap goes — see
-    /// [`PregapPolicy`](crate::engine::cue_split::PregapPolicy). The default
+    /// [`PregapPolicy`]. The default
     /// assigns it to its own track, which matches the common convention.
     ///
     /// Fire-and-forget, like every other queue mutation: the resulting length
@@ -279,9 +279,9 @@ impl EngineHandle {
     /// owns it, so the read happens on the control thread rather than here.
     ///
     /// To learn whether it worked, listen for events. A successful load emits
-    /// [`EngineEvent::PlaylistChanged`](crate::events::EngineEvent::PlaylistChanged);
+    /// [`EngineEvent::PlaylistChanged`];
     /// a failure emits
-    /// [`EngineEvent::PlaylistLoadFailed`](crate::events::EngineEvent::PlaylistLoadFailed)
+    /// [`EngineEvent::PlaylistLoadFailed`]
     /// and leaves the queue **unchanged**, so a malformed file cannot wipe a
     /// queue the user built up.
     ///
@@ -302,7 +302,7 @@ impl EngineHandle {
     ///
     /// A queue holding buffered or in-memory audio is refused rather than
     /// written with those entries silently dropped; the failure arrives as
-    /// [`EngineEvent::PlaylistLoadFailed`](crate::events::EngineEvent::PlaylistLoadFailed).
+    /// [`EngineEvent::PlaylistLoadFailed`].
     pub fn save_playlist_file(&self, path: impl Into<PathBuf>) {
         let _ = self.send_command(EngineCommand::SavePlaylistFile(path.into()));
     }
@@ -1096,7 +1096,7 @@ impl EngineHandle {
     /// Ask the engine to enumerate every input device it can capture from.
     ///
     /// The list arrives as an
-    /// [`EngineEvent::InputDeviceList`](crate::events::EngineEvent::InputDeviceList)
+    /// [`EngineEvent::InputDeviceList`]
     /// event. An empty list means the host has no capture device at all.
     pub fn enumerate_input_devices(&self) {
         let _ = self.send_command(EngineCommand::EnumerateInputDevices);
@@ -1174,7 +1174,7 @@ impl EngineHandle {
         s
     }
 
-    /// Read back the live [`EngineConfig`].
+    /// Read back the live `EngineConfig`.
     ///
     /// Added in 0.9.0. [`Self::settings`] is a curated read-back covering the
     /// controls a UI draws; this returns the engine's configuration verbatim.
@@ -1209,7 +1209,7 @@ impl EngineHandle {
     /// shared telemetry snapshot on the tick cadence: a lock-free, control-plane
     /// read of the *real* generation. The engine has not ticked yet this is `0`;
     /// an observer that needs a value valid at this instant must tick the
-    /// engine (or read [`AudioEngine::graph_generation`]).
+    /// engine (or read `AudioEngine::graph_generation`).
     pub fn graph_generation(&self) -> u64 {
         self.playback_info.load().graph_generation
     }

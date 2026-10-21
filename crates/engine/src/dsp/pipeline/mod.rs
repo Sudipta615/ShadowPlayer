@@ -10,7 +10,7 @@
 //!
 //! The node-based arena (`DspGraph`, a crate-internal of
 //! `dsp::graph2::prod`, previously the public `dsp::graph`) generalized the
-//! pipeline through the [`DspNode`] trait: planar audio, explicit capability
+//! pipeline through the `DspNode` trait: planar audio, explicit capability
 //! introspection per node (`name, channel_support, precision, stateful,
 //! realtime_safe, bit_perfect_compatible, sample_rate_sensitive`), and
 //! block-level processing. The engine's hot path routes through it via the
@@ -673,7 +673,7 @@ impl DspPipeline {
     }
 
     /// Create a builder for constructing a [`DspPipeline`] without an
-    /// [`EngineConfig`](crate::engine::EngineConfig). The host sets each
+    /// `EngineConfig`. The host sets each
     /// stage explicitly and calls [`DspPipelineBuilder::build`].
     pub fn builder(sample_rate: f32) -> DspPipelineBuilder {
         DspPipelineBuilder::new(sample_rate)
@@ -696,7 +696,7 @@ impl DspPipeline {
 // ── DspPipelineBuilder ──────────────────────────────────────────────────────
 
 /// Build a [`DspPipeline`] piecemeal — the host sets each stage explicitly
-/// instead of passing an [`EngineConfig`](crate::engine::EngineConfig).
+/// instead of passing an `EngineConfig`.
 ///
 /// # Example
 ///

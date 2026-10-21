@@ -8,6 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-22
+
+*Released with audio-engine 1.5.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **The full-screen Now Playing is a real player.** Previous, play/pause and next are SVG icons from
+  the app's icon set instead of Unicode media symbols that Inter cannot draw; elapsed and remaining
+  times sit beside the seek bar, the transport is pinned to the bottom of the viewport, and the
+  lyrics panel moves to the right of the artwork so the group uses the whole window.
+- **The song table has a column model.** Title gets the largest share (42 %, against 26 % each for
+  artist and album), the header separators drag, and the widths persist across restarts. A density
+  toggle switches between 36 px comfortable and 26 px compact rows, the quality chip is now a 3 px
+  edge marker with a tooltip instead of consuming title width, and the context menu can reset the
+  columns.
+- **A shared text-truncation helper.** `components::text::truncated_galley` is now the one way the
+  app lays out a single line: album, artist, genre, folder and queue titles elide with `…` instead of
+  hard-clipping at the card edge.
+- **A font-coverage guard.** `crates/ui/tests/font_coverage.rs` parses the cmap tables of both bundled
+  Inter faces, scans user-facing string literals, and fails with the file, line and offending
+  character when a glyph is missing. It also verifies every SVG referenced by `icons.rs`.
+- **Theme and spacing contracts for future skins.** `crates/ui/tests/theme_purity.rs` rejects colour
+  literals outside `theme.rs`; `crates/ui/tests/spacing_scale.rs` rejects literal radii and margins.
+  `docs/THEMING.md` records the token names, WCAG contrast bars and asset requirements a skin must
+  satisfy. Translucent fades now go through `theme::with_alpha`.
+
+### Changed
+- **The Listening History modal measures against its frame, not a nested layout.** The period buttons
+  and the "First scrobble …" date are siblings with explicit widths, and both bar charts allocate
+  the body's inner width, so nothing is clipped at 640, 900 or 1280 px. The headline tiles shrink to
+  fit a 640 px window instead of widening the body.
+- **Documentation claims are tested.** `crates/ui/tests/docs_truth.rs` checks the README shortcut
+  table, limitations list, test commands and engine badge against their sources, the manual's live
+  backend/codec/AutoEQ lists against the engine, and the newest CHANGELOG entry against the manifests.
+
 ## [0.11.0] - 2026-10-21
 
 *Released with audio-engine 1.4.0. The player and the engine are versioned separately and released

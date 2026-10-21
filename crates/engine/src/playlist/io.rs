@@ -36,7 +36,7 @@
 //! buffered them is worse than one that refuses to save.
 //!
 //! Repeat mode and shuffle are likewise not in any of the three formats, so
-//! they are not persisted. [`Playlist::to_format`] / [`Playlist::from_format`]
+//! they are not persisted. `Playlist::to_format` / `Playlist::from_format`
 //! carry them explicitly in memory; the file round-trip covers tracks only.
 //!
 //! # Security note

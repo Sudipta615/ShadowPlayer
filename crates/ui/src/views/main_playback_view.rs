@@ -30,6 +30,8 @@ pub struct MainViewAction {
     pub search_query: Option<String>,
     /// The loudness inspector was requested.
     pub open_loudness: bool,
+    /// Table preferences changed and should be written to the settings store.
+    pub settings_dirty: bool,
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
@@ -335,6 +337,8 @@ pub fn render_main_playback_view(
         sort_order: app_state.current_sort_order,
         is_grid_view: app_state.is_grid_view,
         quick_filter: library_state.quick_filter,
+        column_widths: app_state.column_widths,
+        density: app_state.row_density,
         selected_track_ids: &mut library_state.selected_track_ids,
         last_clicked_index: &mut library_state.last_clicked_index,
         artwork: artwork_service,
@@ -357,6 +361,24 @@ pub fn render_main_playback_view(
         library_state.quick_filter = f;
         // The displayed list is keyed on the filter, so a refresh rebuilds it.
         view_action.needs_reload = true;
+    }
+
+    // Column dragging updates the live layout immediately, but the settings
+    // store is only written when the drag ends: a database write per frame
+    // would be wasteful and would make the drag stutter.
+    if let Some(widths) = table_action.column_widths_changed {
+        app_state.column_widths = widths;
+    }
+    if table_action.column_drag_finished {
+        view_action.settings_dirty = true;
+    }
+    if table_action.toggle_density {
+        app_state.row_density = app_state.row_density.toggled();
+        view_action.settings_dirty = true;
+    }
+    if table_action.reset_columns {
+        app_state.column_widths = Default::default();
+        view_action.settings_dirty = true;
     }
 
     if let Some(order) = table_action.sort_order_changed {

@@ -240,11 +240,11 @@ pub fn compute_correction_filter(
 
 /// Realtime-safe room correction processor.
 ///
-/// Wraps [`dsp::convolution::ConvolutionEngine`], which applies the
+/// Wraps `dsp::convolution::ConvolutionEngine`, which applies the
 /// pre-computed impulse response using partitioned overlap-add convolution.
 ///
 /// Pre-allocates all FFT buffers at [`prepare`](Self::prepare) time on the
-/// control thread. The audio callback [`process_block`](Self::process_block)
+/// control thread. The audio callback `process_block`
 /// is strictly allocation-free and lock-free.
 pub struct RoomCorrectionProcessor {
     engine: ConvolutionEngine,

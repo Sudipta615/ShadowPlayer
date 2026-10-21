@@ -114,7 +114,7 @@ impl NullOutput {
     /// Construct a null sink over `buffer`.
     ///
     /// `target_sample_rate` / `target_channels` of `0` fall back to 48 kHz
-    /// stereo. `tail_frames` of `0` uses [`DEFAULT_TAIL_FRAMES`].
+    /// stereo. `tail_frames` of `0` uses `DEFAULT_TAIL_FRAMES`.
     pub fn new(
         buffer: Arc<FixedFrameBuffer>,
         target_sample_rate: u32,

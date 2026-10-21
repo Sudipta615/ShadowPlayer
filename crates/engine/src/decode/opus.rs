@@ -253,7 +253,7 @@ impl OpusSource {
     }
 
     /// Content sniff on a file: true when the first Ogg packet is an
-    /// OpusHead. [`Self::probe_reader`] is the reader-based form.
+    /// OpusHead. `Self::probe_reader` is the reader-based form.
     pub fn probe(path: &Path) -> bool {
         let Ok(file) = File::open(path) else {
             return false;
@@ -821,7 +821,7 @@ pub fn extract_loudness_metadata(path: &Path) -> crate::dsp::LoudnessMetadata {
 
 /// Extract editorial tags and duration from OpusTags.
 ///
-/// Returns the same [`ExtractedTags`] as Symphonia's extractor so the
+/// Returns the same `ExtractedTags` as Symphonia's extractor so the
 /// `decode::extract_track_metadata` dispatcher can route by extension. Opus
 /// comment fields are plain key/value strings, so the album/genre/date/track
 /// numbers are read from the conventional Vorbis-comment keys rather than from

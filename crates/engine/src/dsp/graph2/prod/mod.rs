@@ -3,7 +3,7 @@
 //! This module is the seam between Graph 2.0's typed-port topology and the
 //! production node arena: the **one node implementation** the engine runs
 //! (mix bus, aux, correction, EQ, … — the full 18-slot arena) lives in
-//! [`arena`]; the plan source is Graph 2.0. Every generation this engine
+//! `arena`; the plan source is Graph 2.0. Every generation this engine
 //! builds carries plans *lowered* from a real Graph2 topology:
 //!
 //! ```text
@@ -18,7 +18,7 @@
 //!
 //! A `ChainRequest` is *what chain to build*; [`ChainRequest::canonical`] is
 //! the default, so the constant path and the plan-driven path are the same code
-//! with a different argument rather than two paths. [`EngineConfig`] alone does
+//! with a different argument rather than two paths. `EngineConfig` alone does
 //! not appear in the diagram on purpose: it configures the nodes, but the chain
 //! those nodes form is a Graph2 compile from a request.
 //!
@@ -31,7 +31,7 @@
 //! ## (v4.0.0) — legacy `dsp::graph` removal
 //!
 //! The former public `dsp::graph` module is gone: its arena, plan, nodes,
-//! and handlers moved here as the crate-private [`arena`] (the single node
+//! and handlers moved here as the crate-private `arena` (the single node
 //! implementation, now an internal of `graph2::prod`), the hand-authored
 //! plan source was deleted (Graph2 lowering is the only plan source), and
 //! The shadow mode was removed with its `graph2_shadow_verify`

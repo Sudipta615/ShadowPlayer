@@ -59,7 +59,7 @@ pub fn show_bit_perfect_modal(
                     .fill(banner_color)
                     .stroke(Stroke::new(1.0_f32, banner_stroke))
                     .corner_radius(CornerRadius::same(theme.radius_lg))
-                    .inner_margin(egui::Margin::symmetric(14, 12))
+                    .inner_margin(egui::Margin::symmetric(theme.space_2xl as i8, theme.space_xl as i8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
@@ -226,7 +226,7 @@ pub fn show_bit_perfect_modal(
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0_f32, theme.border_subtle))
                     .corner_radius(CornerRadius::same(theme.radius_md))
-                    .inner_margin(egui::Margin::symmetric(14, 10));
+                    .inner_margin(egui::Margin::symmetric(theme.space_2xl as i8, theme.space_lg as i8));
 
                 table_frame.show(ui, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);

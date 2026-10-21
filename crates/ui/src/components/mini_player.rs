@@ -59,7 +59,7 @@ impl MiniPlayer<'_> {
             painter.rect_filled(
                 art_rect,
                 CornerRadius::same(self.theme.radius_md),
-                Color32::BLACK,
+                self.theme.bg_pill,
             );
             egui::Image::new(texture)
                 .corner_radius(CornerRadius::same(self.theme.radius_md))

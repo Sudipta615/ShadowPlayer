@@ -54,7 +54,7 @@ impl<'a> GenresView<'a> {
                 .fill(self.theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, self.theme.border_card))
                 .corner_radius(CornerRadius::same(self.theme.radius_lg))
-                .inner_margin(egui::Margin::same(16));
+                .inner_margin(egui::Margin::same(self.theme.space_3xl as i8));
 
             header_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {

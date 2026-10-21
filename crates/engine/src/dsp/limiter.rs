@@ -76,7 +76,7 @@ pub enum TruePeakMode {
     /// 400 MACs per sample per channel and adds
     /// `true_peak::detector_delay_samples()` = 50 samples of latency, which
     /// the limiter's own delay line already accounts for
-    /// ([`LookaheadLimiter::audio_delay_samples`], published as
+    /// (`LookaheadLimiter::audio_delay_samples`, published as
     /// [`LookaheadLimiter::latency_ms`]) and which the latency policy reserves
     /// separately (`engine_plan::limiter_group_delay_ms`).
     #[default]
@@ -911,7 +911,7 @@ impl LookaheadLimiter {
 
     /// Flush the lookahead delay tail.
     ///
-    /// The audio path is delayed by [`Self::audio_delay_samples`] input
+    /// The audio path is delayed by `Self::audio_delay_samples` input
     /// samples, so after the final real sample has been fed the delay line
     /// still holds that many unemitted samples.  Feeding the same number of
     /// silence samples advances the write pointer far enough to release them

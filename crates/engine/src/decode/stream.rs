@@ -10,8 +10,8 @@
 //!
 //! This module is the missing seam. It connects the existing byte source to
 //! Symphonia's existing `MediaSource` entry point
-//! ([`SymphoniaDecoder::open_media_source`]) — the same call
-//! [`SymphoniaDecoder::open`] already makes for a `File` — so a remote track is
+//! (`SymphoniaDecoder::open_media_source`) — the same call
+//! `SymphoniaDecoder::open` already makes for a `File` — so a remote track is
 //! decoded by exactly the same code as a local one, with no second decoder
 //! backend to keep in sync.
 //!

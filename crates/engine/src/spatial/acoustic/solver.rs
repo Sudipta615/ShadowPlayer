@@ -6,7 +6,7 @@
 //! paths connecting them (direct, specular image-source reflections,
 //! wedged diffraction around portal jambs, and transmission through
 //! openings). The result is a set of
-//! [`AcousticPath`](super::path::AcousticPath)s the existing
+//! [`AcousticPath`]s the existing
 //! binaural/panner renderers (or an offline baker) consume — the renderer
 //! never re-derives propagation.
 //!

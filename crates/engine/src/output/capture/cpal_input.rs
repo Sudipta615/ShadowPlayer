@@ -1,5 +1,5 @@
 //! Portable input capture via cpal — the implementation behind
-//! [`SystemCapture`](super::SystemCapture) on every supported platform.
+//! `SystemCapture` on every supported platform.
 //!
 //! # What it closes
 //!

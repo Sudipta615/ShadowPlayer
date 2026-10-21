@@ -22,6 +22,10 @@ pub struct AppState {
     /// Ascending or descending, for the current sort field.
     pub current_sort_order: SortOrder,
     pub is_grid_view: bool,
+    /// The song table's flexible column shares, persisted between launches.
+    pub column_widths: crate::components::songs_table::ColumnWidths,
+    /// Comfortable or compact song-table rows, persisted between launches.
+    pub row_density: crate::components::songs_table::RowDensity,
     pub right_tab: RightTab,
     pub visualizer_mode: VisualizerMode,
     /// Wide layout: show the queue/lyrics drawer as a column.
@@ -90,6 +94,8 @@ impl Default for AppState {
             current_sort: SortField::TrackNumber,
             current_sort_order: SortOrder::Ascending,
             is_grid_view: false,
+            column_widths: Default::default(),
+            row_density: Default::default(),
             right_tab: RightTab::Queue,
             visualizer_mode: VisualizerMode::Spectrum,
             right_panel_visible: true,

@@ -6,7 +6,7 @@
 //!
 //! The room is an axis-aligned box (origin at a corner), matching
 //! [`super::super::room::Room`]; each of its six walls carries its own
-//! frequency-dependent [`MaterialSpectrum`](super::material::MaterialSpectrum)
+//! frequency-dependent [`MaterialSpectrum`]
 //! (the per-wall seam the older [`Room::absorption`](super::super::room::Room::absorption))
 //! documented). A **portal** is an opening in a wall that couples two
 //! spaces; a **diffraction edge** is an open boundary sound bends around
@@ -94,7 +94,7 @@ pub struct AcousticRoom {
 
 impl Default for AcousticRoom {
     /// A 12×10×3 m box with medium reflective default walls (the same
-    /// geometry as the renderer's [`Room`] default).
+    /// geometry as the renderer's `Room` default).
     fn default() -> Self {
         Self {
             width: 12.0,
@@ -107,7 +107,7 @@ impl Default for AcousticRoom {
 }
 
 impl AcousticRoom {
-    /// Build an acoustic room from the renderer's [`Room`] geometry and a
+    /// Build an acoustic room from the renderer's `Room` geometry and a
     /// single material applied to every wall (the legacy scalar
     /// coefficient becomes the material's broadband absorption).
     pub fn from_render_room(

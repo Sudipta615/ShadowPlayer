@@ -274,8 +274,9 @@ Stated plainly, because the alternative is finding out the hard way:
   dependency on one. Opening such a file fails with an error that names the
   format; it is never mis-parsed as something else.
 - **The engine's own limitations are the engine's.** The engine README lists
-  them precisely — talkback, order-4+ ambisonic rotation, the mix bus's
-  automatic summation headroom, and the rest. Where the engine is honest about
+  them precisely — talkback and duplex monitoring, order-4+ ambisonic rotation,
+  the N-input mix bus's automatic summation headroom, physical-DAC validation,
+  in-process plugin sandboxing, and the rest. Where the engine is honest about
   a boundary, the player inherits that boundary rather than papering over it.
 
 ---

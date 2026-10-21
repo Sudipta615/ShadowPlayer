@@ -219,7 +219,7 @@ pub fn show_library_stats_modal(
                     let color = palette[i % palette.len()];
                     painter.rect_filled(
                         Rect::from_min_size(Pos2::new(x, bar_rect.min.y), Vec2::new(w, 14.0)),
-                        CornerRadius::same(3),
+                        CornerRadius::same(theme.radius_xs),
                         color,
                     );
                     x += w;
@@ -366,7 +366,10 @@ fn stat_tile(ui: &mut egui::Ui, label: &str, value: &str, theme: &Theme, width: 
     egui::Frame::NONE
         .fill(theme.bg_card_hover)
         .corner_radius(CornerRadius::same(theme.radius_md))
-        .inner_margin(egui::Margin::symmetric(12, 8))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_xl as i8,
+            theme.space_md as i8,
+        ))
         .show(ui, |ui| {
             ui.set_width(width - 24.0);
             ui.vertical(|ui| {
