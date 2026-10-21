@@ -4,6 +4,7 @@ pub mod duplicates_modal;
 pub mod edit_track_modal;
 pub mod import_playlists_modal;
 pub mod library_stats_modal;
+pub mod listening_modal;
 pub mod loudness_modal;
 pub mod organize_modal;
 pub mod playlist_editor_modal;

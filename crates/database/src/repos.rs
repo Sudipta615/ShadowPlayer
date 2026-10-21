@@ -1218,10 +1218,313 @@ impl HistoryRepo {
     }
 }
 
-pub struct QueueRepo {
+/// The permanent listening history.
+///
+/// This is the local equivalent of a scrobbling service's database: every play
+/// that counted, kept forever, with the artist, title and album denormalised
+/// at write time so the record survives the file being deleted.
+pub struct ScrobbleRepo {
     db: Database,
 }
 
+impl ScrobbleRepo {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    fn now_secs() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
+    }
+
+    /// Record a scrobble for `track`, now.
+    pub fn record(&self, track: &Track, listened_secs: f32) -> Result<()> {
+        self.record_at(track, Self::now_secs(), listened_secs)
+    }
+
+    /// Record a scrobble at an explicit time.
+    ///
+    /// The explicit form exists for tests and for importing a history from
+    /// another player; normal playback uses [`Self::record`].
+    pub fn record_at(&self, track: &Track, played_at: i64, listened_secs: f32) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO scrobbles
+                    (id, track_id, artist, title, album, played_at, duration_secs, listened_secs)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    track.id.to_string(),
+                    &track.artist,
+                    &track.title,
+                    &track.album,
+                    played_at,
+                    track.duration_secs,
+                    listened_secs,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// The most recent scrobbles, newest first.
+    pub fn list(&self, limit: usize) -> Result<Vec<Scrobble>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT track_id, artist, title, album, played_at, duration_secs, listened_secs
+                   FROM scrobbles
+                  ORDER BY played_at DESC
+                  LIMIT ?1;",
+            )?;
+            let iter = stmt.query_map(params![limit as i64], map_scrobble)?;
+            let mut out = Vec::new();
+            for row in iter {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Every scrobble, oldest first — what an export walks.
+    pub fn list_all(&self) -> Result<Vec<Scrobble>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT track_id, artist, title, album, played_at, duration_secs, listened_secs
+                   FROM scrobbles
+                  ORDER BY played_at ASC;",
+            )?;
+            let iter = stmt.query_map([], map_scrobble)?;
+            let mut out = Vec::new();
+            for row in iter {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// How many scrobbles have ever been recorded.
+    pub fn count(&self) -> Result<usize> {
+        self.count_since(None)
+    }
+
+    /// How many scrobbles fall inside a period (`None` is all time).
+    pub fn count_since(&self, since: Option<i64>) -> Result<usize> {
+        self.db.with_conn(|conn| {
+            let n: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM scrobbles WHERE (?1 IS NULL OR played_at >= ?1);",
+                params![since],
+                |row| row.get(0),
+            )?;
+            Ok(n as usize)
+        })
+    }
+
+    /// Total listening time inside a period, in seconds.
+    pub fn total_listened_secs_since(&self, since: Option<i64>) -> Result<f64> {
+        self.db.with_conn(|conn| {
+            let secs: f64 = conn.query_row(
+                "SELECT COALESCE(SUM(listened_secs), 0) FROM scrobbles
+                  WHERE (?1 IS NULL OR played_at >= ?1);",
+                params![since],
+                |row| row.get(0),
+            )?;
+            Ok(secs)
+        })
+    }
+
+    /// The timestamp of the very first scrobble.
+    pub fn first_played_at(&self) -> Result<Option<i64>> {
+        self.db.with_conn(|conn| {
+            conn.query_row("SELECT MIN(played_at) FROM scrobbles;", [], |row| {
+                row.get(0)
+            })
+        })
+    }
+
+    /// Artists by scrobble count, most played first.
+    pub fn top_artists(&self, since: Option<i64>, limit: usize) -> Result<Vec<ScrobbleCount>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT artist, COUNT(*) AS plays
+                   FROM scrobbles
+                  WHERE (?1 IS NULL OR played_at >= ?1)
+                  GROUP BY artist COLLATE NOCASE
+                  ORDER BY plays DESC, artist COLLATE NOCASE ASC
+                  LIMIT ?2;",
+            )?;
+            let iter = stmt.query_map(params![since, limit as i64], |row| {
+                Ok(ScrobbleCount {
+                    name: row.get(0)?,
+                    detail: String::new(),
+                    count: row.get::<_, i64>(1)? as usize,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in iter {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Albums by scrobble count, most played first.
+    pub fn top_albums(&self, since: Option<i64>, limit: usize) -> Result<Vec<ScrobbleCount>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT album, artist, COUNT(*) AS plays
+                   FROM scrobbles
+                  WHERE (?1 IS NULL OR played_at >= ?1)
+                  GROUP BY album COLLATE NOCASE, artist COLLATE NOCASE
+                  ORDER BY plays DESC, album COLLATE NOCASE ASC
+                  LIMIT ?2;",
+            )?;
+            let iter = stmt.query_map(params![since, limit as i64], |row| {
+                Ok(ScrobbleCount {
+                    name: row.get(0)?,
+                    detail: row.get(1)?,
+                    count: row.get::<_, i64>(2)? as usize,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in iter {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Tracks by scrobble count, most played first.
+    pub fn top_tracks(&self, since: Option<i64>, limit: usize) -> Result<Vec<ScrobbleCount>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT title, artist, COUNT(*) AS plays
+                   FROM scrobbles
+                  WHERE (?1 IS NULL OR played_at >= ?1)
+                  GROUP BY title COLLATE NOCASE, artist COLLATE NOCASE
+                  ORDER BY plays DESC, title COLLATE NOCASE ASC
+                  LIMIT ?2;",
+            )?;
+            let iter = stmt.query_map(params![since, limit as i64], |row| {
+                Ok(ScrobbleCount {
+                    name: row.get(0)?,
+                    detail: row.get(1)?,
+                    count: row.get::<_, i64>(2)? as usize,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in iter {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Scrobbles per calendar day in the user's local timezone.
+    ///
+    /// The key is a *day number* (days since the Unix epoch) rather than a
+    /// formatted date: consecutive-day arithmetic is then plain integer
+    /// arithmetic, which is what the streak calculation needs. Pair it with
+    /// [`Self::today_day_number`] to place "today".
+    pub fn per_day(&self, since: Option<i64>) -> Result<Vec<(i64, usize)>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT CAST(strftime('%s', date(played_at, 'unixepoch', 'localtime')) AS INTEGER) / 86400 AS day,
+                        COUNT(*) AS plays
+                   FROM scrobbles
+                  WHERE (?1 IS NULL OR played_at >= ?1)
+                  GROUP BY day
+                  ORDER BY day ASC;",
+            )?;
+            let iter = stmt.query_map(params![since], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)? as usize))
+            })?;
+            let mut out = Vec::new();
+            for row in iter {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Scrobbles per hour of the local day, 0..24.
+    pub fn per_hour(&self, since: Option<i64>) -> Result<[usize; 24]> {
+        let mut hours = [0usize; 24];
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT CAST(strftime('%H', played_at, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+                        COUNT(*) AS plays
+                   FROM scrobbles
+                  WHERE (?1 IS NULL OR played_at >= ?1)
+                  GROUP BY hour;",
+            )?;
+            let iter = stmt.query_map(params![since], |row| {
+                Ok((row.get::<_, i64>(0)? as usize, row.get::<_, i64>(1)? as usize))
+            })?;
+            for row in iter {
+                let (hour, count) = row?;
+                if hour < hours.len() {
+                    hours[hour] = count;
+                }
+            }
+            Ok(hours)
+        })
+    }
+
+    /// The distinct local days that have a scrobble, ascending.
+    pub fn distinct_days(&self) -> Result<Vec<i64>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT
+                        CAST(strftime('%s', date(played_at, 'unixepoch', 'localtime')) AS INTEGER) / 86400 AS day
+                   FROM scrobbles
+                  ORDER BY day ASC;",
+            )?;
+            let iter = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+            let mut out = Vec::new();
+            for row in iter {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Today, as the same day number [`Self::per_day`] uses.
+    pub fn today_day_number(&self) -> Result<i64> {
+        self.db.with_conn(|conn| {
+            conn.query_row(
+                "SELECT CAST(strftime('%s', 'now', 'localtime') AS INTEGER) / 86400;",
+                [],
+                |row| row.get(0),
+            )
+        })
+    }
+}
+
+/// Map a `scrobbles` row.
+fn map_scrobble(row: &Row) -> Result<Scrobble> {
+    let track_id: Option<String> = row.get("track_id")?;
+    let track_id = match track_id {
+        Some(id) => Some(parse_id::<TrackId>(&id, "scrobbles.track_id")?),
+        None => None,
+    };
+    let listened: f64 = row.get("listened_secs")?;
+    let duration: f64 = row.get("duration_secs")?;
+    Ok(Scrobble {
+        track_id,
+        artist: row.get("artist")?,
+        title: row.get("title")?,
+        album: row.get("album")?,
+        played_at: row.get("played_at")?,
+        duration_secs: duration as f32,
+        listened_secs: listened as f32,
+    })
+}
+
+pub struct QueueRepo {
+    db: Database,
+}
 impl QueueRepo {
     pub fn new(db: Database) -> Self {
         Self { db }

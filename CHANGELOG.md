@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A permanent, local listening history.** Every counted play is now written to a `scrobbles` table (migration V9) that is never pruned: the artist, title, album, timestamp and listened time are copied in at write time, so the row survives the track being removed from the library, and nothing is ever sent anywhere. The seven-day `play_history` window stays for Recently Played.
+- **Listening History**, the local answer to a Last.fm profile: week/month/year/all-time totals, the top artists, albums and tracks, what has been on repeat for the last seven days, 30-day and 24-hour charts, current and longest streaks, and CSV, JSON and Last.fm export. It is reached from the scrobble log or the command palette and never makes a network request.
+- **Per-track DSP overrides are stored as a diff.** A track can override any part of the global chain — EQ, graphic EQ, tone, dynamics, bass management, LFE, channel mix — and only the parameters it actually changes are saved. Everything else is inherited at playback time, so a global compressor or crossfeed change reaches every track that did not override it, while the track's own curve and preamp keep winning. The editor lists the overridden parameters by panel block and says how many parameters differ from the global chain. Profiles saved by earlier versions (graphic EQ and preamp) are converted when applied.
+- **Settings search.** The Settings page has a search field: typing shows matching labels, card titles and descriptions, and choosing a result switches to its category, scrolls the row into view and flashes it. The same index feeds the command palette, so any setting can be reached from `Ctrl+Space` without knowing which tab it lives on. A test asserts that the index and the rendered page contain exactly the same settings, so a setting cannot be added without becoming searchable.
+
+### Changed
+- **The scrobble log is now a permanent record.** It reads the full history instead of the seven-day window, reserves space for the timestamp so a long title cannot run underneath it, and links to Listening History above the rows rather than after a potentially endless list.
+- **The per-track DSP dialog explains inheritance in terms of what was not overridden**, rather than naming blocks that the track may in fact own.
+
+### Fixed
+- **The scrobble log no longer loses its history after seven days.** The log read the rolling `play_history` window; it now reads the permanent table, and V9 backfills the rows the window still had.
+
 ## [0.9.0] - 2026-10-21
 
 ### Changed

@@ -65,9 +65,15 @@ pub struct ShadowPlayerApp {
     /// The track whose DSP profile was last applied, so the profile is
     /// applied once per track rather than once per frame.
     dsp_profile_track: Option<domain::ids::TrackId>,
+    /// The chain as it stood when the current track started with no profile.
+    /// The user may adjust the chain while listening to author that track's
+    /// override; this is the base the override is diffed against, so those
+    /// adjustments do not silently become the global chain.
+    dsp_track_base: Option<crate::state::ChainPreset>,
     playlist_repo: PlaylistRepo,
     favorites_repo: FavoritesRepo,
     history_repo: HistoryRepo,
+    scrobble_repo: database::ScrobbleRepo,
     album_repo: AlbumRepo,
     artist_repo: ArtistRepo,
     genre_repo: GenreRepo,
@@ -183,6 +189,7 @@ impl ShadowPlayerApp {
         let playlist_repo = PlaylistRepo::new(db.clone());
         let favorites_repo = FavoritesRepo::new(db.clone());
         let history_repo = HistoryRepo::new(db.clone());
+        let scrobble_repo = database::ScrobbleRepo::new(db.clone());
         let album_repo = AlbumRepo::new(db.clone());
         let artist_repo = ArtistRepo::new(db.clone());
         let genre_repo = GenreRepo::new(db.clone());
@@ -208,9 +215,11 @@ impl ShadowPlayerApp {
             track_repo,
             track_dsp_repo,
             dsp_profile_track: None,
+            dsp_track_base: None,
             playlist_repo,
             favorites_repo,
             history_repo,
+            scrobble_repo,
             album_repo,
             artist_repo,
             genre_repo,
@@ -709,6 +718,12 @@ impl ShadowPlayerApp {
         ));
         entries.push(PaletteEntry::new(
             "Library",
+            "Listening history",
+            "top artists, charts, streaks and export",
+            PaletteAction::OpenListening,
+        ));
+        entries.push(PaletteEntry::new(
+            "Library",
             "Import from other players",
             "playlists left by Rhythmbox, iTunes and Audacious",
             PaletteAction::OpenImportPlaylists,
@@ -716,7 +731,7 @@ impl ShadowPlayerApp {
         entries.push(PaletteEntry::new(
             "Track",
             "Per-track DSP",
-            "give this track its own EQ",
+            "give this track its own version of the chain",
             PaletteAction::OpenTrackDsp,
         ));
         entries.push(PaletteEntry::new(
@@ -749,6 +764,22 @@ impl ShadowPlayerApp {
             "",
             PaletteAction::FocusSearch,
         ));
+
+        // ── Settings ───────────────────────────────────────────────────────
+        // The same static index the Settings page searches, so a command
+        // palette and the page can never disagree about what a setting is
+        // called. Only with a query: seventy rows would bury the commands
+        // when the palette first opens.
+        if !self.app_state.command_palette.query.trim().is_empty() {
+            for entry in crate::components::settings_tab::SETTINGS_INDEX.iter() {
+                entries.push(PaletteEntry::new(
+                    "Settings",
+                    entry.label,
+                    format!("{} \u{203a} {}", entry.category.title(), entry.card),
+                    PaletteAction::JumpToSetting(entry.category, entry.label),
+                ));
+            }
+        }
 
         // ── Tracks ─────────────────────────────────────────────────────────
         // Scored against the raw titles first, so only the best few are ever
@@ -849,6 +880,15 @@ impl ShadowPlayerApp {
             PaletteAction::OpenScrobbleLog => {
                 self.app_state.scrobble_log_open = true;
             }
+            PaletteAction::OpenListening => {
+                self.app_state.listening_modal.open();
+            }
+            PaletteAction::JumpToSetting(category, label) => {
+                self.app_state.active_nav = NavItem::Settings;
+                self.refresh_view();
+                self.dsp_state.settings_tab.active_category = category;
+                crate::components::settings_tab::request_settings_jump(label);
+            }
             PaletteAction::OpenImportPlaylists => {
                 self.open_import_playlists();
             }
@@ -893,8 +933,10 @@ impl ShadowPlayerApp {
 
     /// Apply the current track's own DSP profile, if it has one.
     ///
-    /// The global chain is left alone: the profile is an override for one
-    /// track, and it is put back the moment another track plays.
+    /// A profile is a **diff** against the user's global chain, not a copy of
+    /// it: the track names the parameters it changes and inherits the rest.
+    /// The global chain is captured before the first profile takes over and
+    /// put back the moment a track without one plays.
     fn apply_track_dsp_profile(&mut self) {
         let Some(track) = self.coordinator.current_track().cloned() else {
             return;
@@ -910,7 +952,15 @@ impl ShadowPlayerApp {
                 // with the user's own settings. Restoring them matters — the
                 // previous track's profile is still applied otherwise.
                 self.dsp_profile_track = Some(track.id);
-                self.restore_global_eq();
+                self.restore_global_chain();
+                // The base a future override for this track is authored
+                // against: the chain before the user starts adjusting it.
+                self.dsp_track_base = Some(crate::state::ChainPreset::capture(
+                    "Track base",
+                    "",
+                    &self.dsp_state.eq_panel,
+                    &self.dsp_state.settings_tab,
+                ));
                 return;
             }
             Err(e) => {
@@ -920,56 +970,59 @@ impl ShadowPlayerApp {
         };
         self.dsp_profile_track = Some(track.id);
 
-        // Save the user's own EQ before the first profile takes over, so it
-        // can be put back when a track without one plays.
+        // Save the user's own chain before the first profile takes over, so
+        // it can be put back when a track without one plays.
         if self.app_state.dsp_global_snapshot.is_none() {
-            let eq = &self.dsp_state.eq_panel;
-            self.app_state.dsp_global_snapshot =
-                Some((eq.graphic_enabled, eq.graphic_gains, eq.graphic_preamp_db));
+            self.app_state.dsp_global_snapshot = Some(crate::state::ChainPreset::capture(
+                "Global",
+                "",
+                &self.dsp_state.eq_panel,
+                &self.dsp_state.settings_tab,
+            ));
         }
+        let global = self
+            .app_state
+            .dsp_global_snapshot
+            .clone()
+            .expect("the snapshot was just captured");
 
-        let eq = &mut self.dsp_state.eq_panel;
-        if !profile.graphic_enabled {
-            self.session.set_graphic_eq_enabled(false);
+        let Some(patch) = crate::state::chain_override::legacy_patch(&profile, &global) else {
+            self.restore_global_chain();
             return;
-        }
-        self.session.set_graphic_eq_enabled(true);
-        for (band, gain) in profile.graphic_gains.iter().enumerate() {
-            self.session.set_graphic_eq_slider(band, *gain);
-        }
-        self.session
-            .set_graphic_eq_preamp(profile.graphic_preamp_db);
-        eq.graphic_enabled = true;
-        eq.graphic_preamp_db = profile.graphic_preamp_db;
-        for (band, gain) in profile.graphic_gains.iter().enumerate() {
-            if let Some(g) = eq.graphic_gains.get_mut(band) {
-                *g = *gain;
-            }
-        }
+        };
+        let Some(merged) = crate::state::chain_override::merge_chain(&global, &patch) else {
+            log::warn!(
+                "The DSP profile for {} does not fit the current chain; leaving the global chain",
+                track.title
+            );
+            self.restore_global_chain();
+            return;
+        };
+
+        merged.apply(
+            &mut self.dsp_state.eq_panel,
+            &mut self.dsp_state.settings_tab,
+        );
+        self.dsp_state.sync_chain_to_session(&self.session);
         self.toasts.info(format!(
-            "Using this track's own EQ profile for \u{201c}{}\u{201d}",
+            "Using this track's own chain for \u{201c}{}\u{201d}",
             track.title
         ));
     }
 
-    /// Put the user's own graphic EQ back.
+    /// Put the user's own chain back.
     ///
     /// The snapshot exists only while a track's own profile is applied, so
     /// this is a no-op when the user has never had a profile take over.
-    fn restore_global_eq(&mut self) {
-        let Some((enabled, gains, preamp)) = self.app_state.dsp_global_snapshot.take() else {
+    fn restore_global_chain(&mut self) {
+        let Some(global) = self.app_state.dsp_global_snapshot.take() else {
             return;
         };
-        self.session.set_graphic_eq_enabled(enabled);
-        for (band, gain) in gains.iter().enumerate() {
-            self.session.set_graphic_eq_slider(band, *gain);
-        }
-        self.session.set_graphic_eq_preamp(preamp);
-
-        let eq = &mut self.dsp_state.eq_panel;
-        eq.graphic_enabled = enabled;
-        eq.graphic_gains = gains;
-        eq.graphic_preamp_db = preamp;
+        global.apply(
+            &mut self.dsp_state.eq_panel,
+            &mut self.dsp_state.settings_tab,
+        );
+        self.dsp_state.sync_chain_to_session(&self.session);
     }
 
     /// Open the loudness inspector for the current track.
@@ -2441,6 +2494,13 @@ impl eframe::App for ShadowPlayerApp {
         self.app_state.frame_count += 1;
         #[cfg(feature = "eval-tools")]
         if std::env::var("SHADOWPLAYER_EVAL").is_ok() {
+            // Screenshot runs render as fast as the CPU allows, so egui's
+            // wall-clock animations (smooth scrolling, the jump flash) barely
+            // advance by the capture frame. A small sleep makes a screenshot
+            // show the settled state.
+            if std::env::var("SHADOWPLAYER_EVAL_SLOW").is_ok() && self.app_state.frame_count < 30 {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_MINI").is_ok() {
                 self.app_state.mini_player = true;
             }
@@ -2492,6 +2552,18 @@ impl eframe::App for ShadowPlayerApp {
                         ..Default::default()
                     };
                     self.dsp_state.handle_settings_actions(&self.session, &a);
+                }
+                if let Ok(query) = std::env::var("SHADOWPLAYER_EVAL_SETTINGS_SEARCH") {
+                    self.dsp_state.settings_tab.search_query = query;
+                }
+                if let Ok(label) = std::env::var("SHADOWPLAYER_EVAL_SETTINGS_JUMP") {
+                    if let Some(entry) = crate::components::settings_tab::SETTINGS_INDEX
+                        .iter()
+                        .find(|entry| entry.label == label)
+                    {
+                        self.dsp_state.settings_tab.active_category = entry.category;
+                        crate::components::settings_tab::request_settings_jump(entry.label);
+                    }
                 }
             }
 
@@ -2771,6 +2843,13 @@ impl eframe::App for ShadowPlayerApp {
                 match std::env::var("SHADOWPLAYER_EVAL_MODAL").as_deref() {
                     Ok("bitperfect") => self.app_state.bit_perfect_modal_open = true,
                     Ok("autoeq") => self.dsp_state.autoeq.is_open = true,
+                    Ok("listening") => self.app_state.listening_modal.open(),
+                    Ok("scrobble") => self.app_state.scrobble_log_open = true,
+                    Ok("track_dsp") => {
+                        if let Some(track) = self.library_state.displayed_tracks.first().cloned() {
+                            self.open_track_dsp(&track);
+                        }
+                    }
                     Ok("playlist") => {
                         let first = self.library_state.playlists.first().map(|p| p.id);
                         self.app_state.playlist_editor.open(first);
@@ -2842,6 +2921,85 @@ impl eframe::App for ShadowPlayerApp {
                         let _ = self.track_repo.upsert(&track);
                     }
                     self.reload_library();
+                }
+
+                // Synthetic listening history, so the charts and aggregates
+                // have something to show in a screenshot run. The rows go
+                // through the real repository, so the SQL aggregation is
+                // exercised rather than mocked.
+                if let Ok(raw) = std::env::var("SHADOWPLAYER_EVAL_SCROBBLES") {
+                    let count: usize = raw.parse().unwrap_or(0);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let artists = [
+                        "Aphex Twin",
+                        "Autechre",
+                        "Boards of Canada",
+                        "Burial",
+                        "Four Tet",
+                    ];
+                    let albums = [
+                        "Selected Ambient Works",
+                        "Amber",
+                        "Music Has the Right to Children",
+                        "Untrue",
+                        "Rounds",
+                    ];
+                    let titles = [
+                        "Xtal",
+                        "Roygbiv",
+                        "Teardrop",
+                        "Archangel",
+                        "She Moves She",
+                        "Windowlicker",
+                        "Everything You Do Is a Balloon",
+                        "Olson",
+                    ];
+                    for i in 0..count {
+                        let slot = i % artists.len();
+                        let track = domain::models::Track {
+                            id: domain::ids::TrackId::new(),
+                            path: std::path::PathBuf::from(format!("/eval/scrobble_{i}.flac")),
+                            title: titles[i % titles.len()].to_string(),
+                            artist: artists[slot].to_string(),
+                            album: albums[slot].to_string(),
+                            genre: Some("Electronic".to_string()),
+                            year: Some(1998),
+                            track_number: Some((i % 8) as u32 + 1),
+                            disc_number: None,
+                            duration_secs: 240.0,
+                            sample_rate: 44_100,
+                            channels: 2,
+                            format: "FLAC".to_string(),
+                            bitrate_kbps: Some(900),
+                            is_lossless: true,
+                            replaygain_track_db: Some(-6.0),
+                            replaygain_track_peak: Some(0.9),
+                            replaygain_album_db: Some(-6.0),
+                            replaygain_album_peak: Some(0.9),
+                            r128_loudness_lufs: Some(-14.0),
+                            file_size_bytes: 42_000_000,
+                            mtime_unix_secs: 1_600_000_000,
+                            mtime_nanos: 0,
+                            content_hash: None,
+                            is_favorite: false,
+                            play_count: 0,
+                            skip_count: 0,
+                            last_played_at: None,
+                            added_at: 1_600_000_000,
+                        };
+                        let _ = self.track_repo.upsert(&track);
+                        let day_ago = (i % 20) as i64;
+                        let hour = ((i * 7) % 24) as i64;
+                        let played_at = now - day_ago * 86_400 - hour * 3_600;
+                        let _ = self.scrobble_repo.record_at(
+                            &track,
+                            played_at,
+                            150.0 + (i % 60) as f32,
+                        );
+                    }
                 }
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_FULL").is_ok() {
@@ -3958,12 +4116,6 @@ impl eframe::App for ShadowPlayerApp {
 
         // The per-track DSP editor.
         {
-            let eq = &self.dsp_state.eq_panel;
-            let current_eq = (
-                eq.graphic_enabled,
-                eq.graphic_gains.to_vec(),
-                eq.graphic_preamp_db,
-            );
             // The editor works on whichever track it was opened for, not
             // only the one that happens to be playing.
             let dsp_track = self
@@ -3978,28 +4130,78 @@ impl eframe::App for ShadowPlayerApp {
                         .cloned()
                 })
                 .or_else(|| self.coordinator.current_track().cloned());
+            let is_current_track = dsp_track.as_ref().is_some_and(|track| {
+                self.coordinator
+                    .current_track()
+                    .is_some_and(|current| current.id == track.id)
+            });
+
+            // The chain as the panels hold it, and the base a save is diffed
+            // against. While a profile is applied the base is the user's
+            // global chain; on an unprofiled track it is the chain as it was
+            // when the track started, so adjustments made while auditioning
+            // this track do not silently rewrite the global chain.
+            let current_chain = crate::state::ChainPreset::capture(
+                "Current",
+                "",
+                &self.dsp_state.eq_panel,
+                &self.dsp_state.settings_tab,
+            );
+            let base_chain = self
+                .app_state
+                .dsp_global_snapshot
+                .clone()
+                .or_else(|| {
+                    if is_current_track {
+                        self.dsp_track_base.clone()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| current_chain.clone());
+
             let dsp_actions = crate::modals::track_dsp_modal::show_track_dsp_modal(
                 &ctx,
                 &mut self.app_state.track_dsp_modal,
                 &self.track_dsp_repo,
                 dsp_track.as_ref(),
-                current_eq,
+                crate::modals::track_dsp_modal::TrackDspContext {
+                    current_chain: &current_chain,
+                    base_chain: &base_chain,
+                    is_current_track,
+                },
                 &self.theme,
             );
             if dsp_actions.save_profile {
                 if let Some(track) = dsp_track.clone() {
-                    let eq = &self.dsp_state.eq_panel;
-                    let profile = crate::modals::track_dsp_modal::profile_from_eq(
-                        eq.graphic_enabled,
-                        &eq.graphic_gains,
-                        eq.graphic_preamp_db,
+                    let profile = crate::modals::track_dsp_modal::profile_from_chain(
+                        &base_chain,
+                        &current_chain,
                     );
                     match self.track_dsp_repo.set(&track.id, &profile) {
                         Ok(()) => {
-                            self.toasts
-                                .success(format!("Saved the EQ as {}'s own profile", track.title));
-                            // The profile is what the panel already holds,
-                            // so the engine is already playing it.
+                            let count = profile
+                                .overrides
+                                .as_ref()
+                                .map(|patch| {
+                                    crate::state::chain_override::describe_overrides(patch).len()
+                                })
+                                .unwrap_or(0);
+                            self.toasts.success(format!(
+                                "Saved {count} chain parameter{} as {}'s own override",
+                                if count == 1 { "" } else { "s" },
+                                track.title
+                            ));
+                            if is_current_track && self.app_state.dsp_global_snapshot.is_none() {
+                                // The chain in the panels was authored for
+                                // this track. Keep the chain it started with
+                                // as the global, and let the profile apply on
+                                // top of it from now on.
+                                self.app_state.dsp_global_snapshot = Some(base_chain.clone());
+                                self.dsp_profile_track = None;
+                                self.dsp_track_base = None;
+                                self.apply_track_dsp_profile();
+                            }
                         }
                         Err(e) => self
                             .toasts
@@ -4013,9 +4215,12 @@ impl eframe::App for ShadowPlayerApp {
                         Ok(()) => {
                             self.toasts
                                 .info(format!("{} uses the global settings again", track.title));
-                            self.dsp_profile_track = None;
-                            self.restore_global_eq();
-                            self.apply_track_dsp_profile();
+                            if is_current_track {
+                                self.dsp_profile_track = None;
+                                self.restore_global_chain();
+                                self.dsp_track_base = None;
+                                self.apply_track_dsp_profile();
+                            }
                         }
                         Err(e) => self
                             .toasts
@@ -4027,13 +4232,43 @@ impl eframe::App for ShadowPlayerApp {
 
         // The scrobble log.
         if self.app_state.scrobble_log_open {
-            let still_open = crate::modals::scrobble_log_modal::show_scrobble_log_modal(
+            let log_actions = crate::modals::scrobble_log_modal::show_scrobble_log_modal(
                 &ctx,
-                &self.history_repo,
+                &self.scrobble_repo,
                 &self.theme,
             );
-            if !still_open {
+            if log_actions.closed {
                 self.app_state.scrobble_log_open = false;
+            }
+            if log_actions.open_listening {
+                self.app_state.scrobble_log_open = false;
+                self.app_state.listening_modal.open();
+            }
+        }
+
+        // The listening history: the local answer to a scrobbling service.
+        {
+            let listening_actions = crate::modals::listening_modal::show_listening_modal(
+                &ctx,
+                &mut self.app_state.listening_modal,
+                &self.scrobble_repo,
+                &self.theme,
+            );
+            if listening_actions.close {
+                self.app_state.listening_modal.is_open = false;
+            }
+            if let Some(format) = listening_actions.export {
+                match crate::modals::listening_modal::export_with_dialog(
+                    &self.scrobble_repo,
+                    format,
+                ) {
+                    Ok(Some(path)) => self.toasts.success(format!(
+                        "Exported the listening history to {}",
+                        path.display()
+                    )),
+                    Ok(None) => {}
+                    Err(e) => self.toasts.warning(e),
+                }
             }
         }
 

@@ -187,9 +187,17 @@ impl std::fmt::Display for SortField {
 /// that needs a corrective curve, or a different preamp because it was
 /// mastered louder, gets its own settings rather than changing the whole
 /// library.
+///
+/// [`Self::overrides`] is a JSON object holding **only** the chain fields that
+/// differ from the user's global chain: a diff, not a snapshot. Everything the
+/// track does not name is inherited, so changing the global compressor next
+/// month also changes this track's compressor — while its own EQ curve stays.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TrackDspProfile {
     /// The graphic EQ's per-band gains, in dB.
+    ///
+    /// Kept for profiles written before whole-chain overrides existed. New
+    /// profiles store the graphic EQ inside [`Self::overrides`].
     #[serde(default)]
     pub graphic_gains: Vec<f32>,
     /// Whether the graphic EQ is on for this track.
@@ -198,13 +206,53 @@ pub struct TrackDspProfile {
     /// The graphic EQ's preamp, in dB.
     #[serde(default)]
     pub graphic_preamp_db: f32,
+    /// The chain fields that differ from the global chain, as nested JSON.
+    ///
+    /// It is the UI's serialised chain preset with only the differing leaves
+    /// present. The domain crate stores it opaquely so it does not have to
+    /// depend on the audio configuration types the chain is made of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<serde_json::Value>,
 }
 
 impl TrackDspProfile {
     /// Whether the profile would change anything.
     pub fn is_neutral(&self) -> bool {
-        !self.graphic_enabled && self.graphic_gains.iter().all(|g| g.abs() < 0.01)
+        let legacy_neutral =
+            !self.graphic_enabled && self.graphic_gains.iter().all(|g| g.abs() < 0.01);
+        legacy_neutral
+            && self.overrides.as_ref().is_none_or(|v| match v {
+                serde_json::Value::Object(map) => map.is_empty(),
+                _ => false,
+            })
     }
+}
+
+/// One play in the permanent listening history.
+///
+/// The artist, title and album are copied here at write time. That is the
+/// point of a scrobble: it belongs to the listener, not to the file, so
+/// deleting a track from the library must not erase the times it was heard.
+/// `track_id` is therefore nullable (`ON DELETE SET NULL`) and only used to
+/// recognise a track that is still in the library.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Scrobble {
+    pub track_id: Option<TrackId>,
+    pub artist: String,
+    pub title: String,
+    pub album: String,
+    pub played_at: i64,
+    pub duration_secs: f32,
+    pub listened_secs: f32,
+}
+
+/// One row of a listening chart: a name, an optional second line, and a count.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ScrobbleCount {
+    pub name: String,
+    /// The artist, for an album or a track; empty for an artist.
+    pub detail: String,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

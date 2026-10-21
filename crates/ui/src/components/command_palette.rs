@@ -41,6 +41,13 @@ pub enum PaletteAction {
     OpenTrackDsp,
     /// Open the scrobble log.
     OpenScrobbleLog,
+    /// Open the listening history.
+    OpenListening,
+    /// Switch to Settings, choose a category, and jump to a row.
+    JumpToSetting(
+        crate::components::settings_tab::SettingsCategory,
+        &'static str,
+    ),
     /// Open the import-from-other-players dialog.
     OpenImportPlaylists,
     /// Open the duplicate-track finder.

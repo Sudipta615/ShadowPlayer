@@ -743,6 +743,7 @@ mod unit {
             graphic_gains: vec![1.5, -2.0],
             graphic_enabled: true,
             graphic_preamp_db: -3.0,
+            overrides: None,
         };
         dsp.set(&track.id, &profile).unwrap();
         let read = dsp
@@ -775,6 +776,81 @@ mod unit {
         let scrobbles = history.list_scrobbles(10).unwrap();
         assert_eq!(scrobbles.len(), 1);
         assert_eq!(scrobbles[0].0.id, track.id);
+    }
+
+    #[test]
+    fn test_scrobbles_keep_the_text_after_the_track_is_deleted() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+        let history = ScrobbleRepo::new(db.clone());
+
+        let track = sample_track(TrackId::new(), "/m/a.flac", "A", "Artist", "Album");
+        repo.upsert(&track).unwrap();
+        history.record_at(&track, 1_700_000_000, 200.0).unwrap();
+        assert_eq!(history.count().unwrap(), 1);
+        assert_eq!(history.first_played_at().unwrap(), Some(1_700_000_000));
+
+        repo.delete(&track.id).unwrap();
+
+        let all = history.list_all().unwrap();
+        assert_eq!(all.len(), 1, "a scrobble is not a child of the track row");
+        assert_eq!(all[0].track_id, None, "the link is dropped, the text stays");
+        assert_eq!(all[0].artist, "Artist");
+        assert_eq!(all[0].title, "A");
+        assert_eq!(all[0].album, "Album");
+    }
+
+    #[test]
+    fn test_listening_history_aggregates_by_artist_album_track_and_day() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+        let history = ScrobbleRepo::new(db.clone());
+
+        let a = sample_track(TrackId::new(), "/m/a.flac", "A", "One", "Album X");
+        let b = sample_track(TrackId::new(), "/m/b.flac", "B", "One", "Album X");
+        let c = sample_track(TrackId::new(), "/m/c.flac", "C", "Two", "Album Y");
+        for t in [&a, &b, &c] {
+            repo.upsert(t).unwrap();
+        }
+
+        // Two days, three tracks, two artists and two albums.
+        history.record_at(&a, 1_700_000_000, 100.0).unwrap();
+        history.record_at(&a, 1_700_000_100, 100.0).unwrap();
+        history.record_at(&b, 1_700_000_200, 100.0).unwrap();
+        history.record_at(&c, 1_700_100_000, 50.0).unwrap();
+
+        assert_eq!(history.count().unwrap(), 4);
+        assert_eq!(history.count_since(Some(1_700_050_000)).unwrap(), 1);
+        assert_eq!(
+            history.total_listened_secs_since(None).unwrap(),
+            350.0,
+            "listening time is summed, not estimated from track lengths"
+        );
+
+        let artists = history.top_artists(None, 10).unwrap();
+        assert_eq!(artists[0].name, "One");
+        assert_eq!(artists[0].count, 3);
+        assert_eq!(artists[1].name, "Two");
+
+        let albums = history.top_albums(None, 10).unwrap();
+        assert_eq!(albums[0].name, "Album X");
+        assert_eq!(albums[0].detail, "One");
+        assert_eq!(albums[0].count, 3);
+
+        let tracks = history.top_tracks(None, 10).unwrap();
+        assert_eq!(tracks[0].name, "A");
+        assert_eq!(tracks[0].count, 2);
+
+        let days = history.per_day(None).unwrap();
+        assert_eq!(days.len(), 2, "two distinct local days");
+        assert_eq!(days.iter().map(|(_, n)| n).sum::<usize>(), 4);
+        // The days are consecutive-ish and ascending, which is what the
+        // streak arithmetic relies on.
+        assert!(days[0].0 < days[1].0);
+
+        let hours = history.per_hour(None).unwrap();
+        assert_eq!(hours.iter().sum::<usize>(), 4);
+        assert_eq!(history.distinct_days().unwrap(), vec![days[0].0, days[1].0]);
     }
 
     #[test]

@@ -78,6 +78,589 @@ fn draw_speaker_tab_icon(ui: &egui::Ui, rect: Rect, color: Color32) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Search index
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One settings row, as the search fields and the command palette see it.
+///
+/// This table is deliberately static: it is the contract between the search
+/// and the rendering code, and a test parses the source to prove the two
+/// still agree. A hand-written index could silently miss a setting; the
+/// drift test is what makes that impossible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingsEntry {
+    pub category: SettingsCategory,
+    /// The card the row lives under, e.g. "Bass Management & Subwoofer Integration".
+    pub card: &'static str,
+    /// The row label, exactly as `setting_item` receives it.
+    pub label: &'static str,
+    /// The row description, used as a search fallback.
+    pub description: &'static str,
+}
+
+pub static SETTINGS_INDEX: [SettingsEntry; 70] = [
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Playback Speed & Pitch Transposition",
+        label: "Playback Speed",
+        description: "Tempo multiplier (0.25x slow down to 4.00x speed up)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Playback Speed & Pitch Transposition",
+        label: "Pitch Transposition",
+        description: "Shift musical key in semitone increments (-24 to +24 semitones)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Playback Speed & Pitch Transposition",
+        label: "Processing Engine",
+        description: "Varispeed (analog tape pitch shift) vs TimeStretch (formant-preserved tempo)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Track Transitions & Crossfading",
+        label: "Transition Mode",
+        description: "Gapless mode provides seamless album playback without clicks or silence gaps",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Track Transitions & Crossfading",
+        label: "Crossfade Duration",
+        description: "Overlap time in seconds between fading out song and fading in next song",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Track Transitions & Crossfading",
+        label: "Crossfade Curve",
+        description: "Constant Power maintains perceived volume energy; Linear creates gradual dip",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Loudness Normalization (ReplayGain & EBU R128)",
+        label: "Target Standard",
+        description: "EBU R128 (-14 LUFS) or legacy ReplayGain 2.0 tags",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Audio Driver Backend & Hardware Device",
+        label: "Driver Architecture",
+        description: "Exclusive ALSA, WASAPI Exclusive, or cross-platform automatic detection",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Audio Driver Backend & Hardware Device",
+        label: "Processing Profile",
+        description: "Engine preset: resampler quality, dither, EQ, crossfeed and buffer sizes move together. Consumer keeps the lightest chain, Fidelity the strictest, Low Power the cheapest",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Audio Driver Backend & Hardware Device",
+        label: "Output Endpoint",
+        description: "Leave blank for system default, or enter specific ALSA/WASAPI endpoint string",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Audio Driver Backend & Hardware Device",
+        label: "Fallback Policy",
+        description: "Action to take if exclusive mode device acquisition is rejected by the OS",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Audio Driver Backend & Hardware Device",
+        label: "Hardware Actions",
+        description: "Open external driver control panels and reset device configuration profiles",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Sample Rate Policies & Resampling Precision",
+        label: "Sample Rate Target",
+        description: "Follow Track switches your DAC rate on song change; Fixed resamples everything",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Sample Rate Policies & Resampling Precision",
+        label: "Resampler Engine",
+        description: "Polyphase FIR filter quality used when rate conversion is required",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Sample Rate Policies & Resampling Precision",
+        label: "DSP Precision Mode",
+        description: "Internal processing precision. Quality routes the mix chain through the f64 core for extra headroom at a small CPU cost.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Sample Rate Policies & Resampling Precision",
+        label: "Volume Attenuation Mode",
+        description: "Software volume scaling vs Fixed 100% line-out for external preamp/headphone amp",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Sample Rate Policies & Resampling Precision",
+        label: "TPDF Dither",
+        description: "Triangular PDF dithering eliminates quantization distortion when converting bit depth",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "3D Soundstage & Spatial Radar (Interactive)",
+        label: "Listener Orientation",
+        description: "Rotates the listener's head independently of the virtual centre, so the soundstage can be auditioned from an angle",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "3D Soundstage & Spatial Radar (Interactive)",
+        label: "Air Absorption",
+        description: "Distance-dependent high-frequency roll-off along each path, as air itself absorbs treble over distance",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Binaural HRTF & Head Tracking",
+        label: "Spatial Synthesis Quality",
+        description: "Spherical harmonics order and convolution precision",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Binaural HRTF & Head Tracking",
+        label: "HRTF Profile ID",
+        description: "SOFA dataset profile identifier (e.g. KEMAR_diffuse, IRC_1002)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Binaural HRTF & Head Tracking",
+        label: "Listener Motion Smoothing",
+        description: "Low-pass filter time constant for head motion tracker interpolation",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Binaural HRTF & Head Tracking",
+        label: "Listener Max Angular Velocity",
+        description: "Clamps extreme head rotations (0 = uncapped natural tracking)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Virtual Room Acoustics Simulation",
+        label: "Enable Room Acoustics",
+        description: "Apply virtual listening room reverberation model",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Virtual Room Acoustics Simulation",
+        label: "Reverb Wet/Dry Mix",
+        description: "Ratio of reverberant room reflection to direct dry audio",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Virtual Room Acoustics Simulation",
+        label: "RT60 Decay Time",
+        description: "Time required for acoustic reflections to decay by 60 dB",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Virtual Room Acoustics Simulation",
+        label: "Room Dimensions (W x D x H)",
+        description: "Physical space modeling in meters",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Chain Presets",
+        label: "Save Current Chain",
+        description: "Stores everything currently engaged. A note is handy for headphone or room profiles.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Multitrack Lane Mixer",
+        label: "Add Audio Source File",
+        description: "Ingest secondary stems, reference tracks, or voice commentary channels",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Multitrack Lane Mixer",
+        label: "Active Channel Slot",
+        description: "Select mixer channel strip to control",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Multitrack Lane Mixer",
+        label: "Channel Gain & Pan",
+        description: "Fine-tune channel volume level and stereo pan balance",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Multitrack Lane Mixer",
+        label: "Channel Status",
+        description: "Mute and active playback enable state",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Sidechain Ducking Compressor",
+        label: "Trigger Source Slot",
+        description: "Mixer channel monitored to trigger ducking attenuation",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Sidechain Ducking Compressor",
+        label: "Threshold & Depth",
+        description: "Level that activates ducking (dB) and total volume reduction depth (dB)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Sidechain Ducking Compressor",
+        label: "Attack & Release Envelope",
+        description: "Reaction speed (ms) and recovery return time (ms)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Auxiliary Bus & Psychoacoustic Enhancer",
+        label: "Stereo Field Enhancer",
+        description: "Mid-side psychoacoustic stereo image width expander",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Auxiliary Bus & Psychoacoustic Enhancer",
+        label: "Auxiliary Return Bus",
+        description: "Enable parallel effects return loop with dedicated return gain",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Bass Management",
+        description: "Enable a high-pass on the mains plus a matching low-pass for the subwoofer",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Crossover Frequency",
+        description: "Hand-off point between mains and subwoofer (60–120 Hz is the usual home-theatre range)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Crossover Slope",
+        description: "Steeper slopes protect the mains but add group delay",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Filter Topology",
+        description: "Linkwitz-Riley sums flat at the crossover; Butterworth is −3 dB there",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Filter Q",
+        description: "1/√2 ≈ 0.707 is the Butterworth default",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Mains High-Pass",
+        description: "Also high-pass the main speakers. Disable to high-pass only the sub path",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Subwoofer Distance/Delay",
+        description: "Align the sub's arrival with the mains (0–50 ms; 1 ms ≈ 34 cm)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Subwoofer Phase",
+        description: "Continuously trim the sub's phase for the smoothest crossover sum",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Bass Management & Subwoofer Integration",
+        label: "Subwoofer Polarity",
+        description: "Invert the sub's polarity (use instead of, not with, coarse phase)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "LFE Channel",
+        label: "LFE Processing",
+        description: "Apply gain and an optional low-pass to LFE-role channels",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "LFE Channel",
+        label: "LFE Gain",
+        description: "Trim the .1 channel relative to the other speakers",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "LFE Channel",
+        label: "LFE Low-Pass",
+        description: "Standard LFE content is band-limited to 120 Hz",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Up / Down Mixing",
+        label: "Channel Mapping",
+        description: "Identity by default; ITU-R BS.775 folds multichannel to stereo and can build 5.1/7.1 from stereo",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Up / Down Mixing",
+        label: "Mapping Template",
+        description: "Choose the up-mix or down-mix matrix applied at the output boundary",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "CLAP Plugin Insert",
+        label: "Hosted Plugin",
+        description: "A plugin's own editor is a native window this UI cannot embed, so the rack drives every parameter the plugin publishes instead",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "CLAP Plugin Insert",
+        label: "Plugin Rack",
+        description: "Parameters, host bypass, and named presets that capture the plugin's own state",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "High-Resolution Stream Capture",
+        label: "Output Recording Path",
+        description: "Destination WAV file on local storage",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "High-Resolution Stream Capture",
+        label: "Input / Loopback Device",
+        description: "Capture endpoint (leave blank for loopback master monitor)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "High-Resolution Stream Capture",
+        label: "Recording Controls",
+        description: "Start or finalize audio recording file",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "ReplayGain & Loudness Tagging Tool",
+        label: "Target File Path",
+        description: "Path to audio file to measure integrated LUFS and inject tags",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "ReplayGain & Loudness Tagging Tool",
+        label: "Library ReplayGain Scan",
+        description: "Analyse every track that has no loudness data (EBU R128 + ReplayGain 2.0). Results are cached for playback.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "ReplayGain & Loudness Tagging Tool",
+        label: "Write Tags Into Files",
+        description: "Also save the measured ReplayGain / EBU R128 values into each file's tags (FLAC, MP3, M4A, WAV …). Off by default — this is the only setting that modifies your audio files; DSD and raw PCM are skipped.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Audio Engine Stream Recovery",
+        label: "Stream Recovery",
+        description: "Force re-initializes output pipeline without restarting ShadowPlayer",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "Negotiated Output",
+        description: "The backend the engine actually opened, and the one you asked for. Exclusive requests fall back to shared mode when the native path is unavailable",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "Output Latency",
+        description: "Round-trip buffering between the DSP graph and the hardware device",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "DSP Graph Rebuilds",
+        description: "Mean cost of rebuilding the processing graph (codec, sample-rate or routing change)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Theme & Visual Aesthetics",
+        label: "Theme Palette",
+        description: "Switch between Obsidian dark and Jade light mode",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Theme & Visual Aesthetics",
+        label: "Signature Palette",
+        description: "Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Music Library Storage & Directories",
+        label: "Cataloged Tracks",
+        description: "Indexed audio files in local SQLite library database",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Music Library Storage & Directories",
+        label: "Import Music",
+        description: "Use the system file picker to add songs or whole folders to the library",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Music Library Storage & Directories",
+        label: "Find Duplicate Tracks",
+        description: "Group tracks with identical audio content (matched by fingerprint, not tags) and remove the extra copies",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Music Library Storage & Directories",
+        label: "Or Type a Directory",
+        description: "Advanced: index a folder by typing its absolute path",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Organize Files",
+        label: "Batch Rename & Sort",
+        description: "Build names from tags — e.g. {artist}/{album}/{track} - {title}. Existing files are never overwritten.",
+    },
+];
+
+/// The settings that match a query, best first.
+///
+/// The label is the strongest signal, the card next, and the description is a
+/// fallback for the user who remembers what a setting *does* before what it is
+/// called. The same scorer as the command palette keeps the two search boxes
+/// feeling the same.
+pub fn search_settings(query: &str) -> Vec<&'static SettingsEntry> {
+    use crate::components::command_palette::fuzzy_score;
+
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut scored: Vec<(i32, &'static SettingsEntry)> = SETTINGS_INDEX
+        .iter()
+        .filter_map(|entry| {
+            let label = fuzzy_score(entry.label, query);
+            let card = fuzzy_score(entry.card, query).map(|score| score - 8);
+            let description = fuzzy_score(entry.description, query).map(|score| score - 24);
+            let best = label.max(card).max(description)?;
+            Some((best, entry))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(b.1.label)));
+    scored.into_iter().map(|(_, entry)| entry).collect()
+}
+
+/// A pending "jump to this row" request.
+struct SettingsJump {
+    target: &'static str,
+    /// Whether the row still has to be scrolled into view.
+    scroll: bool,
+    /// When the highlight started, in egui time. Set when the row is first
+    /// drawn rather than when the jump is requested, so switching category
+    /// cannot expire the flash before the row exists.
+    flash_started: Option<f64>,
+}
+
+thread_local! {
+    /// The row a search result or palette entry asked for.
+    ///
+    /// `setting_item` has seventy call sites; threading a "jump target"
+    /// parameter through all of them would be a mechanical change that
+    /// obscures what each row means. The UI runs on one thread, so a
+    /// thread-local is the honest way to carry a one-frame UI instruction.
+    static SETTINGS_JUMP: std::cell::RefCell<Option<SettingsJump>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Ask the next Settings frame to scroll to `label` and flash it.
+pub fn request_settings_jump(label: &'static str) {
+    SETTINGS_JUMP.with(|jump| {
+        *jump.borrow_mut() = Some(SettingsJump {
+            target: label,
+            scroll: true,
+            flash_started: None,
+        });
+    });
+}
+
+/// Whether a jump is waiting to be drawn and scrolled to.
+///
+/// A search result or palette entry is a *jump*, not a scroll: it should land
+/// on the row at once instead of animating a thousand pixels past the user's
+/// eye. The ScrollArea reads this to turn its smoothing off for the frames
+/// where a jump still needs to scroll.
+pub fn settings_jump_pending() -> bool {
+    SETTINGS_JUMP.with(|jump| jump.borrow().as_ref().is_some_and(|state| state.scroll))
+}
+
+/// The pending jump, if it is for this row: `(scroll, flash_start, now)`.
+fn setting_jump_for(label: &str, ui: &egui::Ui) -> Option<(bool, Option<f64>, f64)> {
+    let now = ui.input(|i| i.time);
+    SETTINGS_JUMP.with(|jump| {
+        let mut slot = jump.borrow_mut();
+        let state = slot.as_mut()?;
+        if state.target != label {
+            return None;
+        }
+        Some((state.scroll, state.flash_started, now))
+    })
+}
+
+/// Finish a jump after its row has been drawn: scroll once, then flash.
+fn apply_setting_jump(
+    label: &str,
+    response: &egui::Response,
+    highlight: Rect,
+    ui: &egui::Ui,
+    theme: &Theme,
+) {
+    let Some((scroll, flash_started, now)) = setting_jump_for(label, ui) else {
+        return;
+    };
+    let clip = ui.clip_rect();
+    if scroll {
+        response.scroll_to_me(Some(egui::Align::Center));
+        // The first request can be computed against a layout that is still
+        // settling: switching category changes every card's height, and a
+        // card whose content arrives a frame later moves the row again. Keep
+        // asking until the row is actually in the viewport. A row larger than
+        // the viewport counts as landed: it can never be fully contained.
+        let landed = clip.contains_rect(highlight)
+            || highlight.width() > clip.width()
+            || highlight.height() > clip.height();
+        if landed {
+            SETTINGS_JUMP.with(|jump| {
+                if let Some(state) = jump.borrow_mut().as_mut() {
+                    state.scroll = false;
+                }
+            });
+        }
+    }
+    if !clip.intersects(highlight) {
+        // Off-screen: wait for the scroll to land before starting the flash,
+        // so its 1.5 seconds are spent where the user can see it.
+        return;
+    }
+    let started = flash_started.unwrap_or(now);
+    if flash_started.is_none() {
+        SETTINGS_JUMP.with(|jump| {
+            if let Some(state) = jump.borrow_mut().as_mut() {
+                state.flash_started = Some(now);
+            }
+        });
+    }
+    if now - started < 1.5 {
+        ui.painter().rect_stroke(
+            highlight.expand(3.0),
+            CornerRadius::same(theme.radius_sm),
+            Stroke::new(1.5, theme.accent),
+            egui::StrokeKind::Outside,
+        );
+        ui.ctx().request_repaint();
+    } else {
+        SETTINGS_JUMP.with(|jump| *jump.borrow_mut() = None);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // State
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -93,6 +676,10 @@ fn draw_speaker_tab_icon(ui: &egui::Ui, rect: Rect, color: Color32) {
 #[serde(default)]
 pub struct SettingsTabState {
     pub active_category: SettingsCategory,
+
+    /// The Settings search box. Scratch state: a query is not a preference.
+    #[serde(skip)]
+    pub search_query: String,
 
     // Playback
     pub speed: f32,
@@ -233,6 +820,7 @@ impl Default for SettingsTabState {
     fn default() -> Self {
         Self {
             active_category: SettingsCategory::Playback,
+            search_query: String::new(),
 
             speed: 1.0,
             pitch_semitones: 0.0,
@@ -539,6 +1127,164 @@ pub struct SettingsExtraContext<'a> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Search
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The Settings search field: one line, the same shape as the Help manual's.
+fn render_settings_search(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &Theme) {
+    egui::Frame::NONE
+        .fill(theme.bg_input)
+        .stroke(Stroke::new(1.0, theme.border_input))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
+        .inner_margin(egui::Margin::symmetric(12, 7))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+
+                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                crate::components::icons::draw_search(ui, icon_rect, theme.text_muted);
+
+                let has_query = !state.search_query.is_empty();
+                let clear_w = if has_query { 28.0 } else { 0.0 };
+                let input_w = (ui.available_width() - clear_w - 6.0).max(80.0);
+
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.search_query)
+                        .hint_text(
+                            egui::RichText::new(
+                                "Search settings \u{2014} try \u{201c}subwoofer\u{201d} or \u{201c}latency\u{201d}",
+                            )
+                            .color(theme.text_muted)
+                            .font(crate::theme::font(12.5)),
+                        )
+                        .desired_width(input_w)
+                        .frame(egui::Frame::NONE)
+                        .font(crate::theme::font(13.0))
+                        .text_color(theme.text_primary),
+                );
+
+                if has_query
+                    && ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("\u{00d7}")
+                                    .font(crate::theme::font(14.0))
+                                    .color(theme.text_muted),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text("Clear the search")
+                        .clicked()
+                {
+                    state.search_query.clear();
+                }
+            });
+        });
+}
+
+/// Search-as-jump: the results are a route to the real row, not a filtered
+/// copy of the page. A row's controls only make sense where they live.
+fn render_settings_search_results(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &Theme) {
+    let query = state.search_query.trim().to_string();
+    let results = search_settings(&query);
+
+    ui.label(
+        egui::RichText::new(if results.is_empty() {
+            format!("No settings match \u{201c}{query}\u{201d}")
+        } else {
+            format!(
+                "{} setting{} for \u{201c}{query}\u{201d}",
+                results.len(),
+                if results.len() == 1 { "" } else { "s" }
+            )
+        })
+        .font(crate::theme::font(12.5))
+        .strong()
+        .color(theme.text_secondary),
+    );
+
+    if results.is_empty() {
+        ui.label(
+            egui::RichText::new(
+                "Search labels, card titles and descriptions. Settings are reached \
+                 where they live rather than edited in a list.",
+            )
+            .font(crate::theme::font(11.5))
+            .color(theme.text_dim),
+        );
+        return;
+    }
+
+    egui::ScrollArea::vertical()
+        .id_salt("settings_search_results")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
+
+            for entry in results {
+                let frame = egui::Frame::NONE
+                    .fill(theme.bg_card)
+                    .stroke(Stroke::new(1.0, theme.border_subtle))
+                    .corner_radius(CornerRadius::same(theme.radius_md))
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(entry.label)
+                                    .font(crate::theme::font(12.5))
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(entry.category.title())
+                                            .font(crate::theme::mono_font(10.0))
+                                            .color(theme.text_muted),
+                                    );
+                                },
+                            );
+                        });
+                        ui.label(
+                            egui::RichText::new(entry.card)
+                                .font(crate::theme::font(11.0))
+                                .color(theme.text_secondary),
+                        );
+                        if !entry.description.is_empty() {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(entry.description)
+                                        .font(crate::theme::font(10.5))
+                                        .color(theme.text_dim),
+                                )
+                                .truncate(),
+                            );
+                        }
+                    });
+
+                let response = frame.response.interact(Sense::click());
+                if response.hovered() {
+                    ui.painter().rect_stroke(
+                        frame.response.rect,
+                        CornerRadius::same(theme.radius_md),
+                        Stroke::new(1.0, theme.accent),
+                        egui::StrokeKind::Inside,
+                    );
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if response.clicked() {
+                    state.active_category = entry.category;
+                    request_settings_jump(entry.label);
+                    state.search_query.clear();
+                    ui.ctx().request_repaint();
+                }
+            }
+        });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Entry Points
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -549,9 +1295,20 @@ pub fn show_settings_tab_extended(
     extra: &SettingsExtraContext<'_>,
 ) -> SettingsTabActions {
     let mut actions = SettingsTabActions::default();
+    // A pending jump should land on its row without a smooth-scroll detour.
+    let jump_pending = settings_jump_pending();
 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
+
+        // 0. Search. Typing replaces the page with a short list of rows;
+        // choosing one switches category and scrolls to the real row.
+        render_settings_search(ui, state, theme);
+        if !state.search_query.trim().is_empty() {
+            render_settings_search_results(ui, state, theme);
+            ui.add_space(32.0);
+            return;
+        }
 
         // 1. The section strip. One definition of a tab strip for the whole
         // app (`components::page`), not a second one that only Settings has.
@@ -582,6 +1339,7 @@ pub fn show_settings_tab_extended(
         // 2. Active Category Content in a smooth vertical scroll
         egui::ScrollArea::vertical()
             .id_salt("settings_main_scroll")
+            .animated(!jump_pending)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
@@ -2943,7 +3701,7 @@ pub fn setting_item_with_info(
     theme: &Theme,
     add_control: impl FnOnce(&mut egui::Ui),
 ) {
-    ui.horizontal(|ui| {
+    let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
         let avail_w = ui.available_width();
         // The label column grows with the window instead of staying at a
@@ -2990,14 +3748,22 @@ pub fn setting_item_with_info(
         // the full width they can have, so their right-hand end lands on the
         // card's right edge and the row reads as two columns rather than a
         // label with a control abandoned beside it.
-        ui.horizontal_wrapped(|ui| {
+        let controls = ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
             // The value box beside a slider takes about 74px; the slider
             // gets what is left.
             ui.spacing_mut().slider_width = (control_w - 86.0).clamp(120.0, 620.0);
             add_control(ui);
         });
+        controls.response.rect
     });
+
+    // A search result or command-palette entry asked for this row. The row is
+    // only known after it has been laid out, which is exactly when a scroll
+    // target can be registered. The highlight spans the controls as well as
+    // the label: the horizontal row's own rect stops at the label column.
+    let highlight = row.response.rect.union(row.inner);
+    apply_setting_jump(label, &row.response, highlight, ui, theme);
 }
 
 pub fn toggle_switch(ui: &mut egui::Ui, value: &mut bool, theme: &Theme) -> bool {
@@ -3125,4 +3891,236 @@ fn color_dot(ui: &mut egui::Ui, color: Color32, tooltip: &str) {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
     ui.painter_at(rect).circle_filled(rect.center(), 7.0, color);
     resp.on_hover_text(tooltip);
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// The file's own source, so the index is checked against what is
+    /// actually rendered rather than against a second hand-written list.
+    const SOURCE: &str = include_str!("settings_tab.rs");
+
+    /// The rendering half of the file, before this test module.
+    fn rendering_source() -> &'static str {
+        let end = SOURCE.find("#[cfg(test)]").unwrap_or(SOURCE.len());
+        &SOURCE[..end]
+    }
+
+    /// Parse a Rust string literal at the start of `text`.
+    fn string_literal(text: &str) -> Option<(String, usize)> {
+        let mut chars = text.char_indices();
+        let (_, quote) = chars.next()?;
+        if quote != '"' {
+            return None;
+        }
+        let mut out = String::new();
+        while let Some((index, c)) = chars.next() {
+            match c {
+                '"' => return Some((out, index + 1)),
+                '\\' => {
+                    let (_, escaped) = chars.next()?;
+                    out.push(match escaped {
+                        'n' => '\n',
+                        't' => '\t',
+                        '"' => '"',
+                        '\\' => '\\',
+                        other => other,
+                    });
+                }
+                _ => out.push(c),
+            }
+        }
+        None
+    }
+
+    /// Every `setting_item(ui, "Label", ...)` call and its byte offset.
+    ///
+    /// A call whose first argument is not `ui` followed by a string literal is
+    /// the definition dispatching to `setting_item_with_info`, not a row.
+    fn rendered_rows(source: &str) -> Vec<(usize, String)> {
+        let mut rows = Vec::new();
+        for name in ["setting_item(", "setting_item_with_info("] {
+            let mut from = 0;
+            while let Some(offset) = source[from..].find(name) {
+                let start = from + offset;
+                let after = start + name.len();
+                let rest = source[after..].trim_start();
+                let rest = rest.strip_prefix("ui").unwrap_or("");
+                let rest = rest.trim_start();
+                let rest = rest.strip_prefix(',').unwrap_or("");
+                let rest = rest.trim_start();
+                if let Some((label, _)) = string_literal(rest) {
+                    rows.push((start, label));
+                }
+                from = after;
+            }
+        }
+        rows.sort_by_key(|(at, _)| *at);
+        rows
+    }
+
+    /// Every card title passed to `card_header*`.
+    fn rendered_cards(source: &str) -> Vec<String> {
+        let mut cards = Vec::new();
+        for name in ["card_header(", "card_header_with_info("] {
+            let mut from = 0;
+            while let Some(offset) = source[from..].find(name) {
+                let after = from + offset + name.len();
+                // A real call starts `ui,`; the definition starts `ui:`.
+                let rest = source[after..].trim_start();
+                if let Some(rest) = rest.strip_prefix("ui,") {
+                    // `ui` and the icon contain no string literals, so the
+                    // first literal is always the title.
+                    if let Some(quote) = rest.find('"') {
+                        if let Some((title, _)) = string_literal(&rest[quote..]) {
+                            cards.push(title);
+                        }
+                    }
+                }
+                from = after;
+            }
+        }
+        cards
+    }
+
+    /// The category function each row is rendered from.
+    fn category_of(source: &str, at: usize) -> Option<SettingsCategory> {
+        let mut current = None;
+        for (name, category) in [
+            ("fn render_playback_category(", SettingsCategory::Playback),
+            ("fn render_output_category(", SettingsCategory::Output),
+            ("fn render_spatial_category(", SettingsCategory::Spatial),
+            ("fn render_mixbus_category(", SettingsCategory::MixBus),
+            ("fn render_tools_category(", SettingsCategory::Tools),
+            ("fn render_library_category(", SettingsCategory::Library),
+        ] {
+            if let Some(found) = source[..at].rfind(name) {
+                if current.as_ref().is_none_or(|(best, _)| found > *best) {
+                    current = Some((found, category));
+                }
+            }
+        }
+        current.map(|(_, category)| category)
+    }
+
+    #[test]
+    fn every_rendered_setting_is_indexed() {
+        let source = rendering_source();
+        let rows = rendered_rows(source);
+        assert_eq!(
+            rows.len(),
+            SETTINGS_INDEX.len(),
+            "the render has {} setting rows, the index has {}",
+            rows.len(),
+            SETTINGS_INDEX.len()
+        );
+        let indexed: std::collections::BTreeSet<&str> =
+            SETTINGS_INDEX.iter().map(|entry| entry.label).collect();
+        for (at, label) in rows {
+            assert!(
+                indexed.contains(label.as_str()),
+                "`{label}` is rendered at byte {at} but missing from SETTINGS_INDEX"
+            );
+        }
+    }
+
+    #[test]
+    fn every_indexed_setting_is_rendered_once() {
+        let source = rendering_source();
+        let mut rendered: BTreeMap<String, usize> = BTreeMap::new();
+        for (_, label) in rendered_rows(source) {
+            *rendered.entry(label).or_default() += 1;
+        }
+        let mut indexed: BTreeMap<&str, usize> = BTreeMap::new();
+        for entry in SETTINGS_INDEX.iter() {
+            *indexed.entry(entry.label).or_default() += 1;
+        }
+        for (label, count) in &indexed {
+            assert_eq!(
+                rendered.get(*label).copied().unwrap_or(0),
+                *count,
+                "`{label}` has {count} index rows but {} rendered rows",
+                rendered.get(*label).copied().unwrap_or(0)
+            );
+        }
+        for (label, count) in &rendered {
+            assert_eq!(
+                count, &1,
+                "`{label}` is rendered {count} times; the index cannot address one of them"
+            );
+        }
+    }
+
+    #[test]
+    fn the_index_carries_the_right_category_and_card() {
+        let source = rendering_source();
+        let cards = rendered_cards(source);
+        let card_set: std::collections::BTreeSet<&str> = cards.iter().map(String::as_str).collect();
+        let indexed_cards: std::collections::BTreeSet<&str> =
+            SETTINGS_INDEX.iter().map(|entry| entry.card).collect();
+        assert!(
+            indexed_cards.is_subset(&card_set),
+            "the index names cards the page does not render: {:?}",
+            indexed_cards.difference(&card_set).collect::<Vec<_>>()
+        );
+
+        for (at, label) in rendered_rows(source) {
+            let entry = SETTINGS_INDEX
+                .iter()
+                .find(|entry| entry.label == label)
+                .unwrap_or_else(|| panic!("`{label}` is not indexed"));
+            assert_eq!(
+                category_of(source, at),
+                Some(entry.category),
+                "`{label}` is indexed under {:?} but rendered under {:?}",
+                entry.category,
+                category_of(source, at)
+            );
+            assert!(
+                cards.iter().any(|card| card == entry.card),
+                "`{label}` names the card `{}`, which the page does not render",
+                entry.card
+            );
+        }
+    }
+
+    #[test]
+    fn search_reaches_labels_cards_and_descriptions() {
+        assert_eq!(
+            search_settings("subwoofer")
+                .first()
+                .map(|entry| entry.label),
+            Some("Subwoofer Phase"),
+            "a label match outranks a description match"
+        );
+        assert!(
+            search_settings("crossfeed")
+                .iter()
+                .any(|entry| entry.label == "Processing Profile"),
+            "a description match still finds the row: {:?}",
+            search_settings("crossfeed")
+                .iter()
+                .map(|entry| entry.label)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            search_settings("no such setting exists").is_empty(),
+            "a query with no matched characters finds nothing"
+        );
+        assert!(search_settings("   ").is_empty());
+    }
+
+    #[test]
+    fn every_index_entry_can_be_found_by_its_own_label() {
+        for entry in SETTINGS_INDEX.iter() {
+            let results = search_settings(entry.label);
+            assert!(
+                results.iter().any(|found| found.label == entry.label),
+                "`{}` is not found by its own label",
+                entry.label
+            );
+        }
+    }
 }

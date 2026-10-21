@@ -1,5 +1,5 @@
 use audio_session::{AudioSession, EngineEvent, OutputEvent, PlaybackState};
-use database::{Database, HistoryRepo, QueueRepo, TrackRepo};
+use database::{Database, HistoryRepo, QueueRepo, ScrobbleRepo, TrackRepo};
 use domain::ids::TrackId;
 use domain::models::{RepeatModeChoice, Track};
 use log::{info, warn};
@@ -39,6 +39,7 @@ pub struct PlaybackCoordinator {
     _db: Database,
     track_repo: TrackRepo,
     history_repo: HistoryRepo,
+    scrobble_repo: ScrobbleRepo,
     queue_repo: QueueRepo,
     queue: Vec<Track>,
     /// Original insertion order, kept while shuffle is active so we can restore
@@ -65,6 +66,7 @@ impl PlaybackCoordinator {
     pub fn new(session: Arc<AudioSession>, db: Database) -> Self {
         let track_repo = TrackRepo::new(db.clone());
         let history_repo = HistoryRepo::new(db.clone());
+        let scrobble_repo = ScrobbleRepo::new(db.clone());
         let queue_repo = QueueRepo::new(db.clone());
 
         // Drop play-history rows that have aged out of the rolling window.
@@ -75,6 +77,7 @@ impl PlaybackCoordinator {
             _db: db,
             track_repo,
             history_repo,
+            scrobble_repo,
             queue_repo,
             queue: Vec::new(),
             unshuffled_queue: None,
@@ -627,6 +630,17 @@ impl PlaybackCoordinator {
             .record_play(&track_id, listened, completed, is_scrobble)
         {
             warn!("Could not record play history for {track_id}: {e}");
+        }
+        // The scrobble log is the permanent record; `play_history` above is
+        // only the seven-day window the "Recently Played" view reads. Copy
+        // the track's text fields in now, so the scrobble still says what was
+        // heard after the file is gone.
+        if is_scrobble {
+            if let Some(track) = self.current_track.as_ref() {
+                if let Err(e) = self.scrobble_repo.record(track, listened) {
+                    warn!("Could not record the scrobble for {track_id}: {e}");
+                }
+            }
         }
         self.play_registered = true;
     }

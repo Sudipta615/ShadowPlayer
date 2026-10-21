@@ -1,4 +1,5 @@
 pub mod app_state;
+pub mod chain_override;
 pub mod chain_preset;
 pub mod clap_rack;
 pub mod dsp_state;

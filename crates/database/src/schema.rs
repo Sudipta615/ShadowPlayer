@@ -74,6 +74,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v8(conn)?;
     }
 
+    if current_version < 9 {
+        apply_v9(conn)?;
+    }
+
     Ok(())
 }
 
@@ -380,6 +384,61 @@ pub(crate) fn apply_v4_for_test(conn: &mut Connection) -> Result<()> {
 #[cfg(test)]
 pub(crate) fn apply_v5_for_test(conn: &mut Connection) -> Result<()> {
     apply_v5(conn)
+}
+
+/// V9: the permanent listening history.
+///
+/// `play_history` is a seven-day rolling window: it exists so "Recently
+/// Played" and "Most Played" can be answered without a growing scan. A
+/// listening history is the opposite kind of table — it is the record of
+/// everything ever heard, and it is never pruned.
+///
+/// The artist, title and album are copied in at write time. This is what makes
+/// the table a *history* rather than a join over the library: deleting a track
+/// must not erase the times it was played. `track_id` is nullable for the same
+/// reason (`ON DELETE SET NULL`), and only kept so a scrobble can still be
+/// matched to the track when it is in the library.
+fn apply_v9(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V9 (permanent listening history)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS scrobbles (
+            id TEXT PRIMARY KEY NOT NULL,
+            track_id TEXT REFERENCES tracks(id) ON DELETE SET NULL,
+            artist TEXT NOT NULL,
+            title TEXT NOT NULL,
+            album TEXT NOT NULL,
+            played_at INTEGER NOT NULL,
+            duration_secs REAL NOT NULL DEFAULT 0,
+            listened_secs REAL NOT NULL DEFAULT 0
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_scrobbles_played_at ON scrobbles(played_at DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_scrobbles_artist ON scrobbles(artist COLLATE NOCASE);",
+        "CREATE INDEX IF NOT EXISTS idx_scrobbles_title ON scrobbles(title COLLATE NOCASE);",
+        "CREATE INDEX IF NOT EXISTS idx_scrobbles_track ON scrobbles(track_id);",
+        // Carry the week of scrobbles an existing user may still have in
+        // `play_history` across, so upgrading does not start the history from
+        // an empty table.
+        "INSERT INTO scrobbles
+            (id, track_id, artist, title, album, played_at, duration_secs, listened_secs)
+         SELECT lower(hex(randomblob(16))), h.track_id, t.artist, t.title, t.album,
+                h.played_at, t.duration_secs, h.duration_listened_secs
+           FROM play_history h
+           JOIN tracks t ON t.id = h.track_id
+          WHERE h.is_scrobble = 1;",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (9, strftime('%s', 'now'));",
+    ];
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V9 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
 }
 
 /// V8: skip counts and scrobbles.
