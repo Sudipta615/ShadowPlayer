@@ -1,6 +1,6 @@
 [package]
 name = "clap-fixture-plugin"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 publish = false
 description = "A tiny CLAP plugin used only by this repository's tests and eval hooks."

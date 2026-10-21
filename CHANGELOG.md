@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-21
+
 ### Added
 - **A command palette** (`Ctrl+Space`): one field that reaches the sidebar, the playlists, the smart playlists, the toggles, the panels that are otherwise buried in a menu, and any track in the library. The matching is a scored subsequence match, not a plain `contains`, and its precedence is documented and tested: a candidate that starts with the query beats a phrase that merely contains the word, a whole word beats a mid-word fragment, and a shorter candidate wins a tie. Tracks are scored against their raw titles before any row is built, so a ten-thousand-track library does not allocate ten thousand rows on every keystroke.
 - **ReplayGain album gain is indexed.** The engine could already read an album's gain from the file's own `REPLAYGAIN_ALBUM` tag and apply it, but the library never indexed it, so the app could neither show it nor fall back to a computed value for an album with no tag. The library now stores it (migration V6), the loudness scan computes it with the engine's own loudness-weighted definition and writes it to every track of the album, and the track properties show the track and album gains side by side.
