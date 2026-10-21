@@ -184,21 +184,33 @@ pub fn tab_strip_wrapping(
                 let gap = 4.0 * (tabs.len() as f32 - 1.0);
                 let even_w = ((ui.available_width() - gap) / tabs.len() as f32).max(60.0);
 
+                // An evenly-divided strip only works when every label fits in
+                // its share. Measuring first means a narrow window falls back
+                // to label-sized tabs (and, if asked, wrapping) rather than
+                // clipping the last section's name.
+                let text_widths: Vec<f32> = tabs
+                    .iter()
+                    .map(|tab| {
+                        ui.painter()
+                            .layout_no_wrap(
+                                tab.label.to_string(),
+                                crate::theme::font(12.0),
+                                theme.text_primary,
+                            )
+                            .rect
+                            .width()
+                    })
+                    .collect();
+                let needed: f32 = text_widths.iter().map(|w| w + 48.0).sum::<f32>() + gap + 4.0;
+                let fill = fill_width && ui.available_width() >= needed;
+
                 for (index, tab) in tabs.iter().enumerate() {
                     let is_active = index == selected;
 
                     // A tab that is sized to its label needs the text
                     // measured first, so the icon and the padding fit.
-                    let text_w = ui
-                        .painter()
-                        .layout_no_wrap(
-                            tab.label.to_string(),
-                            crate::theme::font(12.0),
-                            theme.text_primary,
-                        )
-                        .rect
-                        .width();
-                    let tab_w = if fill_width {
+                    let text_w = text_widths[index];
+                    let tab_w = if fill {
                         even_w
                     } else {
                         text_w + if tab.icon.is_some() { 48.0 } else { 26.0 }

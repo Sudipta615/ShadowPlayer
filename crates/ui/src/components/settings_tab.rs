@@ -563,13 +563,18 @@ pub fn show_settings_tab_extended(
             .iter()
             .position(|c| *c == state.active_category)
             .unwrap_or(0);
-        if let Some(picked) = crate::components::page::tab_strip(
+        // Six sections across a narrow window do not fit. Below the width at
+        // which the labels start to collide, the strip sizes each tab to its
+        // own label and wraps instead of clipping the last one.
+        let wide = ui.available_width() >= 760.0;
+        if let Some(picked) = crate::components::page::tab_strip_wrapping(
             ui,
             theme,
             "settings_categories",
             &tabs,
             selected,
-            true,
+            wide,
+            !wide,
         ) {
             state.active_category = SettingsCategory::ALL[picked];
         }
