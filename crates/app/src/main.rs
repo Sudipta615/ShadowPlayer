@@ -173,6 +173,7 @@ mod tests {
             content_hash: None,
             is_favorite: false,
             play_count: 0,
+            skip_count: 0,
             last_played_at: None,
             added_at: 1_700_000_000,
         }

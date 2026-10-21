@@ -118,6 +118,7 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         content_hash: None,
         is_favorite: false,
         play_count: 0,
+        skip_count: 0,
         last_played_at: None,
         added_at: now,
     };
@@ -242,6 +243,7 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             content_hash: None,
             is_favorite: false,
             play_count: 0,
+            skip_count: 0,
             last_played_at: None,
             added_at: now,
         };

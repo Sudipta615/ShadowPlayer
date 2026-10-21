@@ -3,7 +3,7 @@ mod unit {
     use crate::db::Database;
     use crate::repos::*;
     use domain::ids::{PlaylistId, TrackId};
-    use domain::models::{AppSettings, SortField, SortOrder, Track};
+    use domain::models::{AppSettings, SortField, SortOrder, Track, TrackDspProfile};
     use domain::smart::{SmartField, SmartOp, SmartPlaylist, SmartRule};
     use std::path::PathBuf;
 
@@ -35,6 +35,7 @@ mod unit {
             content_hash: None,
             is_favorite: false,
             play_count: 0,
+            skip_count: 0,
             last_played_at: None,
             added_at: 1700000000,
         }
@@ -717,6 +718,66 @@ mod unit {
     }
 
     #[test]
+    fn test_skip_count_and_dsp_profile_round_trip() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+        let dsp = TrackDspRepo::new(db.clone());
+
+        let track = sample_track(TrackId::new(), "/m/a.flac", "A", "Artist", "Album");
+        repo.upsert(&track).unwrap();
+
+        // A skip is counted.
+        repo.increment_skip_count(&track.id).unwrap();
+        repo.increment_skip_count(&track.id).unwrap();
+        let got = repo.get_by_id(&track.id).unwrap().unwrap();
+        assert_eq!(got.skip_count, 2);
+        assert_eq!(got.play_count, 0, "a skip is not a play");
+
+        // The most-skipped list finds it.
+        let skipped = repo.list_most_skipped(10).unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].id, track.id);
+
+        // A per-track DSP profile round-trips.
+        let profile = TrackDspProfile {
+            graphic_gains: vec![1.5, -2.0],
+            graphic_enabled: true,
+            graphic_preamp_db: -3.0,
+        };
+        dsp.set(&track.id, &profile).unwrap();
+        let read = dsp
+            .get(&track.id)
+            .unwrap()
+            .expect("the profile must be there");
+        assert_eq!(read, profile);
+        assert!(!read.is_neutral());
+
+        // And it can be removed.
+        dsp.clear(&track.id).unwrap();
+        assert!(dsp.get(&track.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_scrobbles_are_recorded_separately_from_plays() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+        let history = HistoryRepo::new(db.clone());
+
+        let track = sample_track(TrackId::new(), "/m/a.flac", "A", "Artist", "Album");
+        repo.upsert(&track).unwrap();
+
+        // A play that was abandoned is a play, but not a scrobble.
+        history.record_play(&track.id, 5.0, false, false).unwrap();
+        // One that was heard is both.
+        history.record_play(&track.id, 120.0, false, true).unwrap();
+
+        assert_eq!(history.count_scrobbles().unwrap(), 1);
+        let scrobbles = history.list_scrobbles(10).unwrap();
+        assert_eq!(scrobbles.len(), 1);
+        assert_eq!(scrobbles[0].0.id, track.id);
+    }
+
+    #[test]
     fn test_moved_file_keeps_identity() {
         let db = Database::in_memory().expect("In-memory DB creation failed");
         let repo = TrackRepo::new(db.clone());
@@ -846,6 +907,21 @@ mod unit {
         assert_eq!(m2.len(), 1);
         assert_eq!(m2[0].title, "Gamma");
 
+        // Skip count: the tracks that keep getting jumped past.
+        track_repo.increment_skip_count(&t2.id).unwrap();
+        track_repo.increment_skip_count(&t2.id).unwrap();
+        let mut sp_skip = SmartPlaylist::draft(PlaylistId::new());
+        sp_skip.name = "Skipped".to_string();
+        sp_skip.rules = vec![SmartRule {
+            field: SmartField::SkipCount,
+            op: SmartOp::GreaterThan,
+            value: "1".to_string(),
+        }];
+        let sp_skip = sp_repo.save(&sp_skip).unwrap();
+        let m_skip = sp_repo.evaluate(&sp_skip).unwrap();
+        assert_eq!(m_skip.len(), 1);
+        assert_eq!(m_skip[0].title, "Beta");
+
         // OR: format contains "MP" OR title contains "Alpha" -> t1 + t2.
         let mut sp3 = SmartPlaylist::draft(PlaylistId::new());
         sp3.name = "Any".to_string();
@@ -901,13 +977,13 @@ mod unit {
 
         // Persistence round-trip.
         let all = sp_repo.list().unwrap();
-        assert_eq!(all.len(), 6);
+        assert_eq!(all.len(), 7);
         let got = sp_repo.get(&saved.id).unwrap().unwrap();
         assert_eq!(got.rules.len(), 1);
         assert_eq!(got.rules[0].field, SmartField::Lossless);
 
         sp_repo.delete(&sp2.id).unwrap();
-        assert_eq!(sp_repo.list().unwrap().len(), 5);
+        assert_eq!(sp_repo.list().unwrap().len(), 6);
     }
 
     #[test]

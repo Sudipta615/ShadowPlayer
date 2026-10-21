@@ -38,9 +38,49 @@ mod unit {
             content_hash: None,
             is_favorite: false,
             play_count: 0,
+            skip_count: 0,
             last_played_at: None,
             added_at: 0,
         }
+    }
+
+    #[test]
+    fn test_the_scrobble_rule() {
+        // The Last.fm rule: thirty seconds, or half the track.
+        // The flat threshold, on a track long enough for it to come first.
+        assert!(PlaybackCoordinator::is_scrobble(30.0, 600.0));
+        assert!(!PlaybackCoordinator::is_scrobble(29.0, 600.0));
+        // Half the track, on a short one where half arrives first.
+        assert!(PlaybackCoordinator::is_scrobble(20.0, 40.0));
+        assert!(!PlaybackCoordinator::is_scrobble(19.0, 40.0));
+        // A ten-second interlude scrobbles at five.
+        assert!(PlaybackCoordinator::is_scrobble(5.0, 10.0));
+        assert!(!PlaybackCoordinator::is_scrobble(4.0, 10.0));
+        // An unknown duration falls back to the flat threshold.
+        assert!(!PlaybackCoordinator::is_scrobble(20.0, 0.0));
+        assert!(PlaybackCoordinator::is_scrobble(30.0, 0.0));
+    }
+
+    #[test]
+    fn test_skipping_before_the_track_is_heard_counts() {
+        let config = EngineConfig::default();
+        let session = Arc::new(AudioSession::with_sink(config, Box::new(NoopSink)).unwrap());
+        let db = Database::in_memory().unwrap();
+        let track_repo = TrackRepo::new(db.clone());
+
+        let t1 = sample_track(TrackId::new(), "Track 1");
+        let t2 = sample_track(TrackId::new(), "Track 2");
+        track_repo.upsert(&t1).unwrap();
+        track_repo.upsert(&t2).unwrap();
+
+        let mut coord = PlaybackCoordinator::new(session, db);
+        coord.play_track(t1.clone(), Some(vec![t1.clone(), t2.clone()]));
+
+        // Straight to the next track: nothing was heard, so it is a skip.
+        coord.next();
+        let got = track_repo.get_by_id(&t1.id).unwrap().unwrap();
+        assert_eq!(got.skip_count, 1);
+        assert_eq!(got.play_count, 0, "a skip is not a play");
     }
 
     #[test]

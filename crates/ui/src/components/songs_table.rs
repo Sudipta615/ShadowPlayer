@@ -381,6 +381,8 @@ pub struct SongsTableAction {
     pub remove_track: Option<TrackId>,
     /// User chose "Edit Song Info" from the context menu.
     pub edit_track: Option<TrackId>,
+    /// User chose "Per-track DSP" from the context menu.
+    pub open_dsp: Option<TrackId>,
 
     // ── Bulk (multi-select) actions ─────────────────────────────────────────
     // The selected ids themselves live in `LibraryState`; these flags only say
@@ -448,6 +450,7 @@ impl<'a> SongsTable<'a> {
             show_properties: None,
             remove_track: None,
             edit_track: None,
+            open_dsp: None,
             play_selected: false,
             queue_next_selected: false,
             add_selected_to_queue: false,
@@ -1803,6 +1806,11 @@ fn render_track_context_menu(
 
     if ui.button("Track Properties").clicked() {
         action.show_properties = Some(track.id);
+        ui.close();
+    }
+
+    if ui.button("Per-track DSP…").clicked() {
+        action.open_dsp = Some(track.id);
         ui.close();
     }
 

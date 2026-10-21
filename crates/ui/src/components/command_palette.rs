@@ -37,6 +37,12 @@ pub enum PaletteAction {
     OpenLoudness,
     /// Open the library statistics.
     OpenLibraryStats,
+    /// Open the per-track DSP editor for the current track.
+    OpenTrackDsp,
+    /// Open the scrobble log.
+    OpenScrobbleLog,
+    /// Open the import-from-other-players dialog.
+    OpenImportPlaylists,
     /// Open the duplicate-track finder.
     OpenDuplicates,
     /// Open the batch organiser.

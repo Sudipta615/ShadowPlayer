@@ -487,6 +487,7 @@ mod tests {
             content_hash: Some(format!("hash-{id_seed}")),
             is_favorite: false,
             play_count: 0,
+            skip_count: 0,
             last_played_at: None,
             added_at: 0,
         }

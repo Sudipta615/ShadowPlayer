@@ -37,6 +37,15 @@ pub struct AppState {
     pub loudness_modal: crate::modals::loudness_modal::LoudnessModalState,
     /// The library statistics.
     pub library_stats_modal: crate::modals::library_stats_modal::LibraryStatsModalState,
+    /// The per-track DSP editor.
+    pub track_dsp_modal: crate::modals::track_dsp_modal::TrackDspModalState,
+    /// The user's own graphic EQ, saved the first time a track's own profile
+    /// takes over, so the next track without one can have it back.
+    pub dsp_global_snapshot: Option<(bool, [f32; 64], f32)>,
+    /// The scrobble log.
+    pub scrobble_log_open: bool,
+    /// The import-from-other-players dialog.
+    pub import_playlists_modal: crate::modals::import_playlists_modal::ImportPlaylistsModalState,
     /// The command palette's own state: its query and the highlighted row.
     pub command_palette: crate::components::command_palette::CommandPaletteState,
     /// Single-window compact player mode.
@@ -87,6 +96,10 @@ impl Default for AppState {
             command_palette_open: false,
             loudness_modal: Default::default(),
             library_stats_modal: Default::default(),
+            track_dsp_modal: Default::default(),
+            dsp_global_snapshot: None,
+            scrobble_log_open: false,
+            import_playlists_modal: Default::default(),
             command_palette: Default::default(),
             mini_player: false,
             now_playing_full: false,

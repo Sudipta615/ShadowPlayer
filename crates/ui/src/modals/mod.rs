@@ -2,11 +2,14 @@ pub mod autoeq_modal;
 pub mod bit_perfect_modal;
 pub mod duplicates_modal;
 pub mod edit_track_modal;
+pub mod import_playlists_modal;
 pub mod library_stats_modal;
 pub mod loudness_modal;
 pub mod organize_modal;
 pub mod playlist_editor_modal;
+pub mod scrobble_log_modal;
 pub mod smart_playlist_modal;
+pub mod track_dsp_modal;
 
 pub use crate::components::eq_panel::show_eq_panel;
 pub use crate::components::track_properties_modal::show_track_properties_modal;

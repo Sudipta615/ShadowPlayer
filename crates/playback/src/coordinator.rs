@@ -11,6 +11,17 @@ use std::sync::Arc;
 /// the whole track, whichever is shorter). Skips before this do not register.
 const PLAY_THRESHOLD_SECS: f32 = 20.0;
 
+/// A play counts as a scrobble at thirty seconds, or half the track,
+/// whichever comes first.
+///
+/// This is the rule the scrobbling services use, and it is deliberately
+/// stricter than [`PLAY_THRESHOLD_SECS`]: a play that was abandoned after
+/// twenty seconds is a play, but it is not a scrobble.
+const SCROBBLE_MIN_SECS: f32 = 30.0;
+
+/// The fraction of a track that has to be heard for the play to scrobble.
+const SCROBBLE_FRACTION: f32 = 0.5;
+
 /// The largest position advance between two polls that still counts as
 /// continuous playback. Anything bigger is a seek and must not inflate the
 /// listening total; a normal frame is two orders of magnitude smaller.
@@ -226,6 +237,9 @@ impl PlaybackCoordinator {
             return;
         }
 
+        // Leaving the current track before it was heard is a skip.
+        self.register_skip();
+
         // The queue is already permuted when shuffle is on, so advancing is
         // simply "next in the list" in both modes.
         let next_idx = if let Some(curr) = self.current_index {
@@ -258,6 +272,9 @@ impl PlaybackCoordinator {
             self.session.seek(0.0);
             return;
         }
+
+        // Leaving the current track before it was heard is a skip.
+        self.register_skip();
 
         let prev_idx = if let Some(curr) = self.current_index {
             if curr > 0 {
@@ -564,15 +581,50 @@ impl PlaybackCoordinator {
         }
     }
 
+    /// Whether a play of this length counts as a scrobble.
+    pub fn is_scrobble(listened: f32, duration: f32) -> bool {
+        if duration <= 0.0 {
+            return listened >= SCROBBLE_MIN_SECS;
+        }
+        listened >= SCROBBLE_MIN_SECS || listened >= duration * SCROBBLE_FRACTION
+    }
+
+    /// Note that the current track was skipped before it was heard.
+    ///
+    /// A skip is a jump to another track before the current one had a chance
+    /// to be heard. It is what a "skip this track" smart playlist needs, and
+    /// it is the signal that a track is not worth keeping.
+    fn register_skip(&mut self) {
+        if self.play_registered {
+            return;
+        }
+        let Some(track) = self.current_track.clone() else {
+            return;
+        };
+        if let Err(e) = self.track_repo.increment_skip_count(&track.id) {
+            warn!(
+                "Could not increment the skip count for {}: {e}",
+                track.title
+            );
+        }
+    }
+
     fn register_play(&mut self, track_id: TrackId, threshold: f32, completed: bool) {
         // Reported rather than swallowed: silently failing here means a track
         // that was heard never appears in "recently played" or the play counts.
         if let Err(e) = self.track_repo.increment_play_count(&track_id) {
             warn!("Could not increment play count for {track_id}: {e}");
         }
-        if let Err(e) =
-            self.history_repo
-                .record_play(&track_id, self.listen_secs.max(threshold), completed)
+        let listened = self.listen_secs.max(threshold);
+        let duration = self
+            .current_track
+            .as_ref()
+            .map(|t| t.duration_secs)
+            .unwrap_or(0.0);
+        let is_scrobble = completed || Self::is_scrobble(listened, duration);
+        if let Err(e) = self
+            .history_repo
+            .record_play(&track_id, listened, completed, is_scrobble)
         {
             warn!("Could not record play history for {track_id}: {e}");
         }

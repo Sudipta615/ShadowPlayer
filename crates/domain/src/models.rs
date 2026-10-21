@@ -45,6 +45,8 @@ pub struct Track {
     pub content_hash: Option<String>,
     pub is_favorite: bool,
     pub play_count: u32,
+    /// How many times this track was skipped before it was heard.
+    pub skip_count: u32,
     pub last_played_at: Option<i64>,
     pub added_at: i64,
 }
@@ -176,6 +178,32 @@ impl std::fmt::Display for SortField {
             Self::DateAdded => write!(f, "Date Added"),
             Self::Favorite => write!(f, "Favorites"),
         }
+    }
+}
+
+/// A track's own DSP settings, applied when that track plays.
+///
+/// This is the per-track DSP that every serious local player has: a track
+/// that needs a corrective curve, or a different preamp because it was
+/// mastered louder, gets its own settings rather than changing the whole
+/// library.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct TrackDspProfile {
+    /// The graphic EQ's per-band gains, in dB.
+    #[serde(default)]
+    pub graphic_gains: Vec<f32>,
+    /// Whether the graphic EQ is on for this track.
+    #[serde(default)]
+    pub graphic_enabled: bool,
+    /// The graphic EQ's preamp, in dB.
+    #[serde(default)]
+    pub graphic_preamp_db: f32,
+}
+
+impl TrackDspProfile {
+    /// Whether the profile would change anything.
+    pub fn is_neutral(&self) -> bool {
+        !self.graphic_enabled && self.graphic_gains.iter().all(|g| g.abs() < 0.01)
     }
 }
 

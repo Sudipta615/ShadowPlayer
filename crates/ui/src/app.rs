@@ -61,6 +61,10 @@ pub struct ShadowPlayerApp {
     search_engine: SearchEngine,
 
     track_repo: TrackRepo,
+    track_dsp_repo: database::TrackDspRepo,
+    /// The track whose DSP profile was last applied, so the profile is
+    /// applied once per track rather than once per frame.
+    dsp_profile_track: Option<domain::ids::TrackId>,
     playlist_repo: PlaylistRepo,
     favorites_repo: FavoritesRepo,
     history_repo: HistoryRepo,
@@ -175,6 +179,7 @@ impl ShadowPlayerApp {
         crate::theme::install_fonts(&_cc.egui_ctx);
 
         let track_repo = TrackRepo::new(db.clone());
+        let track_dsp_repo = database::TrackDspRepo::new(db.clone());
         let playlist_repo = PlaylistRepo::new(db.clone());
         let favorites_repo = FavoritesRepo::new(db.clone());
         let history_repo = HistoryRepo::new(db.clone());
@@ -201,6 +206,8 @@ impl ShadowPlayerApp {
             search_engine,
 
             track_repo,
+            track_dsp_repo,
+            dsp_profile_track: None,
             playlist_repo,
             favorites_repo,
             history_repo,
@@ -695,6 +702,24 @@ impl ShadowPlayerApp {
             PaletteAction::OpenLibraryStats,
         ));
         entries.push(PaletteEntry::new(
+            "Library",
+            "Scrobble log",
+            "what you actually listened to",
+            PaletteAction::OpenScrobbleLog,
+        ));
+        entries.push(PaletteEntry::new(
+            "Library",
+            "Import from other players",
+            "playlists left by Rhythmbox, iTunes and Audacious",
+            PaletteAction::OpenImportPlaylists,
+        ));
+        entries.push(PaletteEntry::new(
+            "Track",
+            "Per-track DSP",
+            "give this track its own EQ",
+            PaletteAction::OpenTrackDsp,
+        ));
+        entries.push(PaletteEntry::new(
             "Panel",
             "Duplicate tracks",
             "find identical audio",
@@ -816,6 +841,17 @@ impl ShadowPlayerApp {
             PaletteAction::OpenLibraryStats => {
                 self.open_library_stats();
             }
+            PaletteAction::OpenTrackDsp => {
+                if let Some(track) = self.coordinator.current_track().cloned() {
+                    self.open_track_dsp(&track);
+                }
+            }
+            PaletteAction::OpenScrobbleLog => {
+                self.app_state.scrobble_log_open = true;
+            }
+            PaletteAction::OpenImportPlaylists => {
+                self.open_import_playlists();
+            }
             PaletteAction::OpenDuplicates => {
                 self.scan_duplicates();
             }
@@ -855,6 +891,87 @@ impl ShadowPlayerApp {
         }
     }
 
+    /// Apply the current track's own DSP profile, if it has one.
+    ///
+    /// The global chain is left alone: the profile is an override for one
+    /// track, and it is put back the moment another track plays.
+    fn apply_track_dsp_profile(&mut self) {
+        let Some(track) = self.coordinator.current_track().cloned() else {
+            return;
+        };
+        if self.dsp_profile_track == Some(track.id) {
+            return;
+        }
+
+        let profile = match self.track_dsp_repo.get(&track.id) {
+            Ok(Some(p)) if !p.is_neutral() => p,
+            Ok(_) => {
+                // No profile, or one that changes nothing: the track plays
+                // with the user's own settings. Restoring them matters — the
+                // previous track's profile is still applied otherwise.
+                self.dsp_profile_track = Some(track.id);
+                self.restore_global_eq();
+                return;
+            }
+            Err(e) => {
+                log::warn!("Could not read the DSP profile for {}: {e}", track.title);
+                return;
+            }
+        };
+        self.dsp_profile_track = Some(track.id);
+
+        // Save the user's own EQ before the first profile takes over, so it
+        // can be put back when a track without one plays.
+        if self.app_state.dsp_global_snapshot.is_none() {
+            let eq = &self.dsp_state.eq_panel;
+            self.app_state.dsp_global_snapshot =
+                Some((eq.graphic_enabled, eq.graphic_gains, eq.graphic_preamp_db));
+        }
+
+        let eq = &mut self.dsp_state.eq_panel;
+        if !profile.graphic_enabled {
+            self.session.set_graphic_eq_enabled(false);
+            return;
+        }
+        self.session.set_graphic_eq_enabled(true);
+        for (band, gain) in profile.graphic_gains.iter().enumerate() {
+            self.session.set_graphic_eq_slider(band, *gain);
+        }
+        self.session
+            .set_graphic_eq_preamp(profile.graphic_preamp_db);
+        eq.graphic_enabled = true;
+        eq.graphic_preamp_db = profile.graphic_preamp_db;
+        for (band, gain) in profile.graphic_gains.iter().enumerate() {
+            if let Some(g) = eq.graphic_gains.get_mut(band) {
+                *g = *gain;
+            }
+        }
+        self.toasts.info(format!(
+            "Using this track's own EQ profile for \u{201c}{}\u{201d}",
+            track.title
+        ));
+    }
+
+    /// Put the user's own graphic EQ back.
+    ///
+    /// The snapshot exists only while a track's own profile is applied, so
+    /// this is a no-op when the user has never had a profile take over.
+    fn restore_global_eq(&mut self) {
+        let Some((enabled, gains, preamp)) = self.app_state.dsp_global_snapshot.take() else {
+            return;
+        };
+        self.session.set_graphic_eq_enabled(enabled);
+        for (band, gain) in gains.iter().enumerate() {
+            self.session.set_graphic_eq_slider(band, *gain);
+        }
+        self.session.set_graphic_eq_preamp(preamp);
+
+        let eq = &mut self.dsp_state.eq_panel;
+        eq.graphic_enabled = enabled;
+        eq.graphic_gains = gains;
+        eq.graphic_preamp_db = preamp;
+    }
+
     /// Open the loudness inspector for the current track.
     ///
     /// The album's other tracks are captured here rather than per frame, so
@@ -877,6 +994,30 @@ impl ShadowPlayerApp {
                 .collect()
         };
         self.app_state.loudness_modal.is_open = true;
+    }
+
+    /// Open the per-track DSP editor for a track.
+    fn open_track_dsp(&mut self, track: &Track) {
+        self.app_state.track_dsp_modal.track_id = Some(track.id);
+        self.app_state.track_dsp_modal.is_open = true;
+    }
+
+    /// Open the import-from-other-players dialog.
+    ///
+    /// The playlists are found and matched against the library here, so the
+    /// dialog does not walk the library on every frame it is open.
+    fn open_import_playlists(&mut self) {
+        let found = library::find_playlists();
+        let tracks = &self.library_state.all_tracks;
+        let matched: Vec<usize> = found
+            .iter()
+            .map(|p| crate::modals::import_playlists_modal::match_count(p, tracks))
+            .collect();
+        let state = &mut self.app_state.import_playlists_modal;
+        state.found = found;
+        state.matched = matched;
+        state.ticked = vec![true; state.found.len()];
+        state.is_open = true;
     }
 
     /// Open the library statistics.
@@ -2178,6 +2319,10 @@ impl eframe::App for ShadowPlayerApp {
             self.toasts.warning(notice);
         }
 
+        // A track's own DSP profile is applied when the track starts, so it
+        // plays with its own curve rather than the global one.
+        self.apply_track_dsp_profile();
+
         // 2. Poll Library Scanner progress
         if self.scanner_service.poll() {
             self.reload_library();
@@ -2492,6 +2637,7 @@ impl eframe::App for ShadowPlayerApp {
                             content_hash: Some(format!("eval-hash-{i}")),
                             is_favorite: false,
                             play_count: 0,
+                            skip_count: 0,
                             last_played_at: None,
                             added_at: 0,
                         };
@@ -2689,6 +2835,7 @@ impl eframe::App for ShadowPlayerApp {
                             content_hash: None,
                             is_favorite: i % 3 == 0,
                             play_count: (i as u32) * 7,
+                            skip_count: 0,
                             last_played_at: Some(1_700_000_000),
                             added_at: 1_600_000_000 + (i as i64) * 86_400,
                         };
@@ -2702,6 +2849,21 @@ impl eframe::App for ShadowPlayerApp {
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_STATS").is_ok() {
                 self.open_library_stats();
+            }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_IMPORT").is_ok()
+            {
+                self.open_import_playlists();
+            }
+            if self.app_state.frame_count == 1
+                && std::env::var("SHADOWPLAYER_EVAL_SCROBBLE").is_ok()
+            {
+                self.app_state.scrobble_log_open = true;
+            }
+            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_DSP").is_ok() {
+                if let Some(track) = self.library_state.all_tracks.first().cloned() {
+                    self.app_state.track_dsp_modal.track_id = Some(track.id);
+                    self.app_state.track_dsp_modal.is_open = true;
+                }
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_EDIT").is_ok() {
                 if let Some(track) = self.library_state.all_tracks.first().cloned() {
@@ -3758,6 +3920,139 @@ impl eframe::App for ShadowPlayerApp {
                 }
             }
             self.reload_library();
+        }
+
+        // The per-track DSP editor.
+        {
+            let eq = &self.dsp_state.eq_panel;
+            let current_eq = (
+                eq.graphic_enabled,
+                eq.graphic_gains.to_vec(),
+                eq.graphic_preamp_db,
+            );
+            // The editor works on whichever track it was opened for, not
+            // only the one that happens to be playing.
+            let dsp_track = self
+                .app_state
+                .track_dsp_modal
+                .track_id
+                .and_then(|id| {
+                    self.library_state
+                        .all_tracks
+                        .iter()
+                        .find(|t| t.id == id)
+                        .cloned()
+                })
+                .or_else(|| self.coordinator.current_track().cloned());
+            let dsp_actions = crate::modals::track_dsp_modal::show_track_dsp_modal(
+                &ctx,
+                &mut self.app_state.track_dsp_modal,
+                &self.track_dsp_repo,
+                dsp_track.as_ref(),
+                current_eq,
+                &self.theme,
+            );
+            if dsp_actions.save_profile {
+                if let Some(track) = dsp_track.clone() {
+                    let eq = &self.dsp_state.eq_panel;
+                    let profile = crate::modals::track_dsp_modal::profile_from_eq(
+                        eq.graphic_enabled,
+                        &eq.graphic_gains,
+                        eq.graphic_preamp_db,
+                    );
+                    match self.track_dsp_repo.set(&track.id, &profile) {
+                        Ok(()) => {
+                            self.toasts
+                                .success(format!("Saved the EQ as {}'s own profile", track.title));
+                            // The profile is what the panel already holds,
+                            // so the engine is already playing it.
+                        }
+                        Err(e) => self
+                            .toasts
+                            .warning(format!("Could not save the profile: {e}")),
+                    }
+                }
+            }
+            if dsp_actions.clear_profile {
+                if let Some(track) = dsp_track.clone() {
+                    match self.track_dsp_repo.clear(&track.id) {
+                        Ok(()) => {
+                            self.toasts
+                                .info(format!("{} uses the global settings again", track.title));
+                            self.dsp_profile_track = None;
+                            self.restore_global_eq();
+                            self.apply_track_dsp_profile();
+                        }
+                        Err(e) => self
+                            .toasts
+                            .warning(format!("Could not remove the profile: {e}")),
+                    }
+                }
+            }
+        }
+
+        // The scrobble log.
+        if self.app_state.scrobble_log_open {
+            let still_open = crate::modals::scrobble_log_modal::show_scrobble_log_modal(
+                &ctx,
+                &self.history_repo,
+                &self.theme,
+            );
+            if !still_open {
+                self.app_state.scrobble_log_open = false;
+            }
+        }
+
+        // Importing the playlists other players left behind.
+        {
+            let import_actions = crate::modals::import_playlists_modal::show_import_playlists_modal(
+                &ctx,
+                &mut self.app_state.import_playlists_modal,
+                &self.library_state.all_tracks,
+                &self.theme,
+            );
+            if !import_actions.selected.is_empty() {
+                let selected = import_actions.selected.clone();
+                let found = self.app_state.import_playlists_modal.found.clone();
+                let tracks = self.library_state.all_tracks.clone();
+                let mut imported = 0;
+                for index in selected {
+                    let Some(playlist) = found.get(index) else {
+                        continue;
+                    };
+                    let matched =
+                        crate::modals::import_playlists_modal::matched_tracks(playlist, &tracks);
+                    if matched.is_empty() {
+                        continue;
+                    }
+                    let ids: Vec<domain::ids::TrackId> = matched.iter().map(|t| t.id).collect();
+                    match self.playlist_repo.create(&playlist.name, Some("Imported")) {
+                        Ok(created) => {
+                            let mut added = true;
+                            for id in &ids {
+                                if self.playlist_repo.add_track(&created.id, id).is_err() {
+                                    added = false;
+                                    break;
+                                }
+                            }
+                            if added {
+                                imported += 1;
+                            }
+                        }
+                        Err(e) => {
+                            self.toasts
+                                .warning(format!("Could not import a playlist: {e}"));
+                        }
+                    }
+                }
+                if imported > 0 {
+                    self.toasts.success(format!(
+                        "Imported {imported} playlist{}",
+                        if imported == 1 { "" } else { "s" }
+                    ));
+                }
+                self.app_state.import_playlists_modal.is_open = false;
+            }
         }
 
         // The library statistics.

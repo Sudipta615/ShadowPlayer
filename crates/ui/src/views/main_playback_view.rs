@@ -465,6 +465,12 @@ fn handle_songs_table_action(
     if let Some(rem_id) = action.remove_track {
         let _ = track_repo.delete(&rem_id);
     }
+    if let Some(dsp_id) = action.open_dsp {
+        // The per-track DSP editor works on any track, not just the one that
+        // is playing, so the track is opened by id.
+        app_state.track_dsp_modal.track_id = Some(dsp_id);
+        app_state.track_dsp_modal.is_open = true;
+    }
     if let Some(edit_id) = action.edit_track {
         let track = library_state
             .displayed_tracks

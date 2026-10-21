@@ -102,9 +102,17 @@ pub fn show_modal_scrollable(
 
             egui::ScrollArea::vertical()
                 .id_salt("modal_body_scroll")
-                .auto_shrink([false, false])
+                // Grow with the content, and only scroll once the content
+                // is taller than the window allows: a two-line dialog should
+                // not be a full-screen panel.
+                .auto_shrink([false, true])
                 .max_height(max_body_h)
                 .show(ui, body);
+
+            // Shrink-to-fit measures the body before the scroll area's own
+            // margin is applied; a few pixels here keep the last line of a
+            // short dialog off the frame's edge.
+            ui.add_space(6.0);
         });
 
     close_requested

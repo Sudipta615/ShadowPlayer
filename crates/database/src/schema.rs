@@ -66,6 +66,14 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v6(conn)?;
     }
 
+    if current_version < 7 {
+        apply_v7(conn)?;
+    }
+
+    if current_version < 8 {
+        apply_v8(conn)?;
+    }
+
     Ok(())
 }
 
@@ -372,6 +380,86 @@ pub(crate) fn apply_v4_for_test(conn: &mut Connection) -> Result<()> {
 #[cfg(test)]
 pub(crate) fn apply_v5_for_test(conn: &mut Connection) -> Result<()> {
     apply_v5(conn)
+}
+
+/// V8: skip counts and scrobbles.
+///
+/// A skip count is how many times a track was skipped before it was heard,
+/// which is what a "skip this track" smart playlist needs. The scrobble flag
+/// marks the plays that count as scrobbles: half the track, or thirty
+/// seconds, whichever comes first.
+fn apply_v8(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V8 (skip counts and scrobbles)");
+    let tx = conn.transaction()?;
+
+    let existing: Vec<String> = {
+        let mut stmt = tx.prepare("PRAGMA table_info(tracks);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = Vec::new();
+        for name in names {
+            found.push(name?);
+        }
+        found
+    };
+    let history_columns: Vec<String> = {
+        let mut stmt = tx.prepare("PRAGMA table_info(play_history);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = Vec::new();
+        for name in names {
+            found.push(name?);
+        }
+        found
+    };
+
+    let mut statements: Vec<&str> = Vec::new();
+    if !existing.iter().any(|n| n == "skip_count") {
+        statements.push("ALTER TABLE tracks ADD COLUMN skip_count INTEGER NOT NULL DEFAULT 0;");
+    }
+    if !history_columns.iter().any(|n| n == "is_scrobble") {
+        statements
+            .push("ALTER TABLE play_history ADD COLUMN is_scrobble INTEGER NOT NULL DEFAULT 0;");
+    }
+    statements.push(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (8, strftime('%s', 'now'));",
+    );
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V8 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+/// V7: per-track DSP profiles.
+///
+/// A track can carry its own graphic EQ and preamp, applied when that track
+/// plays. The global chain stays as it is; this is the per-track override.
+fn apply_v7(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V7 (per-track DSP profiles)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS track_dsp_profiles (
+            track_id TEXT PRIMARY KEY NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            profile TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (7, strftime('%s', 'now'));",
+    ];
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V7 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
 }
 
 /// V6: ReplayGain album gain.

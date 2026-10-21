@@ -4,6 +4,7 @@ version = "0.7.0"
 edition = "2021"
 
 [dependencies]
+dirs = "7.0"
 domain = { path = "../domain" }
 database = { path = "../database" }
 metadata = { path = "../metadata" }

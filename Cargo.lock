@@ -2743,6 +2743,7 @@ version = "0.7.0"
 dependencies = [
  "crossbeam",
  "database",
+ "dirs",
  "domain",
  "image",
  "log",

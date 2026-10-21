@@ -33,12 +33,14 @@ pub struct LibraryStats {
     pub never_played: usize,
     /// The total number of plays.
     pub total_plays: u32,
+    /// The tracks that are skipped most often.
+    pub most_skipped: Vec<(String, u32)>,
 }
 
 impl LibraryStats {
     /// Summarise a slice of tracks.
     pub fn from_tracks(tracks: &[Track]) -> Self {
-        use std::collections::{BTreeMap, HashMap, HashSet};
+        use std::collections::{BTreeMap, HashSet};
 
         let mut stats = LibraryStats {
             tracks: tracks.len(),
@@ -107,7 +109,15 @@ impl LibraryStats {
         played.truncate(5);
         stats.top_played = played;
 
-        let _ = HashMap::<u8, u8>::new();
+        let mut skipped: Vec<(String, u32)> = tracks
+            .iter()
+            .filter(|t| t.skip_count > 0)
+            .map(|t| (t.title.clone(), t.skip_count))
+            .collect();
+        skipped.sort_by_key(|a| std::cmp::Reverse(a.1));
+        skipped.truncate(5);
+        stats.most_skipped = skipped;
+
         stats
     }
 
@@ -296,6 +306,28 @@ pub fn show_library_stats_modal(
                 }
             });
 
+            // ── The most skipped ────────────────────────────────────────────
+            if !stats.most_skipped.is_empty() {
+                section_heading(ui, "Most skipped", theme);
+                for (title, count) in &stats.most_skipped {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                        ui.label(
+                            egui::RichText::new(title.clone())
+                                .font(crate::theme::font(12.0))
+                                .color(theme.text_primary),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{count}× skipped"))
+                                    .font(crate::theme::mono_font(11.5))
+                                    .color(theme.accent_warm),
+                            );
+                        });
+                    });
+                }
+            }
+
             // ── The most played ────────────────────────────────────────────
             if !stats.top_played.is_empty() {
                 section_heading(ui, "Most played", theme);
@@ -441,6 +473,7 @@ mod tests {
             content_hash: None,
             is_favorite: false,
             play_count: plays,
+            skip_count: 0,
             last_played_at: None,
             added_at: added,
         }

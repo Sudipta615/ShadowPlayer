@@ -444,6 +444,7 @@ mod sort_tests {
             content_hash: None,
             is_favorite: favorite,
             play_count: 0,
+            skip_count: 0,
             last_played_at: None,
             added_at: 0,
         }

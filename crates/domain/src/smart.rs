@@ -22,11 +22,13 @@ pub enum SmartField {
     Format,
     SampleRate,
     Lossless,
+    /// How many times the track was skipped before it was heard.
+    SkipCount,
 }
 
 impl SmartField {
     /// Every field, in the order the UI should present them.
-    pub const ALL: [SmartField; 13] = [
+    pub const ALL: [SmartField; 14] = [
         SmartField::Title,
         SmartField::Artist,
         SmartField::Album,
@@ -40,6 +42,7 @@ impl SmartField {
         SmartField::Format,
         SmartField::SampleRate,
         SmartField::Lossless,
+        SmartField::SkipCount,
     ];
 
     pub fn label(self) -> &'static str {
@@ -57,6 +60,7 @@ impl SmartField {
             SmartField::Format => "Format",
             SmartField::SampleRate => "Sample Rate",
             SmartField::Lossless => "Lossless",
+            SmartField::SkipCount => "Skip count",
         }
     }
 
@@ -76,6 +80,7 @@ impl SmartField {
             SmartField::Format => "format",
             SmartField::SampleRate => "sample_rate",
             SmartField::Lossless => "is_lossless",
+            SmartField::SkipCount => "skip_count",
         }
     }
 
@@ -89,6 +94,7 @@ impl SmartField {
                 | SmartField::SampleRate
                 | SmartField::Favorite
                 | SmartField::Lossless
+                | SmartField::SkipCount
         )
     }
 

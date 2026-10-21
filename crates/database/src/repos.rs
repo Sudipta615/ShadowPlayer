@@ -146,6 +146,7 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         replaygain_track_peak: row.get("replaygain_track_peak")?,
         replaygain_album_db: row.get("replaygain_album_db")?,
         replaygain_album_peak: row.get("replaygain_album_peak")?,
+        skip_count: row.get::<_, i64>("skip_count")? as u32,
         r128_loudness_lufs: row.get("r128_loudness_lufs")?,
         file_size_bytes: row.get::<_, i64>("file_size_bytes")? as u64,
         mtime_unix_secs: row.get("mtime_unix_secs")?,
@@ -176,8 +177,8 @@ impl TrackRepo {
                     replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
                     replaygain_album_db, replaygain_album_peak,
                     file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash,
-                    is_favorite, play_count, last_played_at, added_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
+                    is_favorite, play_count, skip_count, last_played_at, added_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
                 ON CONFLICT(path) DO UPDATE SET
                     title = excluded.title,
                     artist = excluded.artist,
@@ -197,6 +198,7 @@ impl TrackRepo {
                     r128_loudness_lufs = excluded.r128_loudness_lufs,
                     replaygain_album_db = excluded.replaygain_album_db,
                     replaygain_album_peak = excluded.replaygain_album_peak,
+                    skip_count = excluded.skip_count,
                     file_size_bytes = excluded.file_size_bytes,
                     mtime_unix_secs = excluded.mtime_unix_secs,
                     mtime_nanos = excluded.mtime_nanos,
@@ -228,6 +230,7 @@ impl TrackRepo {
                     track.content_hash,
                     if track.is_favorite { 1 } else { 0 },
                     track.play_count,
+                    track.skip_count as i64,
                     track.last_played_at,
                     track.added_at,
                 ],
@@ -420,6 +423,35 @@ impl TrackRepo {
                 )?;
             }
             Ok(())
+        })
+    }
+
+    /// Note that a track was skipped before it was heard.
+    pub fn increment_skip_count(&self, id: &TrackId) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE tracks SET skip_count = skip_count + 1 WHERE id = ?1;",
+                params![id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// The tracks that are skipped most often.
+    pub fn list_most_skipped(&self, limit: usize) -> Result<Vec<Track>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM tracks
+                  WHERE skip_count > 0
+                  ORDER BY skip_count DESC, title COLLATE NOCASE ASC
+                  LIMIT ?1;",
+            )?;
+            let iter = stmt.query_map(params![limit as i64], map_track)?;
+            let mut tracks = Vec::new();
+            for t in iter {
+                tracks.push(t?);
+            }
+            Ok(tracks)
         })
     }
 
@@ -896,6 +928,89 @@ impl PlaylistRepo {
     }
 }
 
+/// Per-track DSP profiles.
+///
+/// A profile is a track's own graphic EQ and preamp, applied when that track
+/// plays. The global chain is untouched.
+pub struct TrackDspRepo {
+    db: Database,
+}
+
+impl TrackDspRepo {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    /// The profile for a track, if it has one.
+    pub fn get(&self, track_id: &TrackId) -> Result<Option<TrackDspProfile>> {
+        self.db.with_conn(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT profile FROM track_dsp_profiles WHERE track_id = ?1;")?;
+            let row = stmt.query_row(params![track_id.to_string()], |row| row.get::<_, String>(0));
+            match row {
+                Ok(json) => Ok(serde_json::from_str(&json).ok()),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e),
+            }
+        })
+    }
+
+    /// Every track that has a profile.
+    pub fn list(&self) -> Result<Vec<(TrackId, TrackDspProfile)>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT track_id, profile FROM track_dsp_profiles ORDER BY updated_at DESC;",
+            )?;
+            let iter = stmt.query_map([], |row| {
+                let id: String = row.get(0)?;
+                let profile: String = row.get(1)?;
+                Ok((id, profile))
+            })?;
+            let mut out = Vec::new();
+            for row in iter {
+                let (id, json) = row?;
+                let id = parse_id(&id, "track_dsp_profiles.track_id")?;
+                if let Ok(profile) = serde_json::from_str::<TrackDspProfile>(&json) {
+                    out.push((id, profile));
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    /// Store a track's profile, replacing any previous one.
+    pub fn set(&self, track_id: &TrackId, profile: &TrackDspProfile) -> Result<()> {
+        let json = serde_json::to_string(profile)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO track_dsp_profiles (track_id, profile, updated_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(track_id) DO UPDATE SET
+                    profile = excluded.profile,
+                    updated_at = excluded.updated_at;",
+                params![track_id.to_string(), json, now],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Remove a track's profile, so it plays with the global settings again.
+    pub fn clear(&self, track_id: &TrackId) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM track_dsp_profiles WHERE track_id = ?1;",
+                params![track_id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+}
+
 pub struct FavoritesRepo {
     db: Database,
 }
@@ -976,18 +1091,21 @@ impl HistoryRepo {
         track_id: &TrackId,
         duration_listened_secs: f32,
         completed: bool,
+        is_scrobble: bool,
     ) -> Result<()> {
         let now = Self::now_secs();
         self.db.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO play_history (id, track_id, played_at, duration_listened_secs, completed)
-                 VALUES (?1, ?2, ?3, ?4, ?5);",
+                "INSERT INTO play_history
+                    (id, track_id, played_at, duration_listened_secs, completed, is_scrobble)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     track_id.to_string(),
                     now,
                     duration_listened_secs,
                     if completed { 1 } else { 0 },
+                    if is_scrobble { 1 } else { 0 },
                 ],
             )?;
             // Keep play_history bounded: drop anything older than the window.
@@ -1027,6 +1145,46 @@ impl HistoryRepo {
                 tracks.push(t?);
             }
             Ok(tracks)
+        })
+    }
+
+    /// The scrobble log: the plays that count as scrobbles, newest first.
+    ///
+    /// A scrobble is a play of at least thirty seconds, or half the track,
+    /// whichever comes first — the rule the scrobbling services use.
+    pub fn list_scrobbles(&self, limit: usize) -> Result<Vec<(Track, i64, f32)>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT t.*, h.played_at, h.duration_listened_secs
+                   FROM play_history h
+                   JOIN tracks t ON t.id = h.track_id
+                  WHERE h.is_scrobble = 1
+                  ORDER BY h.played_at DESC
+                  LIMIT ?1;",
+            )?;
+            let iter = stmt.query_map(params![limit as i64], |row| {
+                let track = map_track(row)?;
+                let played_at: i64 = row.get("played_at")?;
+                let listened: f64 = row.get("duration_listened_secs")?;
+                Ok((track, played_at, listened as f32))
+            })?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// How many scrobbles there are.
+    pub fn count_scrobbles(&self) -> Result<usize> {
+        self.db.with_conn(|conn| {
+            let n: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM play_history WHERE is_scrobble = 1;",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok(n as usize)
         })
     }
 
