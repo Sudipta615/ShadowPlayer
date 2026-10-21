@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-21
+
 ### Added
 - **A permanent, local listening history.** Every counted play is now written to a `scrobbles` table (migration V9) that is never pruned: the artist, title, album, timestamp and listened time are copied in at write time, so the row survives the track being removed from the library, and nothing is ever sent anywhere. The seven-day `play_history` window stays for Recently Played.
 - **Listening History**, the local answer to a Last.fm profile: week/month/year/all-time totals, the top artists, albums and tracks, what has been on repeat for the last seven days, 30-day and 24-hour charts, current and longest streaks, and CSV, JSON and Last.fm export. It is reached from the scrobble log or the command palette and never makes a network request.
