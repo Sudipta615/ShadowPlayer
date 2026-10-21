@@ -406,6 +406,18 @@ impl AudioSession {
         self.handle.available_devices()
     }
 
+    /// The output devices a given backend can open.
+    ///
+    /// Each backend enumerates its own devices, so the list is the one the
+    /// backend will actually open — an endpoint id for WASAPI, a device UID
+    /// for CoreAudio, a driver's CLSID for ASIO.
+    pub fn available_devices_for(
+        &self,
+        backend: config::AudioBackend,
+    ) -> Vec<engine::output::devices::OutputDeviceInfo> {
+        self.handle.available_devices_for(backend)
+    }
+
     /// Returns `false` when the engine did not receive the command.
     pub fn set_output_backend(&self, backend: config::AudioBackend) -> bool {
         self.send(EngineCommand::SetOutputBackend(backend))

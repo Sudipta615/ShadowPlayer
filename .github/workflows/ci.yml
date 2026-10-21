@@ -44,6 +44,11 @@ jobs:
           -p playback -p search -p audio-session -p ui --lib
           -- --test-threads=1
 
+      # The version bump is a scripted, repeated chore, so it is guarded by a
+      # test rather than by remembering to do eleven edits at once.
+      - name: Versions are in lockstep
+        run: cargo test -p shadowplayer --test version_lockstep -- --test-threads=1
+
   engine:
     name: Engine workspace (fmt, clippy, test)
     runs-on: ubuntu-latest
@@ -75,6 +80,23 @@ jobs:
 
       - name: Tests
         run: cargo test
+
+      # The optional features are compiled on every push, so a feature-gated
+      # module cannot rot behind the default set.
+      - name: All-features build
+        run: cargo check --all-features --all-targets
+
+      # The benchmark suite must compile, or `cargo bench` is broken for
+      # everyone.
+      - name: Benchmarks compile
+        run: cargo bench --no-run
+
+      # The engine's own documentation is a published surface: `cargo doc`
+      # is how an embedder reads the contracts.
+      - name: Documentation
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
 
       # The engine's optional MPRIS interface uses zbus directly; compile it
       # so it cannot rot behind the default feature set.
@@ -112,5 +134,200 @@ jobs:
 
       # Native target check, not a Linux cross-build: this is where the
       # Windows SMTC and macOS Now Playing implementations actually compile.
+      #
+      # A release must be buildable, so this is a *release* build, not a
+      # `cargo check`.
       - name: Compile desktop player
-        run: cargo check -p shadowplayer --target ${{ matrix.target }}
+        run: cargo build --release -p shadowplayer --target ${{ matrix.target }}
+
+      # The test binaries must compile on both platforms too, or the
+      # cross-platform test job below has nothing to run.
+      - name: Compile the tests
+        run: cargo test --no-run -p shadowplayer --target ${{ matrix.target }}
+
+  engine-tests-cross:
+    name: Engine tests on ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: crates/engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/engine
+
+      # The engine's suites are Linux-only today. A player that claims to work
+      # on three platforms cannot have its engine tested on one of them.
+      - name: Engine tests
+        run: cargo test
+
+  ui-screenshots:
+    name: UI screenshots on ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The screenshot harness is behind a feature flag, so it is not in a
+      # shipped build.
+      - name: Build the harness
+        run: cargo build --release -p shadowplayer --features eval-tools
+
+      # The golden images are what catch a visual regression nobody can see in
+      # a test log: a glyph the font does not have, a modal that clips its own
+      # content, a column that drifted.
+      - name: Capture the canonical views
+        run: cargo test -p shadowplayer --features eval-tools --test screenshots -- --nocapture
+        env:
+          # On Linux the runners have no display; Xvfb provides one.
+          DISPLAY: ":99"
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    defaults:
+      run:
+        working-directory: crates/engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: taiki-e/install-action@cargo-fuzz
+
+      # Ten minutes per target is enough to find a crash in a parser.
+      - name: Fuzz the decoders
+        run: cargo fuzz run decode_fuzz -- -max_total_time=600
+        working-directory: crates/engine/fuzz
+
+      - name: Fuzz the playlist parsers
+        run: cargo fuzz run playlist_fuzz -- -max_total_time=600
+        working-directory: crates/engine/fuzz
+
+      - name: Fuzz the lyrics parser
+        run: cargo fuzz run lyrics_fuzz -- -max_total_time=600
+        working-directory: crates/engine/fuzz
+
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    defaults:
+      run:
+        working-directory: crates/engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/engine
+
+      # The committed baselines are the reference; a regression beyond the
+      # threshold fails the job, so a slow change cannot land unnoticed.
+      - name: Compare against the baselines
+        run: cargo bench -- --save-baseline ci
+
+      - name: Upload the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report
+          path: crates/engine/target/criterion
+
+  supply-chain:
+    name: Supply chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Every dependency is a stranger's code, and this player runs with the
+      # user's audio.
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+      - name: cargo-audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+  docs:
+    name: Documentation truth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The READMEs make claims. This job checks the ones a test can check:
+      # the shortcut table, the test counts, the version badges, the platform
+      # matrix.
+      - name: The documentation matches the code
+        run: cargo test -p shadowplayer --test docs_truth -- --test-threads=1

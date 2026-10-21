@@ -78,6 +78,30 @@ fn fixture_library() -> PathBuf {
     FIXTURE.get_or_init(locate_fixture).clone()
 }
 
+/// The fixture library, held open for the lifetime of this test process.
+///
+/// The fixture counts its `deinit` calls in a `static` *inside the shared
+/// library*. That counter is only the same counter if there is only one
+/// instance of the library in the process — and `dlopen` does not guarantee
+/// that: a handle opened and closed by the test can be the last reference, in
+/// which case the library is unloaded, and the next open starts a *fresh*
+/// instance with a fresh counter. Reading the counter before and after the
+/// node was dropped would then be reading two different libraries, and the
+/// check would be meaningless.
+///
+/// Holding one handle open for the whole process means the library is never
+/// unloaded, so there is exactly one instance, and the counter the engine's
+/// node increments is the counter the probe reads.
+fn fixture_handle() -> &'static libloading::Library {
+    static HANDLE: OnceLock<libloading::Library> = OnceLock::new();
+    HANDLE.get_or_init(|| {
+        // SAFETY: the fixture is a plain `cdylib` with a C ABI; loading it
+        // runs its initialisers, which allocate the static tables the plugin
+        // entry points use.
+        unsafe { libloading::Library::new(fixture_library()).expect("fixture library") }
+    })
+}
+
 fn load(kind_id: &str) -> ClapPluginHostNode {
     let mut node = ClapPluginHostNode::new(SAMPLE_RATE);
     node.load_plugin(&fixture_library(), Some(kind_id))
@@ -457,11 +481,15 @@ fn dropping_a_node_deinitialises_the_library_it_unloaded() {
     // unloads the library leaks the library's initialisation. The fixture
     // counts its deinit calls, and the count is monotone, so a concurrent test
     // can only make this check pass more easily — never fail spuriously.
+    //
+    // The count lives in the library's own statics, so it is read through the
+    // handle the process holds open (see `fixture_handle`): one instance, one
+    // counter.
     let path = fixture_library();
-    let deinit_calls = |path: &PathBuf| -> u32 {
+    let deinit_calls = |_path: &PathBuf| -> u32 {
+        // SAFETY: the symbol is a plain C function with no arguments.
         unsafe {
-            let library = libloading::Library::new(path).expect("fixture library");
-            let probe: libloading::Symbol<unsafe extern "C" fn() -> u32> = library
+            let probe: libloading::Symbol<unsafe extern "C" fn() -> u32> = fixture_handle()
                 .get(b"fixture_deinit_calls\0")
                 .expect("deinit probe symbol");
             probe()

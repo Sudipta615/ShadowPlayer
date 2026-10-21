@@ -38,6 +38,7 @@ mod unit {
             mtime_unix_secs: 1_700_000_000,
             mtime_nanos: 0,
             content_hash: None,
+            file_id: None,
             is_favorite: false,
             play_count: 0,
             skip_count: 0,

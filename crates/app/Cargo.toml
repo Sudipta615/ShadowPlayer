@@ -1,6 +1,6 @@
 [package]
 name = "shadowplayer"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 
 [[bin]]
@@ -25,7 +25,25 @@ log = "0.4"
 dirs = "7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# ── Windows: the native, exclusive-mode output backends ───────────────────────
+# See `crates/ui/Cargo.toml` for the full rationale. The same Windows-only
+# dependency entry is declared here so the *binary* — not just the UI library
+# — is built with the native backends. Cargo unifies features across the
+# dependency graph, so one declaration would technically be enough; both are
+# present so that `cargo build -p shadowplayer --target x86_64-pc-windows-msvc`
+# and `cargo test -p ui` each get the right feature set on their own.
+[target.'cfg(target_os = "windows")'.dependencies]
+engine = { package = "audio-engine", path = "../engine", features = ["wasapi-native", "asio-native"] }
+
+
 [features]
 # `cargo run -p shadowplayer --features eval-tools` enables the
 # `SHADOWPLAYER_EVAL*` screenshot/automation hooks (see `ui`'s `eval-tools`).
 eval-tools = ["ui/eval-tools"]
+
+# Windows only: the resource compiler that embeds the application icon and the
+# version metadata into the `.exe`. It is a *target-specific* build
+# dependency, so Linux and macOS builds never compile it and never need a
+# resource compiler.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

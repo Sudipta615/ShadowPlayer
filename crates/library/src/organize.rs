@@ -76,6 +76,11 @@ pub struct OrganizeEntry {
     pub title: String,
     /// Carried through the move so the track keeps its identity fingerprint.
     pub content_hash: Option<String>,
+    /// Carried through the move so the track keeps its filesystem identity.
+    ///
+    /// The file keeps its identity across a move, so the library can tell that
+    /// the file at the new path is the file it already knows.
+    pub file_id: Option<String>,
     pub from: PathBuf,
     pub to: PathBuf,
     /// `None` when the entry is applicable.
@@ -143,6 +148,7 @@ pub fn build_plan(tracks: &[Track], pattern: &str, destination: Option<&Path>) -
             track_id: track.id,
             title: track.title.clone(),
             content_hash: track.content_hash.clone(),
+            file_id: track.file_id.clone(),
             from: track.path.clone(),
             to: PathBuf::new(),
             issue: None,
@@ -485,6 +491,7 @@ mod tests {
             mtime_unix_secs: 1,
             mtime_nanos: 0,
             content_hash: Some(format!("hash-{id_seed}")),
+            file_id: None,
             is_favorite: false,
             play_count: 0,
             skip_count: 0,

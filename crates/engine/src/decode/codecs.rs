@@ -719,6 +719,21 @@ pub fn all_codecs() -> &'static [Codec] {
     ]
 }
 
+/// The codecs this build can actually decode.
+///
+/// [`all_codecs`] names every format the engine *knows about*, including the
+/// two it deliberately does not decode (Musepack and TAK, for which no pure-Rust
+/// decoder exists). A user interface that lists "all codecs" from that list is
+/// promising something the build cannot deliver, so the list a UI shows comes
+/// from here instead.
+pub fn decodable_codecs() -> Vec<Codec> {
+    all_codecs()
+        .iter()
+        .copied()
+        .filter(|codec| capability(*codec).decode)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

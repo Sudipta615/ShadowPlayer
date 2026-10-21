@@ -8,6 +8,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-21
+
+*Released with audio-engine 1.4.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **The player has an icon, and so does the release.** `crates/app/assets/icon.svg` is the source of
+  truth; the rasterised forms (16–1024 px PNG, `.ico`, `.icns`) are generated from it by
+  `assets/make-icons.sh` and committed, and the window, the Explorer preview, the `.msi` and the
+  `.dmg` all carry the same mark. The rasteriser is `resvg` — the same one the app uses to draw its
+  SVG icons — so the launcher mark and the in-app mark are the same shape at every size.
+- **A release pipeline.** `cargo-dist` builds the player for six targets and produces `.deb`,
+  `.rpm`, `AppImage`, `.msi`, `.dmg` and shell installers with checksums; a tag push opens a
+  **draft** GitHub Release for a human to read and publish. The tag's version must equal the
+  workspace version, so a mistyped tag cannot produce a release whose name lies about what is
+  inside it.
+- **The engine ships the three binaries its README always described.** `audio-engine-cli` is a
+  scriptable player and inspector (`--json` for one object per line, `probe` for a file's format and
+  the engine's bit-perfect verdict, `--list-devices` for a backend's own devices); `replaygain-scanner`
+  measures EBU R128 and ReplayGain 2.0 and can write the result back into the files; `engine-tui` is
+  a Ratatui player whose meters, spectrum and EQ curve are read from the running engine and whose EQ
+  panel writes back to it. The TUI's keybinding table is a specification now: a test asserts every
+  binding in the README is implemented.
+- **Real output-device pickers.** Each backend enumerates its *own* devices — the WASAPI render
+  endpoints, the installed ASIO drivers, the macOS device UIDs — instead of borrowing cpal's list,
+  which was wrong for every native backend: cpal's WASAPI backend opens shared-mode streams, and the
+  ASIO drivers are not in cpal's list at all. The Settings page now offers a picker as well as the
+  free-text field, and a device chosen from it is the device the engine opens.
+- **A "This Build" section in the manual**, which lists the compiled backends, the decodable
+  formats, the versions and the platform — read from the live engine rather than written out. Every
+  capability claim in the manual that names a backend is now rendered from
+  `engine::output::available_backends()`, so a build without the native backend cannot claim it.
+- **A log file.** The app writes to stderr *and* to `shadowplayer.log` in its data directory, so a
+  launch from the Explorer on Windows — which has no console — still leaves a record.
+
+### Changed
+- **Bit-perfect is now reachable on Windows.** The native WASAPI Exclusive and ASIO backends are
+  compiled into the Windows build, so it negotiates a real exclusive stream instead of playing
+  through the OS mixer. The escape hatch is one line in the manifest, and the Settings diagnostics
+  card always reports which backend was *actually* negotiated.
+- **The file a library row points at is identified by the filesystem, not by its name.** A file's
+  identity is the device it lives on and its index within that device, so a rename — including a
+  rename that only changed the case, which a case-insensitive filesystem treats as the same file
+  under two spellings — keeps one row instead of becoming two tracks. Before this, a case-only
+  rename on Windows or macOS produced a second track with its own play count, because the old
+  spelling still resolved and was therefore never pruned.
+- **The manual's claims are computed.** "Exclusive ALSA, WASAPI Exclusive, CoreAudio Hog, or ASIO"
+  is now whatever the running build actually has; the AutoEQ section says how many measurements are
+  bundled instead of claiming a database of four thousand; and the manual says outright when a
+  build has no exclusive backend at all and is therefore not bit-perfect.
+
+### Fixed
+- **A duplicate row could survive a case-insensitive filesystem.** The V10 migration records each
+  row's filesystem identity and merges the rows that turn out to be the same file, keeping the one
+  with the most plays and moving the others' favourites, playlists, history and scrobbles to it. A
+  hard link is *not* merged: its entry is still in the directory, so it is two entries on purpose.
+- **A file that was renamed kept its old row and gained a new one.** The scanner now asks the
+  filesystem what the file is before it asks what it is called.
+
+---
+
 ## [0.10.0] - 2026-10-21
 
 ### Added

@@ -6,10 +6,27 @@
 //! seen before, it fingerprints the content and — if an existing track holds the
 //! same content and its old file is gone — moves that track's row to the new
 //! path, keeping its id.
+//!
+//! There is a second, cheaper way to recognise the same thing, and it is the
+//! one that works on a case-insensitive filesystem.
+//!
+//! [`resolve_identity_by_file_id`] asks the *filesystem* what the file is,
+//! rather than what it is called. On Windows and on macOS — where the
+//! filesystem ignores the case of a name — renaming `Track.FLAC` to
+//! `track.flac` does not move a file; it changes how the same file is spelled.
+//! The old path still resolves, so the content-fingerprint path cannot tell
+//! that anything happened (it insists the old file be *gone*), and the new
+//! spelling becomes a second track. The filesystem's own identity does not
+//! have that blind spot: one file, one identity, however it is spelled.
+//!
+//! The fingerprint path stays, because it recognises something the identity
+//! path cannot: a file that was moved and *replaced* by a different file with
+//! the same contents.
 
 use database::TrackRepo;
 use domain::ids::TrackId;
 use log::{info, warn};
+use std::ffi::OsStr;
 use std::path::Path;
 
 use crate::fingerprint::Fingerprint;
@@ -28,11 +45,90 @@ fn old_file_is_gone(path: &Path) -> bool {
     }
 }
 
+/// True when the directory still holds an entry with exactly this name.
+///
+/// See [`domain::file_identity::directory_still_holds`], which is where the
+/// rule lives; this is the local name for it.
+fn directory_still_holds(parent: &Path, file_name: &OsStr) -> bool {
+    domain::file_identity::directory_still_holds(parent, file_name)
+}
+
 /// Fingerprint the file at `path` for a caller that already knows the row at
 /// that path exists but may predate fingerprints. Best-effort.
 pub fn backfill_fingerprint(repo: &TrackRepo, path: &Path, id: &TrackId) {
     if let Some(fp) = Fingerprint::compute(path) {
         let _ = repo.set_content_hash(id, Some(fp.as_str()));
+    }
+}
+
+/// Recognise a file the filesystem already knows, under a different name.
+///
+/// * `path` — the file being indexed.
+/// * `already_indexed` — whether a row already exists for this exact path.
+/// * `file_id` — the filesystem's identity for the file, when it is known.
+///
+/// Returns `Some(id)` when the file is one the library already tracks under a
+/// different name — a rename, including a rename that only changed the case —
+/// and the row must move to the new path. Returns `None` when the caller's own
+/// id is correct.
+///
+/// A hard link is *not* a rename: the old entry is still in the directory, so
+/// the row stays where it is and the new path is indexed as its own track.
+pub fn resolve_identity_by_file_id(
+    repo: &TrackRepo,
+    path: &Path,
+    already_indexed: bool,
+    file_id: Option<&str>,
+) -> Option<TrackId> {
+    if already_indexed {
+        return None;
+    }
+    let file_id = file_id?;
+
+    let candidates = repo.find_by_file_id(file_id).ok()?;
+    if candidates.is_empty() {
+        return None;
+    }
+
+    // More than one row for one file means the library already holds a
+    // duplicate. The migration merges those; until it has run (or if a copy
+    // was made by a tool that preserves the identity), the ambiguity is
+    // resolved by refusing to move anything.
+    let existing = candidates.first()?;
+
+    // The same path: nothing to move.
+    if existing.path == path {
+        return None;
+    }
+
+    // A hard link is a second entry for the same file, not a rename.
+    let (Some(parent), Some(file_name)) = (existing.path.parent(), existing.path.file_name())
+    else {
+        return None;
+    };
+    if directory_still_holds(parent, file_name) {
+        return None;
+    }
+
+    match repo.set_file_id_and_path(&existing.id, Some(file_id), Some(path)) {
+        Ok(true) => {
+            info!(
+                "Renamed track {} -> {} (the filesystem says it is the same file)",
+                existing.path.display(),
+                path.display()
+            );
+            Some(existing.id)
+        }
+        Ok(false) => None,
+        Err(e) => {
+            warn!(
+                "Could not move {} -> {}: {}",
+                existing.path.display(),
+                path.display(),
+                e
+            );
+            None
+        }
     }
 }
 
@@ -151,6 +247,7 @@ mod tests {
             mtime_unix_secs: 1_700_000_000,
             mtime_nanos: 0,
             content_hash: None,
+            file_id: None,
             is_favorite: true,
             play_count: 7,
             skip_count: 0,
@@ -227,6 +324,97 @@ mod tests {
             content_hash.as_deref(),
             Some(track.content_hash.as_deref().unwrap())
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A file that was renamed keeps its row — even when the rename only
+    /// changed the case, which is the case a content fingerprint cannot see
+    /// (the old path still resolves on a case-insensitive filesystem, so the
+    /// fingerprint path insists the old file be gone and never relinks).
+    #[test]
+    fn a_rename_keeps_its_id_through_the_filesystem_identity() {
+        let root = temp_root("rename");
+        let old_path = root.join("Track.FLAC");
+        let new_path = root.join("track.flac");
+        write_content(&old_path, 11);
+
+        let db = Database::in_memory().unwrap();
+        let repo = TrackRepo::new(db);
+        let old_id = TrackId::new();
+        let mut track = sample_track(old_id, &old_path);
+        track.file_id =
+            domain::file_identity::file_identity(&old_path).map(|identity| identity.to_key());
+        repo.upsert(&track).unwrap();
+
+        std::fs::rename(&old_path, &new_path).unwrap();
+
+        let resolved = resolve_identity_by_file_id(
+            &repo,
+            &new_path,
+            false,
+            domain::file_identity::file_identity(&new_path)
+                .map(|identity| identity.to_key())
+                .as_deref(),
+        );
+
+        assert_eq!(resolved, Some(old_id), "the rename is recognised");
+        let stored = repo.get_by_path(&new_path).unwrap().unwrap();
+        assert_eq!(stored.id, old_id);
+        assert_eq!(stored.play_count, 7, "play counts survive the rename");
+        assert!(stored.is_favorite);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A hard link is a second *entry* for one file, not a rename of it. The
+    /// row must stay where it is, and the new path must be indexed as its own
+    /// track — otherwise a library with hard-linked duplicates would flicker
+    /// between the two paths on every scan.
+    #[test]
+    fn a_hard_link_is_not_treated_as_a_rename() {
+        let root = temp_root("hardlink");
+        let original = root.join("original.flac");
+        let link = root.join("link.flac");
+        write_content(&original, 13);
+        std::fs::hard_link(&original, &link).unwrap();
+
+        let db = Database::in_memory().unwrap();
+        let repo = TrackRepo::new(db);
+        let original_id = TrackId::new();
+        let mut track = sample_track(original_id, &original);
+        track.file_id =
+            domain::file_identity::file_identity(&original).map(|identity| identity.to_key());
+        repo.upsert(&track).unwrap();
+
+        let file_id = domain::file_identity::file_identity(&link).map(|i| i.to_key());
+        let resolved = resolve_identity_by_file_id(&repo, &link, false, file_id.as_deref());
+
+        assert_eq!(resolved, None, "a hard link is not a rename");
+        // The original row is untouched.
+        let stored = repo.get_by_path(&original).unwrap().unwrap();
+        assert_eq!(stored.id, original_id);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A file that is already indexed under this exact path is left alone.
+    #[test]
+    fn an_already_indexed_path_is_left_alone() {
+        let root = temp_root("already");
+        let path = root.join("song.flac");
+        write_content(&path, 17);
+
+        let db = Database::in_memory().unwrap();
+        let repo = TrackRepo::new(db);
+        let id = TrackId::new();
+        let mut track = sample_track(id, &path);
+        track.file_id = domain::file_identity::file_identity(&path).map(|i| i.to_key());
+        repo.upsert(&track).unwrap();
+
+        let file_id = domain::file_identity::file_identity(&path).map(|i| i.to_key());
+        let resolved = resolve_identity_by_file_id(&repo, &path, true, file_id.as_deref());
+        assert_eq!(resolved, None);
 
         let _ = std::fs::remove_dir_all(&root);
     }

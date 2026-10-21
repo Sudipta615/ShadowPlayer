@@ -78,6 +78,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v9(conn)?;
     }
 
+    if current_version < 10 {
+        apply_v10(conn)?;
+    }
+
     Ok(())
 }
 
@@ -563,6 +567,227 @@ fn apply_v6(conn: &mut Connection) -> Result<()> {
 
     tx.commit()?;
     Ok(())
+}
+
+/// V10: the filesystem's own identity for a file.
+///
+/// The library used to key a track on its *path*, and the path is a name. On a
+/// case-insensitive filesystem — the default on Windows, and on macOS — the
+/// same file has two spellings, and a rename that only changes the case is a
+/// rename the library cannot see: the old row's path still resolves, so it is
+/// never pruned, and the new spelling becomes a second track with its own
+/// play count and its own place in every playlist.
+///
+/// The fix is not to fold the case in the key — that would merge two genuinely
+/// different files on a case-sensitive filesystem, which is worse — but to
+/// record what the filesystem says about the file: the device it lives on and
+/// its index within that device. Two names for one file then resolve to one
+/// row, and a file that was renamed keeps its identity whatever the rename
+/// was.
+///
+/// The column is filled in here for the rows that are already indexed, and
+/// rows that turn out to be the same file are merged: the one with the most
+/// plays survives, and the others' favourites, playlists and history move to
+/// it.
+fn apply_v10(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V10 (filesystem file identity)");
+    let tx = conn.transaction()?;
+
+    // Same guard as V3 and V5: `ALTER TABLE ADD COLUMN` has no
+    // `IF NOT EXISTS`, and a lost migration row must not make the database
+    // refuse to open.
+    let existing: Vec<String> = {
+        let mut stmt = tx.prepare("PRAGMA table_info(tracks);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = Vec::new();
+        for name in names {
+            found.push(name?);
+        }
+        found
+    };
+
+    if !existing.iter().any(|n| n == "file_id") {
+        tx.execute("ALTER TABLE tracks ADD COLUMN file_id TEXT;", [])?;
+    }
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tracks_file_id ON tracks(file_id);",
+        [],
+    )?;
+
+    // Backfill: read the identity of every row whose file is still on disk.
+    // A row whose file has gone keeps a NULL identity — it is waiting to be
+    // pruned by the scanner's reconciliation, not to be guessed at.
+    let rows: Vec<(String, String)> = {
+        let mut stmt = tx.prepare("SELECT id, path FROM tracks WHERE file_id IS NULL;")?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>("id")?, row.get::<_, String>("path")?))
+        })?;
+        let mut out = Vec::new();
+        for row in mapped {
+            out.push(row?);
+        }
+        out
+    };
+
+    let mut backfilled = 0usize;
+    for (id, path_key) in &rows {
+        let path = domain::paths::decode_path_key(path_key);
+        let Some(identity) = domain::file_identity::file_identity(&path) else {
+            continue;
+        };
+        tx.execute(
+            "UPDATE tracks SET file_id = ?1 WHERE id = ?2;",
+            rusqlite::params![identity.to_key(), id],
+        )?;
+        backfilled += 1;
+    }
+    if backfilled > 0 {
+        info!("V10: recorded the filesystem identity of {backfilled} track(s)");
+    }
+
+    // Merge the rows that turn out to be the same file.
+    let merged = merge_duplicate_file_identities(&tx)?;
+    if merged > 0 {
+        warn!("V10: merged {merged} duplicate track row(s) that pointed at the same file");
+    }
+
+    tx.execute(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (10, strftime('%s', 'now'));",
+        [],
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
+/// The stored path of a track row.
+fn loser_path(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<String> {
+    tx.query_row(
+        "SELECT path FROM tracks WHERE id = ?1;",
+        rusqlite::params![id],
+        |r| r.get::<_, String>(0),
+    )
+}
+
+/// Merge rows that the filesystem says are the same file.
+///
+/// The survivor is the row with the most plays — the one the user has the
+/// strongest claim on — and the losers' favourites, playlist entries, play
+/// history and scrobbles move to it before the losers are deleted. Every
+/// merge is counted and reported; nothing is dropped silently.
+fn merge_duplicate_file_identities(tx: &rusqlite::Transaction<'_>) -> Result<usize> {
+    // The groups: every file identity that more than one row claims.
+    let groups: Vec<(String, Vec<String>)> = {
+        let mut stmt = tx.prepare(
+            "SELECT file_id, GROUP_CONCAT(id) FROM tracks
+              WHERE file_id IS NOT NULL
+              GROUP BY file_id
+             HAVING COUNT(*) > 1;",
+        )?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in mapped {
+            let (file_id, ids) = row?;
+            let members: Vec<String> = ids.split(',').map(|s| s.to_string()).collect();
+            out.push((file_id, members));
+        }
+        out
+    };
+
+    let mut merged = 0usize;
+
+    for (_file_id, members) in groups {
+        // The survivor: the most played, then the earliest added, then the
+        // lowest id — a total order, so the same database always merges the
+        // same way.
+        let mut ranked: Vec<(u32, i64, String)> = Vec::new();
+        for id in &members {
+            let row = tx.query_row(
+                "SELECT play_count, added_at FROM tracks WHERE id = ?1;",
+                rusqlite::params![id],
+                |r| Ok((r.get::<_, u32>(0)?, r.get::<_, i64>(1)?)),
+            )?;
+            ranked.push((row.0, row.1, id.clone()));
+        }
+        ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        let survivor = ranked[0].2.clone();
+        let losers: Vec<String> = ranked[1..].iter().map(|(_, _, id)| id.clone()).collect();
+
+        for loser in &losers {
+            // A row whose directory entry is *still there* is a hard link, not a
+            // rename: the library is holding one file under two names on
+            // purpose, and merging them would silently drop one of them.
+            // Only a row whose entry has been replaced — the case-only rename
+            // this migration exists for — is merged.
+            if !domain::file_identity::entry_has_gone(&domain::paths::decode_path_key(&loser_path(
+                tx, loser,
+            )?)) {
+                continue;
+            }
+
+            // Favourites: the survivor's own row wins; the loser's is kept
+            // only if the survivor is not already a favourite.
+            tx.execute(
+                "INSERT OR IGNORE INTO favorites (track_id, created_at)
+                 SELECT ?1, created_at FROM favorites WHERE track_id = ?2;",
+                rusqlite::params![survivor, loser],
+            )?;
+            tx.execute(
+                "DELETE FROM favorites WHERE track_id = ?1;",
+                rusqlite::params![loser],
+            )?;
+
+            // Playlist entries: move them across, dropping any that would
+            // duplicate an entry the survivor already has in that playlist.
+            tx.execute(
+                "UPDATE OR IGNORE playlist_tracks SET track_id = ?1 WHERE track_id = ?2;",
+                rusqlite::params![survivor, loser],
+            )?;
+            tx.execute(
+                "DELETE FROM playlist_tracks WHERE track_id = ?1;",
+                rusqlite::params![loser],
+            )?;
+
+            // History and scrobbles: the events happened, so they move to the
+            // surviving track rather than vanishing with the row.
+            tx.execute(
+                "UPDATE play_history SET track_id = ?1 WHERE track_id = ?2;",
+                rusqlite::params![survivor, loser],
+            )?;
+            tx.execute(
+                "UPDATE scrobbles SET track_id = ?1 WHERE track_id = ?2;",
+                rusqlite::params![survivor, loser],
+            )?;
+
+            // The loser's own numbers move onto the survivor.
+            tx.execute(
+                "UPDATE tracks SET
+                     is_favorite   = MAX(is_favorite, (SELECT is_favorite FROM tracks WHERE id = ?2)),
+                     play_count    = play_count + (SELECT play_count FROM tracks WHERE id = ?2),
+                     skip_count    = skip_count + (SELECT skip_count FROM tracks WHERE id = ?2),
+                     last_played_at = MAX(COALESCE(last_played_at, 0),
+                                          COALESCE((SELECT last_played_at FROM tracks WHERE id = ?2), 0))
+                 WHERE id = ?1;",
+                rusqlite::params![survivor, loser],
+            )?;
+
+            tx.execute(
+                "DELETE FROM tracks WHERE id = ?1;",
+                rusqlite::params![loser],
+            )?;
+            merged += 1;
+        }
+    }
+
+    Ok(merged)
+}
+
+/// Exposed for the migration's own test.
+#[cfg(test)]
+pub(crate) fn apply_v10_for_test(conn: &mut Connection) -> Result<()> {
+    apply_v10(conn)
 }
 
 /// V5: sub-second modification times, the indexes the hot queries need, and an

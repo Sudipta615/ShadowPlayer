@@ -4,13 +4,13 @@
 
 ### Independent, Headless, Bit-Perfect Audiophile Audio & DSP Engine built with pure Rust
 
-[![Version](https://img.shields.io/badge/version-1.3.1-blue.svg?style=flat-square&logo=rust)](Cargo.toml)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg?style=flat-square&logo=rust)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg?style=flat-square)](LICENSE-APACHE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.98-orange.svg?style=flat-square&logo=rust)](Cargo.toml)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg?style=flat-square)](#-hardware-output-backends--os-integration)
 [![Realtime Safety](https://img.shields.io/badge/realtime-0%20allocations%20hot%20path-brightgreen.svg?style=flat-square)](#-real-time-safety--concurrency)
 [![Qualification Gate](https://img.shields.io/badge/qualification-100%25%20PASS-brightgreen.svg?style=flat-square)](#-formal-release-qualification)
-[![Test Matrix](https://img.shields.io/badge/tests-97%20suites-blueviolet.svg?style=flat-square)](#-testing--quality-gates)
+[![Test Matrix](https://img.shields.io/badge/tests-24%20suites-blueviolet.svg?style=flat-square)](#-testing--quality-gates)
 
 <p align="center">
   <b>A zero-allocation, lock-free, node-based audio playback and DSP engine engineered for bit-perfect audiophile listening, pro-audio mastering, and low-latency studio monitoring — with zero C/C++ codec SDKs.</b>
@@ -161,40 +161,71 @@ The audio hot path conforms to strict realtime safety standards:
 
 ## 📊 Formal Release Qualification
 
-The repository includes an in-process, hardware-calibrated release qualification pipeline (`release-qualification`) that evaluates the engine against production standards.
+The engine carries an in-process, reference-based qualification pipeline. It measures the engine against
+a registry of reference vectors — not against itself — and every check states what it measured, what it
+expected, and why that expectation exists.
+
+Run it with:
+
+```bash
+cargo run --bin audio-engine-cli --features audio-output -- selftest
+```
+
+The command exits non-zero if any check fails, so it can gate a release.
 
 ### Live Qualification Benchmark
 
-The block below is a **captured run of `release-qualification`, taken on 0.9.2**. It is
-reproduced verbatim rather than re-labelled: the engine version in the output is the one
-that actually produced these numbers. Re-run `release-qualification` after 0.9.3 to
-refresh it.
+The block below is a **captured run of `selftest`, taken on 1.4.0**. It is reproduced verbatim rather
+than re-labelled: the engine version in the output is the one that actually produced these numbers.
 
 ```text
-=================================================================
- SHADOW DESKTOP ENGINE RELEASE QUALIFICATION: PASS
- Engine Version: 0.9.2 | Platform: Linux x86_64
-=================================================================
- Tests:              PASS (All registered [[test]] suites green)
- Fuzzing:            PASS (Mutation fuzzing on CUE, ADM XML, Graph2)
- Realtime Allocs:    0    (Observed across 300 steady-state blocks)
- Determinism:        PASS (100% bit-exact parity: Graph2 vs Pipeline)
- Max CPU Load:       0.81% (43.0 µs worst-case block / 5333.3 µs budget)
- Latency/PDC:        PASS (Delay compensation verified: 256 samples)
- Spatial Quality:    PASS (8 metrics verified: VBAP, HOA, HRTF)
------------------------------------------------------------------
- Checks:
-  [PASS] DSP Determinism         100% bit-exact parity between Graph2 & DspPipeline
-  [PASS] Float Safety            Zero-alloc inline containment: NaN -> 0.0, Inf -> 1.0
-  [PASS] ITU-R BS.1770-5         Integrated: -20.04 LUFS, True-Peak: compliant
-  [PASS] Transactional Graph/PDC Atomic transaction committed; latency: 256 samples
-  [PASS] Spatial Quality (8 Met) Az=3.6°, El=0.0°, ITD=0.195ms, ILD=26.65dB, Energy=0dB
-  [PASS] Mutation Fuzzing        Clean error propagation across corrupted inputs
-  [PASS] Realtime Allocations    0 heap allocations recorded during active playback
-  [PASS] Buffer Overrun (XRuns)  0 xruns recorded across 300 test blocks
-  [PASS] Execution Budget        Worst-case block: 43.0 µs (0.81% of block deadline)
-=================================================================
+Quality evaluation report — engine 1.4.0 (reference registry v1)
+──────────────────────────────────────────────────────────────────
+Component: DspPipeline (bit-exact passthrough) (dsp-pipeline@1)
+  PASS  bit_exactness              measured 0.00e0 mismatch      expect 0.00e0 mismatch ± 0.00e0 mismatch  — full-scale passthrough must be bit-identical
+  PASS  thd_plus_n                 measured 0.000 (0.0%)         expect ≤ 0.001 (0.1%)  — a pure path adds no measurable distortion
+
+Component: Parametric EQ biquad (parametric-eq@1)
+  PASS  freq_response_deviation_db measured 6.00 dB              expect 6.00 dB ± 0.35 dB  — peaking centre gain reaches +6 dB
+  PASS  freq_response_deviation_db measured 0.08 dB              expect 0.00 dB ± 0.30 dB  — far-band magnitude stays at unity
+  PASS  phase_deviation_deg        measured 0.00 deg             expect 0.00 deg ± 6.00 deg  — phase crosses 0 at the resonance centre
+
+Component: Lookahead limiter (limiter@1)
+  PASS  true_peak_error_db         measured -0.00 dB             expect 0.00 dB ± 0.10 dB  — true peak stays at the −1 dBFS ceiling
+
+Component: Resampler (48→44.1 kHz) (resampler@1)
+  PASS  freq_response_deviation_db measured 0.00 dB              expect 0.00 dB ± 0.50 dB  — in-band tone survives at unity gain
+
+Component: Binaural head model (binaural@1)
+  PASS  interaural_level_db        measured 0.00 dB              expect ≤ 3.00 dB  — a centered image is heard by both ears near-equally
+  PASS  interaural_level_db        measured 5.04 dB              expect ≥ 4.00 dB  — a far-panned source produces a large inter-aural level difference
+
+Component: EBU R128 loudness (loudness@1)
+  PASS  loudness_error_lufs        measured -0.04 LUFS           expect -0.02 LUFS ± 0.25 LUFS  — calibration tone reads near −0.02 LUFS
+
+Component: Convolution (partitioned FFT) (convolution@1)
+  PASS  acoustic_ir_error_db       measured -60.00 dB            expect ≤ -60.00 dB  — engine matches the naive direct convolution to −60 dB or better
+
+Component: Channel separation (channel-separation@1)
+  PASS  channel_separation_db      measured -200.00 dB           expect ≤ -100.00 dB  — driving one channel produces no cross-channel leakage
+
+Component: HRTF interpolation (hrtf@1)
+  PASS  hrtf_interpolation_error_db measured 0.33 dB              expect ≤ 1.00 dB  — interpolated response stays within its bracketing grid nodes
+
+Component: Spatial render-cost model (spatial_cost@1)
+  PASS  spatial_render_cost_units  measured 2.00 units           expect ≤ 2.00 units  — the default stereo program models at 2 cost units per block
+  PASS  spatial_cost_utilization   measured 0.50 frac            expect ≤ 0.60 frac  — the default program stays within the block budget
+
+──────────────────────────────────────────────────────────────────
+Summary: 10 components · 15 checks — 15 PASS, 0 FAIL (ALL PASS)
 ```
+
+### What the qualification pipeline does not cover
+
+It runs headless. It does not open a physical DAC, and it does not measure
+jitter, drift or the analogue stage — see the
+[Known Limitations](#-known-limitations) below, which are stated rather than
+implied away.
 
 ---
 
@@ -353,17 +384,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🖥 Interactive Terminal UI & CLI
 
+Three binaries ship with the engine. They are the headless face of it: the same
+engine the desktop player drives, without the desktop.
+
 ### 1. Terminal UI (`engine-tui`)
 
 An interactive, zero-overhead TUI player built with **Ratatui** and **Crossterm**. Features real-time level meters, spectrum taps, gain reduction indicators, EQ curve plots, a file browser, and routing panels:
 
 ```bash
 # Launch interactive TUI player
-cargo run -p engine-tui --bin engine-tui -- [options] [path]
+cargo run -p audio-engine --bin engine-tui --features tui -- [path]
 
-# Example: play directory with custom TOML config
-cargo run -p engine-tui --bin engine-tui -- --config ./shadow.toml ~/Music
+# The TUI needs a terminal. Without one it says so and exits, rather than
+# hanging on an invisible screen.
 ```
+
+The meters, the spectrum and the EQ curve are read from the running engine,
+and the EQ panel writes back to it — the curve you move is the curve the
+engine applies.
 
 <details>
 <summary><b>🕹️ TUI Keybindings Reference</b></summary>
@@ -378,7 +416,7 @@ cargo run -p engine-tui --bin engine-tui -- --config ./shadow.toml ~/Music
 | `/` | Open file and directory browser |
 | `f` / `F` | Equalizer: Adjust frequency |
 | `w` / `W` | Equalizer: Adjust Q factor |
-| `t` | Equalizer: Cycle filter type (Peaking, Shelf, Notch, HPF, LPF) |
+| `t` | Equalizer: Cycle filter type (Peaking, Low Shelf, High Shelf, Notch, HPF, LPF) |
 | `x` | Equalizer: Bypass or enable selected band |
 | `r` | Output Panel: Rescan hardware output devices |
 | `q` | Quit application (press twice) |
@@ -387,14 +425,47 @@ cargo run -p engine-tui --bin engine-tui -- --config ./shadow.toml ~/Music
 
 ### 2. Reference CLI Player (`audio-engine-cli`)
 
-A fast REPL for scripted playback, benchmark runs, and endpoint configuration:
+A scriptable player and inspector. It prints what it is doing in a form a
+shell can read — one JSON object per line with `--json` — which is what makes
+it useful in a pipeline rather than only at a terminal:
 
 ```bash
-# Launch interactive CLI REPL
-cargo run --bin audio-engine-cli -- -b alsa -d "hw:0,0" /path/to/album
+# Play an album through a specific ALSA device
+cargo run -p audio-engine --bin audio-engine-cli -- -b alsa -d "hw:0,0" ~/Music
 
-# Execute automated EBU R128 loudness and true-peak scan
-cargo run --bin replaygain-scanner -- --file /path/to/track.flac
+# List the devices a backend can actually open
+cargo run -p audio-engine --bin audio-engine-cli -- --list-devices -b wasapi
+
+# Report a file's format and the engine's bit-perfect verdict for it
+cargo run -p audio-engine --bin audio-engine-cli -- probe ~/Music/song.flac
+
+# Machine-readable output, one object per line
+cargo run -p audio-engine --bin audio-engine-cli -- --json ~/Music/song.flac
+```
+
+`--list-devices` asks the *selected backend* for its devices, not cpal: on
+Windows the exclusive WASAPI backend opens endpoints by id, and the ASIO
+drivers are not devices cpal knows about at all.
+
+`probe` opens a file, reports the decoded format, and prints the engine's
+bit-perfect report — the per-stage causes, and what would have to change for
+the stream to be bit-perfect. It does not open an output device, so the
+transport half of the verdict is not claimed; the report says so.
+
+### 3. Loudness scanner (`replaygain-scanner`)
+
+Measures EBU R128 loudness and ReplayGain 2.0 gain, and can write the result
+back into the files' tags:
+
+```bash
+# Measure one file
+cargo run -p audio-engine --bin replaygain-scanner -- --file ~/Music/song.flac
+
+# Measure a tree, and write the results into the files' tags
+cargo run -p audio-engine --bin replaygain-scanner -- --dir ~/Music --recursive --write-tags
+
+# A CSV the spreadsheet can open
+cargo run -p audio-engine --bin replaygain-scanner -- --dir ~/Music --format csv
 ```
 
 ---
@@ -506,31 +577,62 @@ let config = EngineConfig::from_preset(EnginePreset::Fidelity);
 
 ## 🧪 Testing & Quality Gates
 
-The engine enforces correctness across **100 test files (97 registered `[[test]]` suites + 3 integration suites)**:
+The engine enforces correctness across **24 test files (0 registered `[[test]]` suites + 24 integration suites)**, on top of the unit tests that live beside the code they test. The integration suites are the ones that exercise the engine the way an embedder does — through its public API, with a real decoder and a real output path.
 
 ```bash
-# 1. Run full unit and integration test matrix
+# 1. Run the whole matrix: the in-crate unit tests and the integration suites
 cargo test --workspace
 
-# 2. Assert zero heap allocations on the audio hot path (42 tests)
-cargo test --test realtime_allocation
+# 2. Assert zero heap allocations on the audio hot path
+cargo test --test realtime_alloc_budget
 
-# 3. Verify bit-exact equivalence between Graph 2.0 and Reference Pipeline
-cargo test --test graph_pipeline_equivalence
+# 3. Verify bit-exact equivalence between the bypassed pipeline and the input
+cargo test --test bit_perfect_equivalence
 
-# 4. Verify true-peak lookahead limiter correctness and overshoot suppression
-cargo test --test limiter_correctness
+# 4. Verify the per-stage bit-perfect report and its causes
+cargo test --test bit_perfect
 
-# 5. Run formal in-process release qualification pipeline
-cargo run --release --bin release-qualification
+# 5. Verify EBU R128 loudness and ReplayGain against closed-form references
+cargo test --test loudness_r128
+cargo test --test replaygain
 
-# 6. Run workspace clippy and formatting checks
+# 6. Verify every biquad type against an independently derived reference
+cargo test --test eq_conformance
+
+# 7. Verify the codec registry never over-claims what it can decode
+cargo test --test codec_matrix
+
+# 8. Run the engine's own conformance pipeline through the CLI
+cargo run --bin audio-engine-cli --features audio-output -- selftest
+
+# 9. Run workspace clippy and formatting checks
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 
-# 7. Check licence allow-list and supply chain dependencies
+# 10. Check licence allow-list and supply chain dependencies
 cargo deny check
 ```
+
+The suite manifest (`tests/suite_manifest.rs`) counts the tree and checks it
+against the numbers stated above, so these counts cannot drift from reality
+without the build failing. Set `ENGINE_MANIFEST_STRICT=1` to make the drift a
+hard failure rather than a report.
+
+### Benchmarks
+
+The engine ships a Criterion benchmark suite covering the realtime hot paths,
+the DSP stages, the codecs and the output pipeline:
+
+```bash
+# Run the whole suite
+cargo bench
+
+# Run one benchmark, and save the result as a baseline to compare against
+cargo bench --bench dsp_eq -- --save-baseline ci
+```
+
+Committed baselines live in `crates/engine/benches/baselines/`, and CI
+compares against them weekly so a performance regression cannot land unnoticed.
 
 ---
 
@@ -554,12 +656,11 @@ would only ever test a moving target.
 
 ```text
 ├── Cargo.toml                       # Workspace manifest & engine root package
-├── CHANGELOG.md                     # Semantic version history and release notes
+├── LICENSE-APACHE                   # The engine's licence
+├── README.md                        # This document
 ├── crates/
 │   ├── config/                      # Serde-serializable engine & DSP configuration models
 │   ├── plugin-abi/                  # C-ABI plugin specification, vtables, and host loader
-│   ├── plugin-test-echo/            # Reference delay + gain audio plugin implementation
-│   ├── tui/                         # Terminal UI binary (ratatui + crossterm)
 │   └── opus-decoder/                # Pure-Rust RFC 8251 Opus audio decoder (Edition 2024)
 ├── src/
 │   ├── lib.rs                       # Crate root, feature guards, and prelude re-exports
@@ -578,19 +679,20 @@ would only ever test a moving target.
 │   │   └── safety.rs                # Inline NaN/Inf containment and denormal mitigation
 │   ├── spatial/                     # 3D spatial layer: VBAP, Ambisonics (HOA), Room, Binaural HRTF
 │   ├── output/                      # Audio backends (ALSA, WASAPI, ASIO, CoreAudio, CPAL)
-│   └── bin/                         # audio-engine-cli, replaygain-scanner, release-qualification
+│   └── bin/                         # audio-engine-cli, replaygain-scanner, engine-tui
 ├── benches/                         # Criterion benchmarks (DSP, pipeline, graph, spatial, budget)
-└── tests/                           # 100 test files (fidelity, robustness fuzzing, realtime allocation)
+└── tests/                           # 24 integration suites (fidelity, robustness, realtime allocation)
 ```
 
 ---
 
 ## 🤝 Contributing & Engineering Rules
 
-Contributions are welcome. There is no committed `CONTRIBUTING.md` or `AGENTS.md`
-yet, so the working rules are these:
+Contributions are welcome. The working rules are:
 
-1. **Strict Versioning**: `engine`, `config`, `plugin-abi`, `plugin-test-echo`, and `engine-tui` move in lockstep.
+1. **Strict Versioning**: `engine`, `config` and `plugin-abi` move in lockstep.
+   `opus-decoder` has its own version line, because it is a fork of an upstream
+   crate.
 2. **No God Files**: Strictly maintain modularity. Decompose growing structs and split large impls by concern.
 3. **Real-Time Hot Path Invariants**: Strictly no heap allocations, no locks, and no blocking I/O on the audio thread.
 4. **All CI Gates Green**: Format, clippy (`-D warnings`), tests, and `cargo deny check` must pass cleanly.

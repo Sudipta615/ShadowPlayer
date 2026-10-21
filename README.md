@@ -37,9 +37,80 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
   and named chain presets.
 
 **Desktop**
-- MPRIS2 on Linux (media keys, shells, `playerctl`).
+- MPRIS2 on Linux (media keys, shells, `playerctl`), System Media Transport
+  Controls on Windows, Now Playing on macOS.
 - Light and dark themes, toasts for anything that fails, and a Help view whose
   shortcut list is generated from the same descriptions the app uses.
+
+---
+
+## Installing
+
+Releases are published as GitHub artefacts and as native packages. The
+release workflow builds six targets and attaches the installers to a draft
+GitHub Release.
+
+| Platform | What you get |
+| :--- | :--- |
+| Linux x86-64 / arm64 | `.deb`, `.rpm`, `AppImage`, and a shell installer |
+| Windows x86-64 / arm64 | `.msi` and a `.zip` |
+| macOS x86-64 / arm64 | `.dmg` and a `.tar.gz` |
+
+Download the artefact for your platform from the
+[releases page](https://github.com/Sudipta615/audio_engine/releases) and run
+it. Nothing is installed outside your user account except by the `.deb`,
+`.rpm` and `.msi` packages, which install the binary and the icon.
+
+**From source**
+
+```bash
+git clone <this repo> && cd shadowplayer
+cargo build --release
+cargo run --release -p shadowplayer
+```
+
+---
+
+## What ShadowPlayer is not
+
+A player with a hundred features is not the same as a player that is good at
+one thing. This is what ShadowPlayer deliberately does not do, so that nobody
+has to discover it by disappointment:
+
+- **No streaming services, no internet radio, no accounts, no telemetry.** The
+  app makes no network requests at all. Your library, your listening history
+  and your statistics stay on your machine.
+- **No skins or user themes yet.** There are two themes, light and dark. A
+  theming system is on the way; it is not here yet and the app does not
+  pretend otherwise.
+- **No CD ripping, no video, no transcoding.**
+- **No auto-update.** Updates are manual. This is a consequence of making no
+  network requests, not an oversight.
+- **No multi-instance in 0.x.** A second launch takes over the first.
+- **English only.** There is no localisation layer yet.
+
+---
+
+## Platform support
+
+What works where. The "This Build" section of the in-app manual renders the
+same information from the running binary, so it is never out of date.
+
+| | Linux | Windows | macOS |
+| :--- | :--- | :--- | :--- |
+| Bit-perfect exclusive output | ALSA (`hw:`) | WASAPI Exclusive, ASIO | CoreAudio hog mode |
+| System media integration | MPRIS2 | SMTC | Now Playing |
+| File and folder picker | XDG portal | native | native |
+| The whole feature set | ✅ | ✅ | ✅ |
+
+**Bit-perfect means what it says, and the app tells you when it cannot.**
+Exclusive output requires the operating system's permission: on Linux the
+device must be openable directly (being in the `audio` group usually is
+enough), on Windows the endpoint must not be held by another application, and
+on macOS the app must be able to claim the device. When it cannot, the app
+says which backend it asked for, which one it got, and whether the access was
+*verified* — it never keeps the claim it could not keep. The Settings
+diagnostics card and the Bit-Perfect Signal Path Inspector both show it.
 
 ---
 
@@ -70,10 +141,13 @@ ALSA exclusive mode needs access to the device: being in the `audio` group is
 usually enough, and the Settings tab's diagnostics card reports the backend that
 was actually negotiated when it is not.
 
-**Windows / macOS.** `cargo build --release` works out of the box, using
-shared-mode WASAPI and CoreAudio respectively. The engine's native exclusive
-backends (`wasapi-native`, `asio-native`, hog mode) are engine features that
-this app does not enable; see `crates/engine/README.md`.
+**Windows / macOS.** `cargo build --release` works out of the box. The Windows
+build compiles the engine's native exclusive backends (`wasapi-native` and
+`asio-native`) in, so it negotiates a real exclusive stream rather than the
+OS mixer; the macOS build uses CoreAudio hog mode. If the native path is
+unavailable, the app falls back to shared mode **and says so** — the Settings
+diagnostics card reports the backend that was actually negotiated. See
+`crates/engine/README.md` for the backends in detail.
 
 **Where your data lives**
 
@@ -122,12 +196,20 @@ files or write ReplayGain tags.
 cargo test -p domain -p database -p metadata -p lyrics -p library \
            -p playback -p search -p audio-session -p ui --lib -- --test-threads=1
 
-# Engine (its own workspace, ~1300 tests)
+# The version bump is guarded by a test, not by remembering to do it.
+cargo test -p shadowplayer --test version_lockstep
+
+# Engine (its own workspace)
 cd crates/engine && cargo test
+
+# The engine's benchmark suite
+cd crates/engine && cargo bench
 ```
 
-CI runs `cargo fmt --check`, `clippy -D warnings`, the test suite above and the
-engine's suite on every push; see `.github/workflows/ci.yml`.
+CI runs `cargo fmt --check`, `clippy -D warnings`, the test suite above, the
+engine's suite, the engine's suite **on Windows and macOS as well as Linux**,
+the benchmark suite's compile, and the documentation-truth checks, on every
+push; see `.github/workflows/ci.yml`.
 
 ### Development-only automation
 
@@ -141,17 +223,24 @@ scaffolding behind them.
 ### Releasing
 
 The player and the engine are versioned separately — the engine carries its own
-version (`crates/engine`, currently `1.x`) because it is a standalone library
-with its own workspace and tests — but they are released together. To cut a
-release:
+version (`crates/engine`) because it is a standalone library with its own
+workspace and tests — but they are released together. To cut a release:
 
 1. Bump `version` in `crates/*/Cargo.toml` (the player workspace) and, when the
-   engine changed, `crates/engine/Cargo.toml` too.
+   engine changed, `crates/engine/Cargo.toml` and its sub-crates too.
 2. Move the `[Unreleased]` section of `CHANGELOG.md` under the new version and
-   date, and check the MSRV badge in `crates/engine/README.md`.
+   date, and check the version badge in `crates/engine/README.md`.
 3. `cargo run` prints both versions at startup from `engine::VERSION` and
    `engine::NAME`; the log is the source of truth if a build ever reports the
    wrong pair.
+4. Tag the commit `v<version>` and push the tag. The release workflow checks
+   that the tag matches the workspace version, builds the artefacts, and opens
+   a **draft** release.
+
+Step 1 is guarded by a test: `crates/app/tests/version_lockstep.rs` fails the
+build if the player crates disagree about their version, if the engine's
+sub-crates do, if the CHANGELOG names a different version than the manifests,
+or if the engine's README quotes a version that is no longer true.
 
 ---
 
@@ -165,17 +254,29 @@ Stated plainly, because the alternative is finding out the hard way:
   still unnamed — and full keyboard operation is the recommended way to drive
   the app. Every command below works without a mouse.
 - **English only.** All copy is hard-coded; there is no localisation layer yet.
-  This is a direction, not a promise — see `AUDIT.md` (C10).
-- **Exclusive output where native backends exist.** This build negotiates
-  genuine exclusive/bit-perfect output on Linux (ALSA); on Windows and macOS it
-  plays through the shared-mode OS mixer unless the engine is built with its
-  native backends. The Settings diagnostics card always shows which backend was
-  negotiated, so "bit-perfect" is never claimed on a shared path.
+- **Exclusive output needs the operating system's permission.** The app
+  negotiates genuine exclusive output on all three platforms — ALSA on Linux,
+  WASAPI Exclusive and ASIO on Windows, CoreAudio hog mode on macOS — but each
+  of them can be refused: the Linux device must be openable directly (being in
+  the `audio` group usually is enough), the Windows endpoint must not be held
+  by another application, and the macOS device must be claimable. When it is
+  refused, the app falls back to shared mode **and says so**; the Settings
+  diagnostics card always shows which backend was negotiated and whether the
+  access was verified, so "bit-perfect" is never claimed on a shared path.
 - **No automated database backup.** `library.db` is an ordinary SQLite file; copy
   it if it matters. Scans never delete files, only rows whose file is gone.
-- **MPRIS2 is Linux-only**, and only when a session bus is available.
+- **MPRIS2 is Linux-only**; Windows and macOS use SMTC and Now Playing
+  respectively, which are not configurable in the same way.
 - **Pre-1.0.** `0.x` versions may change settings formats or the database schema
   between releases; migrations run automatically and are one-way.
+- **Two formats are named but not decoded.** Musepack (`.mpc`) and TAK (`.tak`)
+  have no pure-Rust decoder in this tree, and the project does not take an FFI
+  dependency on one. Opening such a file fails with an error that names the
+  format; it is never mis-parsed as something else.
+- **The engine's own limitations are the engine's.** The engine README lists
+  them precisely — talkback, order-4+ ambisonic rotation, the mix bus's
+  automatic summation headroom, and the rest. Where the engine is honest about
+  a boundary, the player inherits that boundary rather than papering over it.
 
 ---
 

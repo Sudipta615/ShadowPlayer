@@ -226,6 +226,25 @@ impl LibraryScanner {
                         // content matches a track whose file is gone, so play
                         // counts, favourites and playlist membership survive.
                         let path_derived_id = extracted.track.id;
+
+                        // First: what does the *filesystem* say this file is?
+                        // This is the check that works on a case-insensitive
+                        // filesystem, where a rename that only changed the
+                        // case leaves the old path resolving — and where the
+                        // content-fingerprint check below cannot tell that
+                        // anything happened at all.
+                        if let Some(stable_id) = crate::identity::resolve_identity_by_file_id(
+                            &repo,
+                            path,
+                            already_indexed,
+                            extracted.track.file_id.as_deref(),
+                        ) {
+                            extracted.track.id = stable_id;
+                        }
+
+                        // Then: the content fingerprint, which recognises a file
+                        // that was moved *and* replaced by a copy of itself —
+                        // something the filesystem's identity cannot see.
                         if let Some(stable_id) = crate::identity::resolve_identity(
                             &repo,
                             path,

@@ -45,12 +45,25 @@ use crate::output::cpal_output::{OutputError, OutputVolume};
 use crate::output::output::{NativeDsdCapability, Output, StreamErrorBatch, StreamErrorState};
 use crate::output::output_info::OutputInfo;
 
-#[cfg(windows)]
 use com::enumerate_asio_drivers;
 use com::AsioDriverInfo;
 use render::AsioRenderContext;
 #[cfg(windows)]
 use types::*;
+
+/// The installed ASIO drivers, as `(name, description, clsid)`.
+///
+/// The CLSID is what a driver is instantiated by, and the name is what the
+/// user recognises. Both are accepted by the backend's device selection.
+///
+/// Off Windows there are no ASIO drivers, and the list is empty.
+#[cfg(feature = "asio-native")]
+pub fn installed_drivers() -> Vec<(String, String, String)> {
+    enumerate_asio_drivers()
+        .into_iter()
+        .map(|driver| (driver.name, driver.description, driver.clsid))
+        .collect()
+}
 
 // ── Global state for the bufferSwitch callback ────────────────────────────────
 //

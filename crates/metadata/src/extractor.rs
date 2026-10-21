@@ -116,6 +116,9 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         mtime_nanos,
         // Filled in by the scanner, which knows the on-disk file.
         content_hash: None,
+        // The filesystem's own identity for the file. The handle is already
+        // open here, so this costs one `stat` and nothing more.
+        file_id: domain::file_identity::file_identity(path).map(|identity| identity.to_key()),
         is_favorite: false,
         play_count: 0,
         skip_count: 0,
@@ -241,6 +244,7 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             mtime_nanos: audio_meta.track.mtime_nanos,
             // CUE virtual tracks share one file, so they are never fingerprinted.
             content_hash: None,
+            file_id: None,
             is_favorite: false,
             play_count: 0,
             skip_count: 0,

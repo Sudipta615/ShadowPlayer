@@ -1,0 +1,21 @@
+# A tiny, single-purpose helper that rasterises `../icon.svg` into the PNG
+# sizes the desktop shells need.
+#
+# It is NOT a workspace member: it exists only so the committed icon PNGs can
+# be regenerated from the SVG source of truth on any machine, with the exact
+# same rasteriser the app already uses to draw its SVG icons (resvg, via
+# `egui_extras`). Run it through `../make-icons.sh`.
+[package]
+name = "shadowplayer-icon-rasterizer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Its own workspace: this helper lives inside the `app` crate's directory, so
+# it must declare that it is not part of the player's workspace.
+[workspace]
+
+[dependencies]
+resvg = { version = "0.45.1", default-features = false }
+usvg = { version = "0.45.1", default-features = false }
+tiny-skia = { version = "0.11.4", features = ["png-format"] }

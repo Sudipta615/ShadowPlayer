@@ -43,6 +43,16 @@ pub struct Track {
     /// file that was moved or renamed so its identity survives. `None` when the
     /// fingerprint could not be computed (e.g. CUE-sheet virtual tracks).
     pub content_hash: Option<String>,
+    /// The filesystem's own identity for this file — see
+    /// [`crate::file_identity`].
+    ///
+    /// This is what lets a file that was *renamed* — including a rename that
+    /// only changed the case, which a case-insensitive filesystem (Windows,
+    /// macOS by default) treats as the same file — keep one row instead of
+    /// becoming two tracks. `None` when the platform cannot answer, or for a
+    /// virtual track (a CUE sheet's entries point at slices of one file).
+    #[serde(default)]
+    pub file_id: Option<String>,
     pub is_favorite: bool,
     pub play_count: u32,
     /// How many times this track was skipped before it was heard.

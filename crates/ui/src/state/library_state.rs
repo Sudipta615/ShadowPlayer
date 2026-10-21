@@ -442,6 +442,7 @@ mod sort_tests {
             mtime_unix_secs: 0,
             mtime_nanos: 0,
             content_hash: None,
+            file_id: None,
             is_favorite: favorite,
             play_count: 0,
             skip_count: 0,

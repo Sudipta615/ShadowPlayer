@@ -1596,6 +1596,43 @@ impl DspNode for ClapPluginHostNode {
     }
 }
 
+/// Read a NUL-terminated string a plugin handed us, tolerating a null pointer
+/// and lossy UTF-8 (the C ABI says nothing about encoding).
+#[cfg(feature = "clap-host")]
+fn cstr_to_string(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+/// Read one of CLAP's fixed-size inline char arrays.
+#[cfg(feature = "clap-host")]
+fn cstr_buf_to_string(buffer: &[c_char]) -> String {
+    let bytes: Vec<u8> = buffer
+        .iter()
+        .take_while(|c| **c != 0)
+        .map(|c| *c as u8)
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Copy a plugin descriptor out of plugin-owned memory.
+#[cfg(feature = "clap-host")]
+fn plugin_info_from(desc: &clap_plugin_descriptor) -> ClapPluginInfo {
+    ClapPluginInfo {
+        id: cstr_to_string(desc.id).unwrap_or_default(),
+        name: cstr_to_string(desc.name).unwrap_or_default(),
+        vendor: cstr_to_string(desc.vendor).unwrap_or_default(),
+        version: cstr_to_string(desc.version).unwrap_or_default(),
+        description: cstr_to_string(desc.description).unwrap_or_default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1780,42 +1817,5 @@ mod tests {
             plugin.get_extension = None;
             assert_eq!(unsafe { probe_main_ports(&plugin) }, None);
         }
-    }
-}
-
-/// Read a NUL-terminated string a plugin handed us, tolerating a null pointer
-/// and lossy UTF-8 (the C ABI says nothing about encoding).
-#[cfg(feature = "clap-host")]
-fn cstr_to_string(ptr: *const c_char) -> Option<String> {
-    if ptr.is_null() {
-        return None;
-    }
-    Some(
-        unsafe { CStr::from_ptr(ptr) }
-            .to_string_lossy()
-            .into_owned(),
-    )
-}
-
-/// Read one of CLAP's fixed-size inline char arrays.
-#[cfg(feature = "clap-host")]
-fn cstr_buf_to_string(buffer: &[c_char]) -> String {
-    let bytes: Vec<u8> = buffer
-        .iter()
-        .take_while(|c| **c != 0)
-        .map(|c| *c as u8)
-        .collect();
-    String::from_utf8_lossy(&bytes).into_owned()
-}
-
-/// Copy a plugin descriptor out of plugin-owned memory.
-#[cfg(feature = "clap-host")]
-fn plugin_info_from(desc: &clap_plugin_descriptor) -> ClapPluginInfo {
-    ClapPluginInfo {
-        id: cstr_to_string(desc.id).unwrap_or_default(),
-        name: cstr_to_string(desc.name).unwrap_or_default(),
-        vendor: cstr_to_string(desc.vendor).unwrap_or_default(),
-        version: cstr_to_string(desc.version).unwrap_or_default(),
-        description: cstr_to_string(desc.description).unwrap_or_default(),
     }
 }

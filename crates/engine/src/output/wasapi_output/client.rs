@@ -68,6 +68,55 @@ fn device_friendly_name(device: &IMMDevice) -> Option<String> {
     name
 }
 
+/// Every active render endpoint, as `(endpoint id, friendly name)`.
+///
+/// The endpoint id is the OS's stable identifier — the same string the
+/// backend's device matching uses — so a device chosen from this list is the
+/// device the backend will open. The friendly name is what the user reads.
+pub(crate) fn enumerate_render_endpoints() -> Vec<(String, String)> {
+    let Some(enumerator) = new_enumerator() else {
+        return Vec::new();
+    };
+    let Ok(collection) = (unsafe { enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) })
+    else {
+        return Vec::new();
+    };
+    let Ok(count) = (unsafe { collection.GetCount() }) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for index in 0..count {
+        let Ok(device) = (unsafe { collection.Item(index) }) else {
+            continue;
+        };
+        let Some(id) = endpoint_id(&device) else {
+            continue;
+        };
+        // An endpoint whose property store cannot be read has no name to
+        // show; it is skipped rather than listed as an empty row.
+        let Some(name) = device_friendly_name(&device) else {
+            continue;
+        };
+        out.push((id, name));
+    }
+    out
+}
+
+/// The id of the default render endpoint, if it can be read.
+pub(crate) fn default_render_endpoint_id() -> Option<String> {
+    let enumerator = new_enumerator()?;
+    let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }.ok()?;
+    endpoint_id(&device)
+}
+
+/// The device enumerator, created the same way the backend creates it.
+fn new_enumerator() -> Option<IMMDeviceEnumerator> {
+    use windows::Win32::Media::Audio::MMDeviceEnumerator;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.ok()
+}
+
 /// Pick the render endpoint to open, honoring the engine's `output_device`
 /// config (`target_device`).
 ///

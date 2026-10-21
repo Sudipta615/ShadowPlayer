@@ -15,6 +15,14 @@ pub enum HelpTab {
     MixBusStudio,
     KeyboardShortcuts,
     Glossary,
+    /// What *this* build can actually do.
+    ///
+    /// Every capability claim in this manual is rendered from the live engine
+    /// rather than written out by hand, and this tab is where the raw facts
+    /// are: the compiled backends, the compiled codecs, the negotiated output
+    /// device, the versions. It is the answer to "is that true on my
+    /// machine?".
+    ThisBuild,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +125,7 @@ pub fn render_help_view(
                     HelpTab::MixBusStudio => render_mixbus_tab(ui, state, theme),
                     HelpTab::KeyboardShortcuts => render_shortcuts_tab(ui, state, theme),
                     HelpTab::Glossary => render_glossary_tab(ui, state, theme),
+                    HelpTab::ThisBuild => render_this_build_tab(ui, state, theme),
                 }
             }
 
@@ -200,6 +209,7 @@ fn render_category_nav_bar(ui: &mut egui::Ui, state: &mut HelpState, theme: &The
         (HelpTab::MixBusStudio, "Mix Bus"),
         (HelpTab::KeyboardShortcuts, "Shortcuts"),
         (HelpTab::Glossary, "Glossary"),
+        (HelpTab::ThisBuild, "This Build"),
     ];
 
     let page_tabs: Vec<crate::components::page::PageTab<'_>> = tabs
@@ -250,23 +260,56 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
 
         ui.add_space(8.0);
 
-        // Core Pillars Grid
+        // Core Pillars Grid.
+        //
+        // The first two pillars state what *this build* can do, so they are
+        // rendered from the live engine. A manual that promises "Exclusive
+        // ALSA, WASAPI, CoreAudio and ASIO" on a build that has none of them
+        // is a promise, and the promise is the thing this project refuses to
+        // make.
+        let exclusive_labels: Vec<String> = engine::output::available_backends()
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b,
+                    config::AudioBackend::ExclusiveAlsa
+                        | config::AudioBackend::ExclusiveWasapi
+                        | config::AudioBackend::ExclusiveAsio
+                        | config::AudioBackend::ExclusiveCoreAudioHog
+                )
+            })
+            .map(|b| crate::components::backend_options::backend_label(*b))
+            .collect();
+
+        let bit_perfect_pillar = if exclusive_labels.is_empty() {
+            (
+                "• Bit-Perfect Audio (not in this build)".to_string(),
+                "This build has no exclusive-mode backend compiled in, so it plays through the operating system's mixer and is not bit-perfect. See “This Build” for what it can do.".to_string(),
+            )
+        } else {
+            (
+                "• Bit-Perfect Audio".to_string(),
+                format!(
+                    "Direct hardware streaming via {}. Bypasses the OS digital mixer and its volume algorithms.",
+                    exclusive_labels.join(", ")
+                ),
+            )
+        };
+
+        let autoeq_profiles = crate::modals::autoeq_modal::get_curated_autoeq_profiles().len();
+        let dsp_pillar = (
+            "• 64-bit Floating Point DSP".to_string(),
+            format!(
+                "Parametric and Graphic EQs (10 to 64 bands), minimum-phase biquad filters, {autoeq_profiles} curated headphone measurements with custom-measurement import, and TPDF dither."
+            ),
+        );
+
         ui.columns(3, |cols| {
             cols[0].vertical(|ui| {
-                feature_pillar_card(
-                    ui,
-                    "• 100% Bit-Perfect Audio",
-                    "Direct hardware streaming via Exclusive ALSA, WASAPI Exclusive, CoreAudio Hog, or ASIO. Bypasses all OS digital mixers and volume algorithms.",
-                    theme,
-                );
+                feature_pillar_card(ui, &bit_perfect_pillar.0, &bit_perfect_pillar.1, theme);
             });
             cols[1].vertical(|ui| {
-                feature_pillar_card(
-                    ui,
-                    "• 64-bit Floating Point DSP",
-                    "Parametric and Graphic EQs (10 to 64 bands), minimum-phase biquad filters, AutoEQ database of 4,000+ headphones, and TPDF dither.",
-                    theme,
-                );
+                feature_pillar_card(ui, &dsp_pillar.0, &dsp_pillar.1, theme);
             });
             cols[2].vertical(|ui| {
                 feature_pillar_card(
@@ -483,62 +526,65 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
         .inner_margin(egui::Margin::symmetric(18, 14));
 
     inspect_frame.show(ui, |ui| {
+        let backend_sentence = exclusive_backend_sentence();
         let (title, input_type, output_type, plain_desc, tech_desc) = match block {
             SignalBlock::Decoder => (
                 "Stage 1: Multi-Format Audio Decoder (Symphonia Engine)",
                 "Compressed/Lossless bytes from disk (FLAC, ALAC, WAV, AIFF, DSD, MP3, Opus)",
                 "Uncompressed 32-bit/64-bit IEEE floating-point PCM sample frames",
                 "Reads your music file from the hard drive and unpacks the compressed data into pure, raw sound wave numbers.",
-                "Uses pure Rust Symphonia decoders. Zero unsafe native C libraries. Decodes high-resolution PCM (up to 384 kHz / 32-bit) and 1-bit Direct Stream Digital (DSD) without rounding or clipping."
+                "Uses pure Rust Symphonia decoders. Zero unsafe native C libraries. Decodes high-resolution PCM (up to 384 kHz / 32-bit) and 1-bit Direct Stream Digital (DSD) without rounding or clipping.".to_string(),
             ),
             SignalBlock::RingBuffer => (
                 "Stage 2: Lock-Free Atomic Inter-Thread RingBuffer",
                 "Decoded PCM audio frames from worker thread",
                 "Synchronized real-time playback buffer for DSP engine",
                 "A high-speed waiting room for music samples that prevents music from stuttering even when your CPU is busy with other apps.",
-                "Implemented with lock-free crossbeam atomic primitives. Decouples the variable-latency file I/O thread from the ultra-strict real-time audio thread to guarantee zero jitter and zero thread-locking priority inversions."
+                "Implemented with lock-free crossbeam atomic primitives. Decouples the variable-latency file I/O thread from the ultra-strict real-time audio thread to guarantee zero jitter and zero thread-locking priority inversions.".to_string(),
             ),
             SignalBlock::Resampler => (
                 "Stage 3: Polyphase FIR Sinc Resampler (Rubato)",
                 "Input track sample rate (e.g. 44.1 kHz CD audio, 96 kHz Hi-Res)",
                 "Hardware DAC target sample rate (or Follow Track exact rate)",
                 "Changes the speed of the digital clock if your soundcard doesn't match the song's native recording rate.",
-                "Employs Rubato's band-limited Sinc polyphase interpolation with windowed Chebyshev filter designs. Delivers >160 dB Signal-to-Noise Ratio (SNR) with zero aliasing artifacts into the audible band."
+                "Employs Rubato's band-limited Sinc polyphase interpolation with windowed Chebyshev filter designs. Delivers >160 dB Signal-to-Noise Ratio (SNR) with zero aliasing artifacts into the audible band.".to_string(),
             ),
             SignalBlock::Equalizer => (
                 "Stage 4: 64-bit DSP Filter Rack & Acoustic Shaping",
                 "Clean PCM stereo samples",
                 "Acoustically compensated audio (Graphic EQ, Shelves, Stereo Width, HRTF)",
                 "The tone control studio: allows you to boost bass punch, smooth vocal harshness, widen the stereo stage, or tune headphones.",
-                "Executes minimum-phase 2nd-order Direct Form II Transposed biquad filter topologies. Implements Robert Bristow-Johnson Audio EQ Cookbook algorithms recalculated on every parameter tick."
+                "Executes minimum-phase 2nd-order Direct Form II Transposed biquad filter topologies. Implements Robert Bristow-Johnson Audio EQ Cookbook algorithms recalculated on every parameter tick.".to_string(),
             ),
             SignalBlock::LimiterHeadroom => (
                 "Stage 5: Master Limiter & Auto Headroom Management",
                 "Audio samples potentially exceeding 0.0 dBFS due to EQ boosts",
                 "Guaranteed clean samples bounded strictly at or below 0.0 dBFS",
                 "A smart volume protector that automatically dials back the master volume when you boost the bass, so your speakers never crackle or distort.",
-                "Monitors inter-sample peaks using 4x oversampling. When EQ boosts push signal amplitude beyond 1.0 peak float, Auto Headroom applies an exact inverse attenuation offset, completely preventing harsh DAC digital overs."
+                "Monitors inter-sample peaks using 4x oversampling. When EQ boosts push signal amplitude beyond 1.0 peak float, Auto Headroom applies an exact inverse attenuation offset, completely preventing harsh DAC digital overs.".to_string(),
             ),
             SignalBlock::Dither => (
                 "Stage 6: TPDF Triangular Probability Dithering",
                 "High-precision 64-bit floating point audio",
                 "Bit-depth matched PCM samples (16-bit or 24-bit integer)",
                 "Adds an ultra-quiet, completely inaudible microscopic hiss that prevents digital distortion when music fades into quiet silence.",
-                "Generates high-pass filtered Triangular Probability Density Function (TPDF) noise. Eliminates quantization harmonic distortion and truncation artifacts when down-converting from 64-bit float to 16/24-bit DAC depth."
+                "Generates high-pass filtered Triangular Probability Density Function (TPDF) noise. Eliminates quantization harmonic distortion and truncation artifacts when down-converting from 64-bit float to 16/24-bit DAC depth.".to_string(),
             ),
             SignalBlock::AudioBackend => (
                 "Stage 7: Exclusive Kernel-Level Driver Interface",
                 "Processed PCM sample frames",
                 "Direct DMA hardware endpoint buffer",
                 "Hands the audio directly to your physical soundcard, completely ignoring Windows/Mac/Linux volume mixers.",
-                "Interfaces directly via Linux ALSA (`hw:X,Y` direct MMAP), Windows WASAPI Exclusive (pull mode, event-driven), macOS CoreAudio Hog mode, or ASIO 2.0. Completely bypasses OS shared mixers (PulseAudio/PipeWire/Windows Audio Engine)."
+                format!(
+                    "Interfaces directly via {backend_sentence}. Completely bypasses the OS shared mixer (PulseAudio/PipeWire/Windows Audio Engine)."
+                ),
             ),
             SignalBlock::HardwareDac => (
                 "Stage 8: Digital-to-Analog Converter (DAC) & Line Output",
                 "Pristine bit-exact binary stream",
                 "Continuous smooth analog voltage wave for your headphones / speakers",
                 "The physical chip that turns digital numbers into real analog sound waves that vibrate your headphone drivers.",
-                "Your external DAC (e.g. ESS Sabre, AKM, R-2R ladder) reconstructs the analog wave using its native crystal clock without jitter or operating-system interference."
+                "Your external DAC (e.g. ESS Sabre, AKM, R-2R ladder) reconstructs the analog wave using its native crystal clock without jitter or operating-system interference.".to_string(),
             ),
         };
 
@@ -724,7 +770,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
             ("Extended Gain Range (±24 dB)", "Standard EQ mode caps adjustments at ±12 dB for safety. Toggling Extended Range unlocks full ±24 dB range for specialized acoustic calibration or aggressive room-mode notch suppression."),
             ("Auto Headroom Management", "An intelligent digital protector that constantly inspects your EQ curve. If the maximum boost across all active bands is +5 dB, it automatically and dynamically applies a -5 dB digital offset, ensuring zero clipping even if you forget to adjust the Preamp!"),
             ("Mid/Side EQ Mode (M/S)", "Splits stereo audio into Mid (monophonic center) and Side (spatial differences). Allows EQ-ing centered bass and lead vocals independently from wide ambient reverbs and panned guitars."),
-            ("AutoEQ 4,000+ Headphone Calibration", "Integrates laboratory acoustic measurements from Harman, Oratory1990, and Crinacle. Automatically configures precise multi-band compensation filters to flatten your specific headphone model's peaks and valleys to the Harman reference target."),
+            ("AutoEQ Headphone Calibration", &format!("Comes with {} curated headphone measurements and accepts your own measurement curve, so any model can be flattened to the Harman reference target. The filters are ordinary parametric EQ bands.", crate::modals::autoeq_modal::get_curated_autoeq_profiles().len())),
         ];
 
         for (title, body) in eq_features {
@@ -886,9 +932,10 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
             theme,
         );
 
+        let driver_sentence = exclusive_backend_sentence();
         let output_features = [
             ("Audiophile Bit-Perfect Direct Stream", "When enabled, completely disengages all software volume attenuation, equalizer biquads, spatializers, and dithering. Hands the unaltered FLAC/WAV PCM bits straight to your external USB DAC."),
-            ("Driver Architecture (ALSA Exclusive / WASAPI Exclusive / ASIO)", "Selects the low-level operating system audio subsystem. Exclusive ALSA locks the Linux ALSA hardware device node (`hw:X,Y`). WASAPI Exclusive locks the Windows endpoint in event-driven pull mode. ASIO Direct interfaces with professional studio drivers."),
+            ("Driver Architecture", &format!("Selects the low-level operating system audio subsystem. {driver_sentence} Each backend enumerates its own devices, so the device you pick in Settings is the device the engine opens.")),
             ("Fallback Policy (Allow vs Strict)", "If another application is locking your DAC when ShadowPlayer starts: 'Allow' falls back to shared mode gracefully; 'Strict' halts playback until the exclusive device can be acquired, guaranteeing bit-perfect fidelity."),
             ("Sample Rate Target (Follow Track vs Fixed)", "'Follow Track' dynamically re-clocks your DAC on song change (switching from 44.1 kHz to 96 kHz to 192 kHz without resampling). 'Fixed' locks your DAC clock to a chosen frequency and uses the Rubato polyphase sinc engine."),
             ("Volume Attenuation Mode (Software Controlled vs Hardware Preferred)", "Software mode scales digital float samples before driver handover. Hardware mode locks ShadowPlayer's output at 100% full-scale line level so you adjust physical volume on your external headphone amp or DAC dial."),
@@ -1369,6 +1416,200 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
 // ─────────────────────────────────────────────────────────────────────────────
 // 11. Tab: Audiophile Glossary & Terminology
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// A sentence naming the exclusive backends this build actually has.
+///
+/// The manual used to say "Linux ALSA, Windows WASAPI Exclusive, macOS
+/// CoreAudio Hog mode, or ASIO 2.0" on every platform and in every build. On
+/// a build without the native backend that sentence is a promise the binary
+/// cannot keep, and the Settings card — which reports what was really
+/// negotiated — would contradict it.
+fn exclusive_backend_sentence() -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for backend in engine::output::available_backends() {
+        let label = crate::components::backend_options::backend_label(backend);
+        let detail = match backend {
+            config::AudioBackend::ExclusiveAlsa => {
+                "locks the Linux ALSA hardware device node (`hw:X,Y` direct MMAP)"
+            }
+            config::AudioBackend::ExclusiveWasapi => {
+                "locks the Windows endpoint in event-driven pull mode"
+            }
+            config::AudioBackend::ExclusiveAsio => {
+                "interfaces with professional studio drivers through the ASIO COM API"
+            }
+            config::AudioBackend::ExclusiveCoreAudioHog => {
+                "claims the macOS device in hog mode and renders through a direct IO proc"
+            }
+            _ => continue,
+        };
+        parts.push(format!("{label} {detail}"));
+    }
+    if parts.is_empty() {
+        "This build has no exclusive-mode backend, so playback goes through the operating system's mixer.".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+/// The "This Build" tab: the facts about the running binary.
+///
+/// Everything here is read from the live engine rather than written out, which
+/// is the point. A manual that says "Windows: WASAPI Exclusive" is a claim
+/// about a *build*; a manual that lists the backends the running binary
+/// actually compiled in is a fact about *this* binary. The difference is the
+/// difference between a promise and a report.
+fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
+    manual_card(ui, theme, |ui| {
+        card_title(
+            ui,
+            "What This Build Can Do",
+            "Read from the running engine. A capability that is not listed here is not in this binary.",
+            theme,
+        );
+
+        build_facts_table(
+            ui,
+            &[
+                ("Player".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+                ("Audio engine".to_string(), engine::VERSION.to_string()),
+                ("Platform".to_string(), std::env::consts::OS.to_string()),
+                (
+                    "Architecture".to_string(),
+                    std::env::consts::ARCH.to_string(),
+                ),
+            ],
+            theme,
+        );
+    });
+
+    manual_card(ui, theme, |ui| {
+        card_title(
+            ui,
+            "Output Backends In This Build",
+            "The backends this binary compiled in. Each one enumerates its own devices, so a device chosen in Settings is a device this build can open.",
+            theme,
+        );
+
+        let backends = engine::output::available_backends();
+        if backends.is_empty() {
+            ui.label(
+                egui::RichText::new("No output backend is compiled into this build.")
+                    .font(crate::theme::font(12.0))
+                    .color(theme.text_dim),
+            );
+        } else {
+            let mut rows: Vec<(String, String)> = Vec::new();
+            for backend in &backends {
+                let devices = engine::output::devices::available_devices(*backend);
+                let detail = if devices.is_empty() {
+                    "no devices reported".to_string()
+                } else {
+                    // A count, and the names — the value column wraps, so a
+                    // long list is readable rather than a line that runs off
+                    // the card.
+                    let names: Vec<String> = devices.iter().map(|d| d.name.clone()).collect();
+                    format!("{} device(s): {}", devices.len(), names.join(", "))
+                };
+                rows.push((
+                    crate::components::backend_options::backend_label(*backend),
+                    detail,
+                ));
+            }
+            build_facts_table(ui, &rows, theme);
+        }
+
+        // The exclusive backends are the ones that make the audiophile claim
+        // true, so their absence is worth saying out loud.
+        let exclusive: Vec<String> = backends
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b,
+                    config::AudioBackend::ExclusiveAlsa
+                        | config::AudioBackend::ExclusiveWasapi
+                        | config::AudioBackend::ExclusiveAsio
+                        | config::AudioBackend::ExclusiveCoreAudioHog
+                )
+            })
+            .map(|b| crate::components::backend_options::backend_label(*b))
+            .collect();
+        if exclusive.is_empty() {
+            ui.label(
+                egui::RichText::new(
+                    "No exclusive-mode backend is compiled in, so this build cannot open a device without the operating system's mixer. Playback is not bit-perfect here.",
+                )
+                .font(crate::theme::font(12.0))
+                .color(theme.warning_yellow),
+            );
+        } else {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Exclusive-mode backends available: {}.",
+                    exclusive.join(", ")
+                ))
+                .font(crate::theme::font(12.0))
+                .color(theme.text_muted),
+            );
+        }
+    });
+
+    manual_card(ui, theme, |ui| {
+        card_title(
+            ui,
+            "Decoders In This Build",
+            "The formats this binary can actually decode.",
+            theme,
+        );
+        let codecs = engine::decode::codecs::decodable_codecs();
+        if codecs.is_empty() {
+            ui.label(
+                egui::RichText::new("No decoder is compiled into this build.")
+                    .font(crate::theme::font(12.0))
+                    .color(theme.warning_yellow),
+            );
+        } else {
+            let mut names: Vec<String> = codecs.iter().map(|c| format!("{c:?}")).collect();
+            names.sort();
+            ui.label(
+                egui::RichText::new(names.join(" · "))
+                    .font(crate::theme::font(12.0))
+                    .color(theme.text_secondary),
+            );
+        }
+    });
+}
+
+/// A two-column list of facts: a label on the left, a value on the right.
+///
+/// The value wraps: a device list is a sentence, and a sentence that runs off
+/// the edge of the card is a sentence the reader cannot finish.
+///
+/// A `Grid` is the obvious choice here and the wrong one: a grid measures its
+/// columns from the *unwrapped* content, so a long value makes the grid
+/// demand more width than the card has, and the label column is squeezed
+/// until it is clipped. A horizontal layout gives the value whatever the
+/// label did not use, and wraps inside it.
+fn build_facts_table(ui: &mut egui::Ui, rows: &[(String, String)], theme: &Theme) {
+    for (label, value) in rows {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
+            ui.label(
+                egui::RichText::new(label.clone())
+                    .font(crate::theme::font(12.0))
+                    .color(theme.text_muted),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(value.clone())
+                        .font(crate::theme::font(12.0))
+                        .color(theme.text_primary),
+                )
+                .wrap(),
+            );
+        });
+    }
+}
 
 fn render_glossary_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {

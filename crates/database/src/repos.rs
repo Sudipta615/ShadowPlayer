@@ -152,6 +152,7 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         mtime_unix_secs: row.get("mtime_unix_secs")?,
         mtime_nanos: row.get::<_, Option<i64>>("mtime_nanos")?.unwrap_or(0) as u32,
         content_hash: row.get("content_hash")?,
+        file_id: row.get("file_id")?,
         is_favorite: is_fav_int != 0,
         play_count: row.get("play_count")?,
         last_played_at: row.get("last_played_at")?,
@@ -176,9 +177,9 @@ impl TrackRepo {
                     duration_secs, sample_rate, channels, format, bitrate_kbps, is_lossless,
                     replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
                     replaygain_album_db, replaygain_album_peak,
-                    file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash,
+                    file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash, file_id,
                     is_favorite, play_count, skip_count, last_played_at, added_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
                 ON CONFLICT(path) DO UPDATE SET
                     title = excluded.title,
                     artist = excluded.artist,
@@ -202,7 +203,8 @@ impl TrackRepo {
                     file_size_bytes = excluded.file_size_bytes,
                     mtime_unix_secs = excluded.mtime_unix_secs,
                     mtime_nanos = excluded.mtime_nanos,
-                    content_hash = excluded.content_hash",
+                    content_hash = excluded.content_hash,
+                    file_id = COALESCE(excluded.file_id, tracks.file_id)",
                 params![
                     track.id.to_string(),
                     encode_path_key(&track.path),
@@ -228,6 +230,7 @@ impl TrackRepo {
                     track.mtime_unix_secs,
                     track.mtime_nanos,
                     track.content_hash,
+                    track.file_id,
                     if track.is_favorite { 1 } else { 0 },
                     track.play_count,
                     track.skip_count as i64,
@@ -323,6 +326,56 @@ impl TrackRepo {
                 params![content_hash, id.to_string()],
             )?;
             Ok(())
+        })
+    }
+
+    /// The rows that the filesystem says are this file.
+    ///
+    /// This is the lookup that survives a rename — including a rename that
+    /// only changed the case, which a case-insensitive filesystem (Windows,
+    /// macOS by default) treats as the same file under two spellings. The
+    /// returned rows may have more than one entry only if the library was
+    /// already holding duplicates before the file-identity migration merged
+    /// them; the caller gets them all so it can decide.
+    pub fn find_by_file_id(&self, file_id: &str) -> Result<Vec<Track>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT * FROM tracks WHERE file_id = ?1;")?;
+            let mapped = stmt.query_map(params![file_id], map_track)?;
+            let mut out = Vec::new();
+            for row in mapped {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Record a track's filesystem identity, and/or point it at a new path.
+    ///
+    /// The two are updated together because they change together: a file that
+    /// moved keeps its identity and gains a new path.
+    pub fn set_file_id_and_path(
+        &self,
+        id: &TrackId,
+        file_id: Option<&str>,
+        new_path: Option<&Path>,
+    ) -> Result<bool> {
+        self.db.with_conn(|conn| {
+            let changed = match (file_id, new_path) {
+                (Some(file_id), Some(path)) => conn.execute(
+                    "UPDATE tracks SET file_id = ?1, path = ?2 WHERE id = ?3;",
+                    params![file_id, encode_path_key(path), id.to_string()],
+                )?,
+                (Some(file_id), None) => conn.execute(
+                    "UPDATE tracks SET file_id = ?1 WHERE id = ?2;",
+                    params![file_id, id.to_string()],
+                )?,
+                (None, Some(path)) => conn.execute(
+                    "UPDATE tracks SET path = ?1 WHERE id = ?2;",
+                    params![encode_path_key(path), id.to_string()],
+                )?,
+                (None, None) => 0,
+            };
+            Ok(changed > 0)
         })
     }
 

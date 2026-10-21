@@ -53,6 +53,10 @@ pub fn render_settings_view(
         let scan_roots = scan_roots_repo.list().unwrap_or_default();
         let track_count = track_repo.count().unwrap_or_default();
 
+        // The device list is cached on the DSP state and refreshed only when
+        // the backend changes — enumerating devices is not a per-frame job.
+        dsp_state.refresh_output_devices(session, false);
+
         let extra = SettingsExtraContext {
             scan_roots: &scan_roots,
             track_count,
@@ -76,6 +80,7 @@ pub fn render_settings_view(
                 .output_info
                 .as_ref()
                 .and_then(|i| i.actual_backend),
+            output_devices: &dsp_state.output_devices,
             graph_build_ms: session.graph_build_stats().0,
             graph_builds: session.graph_build_stats().1,
         };

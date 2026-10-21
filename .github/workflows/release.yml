@@ -1,0 +1,152 @@
+name: Release
+
+# A release is cut by pushing an annotated tag (`v0.11.0`, …). The tag's
+# version must equal the workspace version — `crates/app/tests/version_lockstep.rs`
+# fails the build otherwise, so a mistyped tag cannot produce a release whose
+# name lies about what is inside it.
+#
+# The artefacts are attached to a DRAFT release first. The maintainer reads the
+# release notes, checks the checksums, and publishes it. Nothing is announced
+# by a machine that has not looked at it.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to build (e.g. v0.11.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  plan:
+    name: Plan the build
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.plan.outputs.releases }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the tag
+        id: plan
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          # The workspace version must match the tag. This is the same rule
+          # `version_lockstep.rs` enforces in CI; repeating it here means a
+          # mistyped tag fails with a sentence rather than a diff.
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/app/Cargo.toml | head -1)"
+          expected="v${version}"
+          if [ "$tag" != "$expected" ]; then
+            echo "::error::The tag '$tag' does not match the workspace version '$version' (expected '$expected')."
+            exit 1
+          fi
+          echo "Building $tag from workspace version $version."
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@cargo-dist@v0.28.0
+
+      - name: Plan the release
+        run: cargo dist plan --output-format=json > dist-plan.json
+
+      - name: Read the plan
+        id: plan
+        run: |
+          set -euo pipefail
+          releases="$(jq -r '.releases | join(",")' dist-plan.json)"
+          echo "releases=$releases" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,   target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest,   target: aarch64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest,  target: x86_64-pc-windows-msvc }
+          - { os: windows-latest,  target: aarch64-pc-windows-msvc }
+          - { os: macos-latest,    target: x86_64-apple-darwin }
+          - { os: macos-latest,    target: aarch64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@cargo-dist@v0.28.0
+
+      - name: Build the distributable artefacts
+        run: cargo dist build --target ${{ matrix.target }} --output-format=archive --with-aliases
+
+      - name: Collect the artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: target/distrib/
+          if-no-files-found: error
+
+  publish:
+    name: Publish the draft release
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: target/distrib
+          merge-multiple: true
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --draft \
+            --title "ShadowPlayer $TAG" \
+            --generate-notes \
+            target/distrib/*
+
+      - name: Report the checksums
+        run: |
+          echo "### Artefacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          (cd target/distrib && sha256sum * 2>/dev/null || shasum -a 256 * 2>/dev/null) \
+            | sed 's/^/| `/; s/$/` |/' >> "$GITHUB_STEP_SUMMARY"

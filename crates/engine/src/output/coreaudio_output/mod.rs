@@ -105,6 +105,27 @@ fn release_hog(device: AudioObjectID) {
     let _ = unsafe { set(device, &mut a, &release) };
 }
 
+/// The output devices macOS knows about, as `(device uid, display name)`.
+///
+/// The UID is the device's stable identifier — the same string the backend's
+/// device matching uses — so a device chosen from this list is the device the
+/// hog-mode backend will try to claim.
+pub fn enumerate_output_devices() -> Vec<(String, String)> {
+    all_devices()
+        .into_iter()
+        .filter_map(|id| {
+            let uid = device_uid(id)?;
+            let name = device_display_name(id);
+            Some((uid, name))
+        })
+        .collect()
+}
+
+/// The UID of the default output device, if it can be read.
+pub fn default_output_device_uid() -> Option<String> {
+    default_output_device().and_then(device_uid)
+}
+
 /// The default output device (`kAudioObjectSystemObject` +
 /// `kAudioHardwarePropertyDefaultOutputDevice`).
 fn default_output_device() -> Option<AudioObjectID> {

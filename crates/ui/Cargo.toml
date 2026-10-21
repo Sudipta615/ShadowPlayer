@@ -1,6 +1,6 @@
 [package]
 name = "ui"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 
 [dependencies]
@@ -25,6 +25,26 @@ serde_json = "1.0"
 # Native OS file/folder picker. Default features use the XDG Desktop Portal
 # backend (no GTK3 dev libraries required on Linux).
 rfd = "0.17"
+
+# ── Windows: the native, exclusive-mode output backends ───────────────────────
+# On Windows, the app negotiates a *real* exclusive stream: WASAPI Exclusive
+# (a genuine `IAudioClient` opened in `AUDCLNT_SHAREMODE_EXCLUSIVE`) and
+# Steinberg ASIO (the `IASIO` COM interface, no C++ SDK). Without these
+# features the Windows build is shared-mode only — it plays through the OS
+# mixer and cannot be bit-perfect, which is the whole point of this player.
+#
+# The features are declared here, in a Windows-only dependency table, rather
+# than as app-level features because Cargo cannot make a feature
+# target-conditional. The engine gates the corresponding modules by target as
+# well (`#[cfg(all(target_os = "windows", feature = "wasapi-native"))]`), so
+# nothing Windows-only is compiled on Linux or macOS.
+#
+# Escape hatch: delete the two feature names below to fall back to shared-mode
+# output on Windows. The Settings diagnostics card always reports which backend
+# was actually negotiated, so the app never claims exclusivity it did not get.
+[target.'cfg(target_os = "windows")'.dependencies]
+engine = { package = "audio-engine", path = "../engine", features = ["tag-write", "wasapi-native", "asio-native"] }
+
 # MPRIS2 desktop integration is Linux-only. Keeping zbus target-scoped means
 # Windows/macOS builds do not try to compile a D-Bus stack they cannot use.
 [target.'cfg(target_os = "linux")'.dependencies]

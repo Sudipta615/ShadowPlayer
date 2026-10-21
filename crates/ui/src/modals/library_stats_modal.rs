@@ -471,6 +471,7 @@ mod tests {
             mtime_unix_secs: 0,
             mtime_nanos: 0,
             content_hash: None,
+            file_id: None,
             is_favorite: false,
             play_count: plays,
             skip_count: 0,

@@ -33,6 +33,7 @@ mod unit {
             mtime_unix_secs: 1700000000,
             mtime_nanos: 0,
             content_hash: None,
+            file_id: None,
             is_favorite: false,
             play_count: 0,
             skip_count: 0,
@@ -225,6 +226,216 @@ mod unit {
             .unwrap();
         crate::schema::apply_v5_for_test(&mut conn)
             .expect("re-applying V5 with the column present must be safe");
+    }
+
+    #[test]
+    fn migration_v10_records_the_file_identity_and_merges_the_rows_that_share_one() {
+        // Two rows for one file: the case-insensitive-filesystem bug, where
+        // `Track.FLAC` and `track.flac` are the same file under two spellings.
+        let root = std::env::temp_dir().join(format!(
+            "sp_v10_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        // The file is now spelled `track.flac`; `Track.FLAC` is the spelling the
+        // stale row still carries. On a case-insensitive filesystem both
+        // resolve to this one file; on a case-sensitive one only the real
+        // spelling does — which is exactly why the stale row's identity was
+        // recorded when the file still had that name.
+        let file = root.join("track.flac");
+        std::fs::write(&file, b"x").unwrap();
+        let identity = domain::file_identity::file_identity(&file)
+            .expect("an existing file has an identity")
+            .to_key();
+
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tracks (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 title TEXT NOT NULL,
+                 artist TEXT NOT NULL,
+                 album TEXT NOT NULL,
+                 genre TEXT,
+                 path TEXT NOT NULL,
+                 play_count INTEGER NOT NULL DEFAULT 0,
+                 is_favorite INTEGER NOT NULL DEFAULT 0,
+                 skip_count INTEGER NOT NULL DEFAULT 0,
+                 last_played_at INTEGER,
+                 added_at INTEGER NOT NULL DEFAULT 0,
+                 content_hash TEXT,
+                 file_id TEXT
+             );
+             CREATE TABLE favorites (track_id TEXT PRIMARY KEY NOT NULL, created_at INTEGER NOT NULL);
+             CREATE TABLE playlist_tracks (
+                 id TEXT PRIMARY KEY NOT NULL, playlist_id TEXT NOT NULL, track_id TEXT NOT NULL,
+                 position INTEGER NOT NULL, added_at INTEGER NOT NULL
+             );
+             CREATE TABLE play_history (
+                 id TEXT PRIMARY KEY NOT NULL, track_id TEXT NOT NULL, played_at INTEGER NOT NULL,
+                 duration_listened_secs REAL NOT NULL, completed INTEGER NOT NULL
+             );
+             CREATE TABLE scrobbles (
+                 id TEXT PRIMARY KEY NOT NULL, track_id TEXT, artist TEXT NOT NULL, title TEXT NOT NULL,
+                 album TEXT NOT NULL, played_at INTEGER NOT NULL,
+                 duration_secs REAL NOT NULL DEFAULT 0, listened_secs REAL NOT NULL DEFAULT 0
+             );
+             CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL);
+             INSERT INTO schema_migrations VALUES (9, 0);",
+        )
+        .unwrap();
+
+        let stale = domain::paths::encode_path_key(&root.join("Track.FLAC"));
+        let real = domain::paths::encode_path_key(&file);
+        // The stale row was indexed while the file still had that name, so it
+        // carries the identity the filesystem gave it then.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, album, path, play_count, is_favorite, added_at, file_id)
+             VALUES ('stale', 'T', 'A', 'B', ?1, 2, 1, 100, ?3);",
+            rusqlite::params![stale, real, identity],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, album, path, play_count, added_at, file_id)
+             VALUES ('current', 'T', 'A', 'B', ?1, 9, 200, ?2);",
+            rusqlite::params![real, identity],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO favorites (track_id, created_at) VALUES ('stale', 5);",
+            [],
+        )
+        .unwrap();
+
+        crate::schema::apply_v10_for_test(&mut conn).expect("V10 must apply");
+
+        // One file, one row.
+        let rows: Vec<(String, i64, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, play_count, is_favorite FROM tracks ORDER BY id;")
+                .unwrap();
+            let mapped = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })
+                .unwrap();
+            let mut out = Vec::new();
+            for row in mapped {
+                out.push(row.unwrap());
+            }
+            out
+        };
+
+        assert_eq!(rows.len(), 1, "one file, one row: {rows:?}");
+        let (id, play_count, is_favorite) = &rows[0];
+        // The survivor is the row with the most plays.
+        assert_eq!(id, "current", "the most-played row survives");
+        assert_eq!(*play_count, 11, "the play counts are added together");
+        assert_eq!(*is_favorite, 1, "the favourite flag is carried over");
+
+        // The favourite moved to the survivor.
+        let favourite_owner: String = conn
+            .query_row("SELECT track_id FROM favorites;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(favourite_owner, "current");
+
+        // And the identity was recorded.
+        let file_ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT file_id FROM tracks;").unwrap();
+            let mapped = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+            let mut out = Vec::new();
+            for row in mapped {
+                out.push(row.unwrap());
+            }
+            out
+        };
+        assert_eq!(file_ids, vec![identity]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Two rows for one file that is present under *both* names — a hard link —
+    /// are left alone. The library is holding one file on purpose, and merging
+    /// the rows would silently drop one of them.
+    #[test]
+    fn migration_v10_leaves_a_hard_link_alone() {
+        let root = std::env::temp_dir().join(format!(
+            "sp_v10_link_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let original = root.join("original.flac");
+        let link = root.join("link.flac");
+        std::fs::write(&original, b"x").unwrap();
+        std::fs::hard_link(&original, &link).unwrap();
+        let identity = domain::file_identity::file_identity(&original)
+            .expect("an existing file has an identity")
+            .to_key();
+
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tracks (
+                 id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL,
+                 album TEXT NOT NULL, genre TEXT, path TEXT NOT NULL,
+                 play_count INTEGER NOT NULL DEFAULT 0, is_favorite INTEGER NOT NULL DEFAULT 0,
+                 skip_count INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER,
+                 added_at INTEGER NOT NULL DEFAULT 0, content_hash TEXT, file_id TEXT
+             );
+             CREATE TABLE favorites (track_id TEXT PRIMARY KEY NOT NULL, created_at INTEGER NOT NULL);
+             CREATE TABLE playlist_tracks (
+                 id TEXT PRIMARY KEY NOT NULL, playlist_id TEXT NOT NULL, track_id TEXT NOT NULL,
+                 position INTEGER NOT NULL, added_at INTEGER NOT NULL
+             );
+             CREATE TABLE play_history (
+                 id TEXT PRIMARY KEY NOT NULL, track_id TEXT NOT NULL, played_at INTEGER NOT NULL,
+                 duration_listened_secs REAL NOT NULL, completed INTEGER NOT NULL
+             );
+             CREATE TABLE scrobbles (
+                 id TEXT PRIMARY KEY NOT NULL, track_id TEXT, artist TEXT NOT NULL, title TEXT NOT NULL,
+                 album TEXT NOT NULL, played_at INTEGER NOT NULL,
+                 duration_secs REAL NOT NULL DEFAULT 0, listened_secs REAL NOT NULL DEFAULT 0
+             );
+             CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL);
+             INSERT INTO schema_migrations VALUES (9, 0);",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, album, path, play_count, added_at, file_id)
+             VALUES ('a', 'T', 'A', 'B', ?1, 1, 100, ?3);",
+            rusqlite::params![
+                domain::paths::encode_path_key(&original),
+                domain::paths::encode_path_key(&link),
+                identity
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, album, path, play_count, added_at, file_id)
+             VALUES ('b', 'T', 'A', 'B', ?1, 1, 100, ?2);",
+            rusqlite::params![domain::paths::encode_path_key(&link), identity],
+        )
+        .unwrap();
+
+        crate::schema::apply_v10_for_test(&mut conn).expect("V10 must apply");
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tracks;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2, "a hard link is two entries, and stays two");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

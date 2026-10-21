@@ -8,6 +8,7 @@ use config::{
 use domain::ids::ScanRootId;
 use domain::models::ScanRoot;
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
+use engine::output::devices::OutputDeviceInfo;
 use engine::AudioSource;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -1120,6 +1121,14 @@ pub struct SettingsExtraContext<'a> {
     /// engine fell back — which the user needs to see, because the fallback is
     /// shared-mode.
     pub actual_backend: Option<AudioBackend>,
+    /// The output devices the *selected* backend can open.
+    ///
+    /// Each backend enumerates its own devices, so a device chosen from this
+    /// list is the device the engine will actually open. A list built from
+    /// cpal would be wrong for every native backend: cpal's WASAPI backend
+    /// opens shared-mode streams, and the ASIO drivers are not in cpal's list
+    /// at all.
+    pub output_devices: &'a [OutputDeviceInfo],
     /// Mean DSP graph-rebuild cost in milliseconds.
     pub graph_build_ms: f64,
     /// Number of DSP graph rebuilds since startup.
@@ -1349,7 +1358,7 @@ pub fn show_settings_tab_extended(
                         render_playback_category(ui, state, theme, &mut actions);
                     }
                     SettingsCategory::Output => {
-                        render_output_category(ui, state, theme, &mut actions);
+                        render_output_category(ui, state, theme, extra, &mut actions);
                     }
                     SettingsCategory::Spatial => {
                         render_spatial_category(ui, state, theme, &mut actions);
@@ -1587,10 +1596,96 @@ fn render_playback_category(
 // Category 2: Hardware & Output
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The output-device picker.
+///
+/// The devices come from the *selected* backend, so the device chosen here is
+/// the device the engine will open. Typing a device name was the only way to
+/// choose one before, which is unusable on Windows: the exclusive WASAPI
+/// backend selects an endpoint by its id, not by the name the user can see.
+///
+/// A free-text field is still offered, because ALSA accepts device strings
+/// that no enumeration can guess (`hw:0,1`).
+fn render_device_picker(
+    ui: &mut egui::Ui,
+    state: &mut SettingsTabState,
+    extra: &SettingsExtraContext<'_>,
+    theme: &Theme,
+    actions: &mut SettingsTabActions,
+) {
+    let devices = extra.output_devices;
+
+    // The label of the current selection, so the combo box shows what is
+    // actually in use rather than a raw id.
+    let current_label = if state.output_device.is_empty() {
+        "System default".to_string()
+    } else {
+        devices
+            .iter()
+            .find(|d| d.id == state.output_device)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| state.output_device.clone())
+    };
+
+    let mut selected = state.output_device.clone();
+    let mut picked = false;
+    egui::ComboBox::from_id_salt("output_device_picker")
+        .selected_text(current_label)
+        .width(280.0)
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_value(&mut selected, String::new(), "System default")
+                .changed()
+            {
+                picked = true;
+            }
+            for device in devices {
+                let mut label = device.name.clone();
+                if device.is_default {
+                    label.push_str("  (default)");
+                }
+                // The id is the stable identifier the backend selects by; the
+                // name is only what the user reads.
+                if ui
+                    .selectable_value(&mut selected, device.id.clone(), label)
+                    .changed()
+                {
+                    picked = true;
+                }
+            }
+        });
+
+    if picked && selected != state.output_device {
+        state.output_device = selected.clone();
+        actions.device_changed = Some(selected);
+    }
+
+    if devices.is_empty() {
+        ui.label(
+            egui::RichText::new(
+                "This backend reported no devices. It may need exclusive access, or the device may be in use by another application.",
+            )
+            .font(crate::theme::font(11.0))
+            .color(theme.text_dim),
+        );
+    }
+
+    // The advanced field, for a device string the enumeration cannot know.
+    let mut custom = state.output_device.clone();
+    let edit = egui::TextEdit::singleline(&mut custom)
+        .hint_text("Device id or name (advanced)")
+        .desired_width(280.0)
+        .font(crate::theme::font(12.0));
+    if ui.add(edit).changed() && custom != state.output_device {
+        state.output_device = custom.clone();
+        actions.device_changed = Some(custom);
+    }
+}
+
 fn render_output_category(
     ui: &mut egui::Ui,
     state: &mut SettingsTabState,
     theme: &Theme,
+    extra: &SettingsExtraContext<'_>,
     actions: &mut SettingsTabActions,
 ) {
     // Card 1: Bit-Perfect Audiophile Mode Banner Card
@@ -1719,25 +1814,12 @@ fn render_output_category(
         setting_item(
             ui,
             "Output Endpoint",
-            "Leave blank for system default, or enter specific ALSA/WASAPI endpoint string",
+            "The device the engine opens. Leave it on the system default unless you are routing to a specific DAC.",
             theme,
             |ui| {
-                let edit = egui::TextEdit::singleline(&mut state.output_device)
-                    .hint_text("Default output device...")
-                    .desired_width(180.0)
-                    .font(crate::theme::font(12.0));
-                ui.add(edit);
-                if ui.add(pill_btn("Apply Device", false, theme)).clicked() {
-                    let dev = if state.output_device.is_empty() {
-                        None
-                    } else {
-                        Some(state.output_device.clone())
-                    };
-                    actions.device_changed = Some(dev.unwrap_or_default());
-                }
+                render_device_picker(ui, state, extra, theme, actions);
             },
         );
-
         setting_item(
             ui,
             "Fallback Policy",

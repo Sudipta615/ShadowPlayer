@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    ShadowPlayer's application icon.
+
+    It is the app's own logo glyph — the music note the sidebar draws — set on
+    the Obsidian surface with the Jade/Mint accent ramp, so the mark in a
+    launcher, a taskbar and a title bar is the same mark the app uses inside.
+
+    The geometry is deliberately bold: the note is legible at 16 px, which is
+    the smallest size a desktop shell will ever render it at.
+
+    This file is the SOURCE OF TRUTH for the rasterised forms committed next
+    to it (icon-16.png … icon-512.png, icon.ico, icon.icns). Regenerate them
+    with assets/make-icons.sh after any change here.
+  -->
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1B3230"/>
+      <stop offset="0.55" stop-color="#12181A"/>
+      <stop offset="1" stop-color="#0B0F10"/>
+    </linearGradient>
+    <linearGradient id="note" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#5EEAD4"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- The Obsidian tile. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" ry="232" fill="url(#surface)"/>
+  <!-- A hairline in the card-border token, so the tile reads as a surface. -->
+  <rect x="6" y="6" width="1012" height="1012" rx="226" ry="226" fill="none"
+        stroke="#2A3639" stroke-width="12"/>
+
+  <!-- The note: a stroked stem and flag, and two filled note-heads. -->
+  <g fill="url(#note)" stroke="url(#note)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M372 706 V268 L790 176 V632" fill="none" stroke-width="96"/>
+    <circle cx="296" cy="716" r="118"/>
+    <circle cx="714" cy="646" r="118"/>
+  </g>
+</svg>

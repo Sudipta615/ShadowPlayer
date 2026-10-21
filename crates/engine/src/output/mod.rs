@@ -19,6 +19,7 @@ pub mod cpal_devices;
 pub mod cpal_output;
 pub mod device_match;
 pub mod device_monitor;
+pub mod devices;
 pub mod drift;
 pub mod endpoint;
 pub mod format_converter;

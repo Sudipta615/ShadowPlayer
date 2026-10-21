@@ -1,6 +1,6 @@
 [package]
 name = "domain"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 
 [dependencies]
@@ -8,3 +8,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.10", features = ["v4", "v5", "serde"] }
 thiserror = "2.0"
+
+# Windows only: the file's identity on NTFS.
+#
+# The standard library's `MetadataExt` exposes the volume serial number and
+# the file index, but both are still unstable, so this asks the filesystem
+# directly. The engine already depends on the same crate at the same version,
+# so this adds no new code to the build.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

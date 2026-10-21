@@ -15,4 +15,47 @@ members = [
 ]
 exclude = [
     "crates/engine",
+    "crates/app/assets/rasterizer",
 ]
+
+# ── Distribution ──────────────────────────────────────────────────────────────
+# How the player is packaged and released. `cargo-dist` reads this block; the
+# release workflow in `.github/workflows/release.yml` runs `cargo dist build`
+# on a tag push and attaches the artefacts to a GitHub Release.
+#
+# The engine is deliberately NOT distributed here. It is a separate,
+# independently versioned workspace (`crates/engine`) consumed as a path
+# dependency, and it ships its own artefacts under its own name — see
+# `crates/engine/README.md`.
+[workspace.metadata.dist]
+# The version of cargo-dist that builds the releases. Bumping this is a
+# deliberate act: it changes the shape of the artefacts.
+cargo-dist-version = "0.28.0"
+# Which CI provider drives the build.
+ci = "github"
+# The installers to produce. `shell` is the portable tarball + installer
+# script; the rest are the native packages for each platform.
+installers = ["shell", "deb", "rpm", "appimage", "msi", "dmg"]
+# Every target the project publishes a binary for.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+# The binaries to package, and what to call them. The player's binary lives
+# in `crates/app` because that is where the workspace's `main` is.
+binaries = ["shadowplayer"]
+# The Rust toolchain the release is built with. It matches the engine's MSRV,
+# so a release never needs a newer compiler than the project claims to need.
+rust-version = "1.98"
+# GitHub Actions configuration.
+github-custom-runners = false
+github-build-setup = { rust-version = "1.98" }
+# A tag that does not match a released version still produces artefacts, so a
+# pre-release tag is never a no-op.
+pr-run-mode = "skip"
+windows-unknown = { pre-release-builds = "upload" }
+

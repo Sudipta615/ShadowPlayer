@@ -1050,6 +1050,20 @@ impl EngineHandle {
         crate::output::cpal_devices::enumerate_devices(config::AudioBackend::default())
     }
 
+    /// The output devices a *given* backend can open.
+    ///
+    /// The device list a player shows must come from the backend that will
+    /// open it: a list built from cpal is wrong for every native backend,
+    /// because cpal's WASAPI backend opens shared-mode streams and the ASIO
+    /// drivers are not in cpal's list at all.
+    #[cfg(feature = "audio-output")]
+    pub fn available_devices_for(
+        &self,
+        backend: config::AudioBackend,
+    ) -> Vec<crate::output::devices::OutputDeviceInfo> {
+        crate::output::devices::available_devices(backend)
+    }
+
     /// Open the active ASIO driver's manufacturer settings dialog.
     /// No-op when the current backend is not ASIO or the feature is not compiled in.
     pub fn open_asio_control_panel(&self) {

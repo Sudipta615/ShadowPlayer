@@ -3,7 +3,8 @@ use crate::components::settings_tab::{SettingsTabActions, SettingsTabState};
 use crate::state::chain_preset::{self, ChainPreset};
 use crate::state::clap_rack::{ClapRackActions, ClapRackState};
 use audio_session::AudioSession;
-use config::{CrossfadeConfig, TransitionMode};
+use config::{AudioBackend, CrossfadeConfig, TransitionMode};
+use engine::output::devices::OutputDeviceInfo;
 
 /// Central DSP state container and command dispatcher
 #[derive(Default)]
@@ -13,9 +14,32 @@ pub struct DspState {
     pub autoeq: crate::modals::AutoEqModalState,
     /// The CLAP plugin rack: its window state and the named preset library.
     pub clap_rack: ClapRackState,
+    /// The output devices of the selected backend.
+    ///
+    /// Cached, because enumerating devices is not a per-frame operation: on
+    /// Windows it initialises COM and walks the endpoint collection, and on
+    /// macOS it asks the HAL for the device list. The cache is refreshed when
+    /// the backend changes and when the user asks for it.
+    pub output_devices: Vec<OutputDeviceInfo>,
+    /// The backend the cached device list belongs to.
+    pub output_devices_backend: Option<AudioBackend>,
 }
 
 impl DspState {
+    /// Refresh the cached device list for the selected backend.
+    ///
+    /// A no-op when the list is already for the current backend, so it is safe
+    /// to call every frame — the expensive part only happens when the backend
+    /// actually changed.
+    pub fn refresh_output_devices(&mut self, session: &AudioSession, force: bool) {
+        let backend = self.settings_tab.output_backend;
+        if !force && self.output_devices_backend == Some(backend) {
+            return;
+        }
+        self.output_devices = session.available_devices_for(backend);
+        self.output_devices_backend = Some(backend);
+    }
+
     /// Sync all restored persistent DSP and EQ parameters to the active audio engine session
     pub fn sync_all_to_session(&self, session: &AudioSession) {
         // 1. The signal chain itself (EQ, tone, dynamics, filters, mix bus) is

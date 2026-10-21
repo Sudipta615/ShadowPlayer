@@ -2707,6 +2707,7 @@ impl eframe::App for ShadowPlayerApp {
                             mtime_unix_secs: 1,
                             mtime_nanos: 0,
                             content_hash: Some(format!("eval-hash-{i}")),
+                            file_id: None,
                             is_favorite: false,
                             play_count: 0,
                             skip_count: 0,
@@ -2912,6 +2913,7 @@ impl eframe::App for ShadowPlayerApp {
                             mtime_unix_secs: 1_600_000_000,
                             mtime_nanos: 0,
                             content_hash: None,
+                            file_id: None,
                             is_favorite: i % 3 == 0,
                             play_count: (i as u32) * 7,
                             skip_count: 0,
@@ -2984,6 +2986,7 @@ impl eframe::App for ShadowPlayerApp {
                             mtime_unix_secs: 1_600_000_000,
                             mtime_nanos: 0,
                             content_hash: None,
+                            file_id: None,
                             is_favorite: false,
                             play_count: 0,
                             skip_count: 0,
@@ -3042,6 +3045,9 @@ impl eframe::App for ShadowPlayerApp {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Help;
                 if let Ok(tab_str) = std::env::var("SHADOWPLAYER_EVAL_HELP_TAB") {
                     match tab_str.as_str() {
+                        "thisbuild" => {
+                            self.help_state.active_tab = crate::views::help_view::HelpTab::ThisBuild
+                        }
                         "signal" => {
                             self.help_state.active_tab =
                                 crate::views::help_view::HelpTab::SignalPath

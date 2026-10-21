@@ -1,3 +1,12 @@
+// A windowed subsystem binary on Windows: launching the app from the
+// Explorer does not flash a console window.
+//
+// This is a *crate-level* attribute, so it has to be at the top of the crate
+// root — putting it on `main` compiles, warns, and does nothing, which is
+// worse than not having it. The log still goes to the file in the data
+// directory (see `TeeLog`), so a launch with no console loses nothing.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -49,16 +58,134 @@ fn purge_legacy_demo_data(db: &Database, data_dir: &std::path::Path) {
 const MIN_WINDOW_WIDTH: f32 = 640.0;
 const MIN_WINDOW_HEIGHT: f32 = 360.0;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+/// The application's own icon, in the form the window manager asks for.
+///
+/// The PNG is committed next to `icon.svg` and generated from it by
+/// `assets/make-icons.sh`. Decoding it here — rather than relying on a
+/// framework helper — keeps the icon identical on every platform, including
+/// the ones whose shells read the icon from the executable's resources
+/// instead of the window.
+fn window_icon() -> Option<eframe::egui::IconData> {
+    const ICON_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
+    let decoded = image::load_from_memory_with_format(ICON_PNG, image::ImageFormat::Png).ok()?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Some(eframe::egui::IconData {
+        rgba: rgba.into_raw(),
+        width,
+        height,
+    })
+}
 
-    info!("Starting ShadowPlayer - Audiophile Local Desktop Music Player");
+/// The log file's path inside the data directory.
+fn log_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("shadowplayer.log")
+}
 
+/// A writer that sends every log line to stderr *and* to the log file.
+///
+/// The file is the point: on Windows the app is built as a windowed
+/// subsystem binary, so a launch from the Explorer has no console attached and
+/// stderr goes nowhere. The file is where a user (or a bug report) finds out
+/// what happened.
+struct TeeLog {
+    stderr: std::io::Stderr,
+    file: Option<std::fs::File>,
+}
+
+impl std::io::Write for TeeLog {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.stderr.write(buf)?;
+        if let Some(file) = self.file.as_mut() {
+            // A failing log file must never take the app down.
+            let _ = file.write_all(buf);
+            let _ = file.flush();
+        }
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stderr.flush()
+    }
+}
+
+/// The entry point.
+///
+/// On Windows this is a *windowed* subsystem binary (see the crate-level
+/// attribute at the top of this file), so launching it from the Explorer does
+/// not flash a console window. The trade-off is that a launch failure has
+/// nowhere to print to, which is why the error is written to the log file in
+/// the data directory and, on Windows, shown in a message box.
+fn main() {
+    if let Err(e) = run() {
+        let message = format!("ShadowPlayer failed to start:\n\n{e}");
+        log::error!("{message}");
+        eprintln!("{message}");
+        show_fatal_error(&message);
+        std::process::exit(1);
+    }
+}
+
+/// Tell the user, in the platform's own way, that the app could not start.
+///
+/// On Windows the log file is invisible to a user who has never opened it, so
+/// a message box is the difference between "it did nothing" and an actionable
+/// sentence. Everywhere else, stderr is enough.
+fn show_fatal_error(message: &str) {
+    #[cfg(windows)]
+    {
+        // `MessageBoxW` via the shell's own API, so no extra dependency is
+        // needed for a dialog that is shown exactly once.
+        unsafe {
+            #[link(name = "user32")]
+            extern "system" {
+                fn MessageBoxW(
+                    hwnd: isize,
+                    text: *const u16,
+                    caption: *const u16,
+                    kind: u32,
+                ) -> i32;
+            }
+            let wide =
+                |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
+            let text = wide(message);
+            let caption = wide("ShadowPlayer");
+            MessageBoxW(0, text.as_ptr(), caption.as_ptr(), 0x10);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = message;
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Resolve persistent app data directory
     let data_dir = dirs::data_local_dir()
         .map(|d| d.join("shadowplayer"))
-        .unwrap_or_else(|| PathBuf::from("./data"));
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Initialize logging: stderr plus a file in the data directory.
+    {
+        std::fs::create_dir_all(&data_dir).ok();
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file_path(&data_dir))
+            .ok();
+        let tee = Box::new(TeeLog {
+            stderr: std::io::stderr(),
+            file,
+        });
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .target(env_logger::Target::Pipe(tee))
+            .init();
+    }
+
+    info!("Starting ShadowPlayer - Audiophile Local Desktop Music Player");
+
+    // The data directory was resolved above, before the logger was built, so
+    // the log file could live inside it.
     std::fs::create_dir_all(&data_dir)?;
 
     let db_path = data_dir.join("library.db");
@@ -125,7 +252,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_inner_size(Vec2::new(start_w, start_h))
             .with_min_inner_size(Vec2::new(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT))
             .with_decorations(true)
-            .with_transparent(false),
+            .with_transparent(false)
+            // The app's own mark, on the taskbar, in the title bar and in the
+            // window manager's switcher.
+            .with_icon(window_icon().unwrap_or_default()),
         ..Default::default()
     };
 
@@ -171,6 +301,7 @@ mod tests {
             mtime_unix_secs: 1_700_000_000,
             mtime_nanos: 0,
             content_hash: None,
+            file_id: None,
             is_favorite: false,
             play_count: 0,
             skip_count: 0,

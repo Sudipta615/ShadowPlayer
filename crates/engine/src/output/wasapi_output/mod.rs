@@ -112,6 +112,19 @@ use format::{
 use render::render_loop;
 pub(crate) use render::AUDCLNT_E_DEVICE_INVALIDATED;
 
+/// Every active render endpoint, as `(endpoint id, friendly name)`.
+///
+/// The endpoint id is the OS's stable identifier, so a device chosen from this
+/// list is the device the exclusive backend will open.
+pub fn enumerate_render_endpoints() -> Vec<(String, String)> {
+    client::enumerate_render_endpoints()
+}
+
+/// The id of the default render endpoint, if it can be read.
+pub fn default_render_endpoint_id() -> Option<String> {
+    client::default_render_endpoint_id()
+}
+
 /// Native WASAPI exclusive-mode output.
 pub struct WasapiOutput {
     device_name: String,
