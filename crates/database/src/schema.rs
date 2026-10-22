@@ -86,6 +86,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v11(conn)?;
     }
 
+    if current_version < 12 {
+        apply_v12(conn)?;
+    }
+
     Ok(())
 }
 
@@ -921,6 +925,39 @@ fn apply_v5(conn: &mut Connection) -> Result<()> {
         }
     }
 
+    tx.commit()?;
+    Ok(())
+}
+
+/// V12: playlist cross-references.
+///
+/// A playlist can include another playlist as an entry. The link is stored
+/// separately from `playlist_tracks` so the existing track foreign key and
+/// per-track reordering keep working; resolution happens when the playlist is
+/// played, with cycle detection in [`crate::repos::PlaylistRepo`].
+fn apply_v12(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V12 (playlist cross-references)");
+    let tx = conn.transaction()?;
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS playlist_links (
+            playlist_id TEXT NOT NULL,
+            linked_playlist_id TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            added_at INTEGER NOT NULL,
+            PRIMARY KEY (playlist_id, linked_playlist_id),
+            FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY(linked_playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_playlist_links_linked
+            ON playlist_links(linked_playlist_id);",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (12, strftime('%s', 'now'));",
+    ];
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V12 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
     tx.commit()?;
     Ok(())
 }

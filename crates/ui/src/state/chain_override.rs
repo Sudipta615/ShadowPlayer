@@ -447,6 +447,7 @@ mod tests {
             graphic_enabled: true,
             graphic_preamp_db: -3.0,
             overrides: None,
+            replaygain_override_db: None,
         };
         let patch = legacy_patch(&profile, &base()).expect("a legacy profile must convert");
         let merged = merge_chain(&base(), &patch).unwrap();

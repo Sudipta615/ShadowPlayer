@@ -640,6 +640,42 @@ mod unit {
     }
 
     #[test]
+    fn playlist_links_resolve_and_reject_cycles() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let tracks = TrackRepo::new(db.clone());
+        let playlists = PlaylistRepo::new(db.clone());
+
+        let a = sample_track(TrackId::new(), "/music/link-a.flac", "A", "X", "Album");
+        let b = sample_track(TrackId::new(), "/music/link-b.flac", "B", "X", "Album");
+        tracks.upsert(&a).unwrap();
+        tracks.upsert(&b).unwrap();
+
+        let outer = playlists.create("Outer", None).unwrap();
+        let inner = playlists.create("Inner", None).unwrap();
+        playlists.add_track(&outer.id, &a.id).unwrap();
+        playlists.add_track(&inner.id, &b.id).unwrap();
+        playlists.add_link(&outer.id, &inner.id).unwrap();
+
+        let resolved: Vec<_> = playlists
+            .get_tracks_resolved(&outer.id)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.title)
+            .collect();
+        assert_eq!(
+            resolved,
+            ["A", "B"],
+            "the linked playlist resolves at play time"
+        );
+
+        assert!(
+            playlists.add_link(&inner.id, &outer.id).is_err(),
+            "a link that closes the loop must be rejected"
+        );
+        assert!(playlists.add_link(&outer.id, &outer.id).is_err());
+    }
+
+    #[test]
     fn reordering_playlist_tracks_renumbers_positions() {
         let db = Database::in_memory().expect("In-memory DB creation failed");
         let tracks = TrackRepo::new(db.clone());
@@ -1023,6 +1059,7 @@ mod unit {
             graphic_enabled: true,
             graphic_preamp_db: -3.0,
             overrides: None,
+            replaygain_override_db: Some(-2.5),
         };
         dsp.set(&track.id, &profile).unwrap();
         let read = dsp

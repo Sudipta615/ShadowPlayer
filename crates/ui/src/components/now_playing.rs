@@ -26,6 +26,8 @@ pub struct NowPlayingEvents {
 pub enum SleepTimerRequest {
     Off,
     AfterSeconds(f64),
+    /// Pause after the duration, with a 10-second fade over the tail.
+    AfterSecondsFade(f64),
     EndOfTrack,
 }
 
@@ -737,6 +739,15 @@ impl<'a> NowPlayingCard<'a> {
                                                             .strong()
                                                             .color(self.theme.text_primary),
                                                     );
+                                                    let fade_id = menu_id.with("fade");
+                                                    let mut fade = ui.data(|d| {
+                                                        d.get_temp::<bool>(fade_id).unwrap_or(false)
+                                                    });
+                                                    ui.checkbox(
+                                                        &mut fade,
+                                                        "Fade out over last 10 s",
+                                                    );
+                                                    ui.data_mut(|d| d.insert_temp(fade_id, fade));
                                                     for (label, secs) in [
                                                         ("5 minutes", 300.0),
                                                         ("15 minutes", 900.0),
@@ -745,9 +756,11 @@ impl<'a> NowPlayingCard<'a> {
                                                     ] {
                                                         if ui.button(label).clicked() {
                                                             events.sleep_timer_request = Some(
-                                                                SleepTimerRequest::AfterSeconds(
-                                                                    secs,
-                                                                ),
+                                                                if fade {
+                                                                    SleepTimerRequest::AfterSecondsFade(secs)
+                                                                } else {
+                                                                    SleepTimerRequest::AfterSeconds(secs)
+                                                                },
                                                             );
                                                             close = true;
                                                         }

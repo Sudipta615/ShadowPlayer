@@ -88,7 +88,10 @@ fn percent_encode_uri_path(text: &str) -> String {
 }
 
 /// The player state published to the desktop. Refreshed once per UI frame.
-#[derive(Debug, Clone, Default)]
+///
+/// Also the loopback control protocol's `state` payload, so a remote sees
+/// exactly what a desktop media widget sees.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct MprisSnapshot {
     /// Whether a track is loaded at all (distinguishes Stopped from Paused).
     pub loaded: bool,

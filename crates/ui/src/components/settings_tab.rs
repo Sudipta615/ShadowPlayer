@@ -99,7 +99,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 75] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 76] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -546,6 +546,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 75] = [
     },
     SettingsEntry {
         category: SettingsCategory::Library,
+        card: "Application Instances",
+        label: "Allow multiple instances",
+        description: "Off: a second launch activates this window. On: open concurrent windows (SQLite WAL); takes effect next launch",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
         card: "Organize Files",
         label: "Batch Rename & Sort",
         description: "Build names from tags — e.g. {artist}/{album}/{track} - {title}. Existing files are never overwritten.",
@@ -727,6 +733,9 @@ pub struct SettingsTabState {
     pub sample_rate_policy: SampleRatePolicy,
     pub volume_mode: VolumeMode,
     pub bit_perfect: bool,
+    /// Opt in to concurrent windows. Read before the database opens on the
+    /// next launch, via the marker file the app keeps in step with this field.
+    pub allow_multiple_instances: bool,
     pub dither_enabled: bool,
     pub resampler_quality: ResamplerQuality,
     pub fallback_policy: FallbackPolicy,
@@ -866,6 +875,7 @@ impl Default for SettingsTabState {
             sample_rate_policy: SampleRatePolicy::FollowTrack,
             volume_mode: VolumeMode::SoftwareOnly,
             bit_perfect: false,
+            allow_multiple_instances: false,
             dither_enabled: true,
             resampler_quality: ResamplerQuality::HighQuality,
             fallback_policy: FallbackPolicy::Allow,
@@ -3619,7 +3629,29 @@ fn render_library_category(
         );
     });
 
-    // Card 4: About ShadowPlayer
+    // Card 4: Application Instances
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_puzzle,
+            "Application Instances",
+            "How a second launch behaves while this window is open",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Allow multiple instances",
+            "Off (default): a second launch brings this window forward and exits. On: it opens another window; the SQLite library is WAL-mode, so concurrent windows are safe. Takes effect next launch.",
+            theme,
+            |ui| {
+                toggle_switch(ui, &mut state.allow_multiple_instances, theme);
+            },
+        );
+    });
+
+    // Card 5: About ShadowPlayer
     setting_card(ui, theme, |ui| {
         card_header(
             ui,

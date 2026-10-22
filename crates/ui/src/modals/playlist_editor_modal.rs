@@ -21,6 +21,8 @@ pub struct PlaylistEditorState {
     search_cache: String,
     /// Format used by the next export.
     pub export_format: library::PlaylistFormat,
+    /// Playlist selected in the "link another playlist" picker.
+    pub link_target: Option<PlaylistId>,
     /// Whether the studio was open last frame. Used to move the keyboard
     /// focus into the name field exactly once, when it opens.
     was_open: bool,
@@ -51,6 +53,8 @@ pub struct PlaylistEditorActions {
     pub select_changed: Option<PlaylistId>,
     /// Export the selected playlist in this format.
     pub export: Option<library::PlaylistFormat>,
+    /// Include another playlist as an entry (`playlist`, `linked playlist`).
+    pub link_playlist: Option<(PlaylistId, PlaylistId)>,
 }
 
 const MAX_SEARCH_RESULTS: usize = 60;
@@ -429,6 +433,47 @@ pub fn show_playlist_editor(
                                 egui::RichText::new(format!("• {} song(s)", playlist_tracks.len()))
                                     .font(crate::theme::font(12.0))
                                     .color(theme.text_muted),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let linkable = playlists
+                                        .iter()
+                                        .find(|p| Some(p.id) == state.link_target);
+                                    egui::ComboBox::from_id_salt("playlist_link_target")
+                                        .selected_text(
+                                            linkable.map(|p| p.name.as_str()).unwrap_or("Link…"),
+                                        )
+                                        .width(130.0)
+                                        .show_ui(ui, |ui| {
+                                            for p in playlists.iter().filter(|p| p.id != selected_id)
+                                            {
+                                                ui.selectable_value(
+                                                    &mut state.link_target,
+                                                    Some(p.id),
+                                                    &p.name,
+                                                );
+                                            }
+                                        });
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("Link")
+                                                    .font(crate::theme::font(11.0)),
+                                            )
+                                            .fill(theme.bg_pill)
+                                            .corner_radius(CornerRadius::same(theme.radius_sm)),
+                                        )
+                                        .on_hover_text(
+                                            "Include another playlist here; it resolves at play time",
+                                        )
+                                        .clicked()
+                                    {
+                                        if let Some(target) = state.link_target {
+                                            actions.link_playlist = Some((selected_id, target));
+                                        }
+                                    }
+                                },
                             );
                         });
 

@@ -21,6 +21,8 @@ pub struct TrackDspActions {
     pub save_profile: bool,
     /// The track's profile was removed.
     pub clear_profile: bool,
+    /// The ReplayGain override changed (`Some(None)` clears it).
+    pub replaygain_override: Option<Option<f32>>,
 }
 
 /// The editor's state.
@@ -80,6 +82,9 @@ pub fn show_track_dsp_modal(
         .as_ref()
         .map(|p| chain_override::describe_overrides(p).len())
         .unwrap_or(0);
+    let stored_replaygain = profile.as_ref().and_then(|p| p.replaygain_override_db);
+    let mut replaygain_enabled = stored_replaygain.is_some();
+    let mut replaygain_db = stored_replaygain.unwrap_or(0.0);
 
     let closed = crate::dialog::show_modal(ctx, "track_dsp", "Per-track DSP", 520.0, theme, |ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
@@ -128,6 +133,38 @@ pub fn show_track_dsp_modal(
                         theme.text_secondary
                     }),
                 );
+            });
+        });
+
+        // Per-track gain. This is separate from the chain diff: ReplayGain is
+        // a level correction, not a filter, and the user may want it without
+        // touching the EQ. It is written immediately when toggled, so it
+        // applies to the playing track without a second "save".
+        let gain_card = egui::Frame::NONE
+            .fill(theme.bg_card_hover)
+            .corner_radius(CornerRadius::same(theme.radius_md))
+            .inner_margin(egui::Margin::symmetric(
+                theme.space_xl as i8,
+                theme.space_md as i8,
+            ));
+        gain_card.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                ui.checkbox(&mut replaygain_enabled, "ReplayGain override");
+                if replaygain_enabled {
+                    ui.add(
+                        egui::DragValue::new(&mut replaygain_db)
+                            .range(-24.0..=24.0)
+                            .speed(0.1)
+                            .suffix(" dB"),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new("inherits the library gain")
+                            .font(crate::theme::font(11.0))
+                            .color(theme.text_muted),
+                    );
+                }
             });
         });
 
@@ -306,6 +343,15 @@ pub fn show_track_dsp_modal(
         }
     });
 
+    let new_replaygain = if replaygain_enabled {
+        Some(replaygain_db.clamp(-24.0, 24.0))
+    } else {
+        None
+    };
+    if new_replaygain != stored_replaygain {
+        actions.replaygain_override = Some(new_replaygain);
+    }
+
     if closed {
         state.is_open = false;
     }
@@ -322,5 +368,6 @@ pub fn profile_from_chain(
         graphic_enabled: false,
         graphic_preamp_db: 0.0,
         overrides: chain_override::diff_chain(global, current),
+        replaygain_override_db: None,
     }
 }

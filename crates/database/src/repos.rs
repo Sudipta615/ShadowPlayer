@@ -978,6 +978,112 @@ impl PlaylistRepo {
         })
     }
 
+    /// Tracks as they actually play: the playlist's own tracks followed by the
+    /// contents of every linked playlist, recursively. A link that would loop
+    /// is ignored if it was written before the guard existed (the guard is in
+    /// [`Self::add_link`]); a deleted linked playlist simply contributes
+    /// nothing.
+    pub fn get_tracks_resolved(&self, playlist_id: &PlaylistId) -> Result<Vec<Track>> {
+        let mut out = Vec::new();
+        let mut visited = Vec::new();
+        self.resolve_into(playlist_id, &mut visited, &mut out)?;
+        Ok(out)
+    }
+
+    fn resolve_into(
+        &self,
+        playlist_id: &PlaylistId,
+        visited: &mut Vec<PlaylistId>,
+        out: &mut Vec<Track>,
+    ) -> Result<()> {
+        if visited.contains(playlist_id) {
+            return Ok(());
+        }
+        visited.push(*playlist_id);
+        out.extend(self.get_tracks(playlist_id)?);
+        for linked in self.links(playlist_id)? {
+            self.resolve_into(&linked, visited, out)?;
+        }
+        visited.pop();
+        Ok(())
+    }
+
+    /// Playlists directly referenced by `playlist_id`, in link order.
+    pub fn links(&self, playlist_id: &PlaylistId) -> Result<Vec<PlaylistId>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT linked_playlist_id FROM playlist_links
+                 WHERE playlist_id = ?1
+                 ORDER BY position ASC, added_at ASC;",
+            )?;
+            let rows = stmt.query_map(params![playlist_id.to_string()], |row| {
+                let raw: String = row.get(0)?;
+                parse_id(&raw, "playlist_links.linked_playlist_id")
+            })?;
+            rows.collect::<Result<Vec<_>>>()
+        })
+    }
+
+    /// Link `linked` into `playlist_id`. Returns an error if that would create
+    /// a cycle. Linking the same playlist twice is a no-op.
+    pub fn add_link(&self, playlist_id: &PlaylistId, linked: &PlaylistId) -> Result<()> {
+        if playlist_id == linked {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "a playlist cannot link to itself".into(),
+            ));
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.db.with_conn(|conn| {
+            let cycles: bool = conn.query_row(
+                "WITH RECURSIVE reachable(id) AS (
+                    SELECT linked_playlist_id FROM playlist_links WHERE playlist_id = ?1
+                    UNION
+                    SELECT pl.linked_playlist_id
+                    FROM playlist_links pl JOIN reachable r ON pl.playlist_id = r.id
+                 )
+                 SELECT EXISTS(SELECT 1 FROM reachable WHERE id = ?2);",
+                params![linked.to_string(), playlist_id.to_string()],
+                |r| r.get(0),
+            )?;
+            if cycles {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "playlist link would create a cycle".into(),
+                ));
+            }
+            let next: i64 = conn.query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1
+                 FROM playlist_links WHERE playlist_id = ?1;",
+                params![playlist_id.to_string()],
+                |r| r.get(0),
+            )?;
+            conn.execute(
+                "INSERT OR IGNORE INTO playlist_links
+                    (playlist_id, linked_playlist_id, position, added_at)
+                 VALUES (?1, ?2, ?3, ?4);",
+                params![playlist_id.to_string(), linked.to_string(), next, now],
+            )?;
+            conn.execute(
+                "UPDATE playlists SET updated_at = ?1 WHERE id = ?2;",
+                params![now, playlist_id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn remove_link(&self, playlist_id: &PlaylistId, linked: &PlaylistId) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM playlist_links
+                 WHERE playlist_id = ?1 AND linked_playlist_id = ?2;",
+                params![playlist_id.to_string(), linked.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn delete(&self, id: &PlaylistId) -> Result<()> {
         self.db.with_conn(|conn| {
             conn.execute(

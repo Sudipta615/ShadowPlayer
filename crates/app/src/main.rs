@@ -7,8 +7,12 @@
 // directory (see `TeeLog`), so a launch with no console loses nothing.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod instance;
+
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use instance::{InstanceLock, LockOutcome};
 
 use audio_session::AudioSession;
 use database::{Database, QueueRepo, SettingsRepo, TrackRepo};
@@ -160,9 +164,12 @@ fn show_fatal_error(message: &str) {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Resolve persistent app data directory
-    let data_dir = dirs::data_local_dir()
-        .map(|d| d.join("shadowplayer"))
+    // Resolve persistent app data directory. The environment override keeps
+    // tests and portable runs off the real user profile; both the app and
+    // `shadowplayer-remote` honour it.
+    let data_dir = std::env::var_os("SHADOWPLAYER_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::data_local_dir().map(|d| d.join("shadowplayer")))
         .unwrap_or_else(|| PathBuf::from("."));
 
     // Initialize logging: stderr plus a file in the data directory.
@@ -188,6 +195,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // the log file could live inside it.
     std::fs::create_dir_all(&data_dir)?;
 
+    // Decide ownership before opening the database or the audio device. The
+    // opt-in is a marker file precisely so this decision does not require the
+    // settings database, which a second launch must not touch yet.
+    let allow_multiple = ui::services::multi_instance_enabled(&data_dir);
+    // Take the lock even when multiple instances are allowed. The first
+    // window then owns the control socket, and a later window that starts
+    // after the opt-in is turned off still sees the lock and activates that
+    // owner instead of racing it as a second transport.
+    let instance_lock = match InstanceLock::acquire(&data_dir)? {
+        LockOutcome::Acquired(lock) => {
+            info!("Single-instance lock held at {}", lock.path().display());
+            Some(lock)
+        }
+        LockOutcome::AlreadyRunning if allow_multiple => {
+            info!(
+                "Multiple instances enabled; running alongside the owner without a control socket"
+            );
+            None
+        }
+        LockOutcome::AlreadyRunning => {
+            info!("Another instance owns ShadowPlayer; activating it and exiting");
+            ui::services::activate_existing_instance(&data_dir).map_err(|e| {
+                std::io::Error::other(format!(
+                    "another instance is running but did not accept activation: {e}"
+                ))
+            })?;
+            return Ok(());
+        }
+    };
+
     let db_path = data_dir.join("library.db");
     info!("Opening database at {:?}", db_path);
     let db = Database::open(&db_path)?;
@@ -200,6 +237,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // choice saved in Settings, and quietly changing a working setup for anyone
     // whose machine cannot afford the strict preset.
     let saved_settings = SettingsRepo::new(db.clone()).load().unwrap_or_default();
+
+    // Keep the pre-database marker in step with the persisted preference. A
+    // change takes effect on the next launch, which is the only time it can be
+    // honoured before the database is opened.
+    if saved_settings.allow_multiple_instances != allow_multiple {
+        if let Err(e) = ui::services::set_multi_instance_enabled(
+            &data_dir,
+            saved_settings.allow_multiple_instances,
+        ) {
+            log::warn!("Could not update the multi-instance marker: {e}");
+        }
+    }
+
+    // The owner advertises a loopback-only control socket. A multi-instance
+    // process deliberately starts none: there is one transport owner, and
+    // `shadowplayer-remote` must not race two advertised endpoints.
+    let control_service = if instance_lock.is_some() {
+        match ui::services::ControlService::start(&data_dir) {
+            Ok(service) => Some(service),
+            Err(e) => {
+                log::warn!("Loopback control unavailable: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Initialize authoritative Audio Engine session
     //
@@ -261,11 +325,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let session_clone = session.clone();
     let db_clone = db.clone();
+    let app_data_dir = data_dir.clone();
 
     eframe::run_native(
         "ShadowPlayer",
         native_options,
-        Box::new(move |cc| Ok(Box::new(ShadowPlayerApp::new(cc, session_clone, db_clone)))),
+        Box::new(move |cc| {
+            Ok(Box::new(ShadowPlayerApp::new(
+                cc,
+                session_clone,
+                db_clone,
+                control_service,
+                app_data_dir,
+            )))
+        }),
     )?;
 
     Ok(())

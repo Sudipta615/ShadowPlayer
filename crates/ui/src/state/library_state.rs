@@ -241,7 +241,7 @@ impl LibraryState {
                     recent.truncate(200);
                     recent
                 }
-                NavItem::Playlist(pl_id) => match playlist_repo.get_tracks(&pl_id) {
+                NavItem::Playlist(pl_id) => match playlist_repo.get_tracks_resolved(&pl_id) {
                     Ok(tracks) => tracks,
                     Err(e) => {
                         log::warn!("Could not load the playlist: {e}");

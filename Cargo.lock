@@ -4122,6 +4122,7 @@ dependencies = [
  "metadata",
  "playback",
  "search",
+ "serde_json",
  "ui",
  "winresource",
 ]
@@ -4921,6 +4922,7 @@ dependencies = [
  "domain",
  "eframe",
  "egui_extras",
+ "getrandom 0.3.4",
  "image",
  "library",
  "log",

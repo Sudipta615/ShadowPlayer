@@ -242,6 +242,12 @@ pub struct TrackDspProfile {
     /// depend on the audio configuration types the chain is made of.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overrides: Option<serde_json::Value>,
+    /// A per-track ReplayGain correction, in dB, applied on top of the chain's
+    /// preamp whenever this track plays. `None` inherits the library/profile
+    /// behaviour; the value is stored with the profile so it travels with the
+    /// rest of the track's overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaygain_override_db: Option<f32>,
 }
 
 impl TrackDspProfile {
@@ -254,6 +260,7 @@ impl TrackDspProfile {
                 serde_json::Value::Object(map) => map.is_empty(),
                 _ => false,
             })
+            && self.replaygain_override_db.is_none_or(|db| db.abs() < 0.01)
     }
 }
 
@@ -334,6 +341,10 @@ pub struct AppSettings {
     pub shuffle: bool,
     pub selected_device: Option<String>,
     pub bit_perfect_enabled: bool,
+    /// Opt in to concurrent windows. The default is one owner, where a second
+    /// launch activates the first. Enabling this skips the single-instance
+    /// lock on the next launch (the database is WAL-mode, so it is safe).
+    pub allow_multiple_instances: bool,
     pub window_width: f32,
     pub window_height: f32,
 }
@@ -352,6 +363,7 @@ impl Default for AppSettings {
             shuffle: false,
             selected_device: None,
             bit_perfect_enabled: false,
+            allow_multiple_instances: false,
             window_width: 1280.0,
             window_height: 800.0,
         }

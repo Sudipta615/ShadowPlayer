@@ -136,9 +136,21 @@ pub fn render_main_playback_view(
         }
     }
     if let Some(req) = np_events.sleep_timer_request {
+        // Turning a timer off while it is already fading must put the user's
+        // volume back, not leave the output stuck at the faded level.
+        if matches!(req, SleepTimerRequest::Off) {
+            session.set_volume(if app_state.is_muted {
+                0.0
+            } else {
+                app_state.volume
+            });
+        }
         app_state.sleep_timer = match req {
             SleepTimerRequest::Off => None,
             SleepTimerRequest::AfterSeconds(secs) => Some(SleepTimer::after_seconds(secs)),
+            SleepTimerRequest::AfterSecondsFade(secs) => {
+                Some(SleepTimer::after_seconds_fade(secs, 10.0))
+            }
             SleepTimerRequest::EndOfTrack => Some(SleepTimer::end_of_track()),
         };
     }

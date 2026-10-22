@@ -24,8 +24,8 @@ use crate::modals::{
     SmartPlaylistEditorState,
 };
 use crate::services::{
-    ArtworkService, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
-    MprisCommand, MprisService, MprisSnapshot, ScannerService,
+    ArtworkService, ControlService, ImportKind, ImportResult, ImportService, LoudnessService,
+    LyricsService, MprisCommand, MprisService, MprisSnapshot, ScannerService,
 };
 use crate::state::{AppState, DspState, LibraryState, SleepTimerMode, TelemetryState};
 use crate::theme::Theme;
@@ -86,7 +86,17 @@ pub struct ShadowPlayerApp {
     scanner_service: ScannerService,
     import_service: ImportService,
     mpris_service: MprisService,
+    /// Loopback control for `shadowplayer-remote` and second-launch
+    /// activation. `None` in a multi-instance process, which owns no
+    /// transport.
+    control_service: Option<ControlService>,
     loudness_service: LoudnessService,
+    /// Persistent data directory, used for non-database settings that must be
+    /// readable before the database is opened.
+    data_dir: PathBuf,
+    /// Mirrors the Settings toggle; changes are written to the pre-launch
+    /// marker immediately.
+    multi_instance_allowed: bool,
 
     app_state: AppState,
     library_state: LibraryState,
@@ -180,6 +190,8 @@ impl ShadowPlayerApp {
         _cc: &eframe::CreationContext<'_>,
         session: Arc<AudioSession>,
         db: Database,
+        control_service: Option<ControlService>,
+        data_dir: PathBuf,
     ) -> Self {
         egui_extras::install_image_loaders(&_cc.egui_ctx);
         crate::theme::install_fonts(&_cc.egui_ctx);
@@ -232,7 +244,10 @@ impl ShadowPlayerApp {
             scanner_service,
             import_service,
             mpris_service,
+            control_service,
             loudness_service,
+            data_dir,
+            multi_instance_allowed: false,
 
             app_state: AppState::default(),
             library_state: LibraryState::default(),
@@ -1093,11 +1108,17 @@ impl ShadowPlayerApp {
             .clone()
             .expect("the snapshot was just captured");
 
-        let Some(patch) = crate::state::chain_override::legacy_patch(&profile, &global) else {
-            self.restore_global_chain();
-            return;
+        let patch = match crate::state::chain_override::legacy_patch(&profile, &global) {
+            Some(patch) => patch,
+            // A profile that only carries ReplayGain has no chain diff; an
+            // empty patch means "global chain plus the gain below".
+            None if profile.replaygain_override_db.is_some() => serde_json::json!({}),
+            None => {
+                self.restore_global_chain();
+                return;
+            }
         };
-        let Some(merged) = crate::state::chain_override::merge_chain(&global, &patch) else {
+        let Some(mut merged) = crate::state::chain_override::merge_chain(&global, &patch) else {
             log::warn!(
                 "The DSP profile for {} does not fit the current chain; leaving the global chain",
                 track.title
@@ -1105,6 +1126,12 @@ impl ShadowPlayerApp {
             self.restore_global_chain();
             return;
         };
+        // Apply the track's own gain on top of the chain's preamp. The panels
+        // therefore show the level actually reaching the engine, and the
+        // global chain is restored untouched when the track ends.
+        if let Some(gain_db) = profile.replaygain_override_db {
+            merged.eq.preamp_db += gain_db;
+        }
 
         merged.apply(
             &mut self.dsp_state.eq_panel,
@@ -1222,6 +1249,9 @@ impl ShadowPlayerApp {
             self.coordinator.set_shuffle(app_settings.shuffle);
             self.coordinator.set_repeat_mode(app_settings.repeat_mode);
             self.dsp_state.settings_tab.bit_perfect = app_settings.bit_perfect_enabled;
+            self.dsp_state.settings_tab.allow_multiple_instances =
+                app_settings.allow_multiple_instances;
+            self.multi_instance_allowed = app_settings.allow_multiple_instances;
             self.dsp_state.settings_tab.audio_profile = app_settings.audio_profile;
             if let Some(device) = &app_settings.selected_device {
                 self.dsp_state.settings_tab.output_device = device.clone();
@@ -1266,8 +1296,14 @@ impl ShadowPlayerApp {
                     // they keep their own storage key / are refreshed each
                     // frame.
                     let clap = std::mem::take(&mut self.dsp_state.settings_tab.clap);
+                    // This preference lives in `AppSettings` because the next
+                    // launch reads it before the database opens. The older
+                    // `dsp_settings` blob also contains the field, and may be
+                    // stale, so keep the value just loaded from AppSettings.
+                    let allow_multiple = self.dsp_state.settings_tab.allow_multiple_instances;
                     self.dsp_state.settings_tab = saved;
                     self.dsp_state.settings_tab.clap = clap;
+                    self.dsp_state.settings_tab.allow_multiple_instances = allow_multiple;
                 }
                 Err(e) => {
                     log::warn!("Could not read the saved audio settings, using defaults: {e}");
@@ -1348,6 +1384,7 @@ impl ShadowPlayerApp {
                 Some(self.dsp_state.settings_tab.output_device.clone())
             },
             bit_perfect_enabled: self.dsp_state.settings_tab.bit_perfect,
+            allow_multiple_instances: self.multi_instance_allowed,
             // Read from the live window, not a fixed pair of numbers: the value
             // written here is what the next launch restores.
             window_width: if self.app_state.mini_player {
@@ -2257,52 +2294,53 @@ impl ShadowPlayerApp {
         self.pump_scan_queue();
     }
 
-    /// Bridge for the MPRIS2 desktop service: drain transport requests coming
-    /// from media keys / the shell and publish the current player state.
-    fn handle_mpris(&mut self, ctx: &egui::Context) {
-        if !self.mpris_service.is_active() {
-            return;
-        }
-        self.mpris_service.attach_context(ctx);
-
-        while let Some(cmd) = self.mpris_service.try_recv() {
-            match cmd {
-                MprisCommand::Play => self.session.play(),
-                MprisCommand::Pause => self.session.pause(),
-                MprisCommand::PlayPause => self.coordinator.toggle_play_pause(),
-                MprisCommand::Stop => {
-                    self.session.pause();
-                    self.session.seek(0.0);
-                }
-                MprisCommand::Next => self.coordinator.next(),
-                MprisCommand::Previous => self.coordinator.previous(),
-                MprisCommand::SeekRelative(delta) => {
-                    let cur = self.session.position_secs_compensated();
-                    let dur = self
-                        .coordinator
-                        .current_track()
-                        .map(|t| t.duration_secs)
-                        .unwrap_or(f32::MAX);
-                    self.session.seek((cur + delta as f32).clamp(0.0, dur));
-                }
-                MprisCommand::SetPosition(pos) => {
-                    self.session.seek(pos.max(0.0) as f32);
-                }
-                MprisCommand::SetVolume(v) => {
-                    self.app_state.volume = v.clamp(0.0, 1.0);
-                    self.app_state.is_muted = false;
-                    self.session.set_volume(self.app_state.volume);
-                    self.settings_dirty = true;
-                }
-                MprisCommand::Raise => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                }
-                MprisCommand::Quit => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
+    /// Apply one transport command from any controller (MPRIS, media keys,
+    /// the loopback socket, or a future input source).
+    fn apply_transport_command(&mut self, ctx: &egui::Context, cmd: MprisCommand) {
+        match cmd {
+            MprisCommand::Play => self.session.play(),
+            MprisCommand::Pause => self.session.pause(),
+            MprisCommand::PlayPause => self.coordinator.toggle_play_pause(),
+            MprisCommand::Stop => {
+                self.session.pause();
+                self.session.seek(0.0);
+            }
+            MprisCommand::Next => self.coordinator.next(),
+            MprisCommand::Previous => self.coordinator.previous(),
+            MprisCommand::SeekRelative(delta) => {
+                let cur = self.session.position_secs_compensated();
+                let dur = self
+                    .coordinator
+                    .current_track()
+                    .map(|t| t.duration_secs)
+                    .unwrap_or(f32::MAX);
+                self.session.seek((cur + delta as f32).clamp(0.0, dur));
+            }
+            MprisCommand::SetPosition(pos) => {
+                self.session.seek(pos.max(0.0) as f32);
+            }
+            MprisCommand::SetVolume(v) => {
+                self.app_state.volume = v.clamp(0.0, 1.0);
+                self.app_state.is_muted = false;
+                self.session.set_volume(self.app_state.volume);
+                self.settings_dirty = true;
+            }
+            MprisCommand::Raise => {
+                // A minimized window must be restored before focus means
+                // anything; both commands are harmless on a visible window.
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            MprisCommand::Quit => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
+    }
 
+    /// Bridge for the desktop and loopback controllers: drain transport
+    /// requests and publish the current player state to both surfaces.
+    fn handle_mpris(&mut self, ctx: &egui::Context) {
         let track = self.coordinator.current_track().cloned();
         let art_url = track.as_ref().and_then(|t| {
             let p = self
@@ -2315,7 +2353,7 @@ impl ShadowPlayerApp {
                 None
             }
         });
-        self.mpris_service.publish(MprisSnapshot {
+        let snapshot = MprisSnapshot {
             loaded: track.is_some(),
             playing: self.session.is_playing(),
             title: track.as_ref().map(|t| t.title.clone()).unwrap_or_default(),
@@ -2328,7 +2366,26 @@ impl ShadowPlayerApp {
             position_secs: self.session.position_secs_compensated() as f64,
             volume: self.app_state.volume,
             art_url,
-        });
+        };
+        self.mpris_service.publish(snapshot.clone());
+        if let Some(control) = &self.control_service {
+            control.attach_context(ctx);
+            control.publish(snapshot);
+        }
+
+        if self.mpris_service.is_active() {
+            self.mpris_service.attach_context(ctx);
+            while let Some(cmd) = self.mpris_service.try_recv() {
+                self.apply_transport_command(ctx, cmd);
+            }
+        }
+        while let Some(cmd) = self
+            .control_service
+            .as_ref()
+            .and_then(|control| control.try_recv())
+        {
+            self.apply_transport_command(ctx, cmd);
+        }
     }
 
     /// Advance the sleep timer. In `Duration` mode this counts down and pauses
@@ -2351,10 +2408,26 @@ impl ShadowPlayerApp {
                     timer.remaining -= dt;
                 }
                 if timer.remaining <= 0.0 {
+                    // Restore the user's volume before pausing: the next
+                    // playback must not inherit a faded level.
+                    self.session.set_volume(if self.app_state.is_muted {
+                        0.0
+                    } else {
+                        self.app_state.volume
+                    });
                     self.session.pause();
                     self.app_state.sleep_timer = None;
                     log::info!("Sleep timer elapsed — playback paused");
                 } else {
+                    if timer.fade_secs > 0.0 {
+                        let factor = (timer.remaining / timer.fade_secs).clamp(0.0, 1.0) as f32;
+                        let target = if self.app_state.is_muted {
+                            0.0
+                        } else {
+                            self.app_state.volume * factor
+                        };
+                        self.session.set_volume(target);
+                    }
                     self.app_state.sleep_timer = Some(timer);
                 }
             }
@@ -3825,6 +3898,19 @@ impl eframe::App for ShadowPlayerApp {
                         }
                         // Settings view can mutate settings_tab directly
                         self.settings_dirty = true;
+                        let allow_multiple = self.dsp_state.settings_tab.allow_multiple_instances;
+                        if allow_multiple != self.multi_instance_allowed {
+                            self.multi_instance_allowed = allow_multiple;
+                            if let Err(e) = crate::services::set_multi_instance_enabled(
+                                &self.data_dir,
+                                allow_multiple,
+                            ) {
+                                log::warn!("Could not update the multi-instance marker: {e}");
+                                self.toasts.warning(format!(
+                                    "Could not save the multi-instance preference: {e}"
+                                ));
+                            }
+                        }
                         if let Some(path) = scan_to_start {
                             self.start_scan(path);
                         }
@@ -4163,6 +4249,18 @@ impl eframe::App for ShadowPlayerApp {
             self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &pl);
             pl_changed = true;
         }
+        if let Some((pl, linked)) = pl_actions.link_playlist {
+            match self.playlist_repo.add_link(&pl, &linked) {
+                Ok(()) => self
+                    .toasts
+                    .success("Linked the playlist; its tracks resolve when this one plays"),
+                Err(e) => self
+                    .toasts
+                    .warning(format!("Could not link the playlist: {e}")),
+            }
+            self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &pl);
+            pl_changed = true;
+        }
         if let Some((pl, tr)) = pl_actions.remove_track {
             if let Err(e) = self.playlist_repo.remove_track(&pl, &tr) {
                 log::warn!("Could not remove the track from the playlist: {e}");
@@ -4348,12 +4446,60 @@ impl eframe::App for ShadowPlayerApp {
                 },
                 &self.theme,
             );
+            if let Some(replaygain) = dsp_actions.replaygain_override {
+                if let Some(track) = dsp_track.clone() {
+                    let mut profile = self
+                        .track_dsp_repo
+                        .get(&track.id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    profile.replaygain_override_db = replaygain;
+                    let result = if profile.is_neutral() {
+                        self.track_dsp_repo.clear(&track.id)
+                    } else {
+                        self.track_dsp_repo.set(&track.id, &profile)
+                    };
+                    match result {
+                        Ok(()) => {
+                            if is_current_track {
+                                self.dsp_profile_track = None;
+                                self.apply_track_dsp_profile();
+                            }
+                            self.toasts.info(match replaygain {
+                                Some(db) => format!(
+                                    "{} now plays with a {:+.1} dB ReplayGain override",
+                                    track.title, db
+                                ),
+                                None => format!("{} uses the library gain again", track.title),
+                            });
+                        }
+                        Err(e) => self
+                            .toasts
+                            .warning(format!("Could not save the ReplayGain override: {e}")),
+                    }
+                }
+            }
             if dsp_actions.save_profile {
                 if let Some(track) = dsp_track.clone() {
-                    let profile = crate::modals::track_dsp_modal::profile_from_chain(
+                    // A chain save must not discard the independently edited
+                    // ReplayGain field, and the applied gain must not leak
+                    // into the chain diff (it would then be applied twice).
+                    let replaygain = self
+                        .track_dsp_repo
+                        .get(&track.id)
+                        .ok()
+                        .flatten()
+                        .and_then(|p| p.replaygain_override_db);
+                    let mut chain_for_diff = current_chain.clone();
+                    if let Some(gain_db) = replaygain {
+                        chain_for_diff.eq.preamp_db -= gain_db;
+                    }
+                    let mut profile = crate::modals::track_dsp_modal::profile_from_chain(
                         &base_chain,
-                        &current_chain,
+                        &chain_for_diff,
                     );
+                    profile.replaygain_override_db = replaygain;
                     match self.track_dsp_repo.set(&track.id, &profile) {
                         Ok(()) => {
                             let count = profile

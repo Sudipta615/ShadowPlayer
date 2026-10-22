@@ -86,7 +86,10 @@ has to discover it by disappointment:
 - **No CD ripping, no video, no transcoding.**
 - **No auto-update.** Updates are manual. This is a consequence of making no
   network requests, not an oversight.
-- **No multi-instance in 0.x.** A second launch takes over the first.
+- **One transport owner at a time.** A second launch brings the running
+  window forward and exits. Concurrent windows are an explicit opt-in in
+  Settings → Library; each has its own playback, while the first window owns
+  the remote-control socket.
 - **English only.** There is no localisation layer yet.
 
 ---
@@ -200,6 +203,24 @@ files or write ReplayGain tags.
 | Ctrl + 0 | Clear the rating on the selection or the playing track |
 | Ctrl + Alt + Up / Down | Step the selection's rating up or down |
 | Escape | Close the open dialog (one layer per press), or clear the search |
+
+### Remote control
+
+`shadowplayer-remote` drives the running window over its loopback socket. It
+never opens the library or the audio device, and the socket listens only on
+`127.0.0.1` with a random per-launch token in `<data_dir>/instance.json`:
+
+```bash
+shadowplayer-remote play
+shadowplayer-remote seek -10        # relative seconds
+shadowplayer-remote seek-to 120     # absolute seconds
+shadowplayer-remote volume +5       # percentage-point delta
+shadowplayer-remote state
+shadowplayer-remote quit
+```
+
+The same socket is what makes a second launch activate the first. There is no
+option to bind a LAN address, so this does not add a network service.
 
 ---
 
