@@ -66,10 +66,7 @@ pub fn show_scrobble_log_modal(
 
             ui.label(
                 egui::RichText::new(
-                    "A play counts as a scrobble once it has been heard for thirty \
-                     seconds, or half the track, whichever comes first. A play that \
-                     was skipped is not a scrobble. The history is kept forever; it \
-                     is never sent anywhere.",
+                    tr!("A play counts as a scrobble once it has been heard for thirty \n                     seconds, or half the track, whichever comes first. A play that \n                     was skipped is not a scrobble. The history is kept forever; it \n                     is never sent anywhere."),
                 )
                 .font(crate::theme::font(11.5))
                 .color(theme.text_dim),
@@ -82,14 +79,14 @@ pub fn show_scrobble_log_modal(
                 if ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new("Listening history \u{2192}")
+                            egui::RichText::new(tr!("Listening history →"))
                                 .font(crate::theme::font(12.5))
                                 .color(theme.text_primary),
                         )
                         .fill(theme.bg_pill)
                         .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
-                    .on_hover_text("Top artists, charts, streaks and export from the whole history")
+                    .on_hover_text(tr!(Msg::SFB92069FC598EFA7))
                     .clicked()
                 {
                     actions.open_listening = true;
@@ -100,7 +97,7 @@ pub fn show_scrobble_log_modal(
                 ui.add_space(theme.space_lg);
                 ui.vertical_centered(|ui| {
                     ui.label(
-                        egui::RichText::new("Nothing scrobbled yet")
+                        egui::RichText::new(tr!("Nothing scrobbled yet"))
                             .font(crate::theme::font(13.0))
                             .color(theme.text_muted),
                     );
@@ -183,7 +180,7 @@ pub fn show_most_skipped(ui: &mut egui::Ui, tracks: &[domain::models::Track], th
         return;
     }
     ui.label(
-        egui::RichText::new("Most skipped")
+        egui::RichText::new(tr!("Most skipped"))
             .font(crate::theme::font(12.5))
             .strong()
             .color(theme.text_secondary),

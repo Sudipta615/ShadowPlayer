@@ -359,6 +359,9 @@ pub enum EngineCommand {
         q: f32,
         delay_ms: f32,
     },
+    /// The creative-effects insert: chorus, flanger, phaser, delay and
+    /// saturation, in one command.
+    SetFxConfig(config::FxConfig),
     SetCompressorEnabled(bool),
     SetCompressorBandParams {
         band: usize, // 0=Low, 1=Mid, 2=High

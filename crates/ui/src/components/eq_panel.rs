@@ -135,6 +135,8 @@ pub enum EqTab {
     Parametric,
     Dynamics,
     Filters,
+    /// The creative effects: chorus, flanger, phaser, delay and saturation.
+    Effects,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -222,6 +224,12 @@ pub struct EqPanelState {
     pub correction_enabled: bool,
     pub correction_depth: f32,
     pub correction_ir_path: String,
+
+    // Creative effects (chorus, flanger, phaser, delay, saturation).
+    //
+    /// One struct, not five: the engine's insert is configured in one go, so
+    /// the panel cannot describe a state the engine cannot run.
+    pub fx: config::FxConfig,
 }
 
 impl Default for EqPanelState {
@@ -290,6 +298,7 @@ impl Default for EqPanelState {
             correction_enabled: false,
             correction_depth: 1.0,
             correction_ir_path: String::new(),
+            fx: config::FxConfig::default(),
             window_pos: None,
         }
     }
@@ -350,6 +359,9 @@ pub struct PersistentEqState {
     pub correction_enabled: bool,
     pub correction_depth: f32,
     pub correction_ir_path: String,
+    /// The creative-effects settings.
+    #[serde(default)]
+    pub fx: config::FxConfig,
 }
 
 impl From<&EqPanelState> for PersistentEqState {
@@ -400,6 +412,7 @@ impl From<&EqPanelState> for PersistentEqState {
             correction_enabled: s.correction_enabled,
             correction_depth: s.correction_depth,
             correction_ir_path: s.correction_ir_path.clone(),
+            fx: s.fx,
         }
     }
 }
@@ -461,6 +474,7 @@ impl PersistentEqState {
         state.correction_enabled = self.correction_enabled;
         state.correction_depth = self.correction_depth;
         state.correction_ir_path = self.correction_ir_path.clone();
+        state.fx = self.fx;
     }
 }
 
@@ -503,6 +517,10 @@ pub struct EqPanelActions {
     pub compressor_enabled_changed: Option<bool>,
     pub comp_band_params_changed: Option<usize>,
     pub comp_band_features_changed: Option<usize>,
+
+    // Creative effects
+    /// The creative-effects settings changed.
+    pub fx_changed: bool,
 
     // Filters
     pub crossfeed_enabled_changed: Option<bool>,
@@ -571,10 +589,13 @@ pub fn show_eq_panel(
             render_tab_navigation(ui, state, theme);
 
             // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
+            // The effects tab is not the equalizer, so it stays live even
+            // when the equalizer is bypassed.
             let eq_active = state.graphic_enabled || state.eq_enabled;
+            let fx_tab = state.active_tab == EqTab::Effects;
             let content_start_y = ui.cursor().top();
 
-            ui.add_enabled_ui(eq_active, |ui| {
+            ui.add_enabled_ui(eq_active || fx_tab, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
                 egui::ScrollArea::vertical()
@@ -592,13 +613,20 @@ pub fn show_eq_panel(
                             EqTab::Advanced => {
                                 render_advanced_tab(ui, state, &mut actions, theme);
                             }
+                            EqTab::Effects => {
+                                actions.fx_changed |= crate::components::fx_panel::render_fx_tab(
+                                    ui,
+                                    &mut state.fx,
+                                    theme,
+                                );
+                            }
                             _ => {}
                         }
                     });
             });
 
             // If EQ is bypassed, draw subtle darkening overlay & informative badge
-            if !eq_active {
+            if !eq_active && !fx_tab {
                 let rect = ui.min_rect();
                 let overlay_rect = Rect::from_min_max(
                     Pos2::new(rect.left(), content_start_y),
@@ -673,7 +701,7 @@ fn render_header(
 
         // Title
         ui.label(
-            egui::RichText::new("Equalizer")
+            egui::RichText::new(tr!("Equalizer"))
                 .font(crate::theme::font(17.5))
                 .strong()
                 .color(theme.text_primary),
@@ -706,7 +734,9 @@ fn render_header(
             close_resp.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::Role::Button, true, "Close the DSP studio")
             });
-            let _ = close_resp.clone().on_hover_text("Close the DSP studio");
+            let _ = close_resp
+                .clone()
+                .on_hover_text(tr!(Msg::S35EC68DAC50375CB));
             let cp = ui.painter_at(close_rect);
             let close_bg = if close_resp.hovered() {
                 theme.destructive.gamma_multiply(0.2)
@@ -725,7 +755,7 @@ fn render_header(
                 icon_col,
             );
             if close_resp
-                .on_hover_text("Close Equalizer Panel (Esc)")
+                .on_hover_text(tr!(Msg::S99DFAE3E6EE98739))
                 .clicked()
             {
                 state.is_open = false;
@@ -747,9 +777,10 @@ fn render_header(
 fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Theme) {
     ui.vertical_centered(|ui| {
         let tab_items = [
-            (EqTab::Graphic, "Graphic Equalizer"),
-            (EqTab::Tone, "Tone & Acoustics"),
-            (EqTab::Advanced, "Advanced"),
+            (EqTab::Graphic, tr!("Graphic Equalizer")),
+            (EqTab::Tone, tr!("Tone & Acoustics")),
+            (EqTab::Advanced, tr!("Advanced")),
+            (EqTab::Effects, tr!("Effects")),
         ];
 
         let tab_w = 142.0;
@@ -889,7 +920,7 @@ fn render_graphic_eq_tab(
 
             // Save Preset Button
             let save_btn = egui::Button::new(
-                egui::RichText::new("Save")
+                egui::RichText::new(tr!("Save"))
                     .font(crate::theme::font(11.5))
                     .color(theme.text_primary),
             )
@@ -900,7 +931,7 @@ fn render_graphic_eq_tab(
 
             if ui
                 .add(save_btn)
-                .on_hover_text("Save current EQ curve as a custom preset")
+                .on_hover_text(tr!(Msg::SF9C7F2EDD78EA787))
                 .clicked()
             {
                 state.is_saving_preset = !state.is_saving_preset;
@@ -912,7 +943,7 @@ fn render_graphic_eq_tab(
             // Delete Custom Preset Button (if custom preset active)
             if let Some(idx) = state.selected_custom_preset_idx {
                 let del_btn = egui::Button::new(
-                    egui::RichText::new("Delete")
+                    egui::RichText::new(tr!("Delete"))
                         .font(crate::theme::font(11.0))
                         .color(theme.destructive),
                 )
@@ -923,7 +954,7 @@ fn render_graphic_eq_tab(
 
                 if ui
                     .add(del_btn)
-                    .on_hover_text("Delete selected custom preset")
+                    .on_hover_text(tr!(Msg::S2821880D30CCB161))
                     .clicked()
                     && idx < state.custom_presets.len()
                 {
@@ -975,7 +1006,7 @@ fn render_graphic_eq_tab(
                     .width(115.0)
                     .show_ui(ui, |ui| {
                         ui.label(
-                            egui::RichText::new("Factory Presets")
+                            egui::RichText::new(tr!("Factory Presets"))
                                 .font(crate::theme::font(10.5))
                                 .color(theme.text_muted),
                         );
@@ -995,7 +1026,7 @@ fn render_graphic_eq_tab(
                         if !state.custom_presets.is_empty() {
                             ui.separator();
                             ui.label(
-                                egui::RichText::new("Saved Presets")
+                                egui::RichText::new(tr!("Saved Presets"))
                                     .font(crate::theme::font(10.5))
                                     .color(theme.text_muted),
                             );
@@ -1039,7 +1070,7 @@ fn render_graphic_eq_tab(
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
                     ui.label(
-                        egui::RichText::new("Preset Name:")
+                        egui::RichText::new(tr!("Preset Name:"))
                             .font(crate::theme::font(11.5))
                             .color(theme.text_secondary),
                     );
@@ -1048,7 +1079,7 @@ fn render_graphic_eq_tab(
                     );
 
                     if ui
-                        .button(egui::RichText::new("Confirm Save").color(Color32::WHITE))
+                        .button(egui::RichText::new(tr!("Confirm Save")).color(Color32::WHITE))
                         .clicked()
                     {
                         let trimmed = state.new_preset_name.trim();
@@ -1067,7 +1098,7 @@ fn render_graphic_eq_tab(
                         }
                     }
 
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(tr!(Msg::S2CEB11BE2290BB1B)).clicked() {
                         state.is_saving_preset = false;
                     }
                 });
@@ -1743,7 +1774,7 @@ fn render_advanced_tab(
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                             ui.label(
-                                egui::RichText::new("AutoEQ Headphone Target Calibration")
+                                egui::RichText::new(tr!("AutoEQ Headphone Target Calibration"))
                                     .font(crate::theme::font(13.5))
                                     .strong()
                                     .color(theme.text_primary),
@@ -1756,7 +1787,7 @@ fn render_advanced_tab(
                             );
                         });
                         ui.label(
-                            egui::RichText::new("Calibrate your headphones or IEMs using Harman/Diffuse-field acoustic targets from 4,000+ lab measurements.")
+                            egui::RichText::new(tr!("Calibrate your headphones or IEMs using Harman/Diffuse-field acoustic targets from 4,000+ lab measurements."))
                                 .font(crate::theme::font(11.0))
                                 .color(theme.text_secondary),
                         );
@@ -1764,7 +1795,7 @@ fn render_advanced_tab(
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let btn = egui::Button::new(
-                            egui::RichText::new("Open AutoEQ")
+                            egui::RichText::new(tr!("Open AutoEQ"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
@@ -1774,7 +1805,7 @@ fn render_advanced_tab(
                         .corner_radius(CornerRadius::same(theme.radius_md))
                         .min_size(Vec2::new(110.0, 30.0));
 
-                        if ui.add(btn).on_hover_text("Open headphone calibration search dialog").clicked() {
+                        if ui.add(btn).on_hover_text(tr!(Msg::S628A0870D33BFE83)).clicked() {
                             actions.open_autoeq_dialog = true;
                         }
                     });
@@ -2012,7 +2043,7 @@ fn render_footer_controls(
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                         ui.label(
-                            egui::RichText::new("Preamp (Master)")
+                            egui::RichText::new(tr!("Preamp (Master)"))
                                 .font(crate::theme::font(12.5))
                                 .strong()
                                 .color(theme.text_primary),
@@ -2079,7 +2110,9 @@ fn render_footer_controls(
         reset_resp.widget_info(|| {
             egui::WidgetInfo::labeled(egui::Role::Button, true, "Reset this section")
         });
-        let _ = reset_resp.clone().on_hover_text("Reset this section");
+        let _ = reset_resp
+            .clone()
+            .on_hover_text(tr!(Msg::SEE997457CAFF5C1B));
         let rp = ui.painter_at(reset_rect);
         let bg = if reset_resp.hovered() {
             theme.accent
@@ -2247,7 +2280,16 @@ fn gradient_horizontal_slider(
     changed
 }
 
-fn custom_toggle_switch(ui: &mut egui::Ui, value: &mut bool, tooltip: &str, theme: &Theme) -> bool {
+/// The panel's switch: a rounded track with a sliding thumb.
+///
+/// Shared with the creative-effects panel, so both switches look and feel
+/// the same.
+pub fn custom_toggle_switch(
+    ui: &mut egui::Ui,
+    value: &mut bool,
+    tooltip: &str,
+    theme: &Theme,
+) -> bool {
     let desired_size = Vec2::new(38.0, 20.0);
     let (rect, resp) = ui.allocate_exact_size(desired_size, Sense::click());
     let mut changed = false;

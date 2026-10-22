@@ -82,6 +82,17 @@ impl Chorus {
             right[i] = in_r * self.dry + delayed_r * self.wet;
         }
     }
+
+    /// Clear the delay lines and the LFO.
+    ///
+    /// A chorus that carries a previous track's tail into the next one is
+    /// audible as a smear at the seam, so a track boundary resets it.
+    pub fn reset(&mut self) {
+        self.buf_l.fill(0.0);
+        self.buf_r.fill(0.0);
+        self.pos = 0;
+        self.lfo_phase = 0.0;
+    }
 }
 
 /// Flanger with short modulated delay and through-zero capability.
@@ -150,6 +161,13 @@ impl Flanger {
             *sample = in_val * self.dry + delayed * self.wet;
         }
     }
+
+    /// Clear the delay line and the LFO.
+    pub fn reset(&mut self) {
+        self.buffer.fill(0.0);
+        self.pos = 0;
+        self.lfo_phase = 0.0;
+    }
 }
 
 /// Multi-stage allpass filter phaser (4, 8, 12 poles).
@@ -214,6 +232,12 @@ impl Phaser {
 
             *sample = in_val * self.dry + y * self.wet;
         }
+    }
+
+    /// Clear the allpass ladder and the LFO.
+    pub fn reset(&mut self) {
+        self.stages = [0.0; 8];
+        self.lfo_phase = 0.0;
     }
 }
 

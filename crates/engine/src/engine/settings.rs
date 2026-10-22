@@ -180,6 +180,11 @@ pub struct EngineSettings {
     pub crossfeed_enabled: bool,
     pub crossfeed_profile: config::CrossfeedProfile,
 
+    // ── Creative effects ───────────────────────────────────────────────
+    /// The creative-effects insert's settings, as the engine currently runs
+    /// them. Every effect is off unless the host asked for it.
+    pub fx: config::FxConfig,
+
     // ── Convolution & correction ──────────────────────────────────────
     /// Wet/dry mix of the canonical chain's convolution insert.
     pub convolution_wet_mix: f32,
@@ -268,6 +273,7 @@ impl Default for EngineSettings {
             stereo_enhancer_enabled: false,
             crossfeed_enabled: false,
             crossfeed_profile: config::CrossfeedProfile::default(),
+            fx: config::FxConfig::default(),
 
             convolution_wet_mix: 0.0,
             convolution_ir_loaded: false,
@@ -443,6 +449,7 @@ impl crate::engine::AudioEngine {
             stereo_enhancer_enabled: graph.stereo().enhancer.is_enabled(),
             crossfeed_enabled: graph.crossfeed().crossfeed.is_enabled(),
             crossfeed_profile: graph.crossfeed().crossfeed.profile(),
+            fx: graph.fx_config(),
 
             convolution_wet_mix: conv.wet_mix(),
             convolution_ir_loaded: conv.is_ir_loaded(),

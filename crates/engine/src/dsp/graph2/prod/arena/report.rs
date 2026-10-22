@@ -61,6 +61,7 @@ impl DspGraph {
                         }
                     }
                     "stereo_enhancer" => (self.stereo().is_active(), 0.0, 0.0),
+                    "creative_fx" => (self.fx().is_active(), 0.0, 0.0),
                     "timestretch" => {
                         let active = self.timestretch().is_active();
                         let latency = if active {

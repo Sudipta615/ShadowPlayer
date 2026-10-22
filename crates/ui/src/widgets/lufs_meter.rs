@@ -147,10 +147,6 @@ impl<'a> LufsMeterWidget<'a> {
             );
         }
 
-        let _ = response.on_hover_text(
-            "LUFS blocks: ITU-R BS.1770-5 gated loudness. dBTP: the engine's 4× FIR \
-             estimate of the Annex 2 true-peak definition (engine prototype filter, \
-             not the published 48-tap table).",
-        );
+        let _ = response.on_hover_text(tr!(Msg::SF099C401F00D2CB6));
     }
 }

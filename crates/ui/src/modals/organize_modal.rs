@@ -172,7 +172,7 @@ pub fn show_organize_modal(
         // ── Pattern ────────────────────────────────────────────────
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Naming pattern")
+                egui::RichText::new(tr!("Naming pattern"))
                     .font(crate::theme::font(12.5))
                     .strong()
                     .color(theme.text_primary),
@@ -185,7 +185,7 @@ pub fn show_organize_modal(
             if response.changed() {
                 state.plan_dirty = true;
             }
-            if ui.button("Reset").clicked() {
+            if ui.button(tr!(Msg::S255857544A9D5EC0)).clicked() {
                 actions.reset_pattern = true;
             }
         });
@@ -194,7 +194,7 @@ pub fn show_organize_modal(
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
             ui.label(
-                egui::RichText::new("Tokens:")
+                egui::RichText::new(tr!("Tokens:"))
                     .font(crate::theme::font(11.0))
                     .color(theme.text_muted),
             );
@@ -213,7 +213,7 @@ pub fn show_organize_modal(
         // ── Destination ────────────────────────────────────────────
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Destination")
+                egui::RichText::new(tr!("Destination"))
                     .font(crate::theme::font(12.5))
                     .strong()
                     .color(theme.text_primary),
@@ -234,7 +234,7 @@ pub fn show_organize_modal(
                         .font(crate::theme::font(11.5))
                         .color(theme.text_muted),
                 );
-                if ui.button("Change...").clicked() {
+                if ui.button(tr!(Msg::SA7CA05AD929D0431)).clicked() {
                     actions.pick_destination = true;
                 }
             }
@@ -286,7 +286,7 @@ pub fn show_organize_modal(
             .show(ui, |ui| {
                 if state.tracks.is_empty() {
                     ui.label(
-                        egui::RichText::new("Nothing in scope.")
+                        egui::RichText::new(tr!("Nothing in scope."))
                             .font(crate::theme::font(12.0))
                             .color(theme.text_muted),
                     );
@@ -323,21 +323,19 @@ pub fn show_organize_modal(
                 .fill(theme.accent);
             let response = ui.add_enabled(can_apply, btn);
             if !plan_ready {
-                response
-                    .clone()
-                    .on_hover_text("Waiting for the preview to finish");
+                response.clone().on_hover_text(tr!(Msg::SEA66C5B7B8A95A64));
             }
             if response.clicked() {
                 actions.apply = true;
             }
             if pending == 0 && !state.plan_dirty {
                 ui.label(
-                    egui::RichText::new("Nothing to do with this pattern.")
+                    egui::RichText::new(tr!("Nothing to do with this pattern."))
                         .font(crate::theme::font(11.5))
                         .color(theme.text_muted),
                 );
             }
-            if ui.button("Close").clicked() {
+            if ui.button(tr!(Msg::S5E8250FB85D64C23)).clicked() {
                 close_requested = true;
             }
         });

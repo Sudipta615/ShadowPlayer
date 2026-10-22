@@ -475,6 +475,7 @@ impl AudioEngine {
                 q,
                 delay_ms,
             } => self.handle_set_crossfeed_custom_params(frequency_hz, q, delay_ms),
+            EngineCommand::SetFxConfig(config) => self.handle_set_fx_config(config),
             EngineCommand::SetCompressorEnabled(enabled) => {
                 self.handle_set_compressor_enabled(enabled)
             }

@@ -94,12 +94,25 @@ fn the_readme_shortcut_table_matches_the_in_app_list() {
 fn the_readme_test_commands_exist() {
     let root = repo_root();
     let readme = read(&root.join("README.md"));
-    let tests_dir = root.join("crates/app/tests");
-    let available: Vec<String> = std::fs::read_dir(&tests_dir)
-        .expect("crates/app/tests exists")
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
+    // A test target can live in any crate's `tests` directory: the budget
+    // test belongs to the UI crate, the truth tests to the app.
+    let mut available: Vec<String> = Vec::new();
+    for crate_name in ["app", "ui", "engine"] {
+        let tests_dir = root.join("crates").join(crate_name).join("tests");
+        if !tests_dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(&tests_dir) {
+            available.extend(entries.filter_map(|e| e.ok()).map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.ends_with(".rs") {
+                    name
+                } else {
+                    format!("{name}.rs")
+                }
+            }));
+        }
+    }
 
     // Every `cargo test ...` command the README shows must name a test
     // target that exists, or the reader is told to run something that does
@@ -112,8 +125,8 @@ fn the_readme_test_commands_exist() {
             }
             assert!(
                 available.contains(&format!("{name}.rs")),
-                "the README's test section names '{name}', but \
-                 crates/app/tests/{name}.rs does not exist"
+                "the README's test section names '{name}', but no \
+                 crates/*/tests/{name}.rs exists"
             );
         }
     }

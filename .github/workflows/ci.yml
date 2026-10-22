@@ -57,6 +57,20 @@ jobs:
       - name: Cross-platform packaging inputs
         run: cargo test -p shadowplayer --test platform_parity -- --test-threads=1
 
+      # A 100,000-track library has to stay inside the published budgets
+      # (docs/PERFORMANCE.md). The measurement is a release build: the
+      # budgets are about the shipped player, not about a debug build's
+      # unoptimised arithmetic.
+      - name: The library budget
+        run: >
+          cargo test --release -p ui --test library_budget
+          -- --nocapture --test-threads=1
+
+      # The benchmark must compile, or `cargo bench -p ui` is broken for
+      # everyone.
+      - name: The library benchmark compiles
+        run: cargo bench -p ui --bench library_100k --no-run
+
       # The version bump is a scripted, repeated chore, so it is guarded by a
       # test rather than by remembering to do eleven edits at once.
       - name: Versions are in lockstep

@@ -254,7 +254,7 @@ pub fn show_command_palette(
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut state.query)
                         .id(egui::Id::unique("command_palette_query"))
-                        .hint_text("Type a command, a playlist or a track…")
+                        .hint_text(tr!(Msg::S07D71D1F247C2F67))
                         .font(crate::theme::font(14.0))
                         .desired_width(ui.available_width()),
                 );
@@ -294,7 +294,7 @@ pub fn show_command_palette(
                 ui.add_space(18.0);
                 ui.vertical_centered(|ui| {
                     ui.label(
-                        egui::RichText::new("Nothing matches that")
+                        egui::RichText::new(tr!("Nothing matches that"))
                             .font(crate::theme::font(13.0))
                             .color(theme.text_muted),
                     );

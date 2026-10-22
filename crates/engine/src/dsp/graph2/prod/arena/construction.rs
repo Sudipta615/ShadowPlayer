@@ -167,6 +167,9 @@ impl GraphGeneration {
         gen_node!(self, node_id::TIMESTRETCH, TimeStretch)
             .stretcher
             .set_speed(user.speed);
+        // The creative-effects settings survive a rebuild: the user chose
+        // them, and a sample-rate change must not silently drop them.
+        gen_node!(self, node_id::FX, Fx).apply_config(&user.fx);
 
         // Per-slot user-state replay. The new generation's slot
         // count comes from `config.mix_slots`; the snapshot may carry more or
@@ -331,6 +334,7 @@ impl GraphGeneration {
             GraphNode::Correction(CorrectionNode::new(sample_rate)),
             GraphNode::Spatial(SpatialNode::new(sample_rate)),
             GraphNode::PluginHost(PluginHostNode::new(sample_rate)),
+            GraphNode::Fx(FxNode::new(sample_rate)),
         ];
         debug_assert!(matches!(nodes[node_id::MIX], GraphNode::Mix(_)));
         debug_assert!(matches!(nodes[node_id::EQ], GraphNode::Eq(_)));
@@ -359,6 +363,7 @@ impl GraphGeneration {
         ));
         debug_assert!(matches!(nodes[node_id::SPATIAL], GraphNode::Spatial(_)));
         debug_assert!(matches!(nodes[node_id::PLUGIN], GraphNode::PluginHost(_)));
+        debug_assert!(matches!(nodes[node_id::FX], GraphNode::Fx(_)));
 
         let mut gen = GraphGeneration {
             node_ids: GraphGeneration::canonical_ids(nodes.len()),

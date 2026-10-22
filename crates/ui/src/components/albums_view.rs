@@ -46,7 +46,7 @@ impl<'a> AlbumsView<'a> {
                 ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 
                 let back_btn = egui::Button::new(
-                    egui::RichText::new("‹ Back to Albums")
+                    egui::RichText::new(tr!("‹ Back to Albums"))
                         .font(crate::theme::font(13.5))
                         .color(self.theme.accent_highlight),
                 )
@@ -101,7 +101,7 @@ impl<'a> AlbumsView<'a> {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xs);
                         ui.label(
-                            egui::RichText::new("ALBUM")
+                            egui::RichText::new(tr!("ALBUM"))
                                 .font(crate::theme::font(11.0))
                                 .strong()
                                 .color(self.theme.accent_highlight),
@@ -134,7 +134,7 @@ impl<'a> AlbumsView<'a> {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let play_all_btn = egui::Button::new(
-                                egui::RichText::new("Play All")
+                                egui::RichText::new(tr!("Play All"))
                                     .font(crate::theme::font(12.5))
                                     .color(Color32::WHITE),
                             )
@@ -146,7 +146,7 @@ impl<'a> AlbumsView<'a> {
                             }
 
                             let queue_all_btn = egui::Button::new(
-                                egui::RichText::new("Queue All")
+                                egui::RichText::new(tr!("Queue All"))
                                     .font(crate::theme::font(12.5))
                                     .color(self.theme.text_primary),
                             )
@@ -280,7 +280,7 @@ impl<'a> AlbumsView<'a> {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
                 ui.label(
-                    egui::RichText::new("Albums")
+                    egui::RichText::new(tr!("Albums"))
                         .font(crate::theme::font(24.0))
                         .strong()
                         .color(self.theme.text_primary),
@@ -298,14 +298,14 @@ impl<'a> AlbumsView<'a> {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
                     ui.label(
-                        egui::RichText::new("No albums found in library")
+                        egui::RichText::new(tr!("No albums found in library"))
                             .font(crate::theme::font(15.0))
                             .color(self.theme.text_muted),
                     );
                     ui.label(
-                        egui::RichText::new(
-                            "Add a music folder from 'Folders' to scan your music collection",
-                        )
+                        egui::RichText::new(tr!(
+                            "Add a music folder from 'Folders' to scan your music collection"
+                        ))
                         .font(crate::theme::font(12.5))
                         .color(self.theme.text_dim),
                     );

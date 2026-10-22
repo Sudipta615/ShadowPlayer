@@ -242,7 +242,7 @@ pub fn render_info_icon_button(
                                 c_rect.shrink2(Vec2::splat(5.0)),
                                 cross_col,
                             );
-                            if c_resp.on_hover_text("Close info box").clicked() {
+                            if c_resp.on_hover_text(tr!(Msg::S6A226BC82CB9F014)).clicked() {
                                 close_requested = true;
                             }
                         });
@@ -281,7 +281,7 @@ pub fn render_info_icon_button(
                                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            egui::RichText::new("ENGINE & DSP DYNAMICS")
+                                            egui::RichText::new(tr!("ENGINE & DSP DYNAMICS"))
                                                 .font(crate::theme::font(9.5))
                                                 .strong()
                                                 .color(theme.accent),
@@ -310,7 +310,7 @@ pub fn render_info_icon_button(
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
                                     ui.label(
-                                        egui::RichText::new("RECOMMENDED:")
+                                        egui::RichText::new(tr!("RECOMMENDED:"))
                                             .font(crate::theme::font(9.5))
                                             .strong()
                                             .color(theme.accent_warm),

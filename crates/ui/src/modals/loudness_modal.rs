@@ -222,9 +222,7 @@ pub fn show_loudness_modal(
             ui.add_space(2.0);
             ui.label(
                 egui::RichText::new(
-                    "The band is the rest of the album. A track far to the left of \
-                     its neighbours will sound quiet; one far to the right will be \
-                     the loud thing in the room.",
+                    tr!("The band is the rest of the album. A track far to the left of \n                     its neighbours will sound quiet; one far to the right will be \n                     the loud thing in the room."),
                 )
                 .font(crate::theme::font(11.0))
                 .color(theme.text_dim),

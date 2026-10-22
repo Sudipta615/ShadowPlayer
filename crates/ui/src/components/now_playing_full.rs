@@ -47,7 +47,7 @@ impl<'a> NowPlayingFull<'a> {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
                 ui.label(
-                    egui::RichText::new("NOW PLAYING")
+                    egui::RichText::new(tr!("NOW PLAYING"))
                         .font(crate::theme::font(11.0))
                         .strong()
                         .color(theme.text_dim),
@@ -63,7 +63,7 @@ impl<'a> NowPlayingFull<'a> {
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::Button, true, "Leave full screen")
                     });
-                    let _ = resp.clone().on_hover_text("Leave full screen (F or Esc)");
+                    let _ = resp.clone().on_hover_text(tr!(Msg::S447383E1840F72B0));
                     if resp.clicked() {
                         events.close = true;
                     }
@@ -185,7 +185,7 @@ impl<'a> NowPlayingFull<'a> {
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui.label(
-                                    egui::RichText::new("LYRICS")
+                                    egui::RichText::new(tr!("LYRICS"))
                                         .font(crate::theme::font(11.0))
                                         .strong()
                                         .color(theme.text_dim),
@@ -240,7 +240,7 @@ impl<'a> NowPlayingFull<'a> {
                     ui.add_space(theme.space_xs);
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            egui::RichText::new("F or Esc to leave")
+                            egui::RichText::new(tr!("F or Esc to leave"))
                                 .font(crate::theme::font(10.5))
                                 .color(theme.text_dim),
                         );
@@ -336,7 +336,7 @@ impl<'a> NowPlayingFull<'a> {
                             theme.text_primary
                         };
                         crate::components::icons::draw_skip_prev(ui, prev_rect, prev_col);
-                        let _ = prev_resp.clone().on_hover_text("Previous track");
+                        let _ = prev_resp.clone().on_hover_text(tr!(Msg::S9C2CFDED8ECFF47F));
                         prev_resp.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::Button, true, "Previous track")
                         });
@@ -396,7 +396,7 @@ impl<'a> NowPlayingFull<'a> {
                             theme.text_primary
                         };
                         crate::components::icons::draw_skip_next(ui, next_rect, next_col);
-                        let _ = next_resp.clone().on_hover_text("Next track");
+                        let _ = next_resp.clone().on_hover_text(tr!(Msg::SDC4932D8AABB325F));
                         next_resp.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::Button, true, "Next track")
                         });

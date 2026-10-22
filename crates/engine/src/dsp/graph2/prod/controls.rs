@@ -57,6 +57,7 @@ forward! {
     set_stereo_enhancer_enabled(enabled: bool);
     set_crossfeed_enabled(enabled: bool);
     set_crossfeed_profile(profile: config::CrossfeedProfile);
+    set_fx_config(config: config::FxConfig);
     set_compressor_enabled(enabled: bool);
     set_loudness_mode(mode: LoudnessMode);
     set_input_gain(input: u8, gain: f32);

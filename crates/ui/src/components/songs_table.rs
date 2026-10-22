@@ -676,7 +676,7 @@ impl<'a> SongsTable<'a> {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
                 ui.label(
-                    egui::RichText::new("Songs")
+                    egui::RichText::new(tr!("Songs"))
                         .font(crate::theme::font(22.0))
                         .strong()
                         .color(theme.text_primary),
@@ -743,7 +743,7 @@ impl<'a> SongsTable<'a> {
                             "Show covers as a grid",
                         )
                     });
-                    let _ = grid_resp.clone().on_hover_text("Show covers as a grid");
+                    let _ = grid_resp.clone().on_hover_text(tr!(Msg::S315382037EF4E6A9));
                     if grid_resp.clicked() && !is_grid_view {
                         action.toggle_view_mode = true;
                     }
@@ -772,7 +772,7 @@ impl<'a> SongsTable<'a> {
                             "Show tracks as a list",
                         )
                     });
-                    let _ = list_resp.clone().on_hover_text("Show tracks as a list");
+                    let _ = list_resp.clone().on_hover_text(tr!(Msg::S432E9931F963515D));
                     if list_resp.clicked() && is_grid_view {
                         action.toggle_view_mode = true;
                     }
@@ -882,7 +882,7 @@ impl<'a> SongsTable<'a> {
                         ui.ctx().data(|d| d.get_temp(sort_menu_id).unwrap_or(false));
                     if sort_resp
                         .clone()
-                        .on_hover_text("Change the sort field")
+                        .on_hover_text(tr!(Msg::SA67DAD356DD3A456))
                         .clicked()
                     {
                         sort_menu_open = !sort_menu_open;
@@ -1156,7 +1156,7 @@ impl<'a> SongsTable<'a> {
                 theme.text_muted,
             );
             if num_h_resp
-                .on_hover_text("Click the box to select all · click # to sort")
+                .on_hover_text(tr!(Msg::SC5E23A32409C57E6))
                 .clicked()
             {
                 let pointer = ui.input(|i| i.pointer.interact_pos());
@@ -1210,7 +1210,10 @@ impl<'a> SongsTable<'a> {
                 sort_order,
                 title_col,
             );
-            if title_h_resp.on_hover_text("Sort by Title").clicked() {
+            if title_h_resp
+                .on_hover_text(tr!(Msg::S1D45DD9F445ECA8C))
+                .clicked()
+            {
                 action.sort_field_changed = Some(SortField::Title);
             }
 
@@ -1242,7 +1245,10 @@ impl<'a> SongsTable<'a> {
                 sort_order,
                 artist_col,
             );
-            if artist_h_resp.on_hover_text("Sort by Artist").clicked() {
+            if artist_h_resp
+                .on_hover_text(tr!(Msg::S037ECF046DEFA93D))
+                .clicked()
+            {
                 action.sort_field_changed = Some(SortField::Artist);
             }
 
@@ -1274,7 +1280,10 @@ impl<'a> SongsTable<'a> {
                 sort_order,
                 album_col,
             );
-            if album_h_resp.on_hover_text("Sort by Album").clicked() {
+            if album_h_resp
+                .on_hover_text(tr!(Msg::SC867FBA5A5646ED9))
+                .clicked()
+            {
                 action.sort_field_changed = Some(SortField::Album);
             }
 
@@ -1293,7 +1302,10 @@ impl<'a> SongsTable<'a> {
                 Vec2::new(14.0, 14.0),
             );
             crate::components::icons::draw_clock(ui, clock_icon_rect, clock_col);
-            if clock_resp.on_hover_text("Sort by Duration").clicked() {
+            if clock_resp
+                .on_hover_text(tr!(Msg::SDE0B06B549269586))
+                .clicked()
+            {
                 action.sort_field_changed = Some(SortField::Duration);
             }
 
@@ -1315,7 +1327,10 @@ impl<'a> SongsTable<'a> {
                 rating_label,
                 rating_col,
             );
-            if rating_h_resp.on_hover_text("Sort by Rating").clicked() {
+            if rating_h_resp
+                .on_hover_text(tr!(Msg::S3E71E2EC5E3B3043))
+                .clicked()
+            {
                 action.sort_field_changed = Some(SortField::Rating);
             }
 
@@ -1329,7 +1344,10 @@ impl<'a> SongsTable<'a> {
                 Vec2::new(14.0, 14.0),
             );
             crate::components::icons::draw_heart(ui, heart_icon_rect, theme.text_muted, false);
-            if heart_resp.on_hover_text("Sort by Favorites").clicked() {
+            if heart_resp
+                .on_hover_text(tr!(Msg::S5C1B64888710263F))
+                .clicked()
+            {
                 action.sort_field_changed = Some(SortField::Favorite);
             }
 
@@ -1580,7 +1598,7 @@ impl<'a> SongsTable<'a> {
                         });
                         let _ = rating_resp
                             .clone()
-                            .on_hover_text("Click a star to rate · right-click to clear");
+                            .on_hover_text(tr!(Msg::SCFA981C8B38EA071));
 
                         // Column 1: selection box, else hover play button, else index.
                         if is_selected {
@@ -2021,31 +2039,31 @@ fn render_bulk_bar(
                 ui.add_space(4.0);
 
                 if ui
-                    .button(egui::RichText::new("Play").font(crate::theme::font(12.0)))
+                    .button(egui::RichText::new(tr!("Play")).font(crate::theme::font(12.0)))
                     .clicked()
                 {
                     action.play_selected = true;
                 }
                 if ui
-                    .button(egui::RichText::new("Play Next").font(crate::theme::font(12.0)))
+                    .button(egui::RichText::new(tr!("Play Next")).font(crate::theme::font(12.0)))
                     .clicked()
                 {
                     action.queue_next_selected = true;
                 }
                 if ui
-                    .button(egui::RichText::new("Add to Queue").font(crate::theme::font(12.0)))
+                    .button(egui::RichText::new(tr!("Add to Queue")).font(crate::theme::font(12.0)))
                     .clicked()
                 {
                     action.add_selected_to_queue = true;
                 }
                 if ui
-                    .button(egui::RichText::new("Favorite").font(crate::theme::font(12.0)))
+                    .button(egui::RichText::new(tr!("Favorite")).font(crate::theme::font(12.0)))
                     .clicked()
                 {
                     action.favorite_selected = true;
                 }
                 ui.menu_button(
-                    egui::RichText::new("Rate").font(crate::theme::font(12.0)),
+                    egui::RichText::new(tr!("Rate")).font(crate::theme::font(12.0)),
                     |ui| {
                         for stars in 1..=5u8 {
                             let label = match stars {
@@ -2057,21 +2075,21 @@ fn render_bulk_bar(
                                 ui.close();
                             }
                         }
-                        if ui.button("Clear Rating").clicked() {
+                        if ui.button(tr!(Msg::SDA396F7DB3F6E8D7)).clicked() {
                             action.rate_selected = Some(0);
                             ui.close();
                         }
                     },
                 );
                 if ui
-                    .button(egui::RichText::new("Organize").font(crate::theme::font(12.0)))
+                    .button(egui::RichText::new(tr!("Organize")).font(crate::theme::font(12.0)))
                     .clicked()
                 {
                     action.organize_selected = true;
                 }
                 if !playlists.is_empty() {
                     ui.menu_button(
-                        egui::RichText::new("Add to Playlist").font(crate::theme::font(12.0)),
+                        egui::RichText::new(tr!("Add to Playlist")).font(crate::theme::font(12.0)),
                         |ui| {
                             for pl in playlists {
                                 if ui.button(&pl.name).clicked() {
@@ -2084,7 +2102,7 @@ fn render_bulk_bar(
                 }
                 if ui
                     .button(
-                        egui::RichText::new("Remove")
+                        egui::RichText::new(tr!("Remove"))
                             .font(crate::theme::font(12.0))
                             .color(theme.destructive),
                     )
@@ -2095,7 +2113,7 @@ fn render_bulk_bar(
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .button(egui::RichText::new("Clear").font(crate::theme::font(12.0)))
+                        .button(egui::RichText::new(tr!("Clear")).font(crate::theme::font(12.0)))
                         .clicked()
                     {
                         action.clear_selection = true;
@@ -2258,15 +2276,15 @@ fn render_track_context_menu(
     action: &mut SongsTableAction,
     theme: &Theme,
 ) {
-    if ui.button("Play Now").clicked() {
+    if ui.button(tr!(Msg::SCD25432E0F0BFFFB)).clicked() {
         action.play_track = Some(track.id);
         ui.close();
     }
-    if ui.button("Play Next").clicked() {
+    if ui.button(tr!(Msg::S4B721643601DB784)).clicked() {
         action.queue_next_track = Some(track.id);
         ui.close();
     }
-    if ui.button("Add to Queue").clicked() {
+    if ui.button(tr!(Msg::S937116D0ED2A3AC6)).clicked() {
         action.add_to_queue = Some(track.id);
         ui.close();
     }
@@ -2283,7 +2301,7 @@ fn render_track_context_menu(
         ui.close();
     }
 
-    ui.menu_button("Rating", |ui| {
+    ui.menu_button(tr!(Msg::S36E1BFD2D899A7B0), |ui| {
         for stars in 1..=5u8 {
             let label = match stars {
                 1 => "1 star".to_string(),
@@ -2294,14 +2312,14 @@ fn render_track_context_menu(
                 ui.close();
             }
         }
-        if track.rating > 0 && ui.button("Clear Rating").clicked() {
+        if track.rating > 0 && ui.button(tr!(Msg::SDA396F7DB3F6E8D7)).clicked() {
             action.set_rating = Some((track.id, 0));
             ui.close();
         }
     });
 
     if !playlists.is_empty() {
-        ui.menu_button("Add to Playlist", |ui| {
+        ui.menu_button(tr!(Msg::SDA44F97ADDA826F9), |ui| {
             for pl in playlists {
                 if ui.button(&pl.name).clicked() {
                     action.add_to_playlist = Some((track.id, pl.id));
@@ -2313,24 +2331,24 @@ fn render_track_context_menu(
 
     ui.separator();
 
-    if ui.button("Open Containing Folder").clicked() {
+    if ui.button(tr!(Msg::S8058D56146093AD1)).clicked() {
         if let Some(parent) = track.path.parent() {
             action.open_folder = Some(parent.to_path_buf());
         }
         ui.close();
     }
 
-    if ui.button("Track Properties").clicked() {
+    if ui.button(tr!(Msg::SE2868E427E90B359)).clicked() {
         action.show_properties = Some(track.id);
         ui.close();
     }
 
-    if ui.button("Per-track DSP…").clicked() {
+    if ui.button(tr!(Msg::SDE57BAF260C1358B)).clicked() {
         action.open_dsp = Some(track.id);
         ui.close();
     }
 
-    if ui.button("Edit Song Info").clicked() {
+    if ui.button(tr!(Msg::S5851EE93B1C93A0E)).clicked() {
         action.edit_track = Some(track.id);
         ui.close();
     }
@@ -2338,8 +2356,8 @@ fn render_track_context_menu(
     ui.separator();
 
     if ui
-        .button("Reset Columns")
-        .on_hover_text("Restore the default Title / Artist / Album widths")
+        .button(tr!(Msg::S6DA3E203E02A71DB))
+        .on_hover_text(tr!("Restore the default Title / Artist / Album widths"))
         .clicked()
     {
         action.reset_columns = true;
@@ -2349,7 +2367,7 @@ fn render_track_context_menu(
     ui.separator();
 
     if ui
-        .button(egui::RichText::new("Remove from Library").color(theme.destructive))
+        .button(egui::RichText::new(tr!("Remove from Library")).color(theme.destructive))
         .clicked()
     {
         action.remove_track = Some(track.id);

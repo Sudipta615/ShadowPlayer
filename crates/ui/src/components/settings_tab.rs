@@ -99,7 +99,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 76] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 79] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -556,6 +556,24 @@ pub static SETTINGS_INDEX: [SettingsEntry; 76] = [
         label: "Batch Rename & Sort",
         description: "Build names from tags — e.g. {artist}/{album}/{track} - {title}. Existing files are never overwritten.",
     },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Interface & Language",
+        label: "Language",
+        description: "Follow the system locale, or choose a language explicitly",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Smart Playlists",
+        label: "Smart Playlist Refresh",
+        description: "Re-evaluate the saved queries after every scan, on a timer, or only on request",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Smart Playlists",
+        label: "Refresh Interval",
+        description: "How many minutes pass between two refreshes under the timer policy",
+    },
 ];
 
 /// The settings that match a query, best first.
@@ -587,7 +605,8 @@ pub fn search_settings(query: &str) -> Vec<&'static SettingsEntry> {
 
 /// A pending "jump to this row" request.
 struct SettingsJump {
-    target: &'static str,
+    /// The row to land on, named in the interface's current language.
+    target: String,
     /// Whether the row still has to be scrolled into view.
     scroll: bool,
     /// When the highlight started, in egui time. Set when the row is first
@@ -608,10 +627,16 @@ thread_local! {
 }
 
 /// Ask the next Settings frame to scroll to `label` and flash it.
+///
+/// `label` is the English text from the settings index. The row it names is
+/// rendered translated, so the target is translated too: the jump must land
+/// on the row the user is looking at, in whatever language the interface is
+/// currently speaking.
 pub fn request_settings_jump(label: &'static str) {
+    let target = crate::i18n::tr_literal(label);
     SETTINGS_JUMP.with(|jump| {
         *jump.borrow_mut() = Some(SettingsJump {
-            target: label,
+            target,
             scroll: true,
             flash_started: None,
         });
@@ -782,6 +807,12 @@ pub struct SettingsTabState {
     #[serde(skip)]
     pub clap: crate::state::clap_rack::ClapCardSummary,
 
+    /// When the smart playlists are re-evaluated.
+    ///
+    /// A smart playlist is a saved query over the library, so the only
+    /// question is when the query runs again.
+    pub smart_refresh: domain::smart::SmartRefreshSettings,
+
     // Library maintenance
     /// Set by the Settings > Library "Organize Files" button; the app raises the
     /// batch organizer and clears it.
@@ -892,6 +923,7 @@ impl Default for SettingsTabState {
             chain_preset_rename_buffer: String::new(),
             chain_preset_notice: None,
             clap: crate::state::clap_rack::ClapCardSummary::default(),
+            smart_refresh: domain::smart::SmartRefreshSettings::default(),
             request_organize: false,
             request_clap_library: false,
 
@@ -1118,6 +1150,8 @@ pub struct SettingsTabActions {
     pub trigger_scan: Option<PathBuf>,
     pub remove_scan_root: Option<ScanRootId>,
     pub toggle_theme: bool,
+    /// The interface language changed. `None` means "follow the environment".
+    pub locale_changed: Option<String>,
     /// User pressed "Import Songs…" — open the native file picker.
     pub import_files: bool,
     /// User pressed "Import Folder…" — open the native folder picker.
@@ -1176,6 +1210,12 @@ pub struct SettingsExtraContext<'a> {
     pub graph_build_ms: f64,
     /// Number of DSP graph rebuilds since startup.
     pub graph_builds: u64,
+    /// The saved language preference.
+    ///
+    /// Empty means "follow the environment". The picker shows what is
+    /// stored, not what is active, so the user can see that the choice is
+    /// "the system decides" even when the system happens to speak German.
+    pub locale: &'a str,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1188,7 +1228,10 @@ fn render_settings_search(ui: &mut egui::Ui, state: &mut SettingsTabState, theme
         .fill(theme.bg_input)
         .stroke(Stroke::new(1.0, theme.border_input))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(theme.space_xl as i8, theme.space_md as i8))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_xl as i8,
+            theme.space_md as i8,
+        ))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
@@ -1203,9 +1246,9 @@ fn render_settings_search(ui: &mut egui::Ui, state: &mut SettingsTabState, theme
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
                         .hint_text(
-                            egui::RichText::new(
-                                "Search settings \u{2014} try \u{201c}subwoofer\u{201d} or \u{201c}latency\u{201d}",
-                            )
+                            egui::RichText::new(tr!(
+                                "Search settings — try “subwoofer” or “latency”"
+                            ))
                             .color(theme.text_muted)
                             .font(crate::theme::font(12.5)),
                         )
@@ -1219,13 +1262,13 @@ fn render_settings_search(ui: &mut egui::Ui, state: &mut SettingsTabState, theme
                     && ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new("\u{00d7}")
+                                egui::RichText::new(tr!("×"))
                                     .font(crate::theme::font(14.0))
                                     .color(theme.text_muted),
                             )
                             .frame(false),
                         )
-                        .on_hover_text("Clear the search")
+                        .on_hover_text(tr!(Msg::S5D7548BE29B19777))
                         .clicked()
                 {
                     state.search_query.clear();
@@ -1258,8 +1301,7 @@ fn render_settings_search_results(ui: &mut egui::Ui, state: &mut SettingsTabStat
     if results.is_empty() {
         ui.label(
             egui::RichText::new(
-                "Search labels, card titles and descriptions. Settings are reached \
-                 where they live rather than edited in a list.",
+                tr!("Search labels, card titles and descriptions. Settings are reached \n                 where they live rather than edited in a list."),
             )
             .font(crate::theme::font(11.5))
             .color(theme.text_dim),
@@ -1446,8 +1488,8 @@ fn render_playback_category(
         card_header(
             ui,
             crate::components::icons::draw_disc,
-            "Playback Speed & Pitch Transposition",
-            "Adjust playback rate and pitch using high-precision time-stretching or vintage varispeed",
+            &tr!("Playback Speed & Pitch Transposition"),
+            &tr!("Adjust playback rate and pitch using high-precision time-stretching or vintage varispeed"),
             Some((
                 if state.speed == 1.0 && state.pitch_semitones == 0.0 { "NORMAL" } else { "MODIFIED" },
                 if state.speed == 1.0 && state.pitch_semitones == 0.0 { theme.bg_pill } else { theme.accent.linear_multiply(0.3) },
@@ -1459,8 +1501,8 @@ fn render_playback_category(
         // Speed Slider + Presets
         setting_item(
             ui,
-            "Playback Speed",
-            "Tempo multiplier (0.25x slow down to 4.00x speed up)",
+            &tr!("Playback Speed"),
+            &tr!("Tempo multiplier (0.25x slow down to 4.00x speed up)"),
             theme,
             |ui| {
                 let mut v = state.speed;
@@ -1469,7 +1511,11 @@ fn render_playback_category(
                     actions.speed_changed = Some(v);
                 }
                 badge_label(ui, format!("{:.2}x", state.speed), theme);
-                if state.speed != 1.0 && ui.add(pill_btn("1.0x", false, theme)).clicked() {
+                if state.speed != 1.0
+                    && ui
+                        .add(pill_btn(tr!(Msg::S41E813F1165AB4DE), false, theme))
+                        .clicked()
+                {
                     state.speed = 1.0;
                     actions.speed_changed = Some(1.0);
                 }
@@ -1479,8 +1525,8 @@ fn render_playback_category(
         // Pitch Transposition
         setting_item(
             ui,
-            "Pitch Transposition",
-            "Shift musical key in semitone increments (-24 to +24 semitones)",
+            &tr!("Pitch Transposition"),
+            &tr!("Shift musical key in semitone increments (-24 to +24 semitones)"),
             theme,
             |ui| {
                 let mut v = state.pitch_semitones;
@@ -1489,7 +1535,10 @@ fn render_playback_category(
                     actions.pitch_changed = Some(v);
                 }
                 badge_label(ui, format!("{:+.1} st", state.pitch_semitones), theme);
-                if state.pitch_semitones != 0.0 && ui.add(pill_btn("Reset", false, theme)).clicked()
+                if state.pitch_semitones != 0.0
+                    && ui
+                        .add(pill_btn(tr!(Msg::S255857544A9D5EC0), false, theme))
+                        .clicked()
                 {
                     state.pitch_semitones = 0.0;
                     actions.pitch_changed = Some(0.0);
@@ -1500,8 +1549,8 @@ fn render_playback_category(
         // Speed Processing Mode
         setting_item_with_info(
             ui,
-            "Processing Engine",
-            "Varispeed (analog tape pitch shift) vs TimeStretch (formant-preserved tempo)",
+            &tr!("Processing Engine"),
+            &tr!("Varispeed (analog tape pitch shift) vs TimeStretch (formant-preserved tempo)"),
             Some(&crate::components::info_box::INFO_SPEED_PITCH),
             theme,
             |ui| {
@@ -1522,8 +1571,8 @@ fn render_playback_category(
         card_header(
             ui,
             crate::components::icons::draw_shuffle,
-            "Track Transitions & Crossfading",
-            "Continuous gapless audio streaming or smooth multi-second DJ crossfading between songs",
+            &tr!("Track Transitions & Crossfading"),
+            &tr!("Continuous gapless audio streaming or smooth multi-second DJ crossfading between songs"),
             Some((
                 match state.transition_mode {
                     TransitionMode::Gapless => "GAPLESS DIRECT",
@@ -1539,8 +1588,8 @@ fn render_playback_category(
 
         setting_item_with_info(
             ui,
-            "Transition Mode",
-            "Gapless mode provides seamless album playback without clicks or silence gaps",
+            &tr!("Transition Mode"),
+            &tr!("Gapless mode provides seamless album playback without clicks or silence gaps"),
             Some(&crate::components::info_box::INFO_TRANSITION_CROSSFADE),
             theme,
             |ui| {
@@ -1572,8 +1621,8 @@ fn render_playback_category(
 
                 setting_item(
                     ui,
-                    "Crossfade Duration",
-                    "Overlap time in seconds between fading out song and fading in next song",
+                    &tr!("Crossfade Duration"),
+                    &tr!("Overlap time in seconds between fading out song and fading in next song"),
                     theme,
                     |ui| {
                         let mut v = state.crossfade_duration_secs;
@@ -1587,8 +1636,8 @@ fn render_playback_category(
 
                 setting_item(
                     ui,
-                    "Crossfade Curve",
-                    "Constant Power maintains perceived volume energy; Linear creates gradual dip",
+                    &tr!("Crossfade Curve"),
+                    &tr!("Constant Power maintains perceived volume energy; Linear creates gradual dip"),
                     theme,
                     |ui| {
                         let options = [
@@ -1614,16 +1663,16 @@ fn render_playback_category(
         card_header(
             ui,
             crate::components::icons::draw_bar_chart,
-            "Loudness Normalization (ReplayGain & EBU R128)",
-            "Automated gain matching prevents sudden volume jumps between quiet acoustic and loud mastered tracks",
+            &tr!("Loudness Normalization (ReplayGain & EBU R128)"),
+            &tr!("Automated gain matching prevents sudden volume jumps between quiet acoustic and loud mastered tracks"),
             None,
             theme,
         );
 
         setting_item_with_info(
             ui,
-            "Target Standard",
-            "EBU R128 (-14 LUFS) or legacy ReplayGain 2.0 tags",
+            &tr!("Target Standard"),
+            &tr!("EBU R128 (-14 LUFS) or legacy ReplayGain 2.0 tags"),
             Some(&crate::components::info_box::INFO_LOUDNESS_NORMALIZATION),
             theme,
             |ui| {
@@ -1711,7 +1760,7 @@ fn render_device_picker(
     if devices.is_empty() {
         ui.label(
             egui::RichText::new(
-                "This backend reported no devices. It may need exclusive access, or the device may be in use by another application.",
+                tr!("This backend reported no devices. It may need exclusive access, or the device may be in use by another application."),
             )
             .font(crate::theme::font(11.0))
             .color(theme.text_dim),
@@ -1721,7 +1770,7 @@ fn render_device_picker(
     // The advanced field, for a device string the enumeration cannot know.
     let mut custom = state.output_device.clone();
     let edit = egui::TextEdit::singleline(&mut custom)
-        .hint_text("Device id or name (advanced)")
+        .hint_text(tr!(Msg::SA0C32392220AE499))
         .desired_width(280.0)
         .font(crate::theme::font(12.0));
     if ui.add(edit).changed() && custom != state.output_device {
@@ -1780,7 +1829,7 @@ fn render_output_category(
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                     ui.label(
-                        egui::RichText::new("Audiophile Bit-Perfect Direct Stream")
+                        egui::RichText::new(tr!("Audiophile Bit-Perfect Direct Stream"))
                             .font(crate::theme::font(15.0))
                             .strong()
                             .color(if state.bit_perfect { theme.bit_perfect_green } else { theme.text_primary }),
@@ -1832,8 +1881,8 @@ fn render_output_category(
 
         setting_item_with_info(
             ui,
-            "Driver Architecture",
-            "Exclusive ALSA, WASAPI Exclusive, or cross-platform automatic detection",
+            &tr!("Driver Architecture"),
+            &tr!("Exclusive ALSA, WASAPI Exclusive, or cross-platform automatic detection"),
             Some(&crate::components::info_box::INFO_AUDIO_BACKEND),
             theme,
             |ui| {
@@ -1848,8 +1897,8 @@ fn render_output_category(
 
         setting_item(
             ui,
-            "Processing Profile",
-            "Engine preset: resampler quality, dither, EQ, crossfeed and buffer sizes move together. Consumer keeps the lightest chain, Fidelity the strictest, Low Power the cheapest",
+            &tr!("Processing Profile"),
+            &tr!("Engine preset: resampler quality, dither, EQ, crossfeed and buffer sizes move together. Consumer keeps the lightest chain, Fidelity the strictest, Low Power the cheapest"),
             theme,
             |ui| {
                 let options = [
@@ -1865,8 +1914,8 @@ fn render_output_category(
 
         setting_item(
             ui,
-            "Output Endpoint",
-            "The device the engine opens. Leave it on the system default unless you are routing to a specific DAC.",
+            &tr!("Output Endpoint"),
+            &tr!("The device the engine opens. Leave it on the system default unless you are routing to a specific DAC."),
             theme,
             |ui| {
                 render_device_picker(ui, state, extra, theme, actions);
@@ -1874,8 +1923,8 @@ fn render_output_category(
         );
         setting_item(
             ui,
-            "Fallback Policy",
-            "Action to take if exclusive mode device acquisition is rejected by the OS",
+            &tr!("Fallback Policy"),
+            &tr!("Action to take if exclusive mode device acquisition is rejected by the OS"),
             theme,
             |ui| {
                 let options = [
@@ -1890,15 +1939,18 @@ fn render_output_category(
 
         setting_item(
             ui,
-            "Hardware Actions",
-            "Open external driver control panels and reset device configuration profiles",
+            &tr!("Hardware Actions"),
+            &tr!("Open external driver control panels and reset device configuration profiles"),
             theme,
             |ui| {
-                if ui.add(pill_btn("Open ASIO Panel", false, theme)).clicked() {
+                if ui
+                    .add(pill_btn(tr!(Msg::SE39B424FF4863C4D), false, theme))
+                    .clicked()
+                {
                     actions.open_asio_panel = true;
                 }
                 if ui
-                    .add(pill_btn("Reset Device Profile", false, theme))
+                    .add(pill_btn(tr!(Msg::S575E2028F7A67363), false, theme))
                     .clicked()
                 {
                     actions.clear_output_profile = true;
@@ -1912,16 +1964,16 @@ fn render_output_category(
         card_header(
             ui,
             crate::components::icons::draw_equalizer_sliders,
-            "Sample Rate Policies & Resampling Precision",
-            "Lock output sample rate or dynamically match input track sample rate",
+            &tr!("Sample Rate Policies & Resampling Precision"),
+            &tr!("Lock output sample rate or dynamically match input track sample rate"),
             None,
             theme,
         );
 
         setting_item_with_info(
             ui,
-            "Sample Rate Target",
-            "Follow Track switches your DAC rate on song change; Fixed resamples everything",
+            &tr!("Sample Rate Target"),
+            &tr!("Follow Track switches your DAC rate on song change; Fixed resamples everything"),
             Some(&crate::components::info_box::INFO_SAMPLE_RATE_POLICY),
             theme,
             |ui| {
@@ -1941,8 +1993,8 @@ fn render_output_category(
 
         setting_item_with_info(
             ui,
-            "Resampler Engine",
-            "Polyphase FIR filter quality used when rate conversion is required",
+            &tr!("Resampler Engine"),
+            &tr!("Polyphase FIR filter quality used when rate conversion is required"),
             Some(&crate::components::info_box::INFO_RESAMPLER_QUALITY),
             theme,
             |ui| {
@@ -1960,8 +2012,8 @@ fn render_output_category(
 
         setting_item(
             ui,
-            "DSP Precision Mode",
-            "Internal processing precision. Quality routes the mix chain through the f64 core for extra headroom at a small CPU cost.",
+            &tr!("DSP Precision Mode"),
+            &tr!("Internal processing precision. Quality routes the mix chain through the f64 core for extra headroom at a small CPU cost."),
             theme,
             |ui| {
                 let mut mode = state.precision_mode.unwrap_or_default();
@@ -1978,8 +2030,10 @@ fn render_output_category(
 
         setting_item_with_info(
             ui,
-            "Volume Attenuation Mode",
-            "Software volume scaling vs Fixed 100% line-out for external preamp/headphone amp",
+            &tr!("Volume Attenuation Mode"),
+            &tr!(
+                "Software volume scaling vs Fixed 100% line-out for external preamp/headphone amp"
+            ),
             Some(&crate::components::info_box::INFO_VOLUME_MODE),
             theme,
             |ui| {
@@ -1995,8 +2049,8 @@ fn render_output_category(
 
         setting_item_with_info(
             ui,
-            "TPDF Dither",
-            "Triangular PDF dithering eliminates quantization distortion when converting bit depth",
+            &tr!("TPDF Dither"),
+            &tr!("Triangular PDF dithering eliminates quantization distortion when converting bit depth"),
             Some(&crate::components::info_box::INFO_DITHER),
             theme,
             |ui| {
@@ -2025,8 +2079,8 @@ fn render_spatial_category(
         card_header(
             ui,
             crate::components::icons::draw_bar_chart,
-            "3D Soundstage & Spatial Radar (Interactive)",
-            "Drag the virtual sound source across the circular acoustic field to position audio in 3D space",
+            &tr!("3D Soundstage & Spatial Radar (Interactive)"),
+            &tr!("Drag the virtual sound source across the circular acoustic field to position audio in 3D space"),
             None,
             theme,
         );
@@ -2067,8 +2121,8 @@ fn render_spatial_category(
 
         setting_item_with_info(
             ui,
-            "Listener Orientation",
-            "Rotates the listener's head independently of the virtual centre, so the soundstage can be auditioned from an angle",
+            &tr!("Listener Orientation"),
+            &tr!("Rotates the listener's head independently of the virtual centre, so the soundstage can be auditioned from an angle"),
             None,
             theme,
             |ui| {
@@ -2082,8 +2136,8 @@ fn render_spatial_category(
 
         setting_item_with_info(
             ui,
-            "Air Absorption",
-            "Distance-dependent high-frequency roll-off along each path, as air itself absorbs treble over distance",
+            &tr!("Air Absorption"),
+            &tr!("Distance-dependent high-frequency roll-off along each path, as air itself absorbs treble over distance"),
             None,
             theme,
             |ui| {
@@ -2101,16 +2155,16 @@ fn render_spatial_category(
         card_header(
             ui,
             crate::components::icons::draw_disc,
-            "Binaural HRTF & Head Tracking",
-            "Head-Related Transfer Function filters model human pinna and ear-canal acoustics for headphones",
+            &tr!("Binaural HRTF & Head Tracking"),
+            &tr!("Head-Related Transfer Function filters model human pinna and ear-canal acoustics for headphones"),
             None,
             theme,
         );
 
         setting_item_with_info(
             ui,
-            "Spatial Synthesis Quality",
-            "Spherical harmonics order and convolution precision",
+            &tr!("Spatial Synthesis Quality"),
+            &tr!("Spherical harmonics order and convolution precision"),
             Some(&crate::components::info_box::INFO_SPATIAL_HRTF),
             theme,
             |ui| {
@@ -2128,16 +2182,19 @@ fn render_spatial_category(
 
         setting_item(
             ui,
-            "HRTF Profile ID",
-            "SOFA dataset profile identifier (e.g. KEMAR_diffuse, IRC_1002)",
+            &tr!("HRTF Profile ID"),
+            &tr!("SOFA dataset profile identifier (e.g. KEMAR_diffuse, IRC_1002)"),
             theme,
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.hrtf_profile)
-                    .hint_text("Default KEMAR...")
+                    .hint_text(tr!(Msg::SE0F13CACC590D830))
                     .desired_width(180.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
-                if ui.add(pill_btn("Apply Profile", false, theme)).clicked() {
+                if ui
+                    .add(pill_btn(tr!(Msg::S7CB1A12491596FB2), false, theme))
+                    .clicked()
+                {
                     actions.hrtf_profile_changed = Some(state.hrtf_profile.clone());
                 }
             },
@@ -2145,8 +2202,8 @@ fn render_spatial_category(
 
         setting_item_with_info(
             ui,
-            "Listener Motion Smoothing",
-            "Low-pass filter time constant for head motion tracker interpolation",
+            &tr!("Listener Motion Smoothing"),
+            &tr!("Low-pass filter time constant for head motion tracker interpolation"),
             Some(&crate::components::info_box::INFO_LISTENER_TRACKING),
             theme,
             |ui| {
@@ -2161,8 +2218,8 @@ fn render_spatial_category(
 
         setting_item(
             ui,
-            "Listener Max Angular Velocity",
-            "Clamps extreme head rotations (0 = uncapped natural tracking)",
+            &tr!("Listener Max Angular Velocity"),
+            &tr!("Clamps extreme head rotations (0 = uncapped natural tracking)"),
             theme,
             |ui| {
                 let mut r = state.listener_max_rate;
@@ -2180,8 +2237,8 @@ fn render_spatial_category(
         card_header(
             ui,
             crate::components::icons::draw_folder,
-            "Virtual Room Acoustics Simulation",
-            "Simulates listening room wall reflections, RT60 reverberation decay, and air absorption",
+            &tr!("Virtual Room Acoustics Simulation"),
+            &tr!("Simulates listening room wall reflections, RT60 reverberation decay, and air absorption"),
             Some((
                 if state.room_enabled { "REVERB ACTIVE" } else { "BYPASSED" },
                 theme.bg_pill,
@@ -2192,8 +2249,8 @@ fn render_spatial_category(
 
         setting_item_with_info(
             ui,
-            "Enable Room Acoustics",
-            "Apply virtual listening room reverberation model",
+            &tr!("Enable Room Acoustics"),
+            &tr!("Apply virtual listening room reverberation model"),
             Some(&crate::components::info_box::INFO_ROOM_ACOUSTICS),
             theme,
             |ui| {
@@ -2221,8 +2278,8 @@ fn render_spatial_category(
 
                 setting_item(
                     ui,
-                    "Reverb Wet/Dry Mix",
-                    "Ratio of reverberant room reflection to direct dry audio",
+                    &tr!("Reverb Wet/Dry Mix"),
+                    &tr!("Ratio of reverberant room reflection to direct dry audio"),
                     theme,
                     |ui| {
                         let mut v = state.room_wet;
@@ -2236,8 +2293,8 @@ fn render_spatial_category(
 
                 setting_item(
                     ui,
-                    "RT60 Decay Time",
-                    "Time required for acoustic reflections to decay by 60 dB",
+                    &tr!("RT60 Decay Time"),
+                    &tr!("Time required for acoustic reflections to decay by 60 dB"),
                     theme,
                     |ui| {
                         let mut v = state.room_rt60_ms;
@@ -2251,11 +2308,11 @@ fn render_spatial_category(
 
                 setting_item(
                     ui,
-                    "Room Dimensions (W x D x H)",
-                    "Physical space modeling in meters",
+                    &tr!("Room Dimensions (W x D x H)"),
+                    &tr!("Physical space modeling in meters"),
                     theme,
                     |ui| {
-                        ui.label("W:");
+                        ui.label(tr!(Msg::S09380C07B5C97BE4));
                         let mut w = state.room_width;
                         if ui
                             .add(
@@ -2269,7 +2326,7 @@ fn render_spatial_category(
                             state.room_width = w;
                             actions.spatial_room_changed = true;
                         }
-                        ui.label("D:");
+                        ui.label(tr!(Msg::S08FE8607B598D2EB));
                         let mut d = state.room_depth;
                         if ui
                             .add(
@@ -2283,7 +2340,7 @@ fn render_spatial_category(
                             state.room_depth = d;
                             actions.spatial_room_changed = true;
                         }
-                        ui.label("H:");
+                        ui.label(tr!(Msg::S09270E07B5BB0C17));
                         let mut h = state.room_height;
                         if ui
                             .add(
@@ -2337,8 +2394,8 @@ fn render_chain_presets_card(
         card_header(
             ui,
             crate::components::icons::draw_headphones,
-            "Chain Presets",
-            "Save the entire signal path — equalizer, tone, dynamics, filters and the mix bus — as one named profile",
+            &tr!("Chain Presets"),
+            &tr!("Save the entire signal path — equalizer, tone, dynamics, filters and the mix bus — as one named profile"),
             None,
             theme,
         );
@@ -2346,26 +2403,26 @@ fn render_chain_presets_card(
         // ── Capture the current chain ──────────────────────────────
         setting_item(
             ui,
-            "Save Current Chain",
-            "Stores everything currently engaged. A note is handy for headphone or room profiles.",
+            &tr!("Save Current Chain"),
+            &tr!("Stores everything currently engaged. A note is handy for headphone or room profiles."),
             theme,
             |ui| {
                 ui.add(
                     egui::TextEdit::singleline(chain_preset_draft_name)
-                        .hint_text("Profile name...")
+                        .hint_text(tr!(Msg::S5E942739B58DDBD5))
                         .desired_width(136.0)
                         .font(crate::theme::font(12.0)),
                 );
                 ui.add(
                     egui::TextEdit::singleline(chain_preset_draft_note)
-                        .hint_text("Note (optional)...")
+                        .hint_text(tr!(Msg::SF2F7DEFA2BD873BE))
                         .desired_width(150.0)
                         .font(crate::theme::font(12.0)),
                 );
                 let can_save = !chain_preset_draft_name.trim().is_empty();
                 if ui
-                    .add_enabled(can_save, pill_btn("Save Chain", false, theme))
-                    .on_hover_text("Saving an existing name overwrites that profile")
+                    .add_enabled(can_save, pill_btn(tr!(Msg::S2517FA31F3933B41), false, theme))
+                    .on_hover_text(tr!(Msg::SE1530F77DBF9F4E0))
                     .clicked()
                 {
                     actions.chain_preset_save = Some(chain_preset_draft_name.trim().to_string());
@@ -2378,7 +2435,7 @@ fn render_chain_presets_card(
         if chain_presets.is_empty() {
             ui.label(
                 egui::RichText::new(
-                    "No chain presets yet. Dial in a curve, a crossfeed stage or a crossover, then save it above.",
+                    tr!("No chain presets yet. Dial in a curve, a crossfeed stage or a crossover, then save it above."),
                 )
                 .font(crate::theme::font(11.5))
                 .color(theme.text_dim),
@@ -2419,15 +2476,21 @@ fn render_chain_presets_card(
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(pill_btn("Delete", false, theme)).clicked() {
+                    if ui
+                        .add(pill_btn(tr!(Msg::SDC673E73B5C13AEA), false, theme))
+                        .clicked()
+                    {
                         delete = Some(idx);
                     }
-                    if ui.add(pill_btn("Rename", false, theme)).clicked() {
+                    if ui
+                        .add(pill_btn(tr!(Msg::S60320A18282B2B33), false, theme))
+                        .clicked()
+                    {
                         start_rename = Some(idx);
                     }
                     if ui
-                        .add(pill_btn("Apply", false, theme))
-                        .on_hover_text("Replaces the current chain with this profile")
+                        .add(pill_btn(tr!(Msg::SB8F855B49234B81B), false, theme))
+                        .on_hover_text(tr!(Msg::SAA1012D5FD87698A))
                         .clicked()
                     {
                         apply = Some(idx);
@@ -2440,18 +2503,24 @@ fn render_chain_presets_card(
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(chain_preset_rename_buffer)
-                            .hint_text("New name...")
+                            .hint_text(tr!(Msg::S383F5447E03936AE))
                             .desired_width(180.0)
                             .font(crate::theme::font(12.0)),
                     );
                     let can_commit = !chain_preset_rename_buffer.trim().is_empty();
                     if ui
-                        .add_enabled(can_commit, pill_btn("Save", false, theme))
+                        .add_enabled(
+                            can_commit,
+                            pill_btn(tr!(Msg::S33F85F24C0F5F008), false, theme),
+                        )
                         .clicked()
                     {
                         commit_rename = Some((idx, chain_preset_rename_buffer.trim().to_string()));
                     }
-                    if ui.add(pill_btn("Cancel", false, theme)).clicked() {
+                    if ui
+                        .add(pill_btn(tr!(Msg::S2CEB11BE2290BB1B), false, theme))
+                        .clicked()
+                    {
                         cancel_rename = true;
                     }
                 });
@@ -2505,24 +2574,28 @@ fn render_mixbus_category(
         card_header(
             ui,
             crate::components::icons::draw_equalizer_sliders,
-            "Multitrack Lane Mixer",
-            "Adjust individual input tracks, gain attenuation, stereo panning, and mute states",
+            &tr!("Multitrack Lane Mixer"),
+            &tr!(
+                "Adjust individual input tracks, gain attenuation, stereo panning, and mute states"
+            ),
             None,
             theme,
         );
 
         setting_item(
             ui,
-            "Add Audio Source File",
-            "Ingest secondary stems, reference tracks, or voice commentary channels",
+            &tr!("Add Audio Source File"),
+            &tr!("Ingest secondary stems, reference tracks, or voice commentary channels"),
             theme,
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.add_track_path)
-                    .hint_text("Absolute path to audio stem...")
+                    .hint_text(tr!(Msg::S55955311908B0E1F))
                     .desired_width(180.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
-                if ui.add(pill_btn("+ Add Stem", false, theme)).clicked()
+                if ui
+                    .add(pill_btn(tr!(Msg::S3C92D2852EC673DE), false, theme))
+                    .clicked()
                     && !state.add_track_path.is_empty()
                 {
                     actions.add_track =
@@ -2533,8 +2606,8 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "Active Channel Slot",
-            "Select mixer channel strip to control",
+            &tr!("Active Channel Slot"),
+            &tr!("Select mixer channel strip to control"),
             theme,
             |ui| {
                 let mut slot = state.track_slot as f32;
@@ -2549,7 +2622,10 @@ fn render_mixbus_category(
                     state.track_slot = slot as u8;
                 }
                 badge_label(ui, format!("Slot #{}", state.track_slot), theme);
-                if ui.add(pill_btn("Remove Slot", false, theme)).clicked() {
+                if ui
+                    .add(pill_btn(tr!(Msg::SB4BA4B46A7C22BDB), false, theme))
+                    .clicked()
+                {
                     actions.remove_track = Some(state.track_slot);
                 }
             },
@@ -2557,11 +2633,11 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "Channel Gain & Pan",
-            "Fine-tune channel volume level and stereo pan balance",
+            &tr!("Channel Gain & Pan"),
+            &tr!("Fine-tune channel volume level and stereo pan balance"),
             theme,
             |ui| {
-                ui.label("Gain:");
+                ui.label(tr!(Msg::S05EEC723A5F2B92C));
                 let mut g = state.track_gain;
                 if dual_tone_slider(ui, &mut g, 0.0..=2.0, 0.01, 0.0, theme) {
                     state.track_gain = g;
@@ -2569,7 +2645,7 @@ fn render_mixbus_category(
                 }
                 badge_label(ui, format!("{:.2}x", state.track_gain), theme);
 
-                ui.label("Pan:");
+                ui.label(tr!(Msg::S2DFAE419ECFC86C2));
                 let mut p = state.track_pan;
                 if dual_tone_slider(ui, &mut p, -1.0..=1.0, 0.02, 0.0, theme) {
                     state.track_pan = p;
@@ -2581,8 +2657,8 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "Channel Status",
-            "Mute and active playback enable state",
+            &tr!("Channel Status"),
+            &tr!("Mute and active playback enable state"),
             theme,
             |ui| {
                 let mut m = state.track_muted;
@@ -2604,16 +2680,16 @@ fn render_mixbus_category(
         card_header(
             ui,
             crate::components::icons::draw_trending_up,
-            "Sidechain Ducking Compressor",
-            "Automatically reduces background music level when voice or commentary channel speaks",
+            &tr!("Sidechain Ducking Compressor"),
+            &tr!("Automatically reduces background music level when voice or commentary channel speaks"),
             None,
             theme,
         );
 
         setting_item(
             ui,
-            "Trigger Source Slot",
-            "Mixer channel monitored to trigger ducking attenuation",
+            &tr!("Trigger Source Slot"),
+            &tr!("Mixer channel monitored to trigger ducking attenuation"),
             theme,
             |ui| {
                 let mut slot = state.duck_source_slot as f32;
@@ -2633,12 +2709,12 @@ fn render_mixbus_category(
 
         setting_item_with_info(
             ui,
-            "Threshold & Depth",
-            "Level that activates ducking (dB) and total volume reduction depth (dB)",
+            &tr!("Threshold & Depth"),
+            &tr!("Level that activates ducking (dB) and total volume reduction depth (dB)"),
             Some(&crate::components::info_box::INFO_DUCKING),
             theme,
             |ui| {
-                ui.label("Threshold:");
+                ui.label(tr!(Msg::SC4B836D6B794CF46));
                 let mut t = state.duck_threshold_db;
                 if ui
                     .add(
@@ -2652,7 +2728,7 @@ fn render_mixbus_category(
                 {
                     state.duck_threshold_db = t;
                 }
-                ui.label("Depth:");
+                ui.label(tr!(Msg::S2DB356921ECFD550));
                 let mut d = state.duck_depth_db;
                 if ui
                     .add(
@@ -2671,11 +2747,11 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "Attack & Release Envelope",
-            "Reaction speed (ms) and recovery return time (ms)",
+            &tr!("Attack & Release Envelope"),
+            &tr!("Reaction speed (ms) and recovery return time (ms)"),
             theme,
             |ui| {
-                ui.label("Attack:");
+                ui.label(tr!(Msg::SAB0AFE53776CF2E5));
                 let mut a = state.duck_attack_ms;
                 if ui
                     .add(
@@ -2689,7 +2765,7 @@ fn render_mixbus_category(
                 {
                     state.duck_attack_ms = a;
                 }
-                ui.label("Release:");
+                ui.label(tr!(Msg::SBE02DA81DAB96BEC));
                 let mut r = state.duck_release_ms;
                 if ui
                     .add(
@@ -2704,7 +2780,7 @@ fn render_mixbus_category(
                     state.duck_release_ms = r;
                 }
                 if ui
-                    .add(pill_btn("Apply Ducking Matrix", false, theme))
+                    .add(pill_btn(tr!(Msg::S63C434143EE5AFE5), false, theme))
                     .clicked()
                 {
                     actions.duck_tracks = true;
@@ -2718,16 +2794,16 @@ fn render_mixbus_category(
         card_header(
             ui,
             crate::components::icons::draw_bar_chart,
-            "Auxiliary Bus & Psychoacoustic Enhancer",
-            "Stereo soundstage widening algorithm and parallel auxiliary return loop",
+            &tr!("Auxiliary Bus & Psychoacoustic Enhancer"),
+            &tr!("Stereo soundstage widening algorithm and parallel auxiliary return loop"),
             None,
             theme,
         );
 
         setting_item_with_info(
             ui,
-            "Stereo Field Enhancer",
-            "Mid-side psychoacoustic stereo image width expander",
+            &tr!("Stereo Field Enhancer"),
+            &tr!("Mid-side psychoacoustic stereo image width expander"),
             Some(&crate::components::info_box::INFO_STEREO_WIDTH),
             theme,
             |ui| {
@@ -2741,8 +2817,8 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "Auxiliary Return Bus",
-            "Enable parallel effects return loop with dedicated return gain",
+            &tr!("Auxiliary Return Bus"),
+            &tr!("Enable parallel effects return loop with dedicated return gain"),
             theme,
             |ui| {
                 let mut on = state.aux_enabled;
@@ -2751,7 +2827,7 @@ fn render_mixbus_category(
                     actions.aux_changed = true;
                 }
                 if state.aux_enabled {
-                    ui.label("Return Gain:");
+                    ui.label(tr!(Msg::S5C6D692771336A94));
                     let mut v = state.aux_return_gain;
                     if dual_tone_slider(ui, &mut v, 0.0..=2.0, 0.01, 0.0, theme) {
                         state.aux_return_gain = v;
@@ -2768,8 +2844,8 @@ fn render_mixbus_category(
         card_header(
             ui,
             crate::components::icons::draw_equalizer_sliders,
-            "Bass Management & Subwoofer Integration",
-            "Route low frequencies to a subwoofer with a proper crossover instead of relying on speaker roll-off",
+            &tr!("Bass Management & Subwoofer Integration"),
+            &tr!("Route low frequencies to a subwoofer with a proper crossover instead of relying on speaker roll-off"),
             None,
             theme,
         );
@@ -2778,8 +2854,8 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "Bass Management",
-            "Enable a high-pass on the mains plus a matching low-pass for the subwoofer",
+            &tr!("Bass Management"),
+            &tr!("Enable a high-pass on the mains plus a matching low-pass for the subwoofer"),
             theme,
             |ui| {
                 let mut on = state.bass_management.enabled;
@@ -2793,8 +2869,8 @@ fn render_mixbus_category(
         if state.bass_management.enabled {
             setting_item(
                 ui,
-                "Crossover Frequency",
-                "Hand-off point between mains and subwoofer (60–120 Hz is the usual home-theatre range)",
+                &tr!("Crossover Frequency"),
+                &tr!("Hand-off point between mains and subwoofer (60–120 Hz is the usual home-theatre range)"),
                 theme,
                 |ui| {
                     let mut v = state.bass_management.crossover_hz;
@@ -2808,8 +2884,8 @@ fn render_mixbus_category(
 
             setting_item(
                 ui,
-                "Crossover Slope",
-                "Steeper slopes protect the mains but add group delay",
+                &tr!("Crossover Slope"),
+                &tr!("Steeper slopes protect the mains but add group delay"),
                 theme,
                 |ui| {
                     let options = [
@@ -2825,8 +2901,8 @@ fn render_mixbus_category(
 
             setting_item(
                 ui,
-                "Filter Topology",
-                "Linkwitz-Riley sums flat at the crossover; Butterworth is −3 dB there",
+                &tr!("Filter Topology"),
+                &tr!("Linkwitz-Riley sums flat at the crossover; Butterworth is −3 dB there"),
                 theme,
                 |ui| {
                     let options = [
@@ -2841,8 +2917,8 @@ fn render_mixbus_category(
 
             setting_item(
                 ui,
-                "Filter Q",
-                "1/√2 ≈ 0.707 is the Butterworth default",
+                &tr!("Filter Q"),
+                &tr!("1/√2 ≈ 0.707 is the Butterworth default"),
                 theme,
                 |ui| {
                     let mut v = state.bass_management.q;
@@ -2856,8 +2932,8 @@ fn render_mixbus_category(
 
             setting_item(
                 ui,
-                "Mains High-Pass",
-                "Also high-pass the main speakers. Disable to high-pass only the sub path",
+                &tr!("Mains High-Pass"),
+                &tr!("Also high-pass the main speakers. Disable to high-pass only the sub path"),
                 theme,
                 |ui| {
                     let mut on = state.bass_management.mains_highpass_enabled;
@@ -2870,8 +2946,8 @@ fn render_mixbus_category(
 
             setting_item(
                 ui,
-                "Subwoofer Distance/Delay",
-                "Align the sub's arrival with the mains (0–50 ms; 1 ms ≈ 34 cm)",
+                &tr!("Subwoofer Distance/Delay"),
+                &tr!("Align the sub's arrival with the mains (0–50 ms; 1 ms ≈ 34 cm)"),
                 theme,
                 |ui| {
                     let mut v = state.bass_management.sub_delay_ms;
@@ -2889,8 +2965,8 @@ fn render_mixbus_category(
 
             setting_item(
                 ui,
-                "Subwoofer Phase",
-                "Continuously trim the sub's phase for the smoothest crossover sum",
+                &tr!("Subwoofer Phase"),
+                &tr!("Continuously trim the sub's phase for the smoothest crossover sum"),
                 theme,
                 |ui| {
                     let mut v = state.bass_management.sub_phase_degrees;
@@ -2908,8 +2984,8 @@ fn render_mixbus_category(
 
             setting_item(
                 ui,
-                "Subwoofer Polarity",
-                "Invert the sub's polarity (use instead of, not with, coarse phase)",
+                &tr!("Subwoofer Polarity"),
+                &tr!("Invert the sub's polarity (use instead of, not with, coarse phase)"),
                 theme,
                 |ui| {
                     let mut inv = state.bass_management.sub_polarity_invert;
@@ -2931,8 +3007,8 @@ fn render_mixbus_category(
         card_header(
             ui,
             crate::components::icons::draw_equalizer_sliders,
-            "LFE Channel",
-            "Gain and low-pass for content that already carries a dedicated .1 channel",
+            &tr!("LFE Channel"),
+            &tr!("Gain and low-pass for content that already carries a dedicated .1 channel"),
             None,
             theme,
         );
@@ -2941,8 +3017,8 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "LFE Processing",
-            "Apply gain and an optional low-pass to LFE-role channels",
+            &tr!("LFE Processing"),
+            &tr!("Apply gain and an optional low-pass to LFE-role channels"),
             theme,
             |ui| {
                 let mut on = state.lfe.enabled;
@@ -2956,8 +3032,8 @@ fn render_mixbus_category(
         if state.lfe.enabled {
             setting_item(
                 ui,
-                "LFE Gain",
-                "Trim the .1 channel relative to the other speakers",
+                &tr!("LFE Gain"),
+                &tr!("Trim the .1 channel relative to the other speakers"),
                 theme,
                 |ui| {
                     let mut v = state.lfe.gain_db;
@@ -2973,8 +3049,8 @@ fn render_mixbus_category(
             let mut lp_hz = state.lfe.crossover_hz.unwrap_or(120.0);
             setting_item(
                 ui,
-                "LFE Low-Pass",
-                "Standard LFE content is band-limited to 120 Hz",
+                &tr!("LFE Low-Pass"),
+                &tr!("Standard LFE content is band-limited to 120 Hz"),
                 theme,
                 |ui| {
                     if toggle_switch(ui, &mut lp_on, theme) {
@@ -3005,8 +3081,8 @@ fn render_mixbus_category(
         card_header(
             ui,
             crate::components::icons::draw_equalizer_sliders,
-            "Up / Down Mixing",
-            "Convert between stereo and multichannel with a deterministic, spec-based matrix",
+            &tr!("Up / Down Mixing"),
+            &tr!("Convert between stereo and multichannel with a deterministic, spec-based matrix"),
             None,
             theme,
         );
@@ -3015,8 +3091,8 @@ fn render_mixbus_category(
 
         setting_item(
             ui,
-            "Channel Mapping",
-            "Identity by default; ITU-R BS.775 folds multichannel to stereo and can build 5.1/7.1 from stereo",
+            &tr!("Channel Mapping"),
+            &tr!("Identity by default; ITU-R BS.775 folds multichannel to stereo and can build 5.1/7.1 from stereo"),
             theme,
             |ui| {
                 let mut on = state.channel_mix.enabled;
@@ -3030,8 +3106,8 @@ fn render_mixbus_category(
         if state.channel_mix.enabled {
             setting_item(
                 ui,
-                "Mapping Template",
-                "Choose the up-mix or down-mix matrix applied at the output boundary",
+                &tr!("Mapping Template"),
+                &tr!("Choose the up-mix or down-mix matrix applied at the output boundary"),
                 theme,
                 |ui| {
                     let options = [
@@ -3073,16 +3149,18 @@ fn render_clap_plugin_card(
         card_header(
             ui,
             crate::components::icons::draw_puzzle,
-            "CLAP Plugin Insert",
-            "Host a standard CLAP audio plugin as the master insert, driven from its own rack",
+            &tr!("CLAP Plugin Insert"),
+            &tr!(
+                "Host a standard CLAP audio plugin as the master insert, driven from its own rack"
+            ),
             None,
             theme,
         );
 
         setting_item(
             ui,
-            "Hosted Plugin",
-            "A plugin's own editor is a native window this UI cannot embed, so the rack drives every parameter the plugin publishes instead",
+            &tr!("Hosted Plugin"),
+            &tr!("A plugin's own editor is a native window this UI cannot embed, so the rack drives every parameter the plugin publishes instead"),
             theme,
             |ui| {
                 ui.label(
@@ -3101,20 +3179,27 @@ fn render_clap_plugin_card(
 
         setting_item(
             ui,
-            "Plugin Rack",
-            "Parameters, host bypass, and named presets that capture the plugin's own state",
+            &tr!("Plugin Rack"),
+            &tr!("Parameters, host bypass, and named presets that capture the plugin's own state"),
             theme,
             |ui| {
-                if ui.add(pill_btn("Open Rack…", true, theme)).clicked() {
+                if ui
+                    .add(pill_btn(tr!(Msg::S3C7D232062305680), true, theme))
+                    .clicked()
+                {
                     actions.clap_open_rack = true;
                 }
                 if ui
-                    .add(pill_btn("Choose Plugin File…", false, theme))
+                    .add(pill_btn(tr!(Msg::S6B56819702CBBA69), false, theme))
                     .clicked()
                 {
                     actions.clap_choose_library = true;
                 }
-                if state.clap.loaded && ui.add(pill_btn("Unload", false, theme)).clicked() {
+                if state.clap.loaded
+                    && ui
+                        .add(pill_btn(tr!(Msg::S5D3714BC882DF1B2), false, theme))
+                        .clicked()
+                {
                     actions.clap_unload = true;
                 }
             },
@@ -3147,12 +3232,12 @@ fn render_tools_category(
 
         setting_item(
             ui,
-            "Output Recording Path",
-            "Destination WAV file on local storage",
+            &tr!("Output Recording Path"),
+            &tr!("Destination WAV file on local storage"),
             theme,
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.capture_path)
-                    .hint_text("capture.wav...")
+                    .hint_text(tr!(Msg::S4DB11DCD6DB5E805))
                     .desired_width(180.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
@@ -3161,12 +3246,12 @@ fn render_tools_category(
 
         setting_item(
             ui,
-            "Input / Loopback Device",
-            "Capture endpoint (leave blank for loopback master monitor)",
+            &tr!("Input / Loopback Device"),
+            &tr!("Capture endpoint (leave blank for loopback master monitor)"),
             theme,
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.capture_device)
-                    .hint_text("Default capture endpoint...")
+                    .hint_text(tr!(Msg::S6D98136CAD659CFD))
                     .desired_width(180.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
@@ -3175,14 +3260,14 @@ fn render_tools_category(
 
         setting_item(
             ui,
-            "Recording Controls",
-            "Start or finalize audio recording file",
+            &tr!("Recording Controls"),
+            &tr!("Start or finalize audio recording file"),
             theme,
             |ui| {
                 if ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new("Start Capture")
+                            egui::RichText::new(tr!("Start Capture"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
@@ -3198,7 +3283,7 @@ fn render_tools_category(
                 if ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new("Stop Capture")
+                            egui::RichText::new(tr!("Stop Capture"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
@@ -3219,24 +3304,26 @@ fn render_tools_category(
         card_header(
             ui,
             crate::components::icons::draw_list_icon,
-            "ReplayGain & Loudness Tagging Tool",
-            "Batch analyze audio files and permanently write ID3/FLAC loudness normalization tags",
+            &tr!("ReplayGain & Loudness Tagging Tool"),
+            &tr!("Batch analyze audio files and permanently write ID3/FLAC loudness normalization tags"),
             None,
             theme,
         );
 
         setting_item(
             ui,
-            "Target File Path",
-            "Path to audio file to measure integrated LUFS and inject tags",
+            &tr!("Target File Path"),
+            &tr!("Path to audio file to measure integrated LUFS and inject tags"),
             theme,
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.loudness_tag_path)
-                    .hint_text("/path/to/song.flac…")
+                    .hint_text(tr!("/path/to/song.flac…"))
                     .desired_width(180.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
-                if ui.add(pill_btn("Write Tags", false, theme)).clicked()
+                if ui
+                    .add(pill_btn(tr!(Msg::S7178B1280039227D), false, theme))
+                    .clicked()
                     && !state.loudness_tag_path.is_empty()
                 {
                     actions.write_loudness_tags = Some(state.loudness_tag_path.clone());
@@ -3246,8 +3333,8 @@ fn render_tools_category(
 
         setting_item(
             ui,
-            "Library ReplayGain Scan",
-            "Analyse every track that has no loudness data (EBU R128 + ReplayGain 2.0). Results are cached for playback.",
+            &tr!("Library ReplayGain Scan"),
+            &tr!("Analyse every track that has no loudness data (EBU R128 + ReplayGain 2.0). Results are cached for playback."),
             theme,
             |ui| {
                 if extra.loudness_running {
@@ -3258,7 +3345,7 @@ fn render_tools_category(
                             .desired_width(150.0)
                             .text(format!("{}/{}", extra.loudness_done, extra.loudness_total)),
                     );
-                    if ui.add(pill_btn("Cancel", true, theme)).clicked() {
+                    if ui.add(pill_btn(tr!(Msg::S2CEB11BE2290BB1B), true, theme)).clicked() {
                         actions.cancel_loudness_scan = true;
                     }
                 } else {
@@ -3276,8 +3363,8 @@ fn render_tools_category(
 
         setting_item(
             ui,
-            "Write Tags Into Files",
-            "Also save the measured ReplayGain / EBU R128 values into each file's tags (FLAC, MP3, M4A, WAV …). Off by default — this is the only setting that modifies your audio files; DSD and raw PCM are skipped.",
+            &tr!("Write Tags Into Files"),
+            &tr!("Also save the measured ReplayGain / EBU R128 values into each file's tags (FLAC, MP3, M4A, WAV …). Off by default — this is the only setting that modifies your audio files; DSD and raw PCM are skipped."),
             theme,
             |ui| {
                 toggle_switch(ui, &mut state.loudness_write_tags, theme);
@@ -3298,22 +3385,22 @@ fn render_tools_category(
         card_header(
             ui,
             crate::components::icons::draw_gear,
-            "Audio Engine Stream Recovery",
-            "Re-arm playback queues, drain ringbuffers, and recover from hardware USB/DAC disconnects",
+            &tr!("Audio Engine Stream Recovery"),
+            &tr!("Re-arm playback queues, drain ringbuffers, and recover from hardware USB/DAC disconnects"),
             None,
             theme,
         );
 
         setting_item(
             ui,
-            "Stream Recovery",
-            "Force re-initializes output pipeline without restarting ShadowPlayer",
+            &tr!("Stream Recovery"),
+            &tr!("Force re-initializes output pipeline without restarting ShadowPlayer"),
             theme,
             |ui| {
                 if ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new("Recover Stream & Re-arm")
+                            egui::RichText::new(tr!("Recover Stream & Re-arm"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(Color32::WHITE),
@@ -3334,8 +3421,8 @@ fn render_tools_category(
         card_header(
             ui,
             crate::components::icons::draw_gear,
-            "Runtime Diagnostics",
-            "Live figures measured by the audio engine's output path",
+            &tr!("Runtime Diagnostics"),
+            &tr!("Live figures measured by the audio engine's output path"),
             None,
             theme,
         );
@@ -3354,8 +3441,8 @@ fn render_tools_category(
 
         setting_item(
             ui,
-            "DSP Graph Rebuilds",
-            "Mean cost of rebuilding the processing graph (codec, sample-rate or routing change)",
+            &tr!("DSP Graph Rebuilds"),
+            &tr!("Mean cost of rebuilding the processing graph (codec, sample-rate or routing change)"),
             theme,
             |ui| {
                 badge_label(
@@ -3382,13 +3469,104 @@ fn render_library_category(
     extra: &SettingsExtraContext<'_>,
     actions: &mut SettingsTabActions,
 ) {
-    // Card 1: Theme & Visual Aesthetics
+    // Card 1: Interface & Language
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_logo,
+            &tr!("Interface & Language"),
+            &tr!("The language the interface speaks; the system locale decides when unset"),
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            &tr!("Language"),
+            &tr!("Follow the system locale, or choose a language explicitly"),
+            theme,
+            |ui| {
+                let current = extra.locale;
+                egui::ComboBox::from_id_salt("settings_language")
+                    .selected_text(language_label(current))
+                    .show_ui(ui, |ui| {
+                        for (code, name) in [
+                            ("", tr!("Auto (system)").as_str()),
+                            ("en", "English"),
+                            ("de", "Deutsch"),
+                        ] {
+                            if ui.selectable_label(current == code, name).clicked() {
+                                actions.locale_changed = Some(code.to_string());
+                            }
+                        }
+                    });
+            },
+        );
+    });
+
+    // Card 2: Smart Playlists
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_list_icon,
+            &tr!("Smart Playlists"),
+            &tr!("When the saved queries over your library are run again"),
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            &tr!("Smart Playlist Refresh"),
+            &tr!("Re-evaluate the saved queries after every scan, on a timer, or only on request"),
+            theme,
+            |ui| {
+                let policy = state.smart_refresh.policy;
+                egui::ComboBox::from_id_salt("settings_smart_refresh")
+                    .selected_text(policy.label())
+                    .show_ui(ui, |ui| {
+                        for option in domain::smart::SmartRefreshPolicy::ALL {
+                            if ui
+                                .selectable_label(policy == option, option.label())
+                                .on_hover_text(option.description())
+                                .clicked()
+                            {
+                                state.smart_refresh.policy = option;
+                            }
+                        }
+                    });
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Refresh Interval"),
+            &tr!("How many minutes pass between two refreshes under the timer policy"),
+            theme,
+            |ui| {
+                let mut minutes = state.smart_refresh.interval_minutes as f32;
+                let enabled =
+                    state.smart_refresh.policy == domain::smart::SmartRefreshPolicy::Interval;
+                let response = ui.add_enabled(
+                    enabled,
+                    egui::Slider::new(&mut minutes, 1.0..=120.0)
+                        .suffix(" min")
+                        .step_by(1.0),
+                );
+                if enabled && response.changed() {
+                    state.smart_refresh.interval_minutes = minutes.round() as u32;
+                }
+            },
+        );
+    });
+
+    // Card 3: Theme & Visual Aesthetics
     setting_card(ui, theme, |ui| {
         card_header(
             ui,
             crate::components::icons::draw_moon,
-            "Theme & Visual Aesthetics",
-            "Obsidian surfaces, jade highlights, and typography for the player shell",
+            &tr!("Theme & Visual Aesthetics"),
+            &tr!("Obsidian surfaces, jade highlights, and typography for the player shell"),
             Some((
                 if extra.is_dark_theme {
                     "OBSIDIAN"
@@ -3403,8 +3581,8 @@ fn render_library_category(
 
         setting_item(
             ui,
-            "Theme Palette",
-            "Switch between Obsidian dark and Jade light mode",
+            &tr!("Theme Palette"),
+            &tr!("Switch between Obsidian dark and Jade light mode"),
             theme,
             |ui| {
                 let lbl = if extra.is_dark_theme {
@@ -3433,8 +3611,8 @@ fn render_library_category(
 
         setting_item(
             ui,
-            "Signature Palette",
-            "Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)",
+            &tr!("Signature Palette"),
+            &tr!("Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)"),
             theme,
             |ui| {
                 color_dot(ui, theme.accent, "Jade");
@@ -3445,13 +3623,13 @@ fn render_library_category(
         );
     });
 
-    // Card 2: Music Library & Monitored Directories
+    // Card 4: Music Library & Monitored Directories
     setting_card(ui, theme, |ui| {
         card_header(
             ui,
             crate::components::icons::draw_folder,
-            "Music Library Storage & Directories",
-            "Manage monitored folders and scan for new audio files, albums, and embedded artwork",
+            &tr!("Music Library Storage & Directories"),
+            &tr!("Manage monitored folders and scan for new audio files, albums, and embedded artwork"),
             Some((
                 if extra.is_scanning {
                     "SCANNING..."
@@ -3474,8 +3652,8 @@ fn render_library_category(
 
         setting_item(
             ui,
-            "Cataloged Tracks",
-            "Indexed audio files in local SQLite library database",
+            &tr!("Cataloged Tracks"),
+            &tr!("Indexed audio files in local SQLite library database"),
             theme,
             |ui| {
                 badge_label(ui, format!("{} tracks indexed", extra.track_count), theme);
@@ -3484,26 +3662,35 @@ fn render_library_category(
 
         setting_item(
             ui,
-            "Import Music",
-            "Use the system file picker to add songs or whole folders to the library",
+            &tr!("Import Music"),
+            &tr!("Use the system file picker to add songs or whole folders to the library"),
             theme,
             |ui| {
                 ui.add_enabled_ui(!extra.import_active, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
 
-                        if ui.add(pill_btn("Import Songs…", true, theme)).clicked() {
+                        if ui
+                            .add(pill_btn(tr!(Msg::S3D973E682A0E8DCA), true, theme))
+                            .clicked()
+                        {
                             actions.import_files = true;
                         }
-                        if ui.add(pill_btn("Import Folder…", false, theme)).clicked() {
+                        if ui
+                            .add(pill_btn(tr!(Msg::SA26A7865D8B6F054), false, theme))
+                            .clicked()
+                        {
                             actions.import_folder = true;
                         }
-                        if ui.add(pill_btn("Open M3U…", false, theme)).clicked() {
+                        if ui
+                            .add(pill_btn(tr!(Msg::S927FD885EC2CFC42), false, theme))
+                            .clicked()
+                        {
                             actions.import_playlist = true;
                         }
                         if extra.import_active {
                             ui.label(
-                                egui::RichText::new("waiting for file picker…")
+                                egui::RichText::new(tr!("waiting for file picker…"))
                                     .font(crate::theme::font(11.5))
                                     .color(theme.text_muted),
                             );
@@ -3515,11 +3702,11 @@ fn render_library_category(
 
         setting_item(
             ui,
-            "Find Duplicate Tracks",
-            "Group tracks with identical audio content (matched by fingerprint, not tags) and remove the extra copies",
+            &tr!("Find Duplicate Tracks"),
+            &tr!("Group tracks with identical audio content (matched by fingerprint, not tags) and remove the extra copies"),
             theme,
             |ui| {
-                if ui.add(pill_btn("Find Duplicates…", false, theme)).clicked() {
+                if ui.add(pill_btn(tr!(Msg::SCD03664EB9D51130), false, theme)).clicked() {
                     actions.find_duplicates = true;
                 }
             },
@@ -3527,16 +3714,18 @@ fn render_library_category(
 
         setting_item(
             ui,
-            "Or Type a Directory",
-            "Advanced: index a folder by typing its absolute path",
+            &tr!("Or Type a Directory"),
+            &tr!("Advanced: index a folder by typing its absolute path"),
             theme,
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.new_scan_path)
-                    .hint_text("/home/user/Music...")
+                    .hint_text(tr!("/home/user/Music..."))
                     .desired_width(200.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
-                if ui.add(pill_btn("+ Add & Scan", false, theme)).clicked()
+                if ui
+                    .add(pill_btn(tr!(Msg::S58F5A4DBDD4BD584), false, theme))
+                    .clicked()
                     && !state.new_scan_path.is_empty()
                 {
                     let path = PathBuf::from(state.new_scan_path.trim());
@@ -3551,7 +3740,7 @@ fn render_library_category(
         if !extra.imported_dirs.is_empty() {
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("Imported File Locations:")
+                egui::RichText::new(tr!("Imported File Locations:"))
                     .font(crate::theme::font(12.0))
                     .strong()
                     .color(theme.text_secondary),
@@ -3574,7 +3763,7 @@ fn render_library_category(
         if !extra.scan_roots.is_empty() {
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("Monitored Music Folders:")
+                egui::RichText::new(tr!("Monitored Music Folders:"))
                     .font(crate::theme::font(12.0))
                     .strong()
                     .color(theme.text_secondary),
@@ -3594,10 +3783,16 @@ fn render_library_category(
 
                     let path_clone = root.path.clone();
                     let id_clone = root.id;
-                    if ui.add(pill_btn("Rescan", false, theme)).clicked() {
+                    if ui
+                        .add(pill_btn(tr!(Msg::S0095E23ABF1B93A9), false, theme))
+                        .clicked()
+                    {
                         actions.trigger_scan = Some(path_clone);
                     }
-                    if ui.add(pill_btn("Remove", false, theme)).clicked() {
+                    if ui
+                        .add(pill_btn(tr!(Msg::SEA4F08110BB8F15D), false, theme))
+                        .clicked()
+                    {
                         actions.remove_scan_root = Some(id_clone);
                     }
                 });
@@ -3605,45 +3800,45 @@ fn render_library_category(
         }
     });
 
-    // Card 3: Organize Files
+    // Card 5: Organize Files
     setting_card(ui, theme, |ui| {
         card_header(
             ui,
             crate::components::icons::draw_list_icon,
-            "Organize Files",
-            "Rename and re-sort files on disk to a naming scheme, with a full preview before anything moves",
+            &tr!("Organize Files"),
+            &tr!("Rename and re-sort files on disk to a naming scheme, with a full preview before anything moves"),
             None,
             theme,
         );
 
         setting_item(
             ui,
-            "Batch Rename & Sort",
-            "Build names from tags — e.g. {artist}/{album}/{track} - {title}. Existing files are never overwritten.",
+            &tr!("Batch Rename & Sort"),
+            &tr!("Build names from tags — e.g. {artist}/{album}/{track} - {title}. Existing files are never overwritten."),
             theme,
             |ui| {
-                if ui.add(pill_btn("Organize Files...", false, theme)).clicked() {
+                if ui.add(pill_btn(tr!(Msg::S8E7A2EB1BB92D5DF), false, theme)).clicked() {
                     state.request_organize = true;
                 }
             },
         );
     });
 
-    // Card 4: Application Instances
+    // Card 6: Application Instances
     setting_card(ui, theme, |ui| {
         card_header(
             ui,
             crate::components::icons::draw_puzzle,
-            "Application Instances",
-            "How a second launch behaves while this window is open",
+            &tr!("Application Instances"),
+            &tr!("How a second launch behaves while this window is open"),
             None,
             theme,
         );
 
         setting_item(
             ui,
-            "Allow multiple instances",
-            "Off (default): a second launch brings this window forward and exits. On: it opens another window; the SQLite library is WAL-mode, so concurrent windows are safe. Takes effect next launch.",
+            &tr!("Allow multiple instances"),
+            &tr!("Off (default): a second launch brings this window forward and exits. On: it opens another window; the SQLite library is WAL-mode, so concurrent windows are safe. Takes effect next launch."),
             theme,
             |ui| {
                 toggle_switch(ui, &mut state.allow_multiple_instances, theme);
@@ -3651,13 +3846,13 @@ fn render_library_category(
         );
     });
 
-    // Card 5: About ShadowPlayer
+    // Card 7: About ShadowPlayer
     setting_card(ui, theme, |ui| {
         card_header(
             ui,
             crate::components::icons::draw_logo,
-            "About ShadowPlayer",
-            "Audiophile Local Desktop Music Player",
+            &tr!("About ShadowPlayer"),
+            &tr!("Audiophile Local Desktop Music Player"),
             Some((
                 concat!("v", env!("CARGO_PKG_VERSION")),
                 theme.bg_pill,
@@ -3683,15 +3878,15 @@ fn render_library_category(
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
                 ui.label(
-                    egui::RichText::new("ShadowPlayer")
+                    egui::RichText::new(tr!("ShadowPlayer"))
                         .font(crate::theme::font(15.0))
                         .strong()
                         .color(theme.text_primary),
                 );
                 ui.label(
-                    egui::RichText::new(
-                        "Music for a better you - Audiophile Local Desktop Music Player",
-                    )
+                    egui::RichText::new(tr!(
+                        "Music for a better you - Audiophile Local Desktop Music Player"
+                    ))
                     .font(crate::theme::font(12.0))
                     .color(theme.text_secondary),
                 );
@@ -3985,9 +4180,9 @@ pub fn segment_picker<T: Clone + PartialEq>(
     changed
 }
 
-fn pill_btn(label: &str, selected: bool, theme: &Theme) -> egui::Button<'static> {
+fn pill_btn(label: impl Into<String>, selected: bool, theme: &Theme) -> egui::Button<'static> {
     egui::Button::new(
-        egui::RichText::new(label.to_owned())
+        egui::RichText::new(label.into())
             .font(crate::theme::font(11.5))
             .color(if selected {
                 Color32::WHITE
@@ -4061,6 +4256,19 @@ fn color_dot(ui: &mut egui::Ui, color: Color32, tooltip: &str) {
     resp.on_hover_text(tooltip);
 }
 
+/// The name of a language choice, in the language it names.
+///
+/// A language picker shows every language in its own language: a reader who
+/// does not know the current one still finds theirs.
+fn language_label(preference: &str) -> String {
+    match preference {
+        "" => tr!("Auto (system)"),
+        "en" => "English".to_string(),
+        "de" => "Deutsch".to_string(),
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod search_tests {
     use super::*;
@@ -4103,6 +4311,23 @@ mod search_tests {
         None
     }
 
+    /// Parse the label of a settings row.
+    ///
+    /// The label is either a plain literal or a translated one: the copy is
+    /// in the catalogue, so the render says `&tr!("Label")` while the index
+    /// still keys on the English text. Both spellings name the same row, and
+    /// the drift test must see through the translation to prove that.
+    fn row_label_literal(text: &str) -> Option<(String, usize)> {
+        let mut rest = text.trim_start();
+        if let Some(stripped) = rest.strip_prefix('&') {
+            rest = stripped.trim_start();
+        }
+        if let Some(stripped) = rest.strip_prefix("tr!(") {
+            return string_literal(stripped.trim_start());
+        }
+        string_literal(rest)
+    }
+
     /// Every `setting_item(ui, "Label", ...)` call and its byte offset.
     ///
     /// A call whose first argument is not `ui` followed by a string literal is
@@ -4119,7 +4344,7 @@ mod search_tests {
                 let rest = rest.trim_start();
                 let rest = rest.strip_prefix(',').unwrap_or("");
                 let rest = rest.trim_start();
-                if let Some((label, _)) = string_literal(rest) {
+                if let Some((label, _)) = row_label_literal(rest) {
                     rows.push((start, label));
                 }
                 from = after;

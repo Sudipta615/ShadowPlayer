@@ -46,7 +46,7 @@ impl<'a> ArtistsView<'a> {
                 ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 
                 let back_btn = egui::Button::new(
-                    egui::RichText::new("‹ Back to Artists")
+                    egui::RichText::new(tr!("‹ Back to Artists"))
                         .font(crate::theme::font(13.5))
                         .color(self.theme.accent_highlight),
                 )
@@ -90,7 +90,7 @@ impl<'a> ArtistsView<'a> {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xs);
                         ui.label(
-                            egui::RichText::new("ARTIST")
+                            egui::RichText::new(tr!("ARTIST"))
                                 .font(crate::theme::font(11.0))
                                 .strong()
                                 .color(self.theme.accent_highlight),
@@ -110,7 +110,7 @@ impl<'a> ArtistsView<'a> {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let play_all_btn = egui::Button::new(
-                                egui::RichText::new("Play All")
+                                egui::RichText::new(tr!("Play All"))
                                     .font(crate::theme::font(12.5))
                                     .color(Color32::WHITE),
                             )
@@ -122,7 +122,7 @@ impl<'a> ArtistsView<'a> {
                             }
 
                             let queue_all_btn = egui::Button::new(
-                                egui::RichText::new("Queue All")
+                                egui::RichText::new(tr!("Queue All"))
                                     .font(crate::theme::font(12.5))
                                     .color(self.theme.text_primary),
                             )
@@ -268,7 +268,7 @@ impl<'a> ArtistsView<'a> {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
                 ui.label(
-                    egui::RichText::new("Artists")
+                    egui::RichText::new(tr!("Artists"))
                         .font(crate::theme::font(24.0))
                         .strong()
                         .color(self.theme.text_primary),
@@ -286,7 +286,7 @@ impl<'a> ArtistsView<'a> {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
                     ui.label(
-                        egui::RichText::new("No artists found in library")
+                        egui::RichText::new(tr!("No artists found in library"))
                             .font(crate::theme::font(15.0))
                             .color(self.theme.text_muted),
                     );

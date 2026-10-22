@@ -167,7 +167,7 @@ impl<'a> NowPlayingCard<'a> {
                     ui.horizontal(|ui| {
                         if !dense {
                             ui.label(
-                                egui::RichText::new("NOW PLAYING")
+                                egui::RichText::new(tr!("NOW PLAYING"))
                                     .font(crate::theme::font(11.0))
                                     .strong()
                                     .color(self.theme.text_muted),
@@ -194,7 +194,7 @@ impl<'a> NowPlayingCard<'a> {
                                 )
                             });
                             if menu_resp
-                                .on_hover_text("Track Details & Properties")
+                                .on_hover_text(tr!(Msg::S12AFDC22AEAD3E05))
                                 .clicked()
                             {
                                 events.open_properties = true;
@@ -477,7 +477,7 @@ impl<'a> NowPlayingCard<'a> {
                                 prev_rect,
                                 self.theme.text_primary,
                             );
-                            let _ = prev_resp.clone().on_hover_text("Previous track");
+                            let _ = prev_resp.clone().on_hover_text(tr!(Msg::S9C2CFDED8ECFF47F));
                             prev_resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::Role::Button,
@@ -563,7 +563,7 @@ impl<'a> NowPlayingCard<'a> {
                                 next_rect,
                                 self.theme.text_primary,
                             );
-                            let _ = next_resp.clone().on_hover_text("Next track");
+                            let _ = next_resp.clone().on_hover_text(tr!(Msg::SDC4932D8AABB325F));
                             next_resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(egui::Role::Button, true, "Next track")
                             });
@@ -654,7 +654,7 @@ impl<'a> NowPlayingCard<'a> {
                                         )
                                     });
                                     if eq_resp
-                                        .on_hover_text("Equalizer & Audio DSP Studio (Ctrl+E)")
+                                        .on_hover_text(tr!(Msg::SC6F366A8CAC51316))
                                         .clicked()
                                     {
                                         events.open_eq_panel = true;
@@ -682,7 +682,7 @@ impl<'a> NowPlayingCard<'a> {
                                         )
                                     });
                                     let _ = ld_resp.clone().on_hover_text(
-                                        "Loudness inspector — how loud this track is",
+                                        tr!(Msg::SAE6D928B2036843C),
                                     );
                                     if ld_resp.clicked() {
                                         events.open_loudness = true;
@@ -735,7 +735,7 @@ impl<'a> NowPlayingCard<'a> {
                                                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                                                     ui.set_min_width(170.0);
                                                     ui.label(
-                                                        egui::RichText::new("Sleep Timer")
+                                                        egui::RichText::new(tr!("Sleep Timer"))
                                                             .strong()
                                                             .color(self.theme.text_primary),
                                                     );
@@ -765,13 +765,13 @@ impl<'a> NowPlayingCard<'a> {
                                                             close = true;
                                                         }
                                                     }
-                                                    if ui.button("End of current track").clicked() {
+                                                    if ui.button(tr!(Msg::S3063E1ABD1649A75)).clicked() {
                                                         events.sleep_timer_request =
                                                             Some(SleepTimerRequest::EndOfTrack);
                                                         close = true;
                                                     }
                                                     if timer_active
-                                                        && ui.button("Turn off timer").clicked()
+                                                        && ui.button(tr!(Msg::SA8495B8E4DE244CE)).clicked()
                                                     {
                                                         events.sleep_timer_request =
                                                             Some(SleepTimerRequest::Off);

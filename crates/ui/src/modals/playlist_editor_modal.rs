@@ -109,15 +109,15 @@ pub fn show_playlist_editor(
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                     ui.label(
-                        egui::RichText::new("Playlist Studio")
+                        egui::RichText::new(tr!("Playlist Studio"))
                             .font(crate::theme::font(16.0))
                             .strong()
                             .color(theme.text_primary),
                     );
                     ui.label(
-                        egui::RichText::new(
-                            "Create custom playlists and curate tracks from your library",
-                        )
+                        egui::RichText::new(tr!(
+                            "Create custom playlists and curate tracks from your library"
+                        ))
                         .font(crate::theme::font(11.5))
                         .color(theme.text_muted),
                     );
@@ -148,9 +148,7 @@ pub fn show_playlist_editor(
 
                     let edit = egui::TextEdit::singleline(&mut state.new_name)
                         .id(new_name_field_id)
-                        .hint_text(
-                            "Enter new playlist name (e.g. Audiophile Favorites, Late Night)...",
-                        )
+                        .hint_text(tr!(Msg::S7C540AFDFC449122))
                         .desired_width(ui.available_width() - 130.0)
                         .font(crate::theme::font(13.0));
                     let edit_resp = ui.add(edit);
@@ -159,7 +157,7 @@ pub fn show_playlist_editor(
                         edit_resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
 
                     let btn = egui::Button::new(
-                        egui::RichText::new("+ Create Playlist")
+                        egui::RichText::new(tr!("+ Create Playlist"))
                             .font(crate::theme::font(12.5))
                             .strong()
                             .color(Color32::WHITE),
@@ -198,7 +196,7 @@ pub fn show_playlist_editor(
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 let can_export = state.selected.is_some() && !playlist_tracks.is_empty();
                                 let btn = egui::Button::new(
-                                    egui::RichText::new("Export")
+                                    egui::RichText::new(tr!("Export"))
                                         .font(crate::theme::font(11.0))
                                         .color(if can_export { theme.text_secondary } else { theme.text_muted }),
                                 )
@@ -240,7 +238,7 @@ pub fn show_playlist_editor(
                                 .inner_margin(Margin::same(theme.space_2xl as i8));
                             empty_frame.show(ui, |ui| {
                                 ui.label(
-                                    egui::RichText::new("No custom playlists yet.\nType a name above and click Create.")
+                                    egui::RichText::new(tr!("No custom playlists yet.\nType a name above and click Create."))
                                         .font(crate::theme::font(12.0))
                                         .color(theme.text_muted),
                                 );
@@ -262,14 +260,14 @@ pub fn show_playlist_editor(
                                             let edit = egui::TextEdit::singleline(&mut state.rename_buf)
                                                 .desired_width(ui.available_width() - 56.0);
                                             ui.add(edit);
-                                            if ui.small_button("OK").clicked() {
+                                            if ui.small_button(tr!(Msg::S091D3D07B5B3076F)).clicked() {
                                                 let name = state.rename_buf.trim().to_string();
                                                 if !name.is_empty() {
                                                     actions.rename = Some((pl.id, name));
                                                 }
                                                 state.rename_id = None;
                                             }
-                                            if ui.small_button("Cancel").clicked() {
+                                            if ui.small_button(tr!(Msg::S2CEB11BE2290BB1B)).clicked() {
                                                 state.rename_id = None;
                                             }
                                         });
@@ -298,9 +296,9 @@ pub fn show_playlist_editor(
                                         Vec2::new(16.0, 16.0),
                                     );
                                     let rename_resp = ui.interact(rename_rect, ui.make_persistent_id(format!("ren_{}", pl.id)), Sense::click())
-                                        .on_hover_text("Rename playlist");
+                                        .on_hover_text(tr!(Msg::SE38CA9949A0FDDA7));
                                     let del_resp = ui.interact(del_rect, ui.make_persistent_id(format!("del_{}", pl.id)), Sense::click())
-                                        .on_hover_text("Delete playlist");
+                                        .on_hover_text(tr!(Msg::SAD9F16B467D53F18));
 
                                     if del_resp.clicked() {
                                         actions.delete = Some(pl.id);
@@ -399,13 +397,13 @@ pub fn show_playlist_editor(
                                     crate::components::icons::draw_list_icon(ui, ic_rect, theme.accent);
                                     ui.add_space(8.0);
                                     ui.label(
-                                        egui::RichText::new("No Playlist Selected")
+                                        egui::RichText::new(tr!("No Playlist Selected"))
                                             .font(crate::theme::font(15.0))
                                             .strong()
                                             .color(theme.text_primary),
                                     );
                                     ui.label(
-                                        egui::RichText::new("Select a playlist from the left, or create a new one above to add songs.")
+                                        egui::RichText::new(tr!("Select a playlist from the left, or create a new one above to add songs."))
                                             .font(crate::theme::font(12.0))
                                             .color(theme.text_muted),
                                     );
@@ -458,14 +456,14 @@ pub fn show_playlist_editor(
                                     if ui
                                         .add(
                                             egui::Button::new(
-                                                egui::RichText::new("Link")
+                                                egui::RichText::new(tr!("Link"))
                                                     .font(crate::theme::font(11.0)),
                                             )
                                             .fill(theme.bg_pill)
                                             .corner_radius(CornerRadius::same(theme.radius_sm)),
                                         )
                                         .on_hover_text(
-                                            "Include another playlist here; it resolves at play time",
+                                            tr!(Msg::S14259279BC61EDA3),
                                         )
                                         .clicked()
                                     {
@@ -481,7 +479,7 @@ pub fn show_playlist_editor(
 
                         // Section 1: Current tracks in playlist
                         ui.label(
-                            egui::RichText::new("Tracks in Playlist")
+                            egui::RichText::new(tr!("Tracks in Playlist"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
                                 .color(theme.text_secondary),
@@ -494,7 +492,7 @@ pub fn show_playlist_editor(
                             .show(ui, |ui| {
                                 if playlist_tracks.is_empty() {
                                     ui.label(
-                                        egui::RichText::new("Playlist is empty — search and add tracks below.")
+                                        egui::RichText::new(tr!("Playlist is empty — search and add tracks below."))
                                             .font(crate::theme::font(11.5))
                                             .color(theme.text_muted),
                                     );
@@ -529,7 +527,7 @@ pub fn show_playlist_editor(
                                             up_col,
                                         );
                                         if idx > 0
-                                            && up_resp.on_hover_text("Move up").clicked()
+                                            && up_resp.on_hover_text(tr!(Msg::S4EA0F21FC2A338A1)).clicked()
                                         {
                                             actions.move_track =
                                                 Some((selected_id, idx, idx - 1));
@@ -562,7 +560,7 @@ pub fn show_playlist_editor(
                                             down_col,
                                         );
                                         if can_down
-                                            && down_resp.on_hover_text("Move down").clicked()
+                                            && down_resp.on_hover_text(tr!(Msg::SB233557012DCB328)).clicked()
                                         {
                                             actions.move_track =
                                                 Some((selected_id, idx, idx + 1));
@@ -571,7 +569,7 @@ pub fn show_playlist_editor(
                                         let (del_r, del_resp) = ui.allocate_exact_size(Vec2::new(18.0, 18.0), Sense::click());
                                         let del_col = if del_resp.hovered() { theme.accent_warm } else { theme.text_muted };
                                         crate::components::icons::draw_window_close(ui, del_r, del_col);
-                                        if del_resp.on_hover_text("Remove from playlist").clicked() {
+                                        if del_resp.on_hover_text(tr!(Msg::S421807CFDA51587F)).clicked() {
                                             actions.remove_track = Some((selected_id, t.id));
                                         }
 
@@ -603,7 +601,7 @@ pub fn show_playlist_editor(
                         // Section 2: Add songs from library
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Add Tracks from Library")
+                                egui::RichText::new(tr!("Add Tracks from Library"))
                                     .font(crate::theme::font(12.5))
                                     .strong()
                                     .color(theme.text_primary),
@@ -616,7 +614,7 @@ pub fn show_playlist_editor(
                         });
 
                         let search_edit = egui::TextEdit::singleline(&mut state.search)
-                            .hint_text("Search library by song title, artist, or album...")
+                            .hint_text(tr!(Msg::S4B808A03176E6A3B))
                             .desired_width(ui.available_width())
                             .font(crate::theme::font(12.0));
                         ui.add(search_edit);
@@ -669,7 +667,7 @@ pub fn show_playlist_editor(
                                         .corner_radius(CornerRadius::same(theme.radius_sm))
                                         .min_size(Vec2::new(56.0, 22.0));
 
-                                        if ui.add(add_btn).on_hover_text("Add song to this playlist").clicked() {
+                                        if ui.add(add_btn).on_hover_text(tr!(Msg::S9F237A4F8C8FA7CC)).clicked() {
                                             actions.add_track = Some((selected_id, t.id));
                                         }
 

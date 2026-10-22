@@ -512,6 +512,14 @@ impl AudioSession {
         self.handle.set_crossfeed_profile(profile);
     }
 
+    /// Apply the creative-effects insert's settings.
+    ///
+    /// One call carries every effect (chorus, flanger, phaser, delay,
+    /// saturation), so the insert is always in a state the UI can describe.
+    pub fn set_fx_config(&self, config: config::FxConfig) {
+        self.handle.set_fx_config(config);
+    }
+
     pub fn set_compressor_enabled(&self, enabled: bool) {
         self.send(EngineCommand::SetCompressorEnabled(enabled));
     }

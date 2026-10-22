@@ -269,6 +269,16 @@ pub static DSP_STAGE_CAPABILITIES: &[DspStageCapability] = &[
         precision: StagePrecision::Any,
     },
     DspStageCapability {
+        name: "creative_fx",
+        channel_support: StageChannelSupport::StereoOnly,
+        position: "post-stereo",
+        stateful: true,
+        realtime_safe: true,
+        bit_perfect_compatible: false,
+        sample_rate_sensitive: true,
+        precision: StagePrecision::Any,
+    },
+    DspStageCapability {
         name: "timestretch",
         channel_support: StageChannelSupport::StereoOnly,
         position: "post-mix",

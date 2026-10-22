@@ -141,12 +141,12 @@ pub fn show_edit_track_modal(
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
                 ui.add(egui::Checkbox::new(&mut state.write_to_file, ""));
                 ui.label(
-                    egui::RichText::new("Write the tags into the file too")
+                    egui::RichText::new(tr!("Write the tags into the file too"))
                         .font(crate::theme::font(12.0))
                         .color(theme.text_secondary),
                 );
                 let _ = ui.label(
-                    egui::RichText::new("— the file is the source of truth")
+                    egui::RichText::new(tr!("— the file is the source of truth"))
                         .font(crate::theme::font(11.0))
                         .color(theme.text_dim),
                 );
@@ -154,12 +154,13 @@ pub fn show_edit_track_modal(
 
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                let save_btn = egui::Button::new(egui::RichText::new("Save").color(Color32::WHITE))
-                    .fill(theme.accent);
+                let save_btn =
+                    egui::Button::new(egui::RichText::new(tr!("Save")).color(Color32::WHITE))
+                        .fill(theme.accent);
                 if ui.add(save_btn).clicked() {
                     save = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr!(Msg::S2CEB11BE2290BB1B)).clicked() {
                     cancel = true;
                 }
             });

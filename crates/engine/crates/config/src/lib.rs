@@ -8,6 +8,7 @@ mod config_file;
 mod dsp_config;
 mod engine_config;
 mod enums;
+mod fx_config;
 mod rate_policy;
 mod scene_config;
 mod spatial_render;
@@ -34,6 +35,10 @@ pub use enums::{
     OutputAccessState, PerformanceMode, PrecisionMode, QualityLatencyProfile, RateFallbackPolicy,
     ResamplerQuality, ResamplerQualityInfo, SpeedMode, TimeStretchQuality, TransitionMode,
     VolumeMode,
+};
+pub use fx_config::{
+    ChorusConfig, DelayConfig, DistortionConfig, DistortionShape, EffectSettings, FlangerConfig,
+    FxConfig, FxEffect, PhaserConfig,
 };
 pub use rate_policy::{apply_fallback, base_rate, clock_family, nearest_rate, SampleRatePolicy};
 pub use scene_config::{

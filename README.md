@@ -20,8 +20,9 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
   favorites, playlist membership and lyrics.
 - Songs table with sortable columns, quick-filter chips, multi-select and bulk
   actions; Albums, Artists, Genres and Folders views.
-- Standard playlists, smart (rule-based) playlists, duplicate finder, batch
-  organizer with a reviewable rename plan, M3U import/export.
+- Standard playlists, smart (rule-based) playlists with a stated refresh
+  policy — after every scan, on a timer, or only when you ask — duplicate
+  finder, batch organizer with a reviewable rename plan, M3U import/export.
 - Embedded tag lyrics and `.lrc` sidecars (including ID3v2 `SYLT` timed lyrics
   and non-UTF-8 files), with a synced-lyrics panel.
 
@@ -33,14 +34,16 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
 - CUE sheets, DSD, all codecs the engine ships; ReplayGain / EBU R128 (from
   tags, from an on-disk loudness cache, or from a library-wide scan).
 - Full DSP studio: parametric and graphic EQ, dynamics, filters, crossfeed,
-  stereo enhancement, spatial/screen audio, room correction, CLAP plugin rack
-  and named chain presets.
+  stereo enhancement, spatial/screen audio, room correction, creative effects
+  (chorus, flanger, phaser, delay, saturation), CLAP plugin rack and named
+  chain presets.
 
 **Desktop**
 - MPRIS2 on Linux (media keys, shells, `playerctl`), System Media Transport
   Controls on Windows, Now Playing on macOS.
-- Light and dark themes, toasts for anything that fails, and a Help view whose
-  shortcut list is generated from the same descriptions the app uses.
+- Light and dark themes, an interface in English or German, toasts for
+  anything that fails, and a Help view whose shortcut list is generated from
+  the same descriptions the app uses.
 
 ---
 
@@ -234,6 +237,12 @@ cargo test -p domain -p database -p metadata -p lyrics -p library \
 # The version bump is guarded by a test, not by remembering to do it.
 cargo test -p shadowplayer --test version_lockstep
 
+# The library budget: a 100,000-track library inside the published budgets.
+cargo test --release -p ui --test library_budget -- --nocapture
+
+# The library benchmark behind those numbers.
+cargo bench -p ui --bench library_100k
+
 # Engine (its own workspace)
 cd crates/engine && cargo test
 
@@ -243,8 +252,16 @@ cd crates/engine && cargo bench
 
 CI runs `cargo fmt --check`, `clippy -D warnings`, the test suite above, the
 engine's suite, the engine's suite **on Windows and macOS as well as Linux**,
-the benchmark suite's compile, and the documentation-truth checks, on every
-push; see `.github/workflows/ci.yml`.
+the benchmark suite's compile, the library budget, and the
+documentation-truth checks, on every push; see `.github/workflows/ci.yml`.
+
+### A big library
+
+The player is built for libraries that are larger than a demo: the songs
+table is virtualised, so the frame cost does not grow with the library, and
+changing the sort re-orders the list that is already on screen instead of
+copying the library again. The numbers are published in
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md), and CI asserts them.
 
 ### Development-only automation
 
@@ -288,7 +305,14 @@ Stated plainly, because the alternative is finding out the hard way:
   blank window. The labelling is not complete yet — some icon-only controls are
   still unnamed — and full keyboard operation is the recommended way to drive
   the app. Every command below works without a mouse.
-- **English only.** All copy is hard-coded; there is no localisation layer yet.
+- **English and German, and German is not finished.** The interface speaks
+  English and German: the catalogue lives in `crates/ui/locales`, the build
+  script refuses to compile a string that is not in it, and a missing
+  translation falls back to English rather than showing a key. The German
+  catalogue currently covers the labels, buttons and menus; the long prose in
+  the Help manual is still English. Pick a language in Settings → *Library &
+  App*, or leave it on *Auto* and let `LC_ALL`, `LC_MESSAGES` or `LANG`
+  decide.
 - **Exclusive output needs the operating system's permission.** The app
   negotiates genuine exclusive output on all three platforms — ALSA on Linux,
   WASAPI Exclusive and ASIO on Windows, CoreAudio hog mode on macOS — but each

@@ -166,9 +166,9 @@ fn render_manual_search(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
                         .hint_text(
-                            egui::RichText::new(
-                                "Search the manual — LUFS, ASIO, HRTF, Biquad, Dither…",
-                            )
+                            egui::RichText::new(tr!(
+                                "Search the manual — LUFS, ASIO, HRTF, Biquad, Dither…"
+                            ))
                             .color(theme.text_muted)
                             .font(crate::theme::font(12.5)),
                         )
@@ -182,7 +182,7 @@ fn render_manual_search(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                     && ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new("\u{00d7}")
+                                egui::RichText::new(tr!("×"))
                                     .font(crate::theme::font(14.0))
                                     .color(theme.text_muted),
                             )
@@ -248,14 +248,14 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "1. Welcome to ShadowPlayer",
+            &tr!("1. Welcome to ShadowPlayer"),
             "The audiophile music workstation engineered for bit-exact transparency",
             theme,
         );
 
         ui.label(
             egui::RichText::new(
-                "ShadowPlayer is not a typical consumer music player. It was engineered from the ground up in Rust to treat your digital audio library with studio-grade mathematical fidelity. Traditional operating system media players push your audio through noisy OS audio mixers, degrade dynamic range through digital bit-truncation, and force hidden sample rate conversions. ShadowPlayer provides direct bit-perfect transport to external Digital-to-Analog Converters (DACs) alongside a 64-bit floating point DSP suite."
+                tr!("ShadowPlayer is not a typical consumer music player. It was engineered from the ground up in Rust to treat your digital audio library with studio-grade mathematical fidelity. Traditional operating system media players push your audio through noisy OS audio mixers, degrade dynamic range through digital bit-truncation, and force hidden sample rate conversions. ShadowPlayer provides direct bit-perfect transport to external Digital-to-Analog Converters (DACs) alongside a 64-bit floating point DSP suite.")
             )
             .font(crate::theme::font(13.5))
             .color(theme.text_secondary),
@@ -329,7 +329,7 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "2. High-Level System Architecture Diagram",
+            &tr!("2. High-Level System Architecture Diagram"),
             "Complete flow from encoded audio file to analog headphone output",
             theme,
         );
@@ -349,7 +349,7 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "3. Interface Elements & Layout Walkthrough",
+            &tr!("3. Interface Elements & Layout Walkthrough"),
             "How to navigate and control the desktop workspace",
             theme,
         );
@@ -365,7 +365,7 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
         for (name, desc) in layout_points {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
-                ui.label(egui::RichText::new("•").color(theme.accent_warm));
+                ui.label(egui::RichText::new(tr!("•")).color(theme.accent_warm));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
                     ui.label(
@@ -395,7 +395,7 @@ fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
 
 fn render_signal_path_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. Interactive Audio Signal Flow", "Click any node in the digital processing chain below to inspect its sample mathematics", theme);
+        card_title(ui, &tr!("1. Interactive Audio Signal Flow"), "Click any node in the digital processing chain below to inspect its sample mathematics", theme);
 
         // Clickable interactive block diagram
         render_interactive_pipeline_diagram(ui, state, theme);
@@ -411,14 +411,14 @@ fn render_signal_path_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Them
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "2. Internal Mathematical Precision & Buffer Health",
+            &tr!("2. Internal Mathematical Precision & Buffer Health"),
             "64-bit double precision IEEE 754 vs 32-bit single precision",
             theme,
         );
 
         ui.label(
             egui::RichText::new(
-                "When audio processing modifies samples (such as applying +3 dB of bass or cutting 1 kHz), rounding errors inevitably accumulate in digital arithmetic. Standard 16-bit processing causes audible quantization distortion. 32-bit float offers a theoretical noise floor of -144 dBFS, while ShadowPlayer's internal 64-bit double precision engine provides a staggering -300+ dBFS dynamic range. This means you can chain multiple biquad filters, shelving curves, spatializers, and gain offsets without losing a single micro-fraction of resolution."
+                tr!("When audio processing modifies samples (such as applying +3 dB of bass or cutting 1 kHz), rounding errors inevitably accumulate in digital arithmetic. Standard 16-bit processing causes audible quantization distortion. 32-bit float offers a theoretical noise floor of -144 dBFS, while ShadowPlayer's internal 64-bit double precision engine provides a staggering -300+ dBFS dynamic range. This means you can chain multiple biquad filters, shelving curves, spatializers, and gain offsets without losing a single micro-fraction of resolution.")
             )
             .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
@@ -600,11 +600,11 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
             ui.separator();
 
             ui.horizontal_top(|ui| {
-                ui.label(egui::RichText::new("Input Format:").strong().color(theme.text_primary));
+                ui.label(egui::RichText::new(tr!("Input Format:")).strong().color(theme.text_primary));
                 ui.add(egui::Label::new(egui::RichText::new(input_type).color(theme.text_secondary)).wrap());
             });
             ui.horizontal_top(|ui| {
-                ui.label(egui::RichText::new("Output Format:").strong().color(theme.text_primary));
+                ui.label(egui::RichText::new(tr!("Output Format:")).strong().color(theme.text_primary));
                 ui.add(egui::Label::new(egui::RichText::new(output_type).color(theme.text_secondary)).wrap());
             });
 
@@ -617,7 +617,7 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
                     theme.bit_perfect_green,
                     theme,
                 );
-                ui.label(egui::RichText::new("Function Overview:").strong().color(theme.bit_perfect_green));
+                ui.label(egui::RichText::new(tr!("Function Overview:")).strong().color(theme.bit_perfect_green));
             });
             ui.add(egui::Label::new(egui::RichText::new(plain_desc).font(crate::theme::font(12.5)).color(theme.text_secondary)).wrap());
 
@@ -630,7 +630,7 @@ fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBlock, theme: &
                     theme.accent_warm,
                     theme,
                 );
-                ui.label(egui::RichText::new("Engineering & Mathematics:").strong().color(theme.accent_warm));
+                ui.label(egui::RichText::new(tr!("Engineering & Mathematics:")).strong().color(theme.accent_warm));
             });
             ui.add(egui::Label::new(egui::RichText::new(tech_desc).font(crate::theme::font(12.0)).color(theme.text_muted)).wrap());
         });
@@ -645,7 +645,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "1. Equalizer Spectrum & Filter Topologies",
+            &tr!("1. Equalizer Spectrum & Filter Topologies"),
             "Understanding graphic bands, shelves, Q factors, and frequency bands",
             theme,
         );
@@ -665,7 +665,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
 
     // Interactive Filter Response Sandbox
     manual_card(ui, theme, |ui| {
-        card_title(ui, "2. Interactive Filter Sandbox", "Experiment with simulated filter gains below to see how frequency response curves shape audio in real time", theme);
+        card_title(ui, &tr!("2. Interactive Filter Sandbox"), "Experiment with simulated filter gains below to see how frequency response curves shape audio in real time", theme);
 
         let avail_w = ui.available_width();
         let controls_w = (avail_w * 0.42).clamp(240.0, 320.0);
@@ -681,13 +681,13 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                 |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
                     ui.label(
-                        egui::RichText::new("Simulated Controls:")
+                        egui::RichText::new(tr!("Simulated Controls:"))
                             .strong()
                             .color(theme.accent_warm),
                     );
 
                     ui.horizontal(|ui| {
-                        ui.label("Bass Shelf (80 Hz):");
+                        ui.label(tr!(Msg::S117ABC28FA94C587));
                         let resp = ui.add(
                             egui::Slider::new(&mut state.demo_shelf_gain, -12.0..=12.0)
                                 .suffix(" dB"),
@@ -702,7 +702,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("Mid Peak (1.5 kHz):");
+                        ui.label(tr!(Msg::S13647365883E2FF6));
                         let resp = ui.add(
                             egui::Slider::new(&mut state.demo_peak_gain, -12.0..=12.0)
                                 .suffix(" dB"),
@@ -717,7 +717,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("Mid Peak Q (Width):");
+                        ui.label(tr!(Msg::SEA1E5DECF132858A));
                         let resp = ui.add(egui::Slider::new(&mut state.demo_peak_q, 0.5..=5.0));
                         resp.widget_info(|| {
                             egui::WidgetInfo::labeled(
@@ -729,7 +729,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("Treble Shelf (10 kHz):");
+                        ui.label(tr!(Msg::SB01A7376DDC5505E));
                         let resp = ui.add(
                             egui::Slider::new(&mut state.demo_treble_gain, -12.0..=12.0)
                                 .suffix(" dB"),
@@ -743,7 +743,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
                         });
                     });
 
-                    if ui.button("Reset Sandbox to Flat (0 dB)").clicked() {
+                    if ui.button(tr!(Msg::SD13B7F04122611D4)).clicked() {
                         state.demo_shelf_gain = 0.0;
                         state.demo_peak_gain = 0.0;
                         state.demo_treble_gain = 0.0;
@@ -763,7 +763,7 @@ fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme)
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "3. Complete Equalizer Settings Guide",
+            &tr!("3. Complete Equalizer Settings Guide"),
             "Every slider, toggle, and acoustic mode explained",
             theme,
         );
@@ -881,7 +881,7 @@ fn render_frequency_response_curve_painter(
 
 fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. Bit-Perfect Direct Hardware Streaming", "Why operating system audio mixers degrade sound and how ShadowPlayer achieves pure direct bitstream", theme);
+        card_title(ui, &tr!("1. Bit-Perfect Direct Hardware Streaming"), "Why operating system audio mixers degrade sound and how ShadowPlayer achieves pure direct bitstream", theme);
 
         let avail_w = ui.available_width();
         let img_h = avail_w * (768.0 / 1376.0);
@@ -897,7 +897,7 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "2. Why the Operating System Degrades Sound",
+            &tr!("2. Why the Operating System Degrades Sound"),
             "Three critical flaws in standard OS audio engines",
             theme,
         );
@@ -933,7 +933,7 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "3. Hardware Output Settings Reference",
+            &tr!("3. Hardware Output Settings Reference"),
             "Configuring drivers, fallback policies, and sample rates",
             theme,
         );
@@ -959,7 +959,7 @@ fn render_bit_perfect_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &The
 
 fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
-        card_title(ui, "1. 3D Binaural HRTF & Virtual Room Acoustics", "How Head-Related Transfer Function impulse responses recreate realistic three-dimensional sound on headphones", theme);
+        card_title(ui, &tr!("1. 3D Binaural HRTF & Virtual Room Acoustics"), "How Head-Related Transfer Function impulse responses recreate realistic three-dimensional sound on headphones", theme);
 
         let avail_w = ui.available_width();
         let img_h = avail_w * (768.0 / 1376.0);
@@ -974,7 +974,7 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
 
     // Interactive Spatial Radar Simulator
     manual_card(ui, theme, |ui| {
-        card_title(ui, "2. Interactive Binaural Soundstage Simulator", "Drag the azimuth angle and distance sliders to inspect simulated ear delay and shadowing", theme);
+        card_title(ui, &tr!("2. Interactive Binaural Soundstage Simulator"), "Drag the azimuth angle and distance sliders to inspect simulated ear delay and shadowing", theme);
 
         let avail_w = ui.available_width();
         let radar_size = 180.0_f32;
@@ -990,13 +990,13 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                 |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
                     ui.label(
-                        egui::RichText::new("Acoustic Coordinates:")
+                        egui::RichText::new(tr!("Acoustic Coordinates:"))
                             .strong()
                             .color(theme.accent_warm),
                     );
 
                     ui.horizontal(|ui| {
-                        ui.label("Source Azimuth Angle:");
+                        ui.label(tr!(Msg::S52F4CACF3D8016A3));
                         ui.add(
                             egui::Slider::new(&mut state.demo_azimuth_deg, -180.0..=180.0)
                                 .suffix("°"),
@@ -1004,7 +1004,7 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("Virtual Distance:");
+                        ui.label(tr!(Msg::S9D797C69369C407F));
                         ui.add(
                             egui::Slider::new(&mut state.demo_distance_m, 0.5..=10.0).suffix(" m"),
                         );
@@ -1020,7 +1020,7 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
 
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new("Calculated Psychoacoustic Cues:")
+                        egui::RichText::new(tr!("Calculated Psychoacoustic Cues:"))
                             .strong()
                             .color(theme.bit_perfect_green),
                     );
@@ -1046,7 +1046,7 @@ fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "3. Spatial & Acoustics Settings Guide",
+            &tr!("3. Spatial & Acoustics Settings Guide"),
             "Understanding SOFA profiles, listener tracking smoothing, and RT60 room decay",
             theme,
         );
@@ -1142,14 +1142,14 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "1. Processing Engine: Varispeed vs TimeStretch",
+            &tr!("1. Processing Engine: Varispeed vs TimeStretch"),
             "Analog tape pitch shift vs modern decoupled granular time-stretching",
             theme,
         );
 
         ui.label(
             egui::RichText::new(
-                "When you speed up audio, two physical approaches exist. Varispeed acts like speeding up the motor of an analog tape machine or vinyl record: playing 1.5x faster shifts all frequencies up proportionally. This preserves 100% micro-phase coherency with zero digital artifacts. In contrast, TimeStretch uses a phase vocoder to keep musical pitch fixed while altering speed."
+                tr!("When you speed up audio, two physical approaches exist. Varispeed acts like speeding up the motor of an analog tape machine or vinyl record: playing 1.5x faster shifts all frequencies up proportionally. This preserves 100% micro-phase coherency with zero digital artifacts. In contrast, TimeStretch uses a phase vocoder to keep musical pitch fixed while altering speed.")
             )
             .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
@@ -1159,7 +1159,7 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
 
         // Interactive Speed Demo
         ui.horizontal(|ui| {
-            ui.label("Interactive Speed Multiplier:");
+            ui.label(tr!(Msg::S9EEBF2448150F573));
             ui.add(egui::Slider::new(&mut state.demo_speed, 0.25..=4.0).suffix("x"));
             let semitones = 12.0 * state.demo_speed.log2();
             badge(
@@ -1175,14 +1175,14 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "2. Track Transitions: Gapless Direct vs Crossfades",
+            &tr!("2. Track Transitions: Gapless Direct vs Crossfades"),
             "Why Constant Power crossfading prevents volume drops",
             theme,
         );
 
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Crossfade Curve Type:")
+                egui::RichText::new(tr!("Crossfade Curve Type:"))
                     .strong()
                     .color(theme.accent_warm),
             );
@@ -1213,14 +1213,14 @@ fn render_playback_tab(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) 
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "3. Loudness Normalization: EBU R128 vs ReplayGain",
+            &tr!("3. Loudness Normalization: EBU R128 vs ReplayGain"),
             "Eliminate volume jumps without compressing dynamic range",
             theme,
         );
 
         ui.label(
             egui::RichText::new(
-                "Different songs and albums are mastered at radically different volume levels. Switching from an older 1980s jazz album to modern pop music forces you to reach for the volume dial. ShadowPlayer implements the international broadcast standard EBU R128 (-14 LUFS) alongside ReplayGain 2.0. Unlike consumer peak normalizers that cause harsh digital clipping, EBU R128 uses K-weighted human perceptual loudness filters to calculate integrated loudness and apply transparent gain offsets."
+                tr!("Different songs and albums are mastered at radically different volume levels. Switching from an older 1980s jazz album to modern pop music forces you to reach for the volume dial. ShadowPlayer implements the international broadcast standard EBU R128 (-14 LUFS) alongside ReplayGain 2.0. Unlike consumer peak normalizers that cause harsh digital clipping, EBU R128 uses K-weighted human perceptual loudness filters to calculate integrated loudness and apply transparent gain offsets.")
             )
             .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
@@ -1315,14 +1315,14 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "1. Multi-Track Mixer & Audio Stem Ingestion",
+            &tr!("1. Multi-Track Mixer & Audio Stem Ingestion"),
             "Control gain, stereo pan, and mute states for secondary audio sources",
             theme,
         );
 
         ui.label(
             egui::RichText::new(
-                "ShadowPlayer includes a multi-track mixing engine allowing you to inject auxiliary stems, click tracks, or commentary channels alongside your primary music. Each channel slot provides independent float gain (0.0x to 2.0x), true stereo pan balancing (-1.0 Left to +1.0 Right), and instantaneous mute toggling."
+                tr!("ShadowPlayer includes a multi-track mixing engine allowing you to inject auxiliary stems, click tracks, or commentary channels alongside your primary music. Each channel slot provides independent float gain (0.0x to 2.0x), true stereo pan balancing (-1.0 Left to +1.0 Right), and instantaneous mute toggling.")
             )
             .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
@@ -1332,14 +1332,14 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "2. Sidechain Ducking Compressor",
+            &tr!("2. Sidechain Ducking Compressor"),
             "Automatically dip background music when speech is detected",
             theme,
         );
 
         ui.label(
             egui::RichText::new(
-                "When broadcasting or listening with a voice channel active, manual volume fading is cumbersome. The Sidechain Ducking Compressor monitors a designated trigger slot (such as microphone input or voice stems). When audio exceeds the Threshold (dB), it smoothly attenuates the music by the Duck Depth (dB) at the specified Attack speed, restoring full volume over the Release envelope once speech stops."
+                tr!("When broadcasting or listening with a voice channel active, manual volume fading is cumbersome. The Sidechain Ducking Compressor monitors a designated trigger slot (such as microphone input or voice stems). When audio exceeds the Threshold (dB), it smoothly attenuates the music by the Duck Depth (dB) at the specified Attack speed, restoring full volume over the Release envelope once speech stops.")
             )
             .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
@@ -1349,14 +1349,14 @@ fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme) {
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "3. High-Resolution Stream Capture",
+            &tr!("3. High-Resolution Stream Capture"),
             "Direct live bit-perfect loopback recording to uncompressed PCM WAV",
             theme,
         );
 
         ui.label(
             egui::RichText::new(
-                "Need to capture an uncompressed reference recording of live audio? The Stream Capture engine taps directly into the post-DSP master ringbuffer, writing pure 32-bit floating point PCM audio to a `.wav` file on your local storage with zero generation loss."
+                tr!("Need to capture an uncompressed reference recording of live audio? The Stream Capture engine taps directly into the post-DSP master ringbuffer, writing pure 32-bit floating point PCM audio to a `.wav` file on your local storage with zero generation loss.")
             )
             .font(crate::theme::font(13.0))
             .color(theme.text_secondary),
@@ -1372,7 +1372,7 @@ fn render_shortcuts_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "1. Audiophile Keyboard Shortcuts",
+            &tr!("1. Audiophile Keyboard Shortcuts"),
             "Complete reference of keyboard commands for instant mouse-free operation",
             theme,
         );
@@ -1563,7 +1563,7 @@ fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Them
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "What This Build Can Do",
+            &tr!("What This Build Can Do"),
             "Read from the running engine. A capability that is not listed here is not in this binary.",
             theme,
         );
@@ -1586,7 +1586,7 @@ fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Them
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "Platform Feature Matrix",
+            &tr!("Platform Feature Matrix"),
             "The same generated matrix as the README. Each platform claim is checked against the cfg gates in the code.",
             theme,
         );
@@ -1597,7 +1597,7 @@ fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Them
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "Output Backends In This Build",
+            &tr!("Output Backends In This Build"),
             "The backends this binary compiled in. Each one enumerates its own devices, so a device chosen in Settings is a device this build can open.",
             theme,
         );
@@ -1605,7 +1605,7 @@ fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Them
         let backends = engine::output::available_backends();
         if backends.is_empty() {
             ui.label(
-                egui::RichText::new("No output backend is compiled into this build.")
+                egui::RichText::new(tr!("No output backend is compiled into this build."))
                     .font(crate::theme::font(12.0))
                     .color(theme.text_dim),
             );
@@ -1648,7 +1648,7 @@ fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Them
         if exclusive.is_empty() {
             ui.label(
                 egui::RichText::new(
-                    "No exclusive-mode backend is compiled in, so this build cannot open a device without the operating system's mixer. Playback is not bit-perfect here.",
+                    tr!("No exclusive-mode backend is compiled in, so this build cannot open a device without the operating system's mixer. Playback is not bit-perfect here."),
                 )
                 .font(crate::theme::font(12.0))
                 .color(theme.warning_yellow),
@@ -1668,14 +1668,14 @@ fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Them
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "Decoders In This Build",
+            &tr!("Decoders In This Build"),
             "The formats this binary can actually decode.",
             theme,
         );
         let codecs = engine::decode::codecs::decodable_codecs();
         if codecs.is_empty() {
             ui.label(
-                egui::RichText::new("No decoder is compiled into this build.")
+                egui::RichText::new(tr!("No decoder is compiled into this build."))
                     .font(crate::theme::font(12.0))
                     .color(theme.warning_yellow),
             );
@@ -1726,7 +1726,7 @@ fn render_glossary_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Theme)
     manual_card(ui, theme, |ui| {
         card_title(
             ui,
-            "Complete Technical Glossary & Definitions",
+            &tr!("Complete Technical Glossary & Definitions"),
             "Clear definitions of every acoustic, DSP, and engineering term in ShadowPlayer",
             theme,
         );
@@ -1837,7 +1837,7 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
                             if ui
                                 .add(
                                     egui::Button::new(
-                                        egui::RichText::new("Jump to Section >>")
+                                        egui::RichText::new(tr!("Jump to Section >>"))
                                             .font(crate::theme::font(11.5))
                                             .strong()
                                             .color(Color32::WHITE),
@@ -1862,8 +1862,8 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
 
         if matches_found == 0 {
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("No direct matches found. Try searching for 'LUFS', 'DAC', 'EQ', 'Dither', 'ASIO', 'Crossfade', 'Biquad', or 'Varispeed'.").color(theme.text_muted));
-            if ui.button("Clear Search Query").clicked() {
+            ui.label(egui::RichText::new(tr!("No direct matches found. Try searching for 'LUFS', 'DAC', 'EQ', 'Dither', 'ASIO', 'Crossfade', 'Biquad', or 'Varispeed'.")).color(theme.text_muted));
+            if ui.button(tr!(Msg::SFB12F7530586615E)).clicked() {
                 state.search_query.clear();
             }
         }
@@ -1886,7 +1886,14 @@ fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str, theme: &Theme) {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
             // The interactive sections say so, so a reader knows the card
             // below is something to use and not another paragraph.
-            if title.contains("Interactive") || title.contains("Simulator") {
+            //
+            // The comparison is against the *translated* word, because the
+            // title arrives already translated: comparing against the
+            // English text would silently stop marking the card once the
+            // interface speaks German.
+            let interactive = tr!("Interactive");
+            let simulator = tr!("Simulator");
+            if title.contains(interactive.as_str()) || title.contains(simulator.as_str()) {
                 egui::Frame::NONE
                     .fill(theme.accent.linear_multiply(0.18))
                     .corner_radius(CornerRadius::same(theme.radius_sm))
@@ -1896,7 +1903,7 @@ fn card_title(ui: &mut egui::Ui, title: &str, subtitle: &str, theme: &Theme) {
                     ))
                     .show(ui, |ui| {
                         ui.label(
-                            egui::RichText::new("TRY IT")
+                            egui::RichText::new(tr!("TRY IT"))
                                 .font(crate::theme::font(9.5))
                                 .strong()
                                 .color(theme.accent_highlight),

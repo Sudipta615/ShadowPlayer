@@ -181,6 +181,9 @@ pub enum ProdStage {
     /// The plugin host insert — Rust-native effect plugins at
     /// the master insert seam (post-volume / seek-fade, pre-limiter).
     PluginHost,
+    /// The creative-effects insert — chorus, flanger, phaser, delay and
+    /// saturation (post-stereo, pre-timestretch).
+    CreativeFx,
 }
 
 impl ProdStage {
@@ -205,11 +208,12 @@ impl ProdStage {
             ProdStage::Correction => 15,
             ProdStage::Spatial => 16,
             ProdStage::PluginHost => 17,
+            ProdStage::CreativeFx => 18,
         }
     }
 
     /// Every production stage, in arena-slot order.
-    pub const ALL: [ProdStage; 18] = [
+    pub const ALL: [ProdStage; 19] = [
         ProdStage::MixBus,
         ProdStage::Eq,
         ProdStage::Dynamics,
@@ -228,6 +232,7 @@ impl ProdStage {
         ProdStage::Correction,
         ProdStage::Spatial,
         ProdStage::PluginHost,
+        ProdStage::CreativeFx,
     ];
 
     /// The stage that occupies `slot`, or `None` when the slot is not a
@@ -261,6 +266,7 @@ impl ProdStage {
             ProdStage::Dither => "dither",
             ProdStage::Spatial => "spatial",
             ProdStage::PluginHost => "plugin_host",
+            ProdStage::CreativeFx => "creative_fx",
         }
     }
 

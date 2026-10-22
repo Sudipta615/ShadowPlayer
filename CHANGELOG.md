@@ -8,6 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-22
+
+*Released with audio-engine 1.7.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **The interface speaks German.** The copy moved into a generated catalogue: `crates/ui/build.rs`
+  reads `crates/ui/locales/en.json` and `de.json` and emits the message table, so a string that is
+  not in the catalogue does not compile. The language is chosen in Settings → *Library & App*, or
+  left on *Auto*, where `LC_ALL`, `LC_MESSAGES` or `LANG` decide. A string with no translation
+  falls back to English rather than showing a key, and the fallback is tested. The German catalogue
+  covers the labels, buttons and menus; the long prose in the Help manual is still English.
+- **Smart playlists say when they refresh.** A new setting chooses the policy: after every scan
+  (the default), on a timer, or only when the user asks. The result is cached either way, so the
+  timer and the manual policy do not re-run the query over the whole library every time the view is
+  opened, and the *Refresh* button next to a smart playlist does what it says. The library-change
+  policy notices the change before the list is rebuilt, so the answer is never one scan old.
+- **The engine's creative effects reach the playback path.** The chorus, flanger, phaser,
+  ping-pong delay and saturation that the engine already implemented are now a stage in the
+  production graph — after the stereo stage, before the transport stages — with one command that
+  carries the whole insert, so the settings can never disagree with each other. The DSP panel grew
+  an *Effects* tab to drive them. Every effect is off until it is asked for, and the insert is
+  transparent while they are off.
+- **A 100,000-track library has published numbers.** `docs/PERFORMANCE.md` states what a library
+  that size costs the UI, and `crates/ui/tests/library_budget.rs` asserts it in CI: a frame with
+  100,000 tracks stays under 16 ms, a rebuild under 250 ms. The measurement is a release build, and
+  the library is synthetic and deterministic, so the same work is measured on every machine.
+
+### Changed
+- **Changing the sort no longer copies the library.** The visible list was rebuilt from scratch
+  whenever the sort changed: the library was copied out of the state — half a million string
+  allocations at 100,000 tracks — and sorted again. The list that is already on screen is now
+  re-ordered in place, and a counter in the library state makes the difference testable.
+- **The sort is measured, not assumed.** Two alternatives were tried and rejected on the numbers:
+  a case-insensitive comparison that allocates nothing was five times slower than the cached keys,
+  and sorting an index permutation was slower than sorting the records directly. Both are recorded
+  in `docs/PERFORMANCE.md` so they are not tried a third time.
+
+### Fixed
+- **The Settings jump survives a translation.** The Settings search jumped to a row named in
+  English while the rows were rendered in the user's language, so the jump landed on nothing in
+  German. The target is translated with the row.
+- **The Help manual's interactive cards are marked in every language.** The card that says the
+  section is interactive was recognised by an English word, so the marker disappeared once the
+  interface spoke German. The comparison is against the translated word now.
+
+### Testing and release
+- The player suite covers the locale selection and the environment fallback, the three smart-playlist
+  refresh policies, and the creative-effects insert (transparent while off, audible when engaged,
+  and surviving a graph rebuild). The library budget is a release-mode test in CI, and the
+  benchmark behind the published numbers compiles there too.
+
 ## [0.13.0] - 2026-10-22
 
 *Released with audio-engine 1.6.0. The player and the engine are versioned separately and released

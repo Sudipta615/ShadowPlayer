@@ -80,21 +80,25 @@ pub fn show_duplicates_modal(
 
     let mut is_open = state.is_open;
 
-    let closed =
-        crate::dialog::show_modal(ctx, "duplicates", "Duplicate Tracks", 620.0, theme, |ui| {
+    let closed = crate::dialog::show_modal(
+        ctx,
+        "duplicates",
+        "Duplicate Tracks",
+        620.0,
+        theme,
+        |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
 
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(
-                        "Tracks with identical audio content, found by content fingerprint \
-                         (tags and file names are ignored).",
+                        tr!("Tracks with identical audio content, found by content fingerprint \n                         (tags and file names are ignored)."),
                     )
                     .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Rescan").clicked() {
+                    if ui.button(tr!(Msg::S0095E23ABF1B93A9)).clicked() {
                         actions.rescan = true;
                     }
                 });
@@ -104,13 +108,13 @@ pub fn show_duplicates_modal(
 
             if !state.scanned {
                 ui.label(
-                    egui::RichText::new("Press Rescan to look for duplicates.")
+                    egui::RichText::new(tr!("Press Rescan to look for duplicates."))
                         .font(crate::theme::font(12.5))
                         .color(theme.text_muted),
                 );
             } else if state.groups.is_empty() {
                 ui.label(
-                    egui::RichText::new("No duplicates found. Your library is clean.")
+                    egui::RichText::new(tr!("No duplicates found. Your library is clean."))
                         .font(crate::theme::font(12.5))
                         .color(theme.text_muted),
                 );
@@ -151,7 +155,7 @@ pub fn show_duplicates_modal(
                                                 egui::Checkbox::new(&mut checked, label),
                                             );
                                             ui.label(
-                                                egui::RichText::new("keep")
+                                                egui::RichText::new(tr!("keep"))
                                                     .font(crate::theme::font(11.0))
                                                     .color(theme.bit_perfect_green),
                                             );
@@ -205,13 +209,14 @@ pub fn show_duplicates_modal(
 
                 if state.delete_from_disk {
                     ui.label(
-                        egui::RichText::new("This cannot be undone.")
+                        egui::RichText::new(tr!("This cannot be undone."))
                             .font(crate::theme::font(11.0))
                             .color(theme.accent_highlight),
                     );
                 }
             });
-        });
+        },
+    );
     if closed {
         is_open = false;
     }

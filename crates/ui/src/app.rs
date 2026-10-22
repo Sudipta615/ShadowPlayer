@@ -97,6 +97,8 @@ pub struct ShadowPlayerApp {
     /// Mirrors the Settings toggle; changes are written to the pre-launch
     /// marker immediately.
     multi_instance_allowed: bool,
+    /// The saved language preference. Empty means "follow the environment".
+    locale: String,
 
     app_state: AppState,
     library_state: LibraryState,
@@ -248,6 +250,7 @@ impl ShadowPlayerApp {
             loudness_service,
             data_dir,
             multi_instance_allowed: false,
+            locale: String::new(),
 
             app_state: AppState::default(),
             library_state: LibraryState::default(),
@@ -1232,6 +1235,12 @@ impl ShadowPlayerApp {
 
     pub fn load_persisted_settings(&mut self) {
         if let Ok(app_settings) = self.settings_repo.load() {
+            // The language is decided before anything is rendered, so the
+            // first frame is already in the right language. An empty
+            // preference means "ask the environment"; the POSIX locale
+            // variables decide, and English is the fallback.
+            self.locale = app_settings.locale.clone();
+            crate::i18n::init(&self.locale);
             self.theme = if app_settings.theme_dark {
                 Theme::dark()
             } else {
@@ -1362,6 +1371,20 @@ impl ShadowPlayerApp {
         self.clap_refresh_frames = CLAP_STARTUP_REFRESHES;
     }
 
+    /// Change the interface language.
+    ///
+    /// An empty preference means "follow the environment", so the POSIX
+    /// locale variables decide again. The change takes effect on the next
+    /// frame, and is written to the settings with the next save.
+    fn set_locale(&mut self, preference: String) {
+        self.locale = preference.clone();
+        crate::i18n::init(&preference);
+        self.settings_dirty = true;
+        if let Some(ctx) = &self.wake_ctx {
+            ctx.request_repaint();
+        }
+    }
+
     pub fn save_persisted_settings(&self) {
         // 1. Save AppSettings
         let app_settings = domain::models::AppSettings {
@@ -1397,6 +1420,7 @@ impl ShadowPlayerApp {
             } else {
                 self.window_size.1
             },
+            locale: self.locale.clone(),
         };
         if let Err(e) = self.settings_repo.save(&app_settings) {
             log::warn!("Could not persist app settings: {e}");
@@ -1523,8 +1547,7 @@ impl ShadowPlayerApp {
                         self.toasts
                             .success(format!("Imported {imported} track(s) into the library"));
                     } else {
-                        self.toasts
-                            .warning("Nothing was imported — those files are not supported audio");
+                        self.toasts.warning(tr!(Msg::SF20A9D80B386ACFE));
                     }
                 }
             }
@@ -2074,6 +2097,9 @@ impl ShadowPlayerApp {
     }
 
     pub fn reload_library(&mut self) {
+        // The refresh policy lives in the settings; the state that consults
+        // it needs the current value.
+        self.sync_smart_refresh_policy();
         self.library_state.reload(
             &self.track_repo,
             &self.favorites_repo,
@@ -2090,6 +2116,42 @@ impl ShadowPlayerApp {
             self.app_state.current_sort,
             self.app_state.current_sort_order,
         );
+    }
+
+    /// Re-evaluate the smart playlists now.
+    ///
+    /// The user asked for it, so the refresh policy does not get a say: the
+    /// cached results are dropped and the next view of a smart playlist runs
+    /// its query again.
+    pub fn refresh_smart_playlists(&mut self) {
+        self.library_state.request_smart_refresh();
+        self.refresh_view();
+    }
+
+    /// Push the saved refresh policy into the library state.
+    ///
+    /// The policy is a preference the user edits in Settings, and the state
+    /// that consults it lives with the library. A change of policy drops the
+    /// cached results, because the new policy may want a different answer.
+    fn sync_smart_refresh_policy(&mut self) {
+        let wanted = self.dsp_state.settings_tab.smart_refresh.clamped();
+        if self.library_state.smart_refresh != wanted {
+            self.library_state.smart_refresh = wanted;
+            self.library_state.clear_smart_cache();
+        }
+    }
+
+    /// Re-evaluate the smart playlists when the timer policy says so.
+    ///
+    /// Nothing happens under the other two policies: the library-change
+    /// policy is driven by the scanner, and the manual policy by the user.
+    fn tick_smart_refresh(&mut self) {
+        self.sync_smart_refresh_policy();
+        if !self.library_state.smart_refresh_due() {
+            return;
+        }
+        self.library_state.request_smart_refresh();
+        self.refresh_view();
     }
 
     /// Rebuild only the visible track list for the current tab/search/sort.
@@ -2141,7 +2203,7 @@ impl ShadowPlayerApp {
     /// Open the batch organizer for a set of tracks.
     fn open_organize(&mut self, tracks: Vec<domain::models::Track>, scope_label: String) {
         if tracks.is_empty() {
-            self.toasts.info("Nothing to organize".to_string());
+            self.toasts.info(tr!(Msg::SE08BEDBD4E069BB0).to_string());
             return;
         }
         let label = format!(
@@ -2609,6 +2671,11 @@ impl eframe::App for ShadowPlayerApp {
 
         // 2. Poll Library Scanner progress
         if self.scanner_service.poll() {
+            // The library changed, so the smart playlists may have new
+            // answers. Under the library-change policy that is the trigger;
+            // under the manual policy it changes nothing. The note comes
+            // first, so the rebuild below already sees it.
+            self.library_state.note_library_change();
             self.reload_library();
             // A finished scan may unblock the next queued root.
             self.pump_scan_queue();
@@ -2631,6 +2698,9 @@ impl eframe::App for ShadowPlayerApp {
 
         // 2c. Sleep timer (countdown or end-of-track).
         self.update_sleep_timer(&ctx);
+
+        // 2c2. Smart playlists: the timer policy re-evaluates them on its own.
+        self.tick_smart_refresh();
 
         // 2d. Desktop integration: apply media-key transport, publish state.
         self.handle_mpris(&ctx);
@@ -3099,9 +3169,8 @@ impl eframe::App for ShadowPlayerApp {
                     self.app_state.right_tab = crate::components::right_panel::RightTab::Lyrics;
                 }
                 if std::env::var("SHADOWPLAYER_EVAL_TOAST").is_ok() {
-                    self.toasts
-                        .success("Opened playlist 'Late Night Drive' — 12 of 14 tracks");
-                    self.toasts.info("Scan complete: 812 tracks (2410ms)");
+                    self.toasts.success(tr!(Msg::S943B3EFDC31F6DE7));
+                    self.toasts.info(tr!(Msg::SB10EA0D7A7D70A46));
                 }
                 if let Ok(f) = std::env::var("SHADOWPLAYER_EVAL_FILTER") {
                     use crate::components::songs_table::QuickFilter as QF;
@@ -3890,6 +3959,7 @@ impl eframe::App for ShadowPlayerApp {
                             import_active,
                             &self.app_state.imported_dirs,
                             self.loudness_service.progress(),
+                            &self.locale,
                             |path| scan_to_start = Some(path),
                             |kind| import_req = Some(kind),
                         );
@@ -3926,6 +3996,9 @@ impl eframe::App for ShadowPlayerApp {
                         }
                         if sv_actions.find_duplicates {
                             self.scan_duplicates();
+                        }
+                        if let Some(locale) = sv_actions.locale_changed {
+                            self.set_locale(locale);
                         }
                     }
                     NavItem::Help => {
@@ -3994,6 +4067,9 @@ impl eframe::App for ShadowPlayerApp {
                             {
                                 self.smart_playlist_editor.open_existing(&sp);
                             }
+                        }
+                        if view_action.refresh_smart_playlist {
+                            self.refresh_smart_playlists();
                         }
                         if let Some(tracks) = view_action.organize_tracks {
                             self.open_organize(tracks, "Selection".to_string());
@@ -4199,6 +4275,8 @@ impl eframe::App for ShadowPlayerApp {
             }
         }
         if sp_changed {
+            // The definition changed, so every cached answer is out of date.
+            self.library_state.request_smart_refresh();
             self.reload_library();
         }
 
@@ -4251,9 +4329,7 @@ impl eframe::App for ShadowPlayerApp {
         }
         if let Some((pl, linked)) = pl_actions.link_playlist {
             match self.playlist_repo.add_link(&pl, &linked) {
-                Ok(()) => self
-                    .toasts
-                    .success("Linked the playlist; its tracks resolve when this one plays"),
+                Ok(()) => self.toasts.success(tr!(Msg::S087398277D809E0D)),
                 Err(e) => self
                     .toasts
                     .warning(format!("Could not link the playlist: {e}")),

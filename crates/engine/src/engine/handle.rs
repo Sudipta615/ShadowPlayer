@@ -697,6 +697,14 @@ impl EngineHandle {
         let _ = self.send_command(EngineCommand::SetCrossfeedProfile(profile));
     }
 
+    /// Apply the creative-effects insert's settings.
+    ///
+    /// One call carries every effect, so the insert is always in a state the
+    /// host can describe: chorus, flanger, phaser, delay and saturation.
+    pub fn set_fx_config(&self, config: config::FxConfig) {
+        let _ = self.send_command(EngineCommand::SetFxConfig(config));
+    }
+
     /// Set custom crossfeed parameters (frequency cut-off, Q, and ITD delay in ms).
     pub fn set_crossfeed_custom_params(&self, frequency_hz: f32, q: f32, delay_ms: f32) {
         let _ = self.send_command(EngineCommand::SetCrossfeedCustomParams {

@@ -119,6 +119,14 @@ impl PingPongDelay {
         }
     }
 
+    /// The delay line's capacity in samples.
+    ///
+    /// The longest delay the line can hold. A host clamps its delay time to
+    /// this, because a longer one would read outside the buffer.
+    pub fn buffer_len(&self) -> usize {
+        self.buf_l.len()
+    }
+
     /// Reset internal delay memory.
     pub fn reset(&mut self) {
         self.buf_l.fill(0.0);

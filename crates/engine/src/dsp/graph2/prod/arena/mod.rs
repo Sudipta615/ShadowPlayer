@@ -128,8 +128,12 @@ mod node_id {
     /// The plugin host insert — Rust-native effect plugins
     /// (post-volume, pre-limiter). Disabled / empty = bit-exact.
     pub const PLUGIN: usize = 17;
+    /// The creative-effects insert — chorus, flanger, phaser, delay and
+    /// saturation (post-stereo, pre-timestretch). Every effect off = the
+    /// stage is transparent.
+    pub const FX: usize = 18;
     /// Number of canonical node slots (also the first non-node `NodeId`).
-    pub const NODE_COUNT: usize = 18;
+    pub const NODE_COUNT: usize = 19;
 }
 
 /// The number of canonical node slots in a generation.
@@ -171,6 +175,7 @@ pub(crate) enum GraphNode {
     Correction(CorrectionNode),
     Spatial(SpatialNode),
     PluginHost(PluginHostNode),
+    Fx(FxNode),
 }
 
 const VOLUME_RAMP_DURATION_MS: f32 = 10.0;

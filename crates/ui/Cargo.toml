@@ -1,7 +1,10 @@
 [package]
 name = "ui"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
+
+[build-dependencies]
+serde_json = "1.0"
 
 [dependencies]
 domain = { path = "../domain" }
@@ -62,6 +65,16 @@ pollster = "1.0"
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8", default-features = false }
 raw-window-handle = "0.6"
+
+[dev-dependencies]
+# The library benchmark. `cargo bench -p ui` measures the rebuild of a
+# 100,000-track library, which is the operation a big library makes the UI
+# thread wait for.
+criterion = "0.8.2"
+
+[[bench]]
+name = "library_100k"
+harness = false
 
 [features]
 # Development-only automation hooks: `SHADOWPLAYER_EVAL*` drives the UI to a

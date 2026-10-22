@@ -104,7 +104,7 @@ fn render_header(
 ) {
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("Plugin Rack")
+            egui::RichText::new(tr!("Plugin Rack"))
                 .font(crate::theme::font(15.0))
                 .color(theme.text_primary)
                 .strong(),
@@ -130,7 +130,10 @@ fn render_header(
         .fill(theme.bg_input)
         .stroke(Stroke::new(1.0, theme.border_subtle))
         .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(Margin::symmetric(theme.space_xl as i8, theme.space_lg as i8))
+        .inner_margin(Margin::symmetric(
+            theme.space_xl as i8,
+            theme.space_lg as i8,
+        ))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xs);
 
@@ -161,7 +164,7 @@ fn render_header(
                 }
                 None => {
                     ui.label(
-                        egui::RichText::new("No plugin loaded")
+                        egui::RichText::new(tr!("No plugin loaded"))
                             .font(crate::theme::font(13.0))
                             .color(theme.text_secondary),
                     );
@@ -187,16 +190,14 @@ fn render_header(
                         view.rack.is_loaded(),
                         egui::Checkbox::new(&mut enabled, "Insert active"),
                     )
-                    .on_hover_text(
-                        "Take the plugin out of the signal path. Its parameters and state are kept.",
-                    );
+                    .on_hover_text(tr!(Msg::SCFC9BA58C78BFD4D));
                 if toggle.changed() {
                     actions.set_enabled = Some(enabled);
                 }
 
                 if view.rack.is_loaded() && view.rack.has_state {
                     ui.label(
-                        egui::RichText::new("· state available")
+                        egui::RichText::new(tr!("· state available"))
                             .font(crate::theme::font(10.5))
                             .color(theme.text_muted),
                     );
@@ -223,7 +224,7 @@ fn render_header(
             actions.choose_library = true;
         }
         if pill(ui, "Re-read", theme, false)
-            .on_hover_text("Ask the engine to republish the plugin and its parameters.")
+            .on_hover_text(tr!(Msg::S5B9FDDD07DB08335))
             .clicked()
         {
             actions.refresh = true;
@@ -254,9 +255,7 @@ fn render_unloaded(
     ui.add_space(6.0);
     ui.label(
         egui::RichText::new(
-            "Load a CLAP plugin to insert it after the volume stage. A plugin's own \
-             editor is a native window, so this rack drives every parameter the \
-             plugin publishes instead.",
+            tr!("Load a CLAP plugin to insert it after the volume stage. A plugin's own \n             editor is a native window, so this rack drives every parameter the \n             plugin publishes instead."),
         )
         .font(crate::theme::font(11.5))
         .color(theme.text_secondary),
@@ -381,7 +380,7 @@ fn render_parameters(
 
     if editable.is_empty() {
         ui.label(
-            egui::RichText::new("This plugin publishes no editable parameters.")
+            egui::RichText::new(tr!("This plugin publishes no editable parameters."))
                 .font(crate::theme::font(11.5))
                 .color(theme.text_secondary),
         );
@@ -503,8 +502,7 @@ fn render_presets(
     );
     ui.label(
         egui::RichText::new(
-            "A preset stores the parameter values the host set, and the plugin's own \
-             state when it has one.",
+            tr!("A preset stores the parameter values the host set, and the plugin's own \n             state when it has one."),
         )
         .font(crate::theme::font(10.5))
         .color(theme.text_muted),
@@ -515,11 +513,13 @@ fn render_presets(
     ui.horizontal(|ui| {
         ui.add_sized(
             Vec2::new(170.0, 22.0),
-            egui::TextEdit::singleline(&mut state.preset_name).hint_text("Preset name"),
+            egui::TextEdit::singleline(&mut state.preset_name)
+                .hint_text(tr!(Msg::S7E2C3C9273DFFA01)),
         );
         ui.add_sized(
             Vec2::new(150.0, 22.0),
-            egui::TextEdit::singleline(&mut state.preset_note).hint_text("Note (optional)"),
+            egui::TextEdit::singleline(&mut state.preset_note)
+                .hint_text(tr!(Msg::S0A6BD2583999C878)),
         );
         if pill(ui, "Save Preset", theme, true).clicked() {
             actions.save_preset = true;
@@ -530,7 +530,7 @@ fn render_presets(
 
     if relevant.is_empty() {
         ui.label(
-            egui::RichText::new("No presets saved for this plugin yet.")
+            egui::RichText::new(tr!("No presets saved for this plugin yet."))
                 .font(crate::theme::font(11.0))
                 .color(theme.text_secondary),
         );

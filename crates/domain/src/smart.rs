@@ -395,6 +395,95 @@ impl SmartRule {
     }
 }
 
+/// When a smart playlist is re-evaluated.
+///
+/// The rules themselves are a saved query, so the only question is *when* it
+/// is run again. A library that changes under a "Recently added" playlist
+/// makes it stale; how stale depends on what the user asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SmartRefreshPolicy {
+    /// Re-evaluate whenever the library changes.
+    ///
+    /// The default: a smart playlist is meant to be self-updating, and the
+    /// library is the only thing that can change what it matches.
+    #[default]
+    LibraryChange,
+    /// Re-evaluate on a timer, whether or not the library changed.
+    ///
+    /// For rules that depend on time — "played in the last week" — which a
+    /// library change alone would never notice.
+    Interval,
+    /// Re-evaluate only when the user asks.
+    ///
+    /// The result is frozen until the user presses Refresh, so a long query
+    /// over a huge library is paid for once, not on every visit.
+    Manual,
+}
+
+impl SmartRefreshPolicy {
+    pub const ALL: [SmartRefreshPolicy; 3] = [
+        SmartRefreshPolicy::LibraryChange,
+        SmartRefreshPolicy::Interval,
+        SmartRefreshPolicy::Manual,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::LibraryChange => "When the library changes",
+            Self::Interval => "On a timer",
+            Self::Manual => "Only when I ask",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::LibraryChange => "Re-evaluate the smart playlists after every scan",
+            Self::Interval => "Re-evaluate the smart playlists every few minutes",
+            Self::Manual => "Keep the last result until you press Refresh",
+        }
+    }
+}
+
+/// How often the smart playlists are re-evaluated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SmartRefreshSettings {
+    pub policy: SmartRefreshPolicy,
+    /// How many minutes between refreshes under [`SmartRefreshPolicy::Interval`].
+    pub interval_minutes: u32,
+}
+
+impl Default for SmartRefreshSettings {
+    fn default() -> Self {
+        Self {
+            policy: SmartRefreshPolicy::default(),
+            interval_minutes: 15,
+        }
+    }
+}
+
+impl SmartRefreshSettings {
+    /// The smallest interval that is still useful.
+    ///
+    /// A refresh every second would re-run every smart playlist on every
+    /// frame of a long library; the setting is clamped rather than rejected
+    /// so an old payload cannot make the app spin.
+    pub const MIN_INTERVAL_MINUTES: u32 = 1;
+
+    pub fn clamped(self) -> Self {
+        Self {
+            policy: self.policy,
+            interval_minutes: self.interval_minutes.max(Self::MIN_INTERVAL_MINUTES),
+        }
+    }
+
+    /// The interval in seconds.
+    pub fn interval_secs(&self) -> i64 {
+        i64::from(self.clamped().interval_minutes) * 60
+    }
+}
+
 /// A saved, self-updating playlist definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SmartPlaylist {

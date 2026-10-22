@@ -147,6 +147,9 @@ pub struct UserState {
     /// Shorter than the generation's slot count is fine (missing entries
     /// keep no track); entries beyond the generation's slots are ignored.
     pub slot_automation: Vec<Option<SlotAutomationData>>,
+    /// The creative-effects settings, carried across a rebuild so a live
+    /// change survives a generation swap.
+    pub fx: config::FxConfig,
 }
 
 impl Default for UserState {
@@ -172,6 +175,7 @@ impl Default for UserState {
             plugin_params: None,
             duck: None,
             slot_automation: Vec::new(),
+            fx: config::FxConfig::default(),
         }
     }
 }

@@ -86,7 +86,7 @@ pub fn show_modal_scrollable(
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::Button, true, "Close")
                     });
-                    let _ = resp.clone().on_hover_text("Close");
+                    let _ = resp.clone().on_hover_text(tr!(Msg::S5E8250FB85D64C23));
                     if resp.clicked() {
                         close_requested = true;
                     }
@@ -196,7 +196,7 @@ pub fn show_modal(
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::Button, true, "Close")
                     });
-                    let _ = resp.clone().on_hover_text("Close");
+                    let _ = resp.clone().on_hover_text(tr!(Msg::S5E8250FB85D64C23));
                     if resp.clicked() {
                         close_requested = true;
                     }

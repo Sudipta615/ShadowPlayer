@@ -110,7 +110,7 @@ impl<'a> SideBar<'a> {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xxs);
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new("ShadowPlayer")
+                                egui::RichText::new(tr!("ShadowPlayer"))
                                     .font(crate::theme::font(if compact_brand {
                                         15.0
                                     } else {
@@ -123,7 +123,7 @@ impl<'a> SideBar<'a> {
                         );
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new("Music for a better you")
+                                egui::RichText::new(tr!("Music for a better you"))
                                     .font(crate::theme::font(10.5))
                                     .color(self.theme.text_muted),
                             )
@@ -162,13 +162,16 @@ impl<'a> SideBar<'a> {
                     Rect::from_center_size(plus_rect.center(), Vec2::splat(18.0)),
                     plus_color,
                 );
-                if plus_resp.on_hover_text("New playlist").clicked() {
+                if plus_resp
+                    .on_hover_text(tr!(Msg::SD4F48AACA7B6E405))
+                    .clicked()
+                {
                     (self.on_create_playlist)();
                 }
             } else {
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("Playlists")
+                        egui::RichText::new(tr!("Playlists"))
                             .font(crate::theme::font(13.0))
                             .color(self.theme.text_muted),
                     );
@@ -187,7 +190,7 @@ impl<'a> SideBar<'a> {
                         plus_resp.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::Button, true, "New playlist")
                         });
-                        let _ = plus_resp.clone().on_hover_text("New playlist");
+                        let _ = plus_resp.clone().on_hover_text(tr!(Msg::SD4F48AACA7B6E405));
                         if plus_resp.clicked() {
                             menu_open = !menu_open;
                             ui.ctx().data_mut(|d| d.insert_temp(plus_id, menu_open));
@@ -202,11 +205,11 @@ impl<'a> SideBar<'a> {
                                 .show(ui.ctx(), |ui| {
                                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                                         ui.set_min_width(140.0);
-                                        if ui.button("Standard Playlist").clicked() {
+                                        if ui.button(tr!(Msg::SD50E805A69F8C016)).clicked() {
                                             (self.on_create_playlist)();
                                             close = true;
                                         }
-                                        if ui.button("Smart Playlist").clicked() {
+                                        if ui.button(tr!(Msg::SDA82BB90A6E11970)).clicked() {
                                             (self.on_create_smart_playlist)();
                                             close = true;
                                         }
@@ -339,7 +342,7 @@ impl<'a> SideBar<'a> {
         let trash_id = ui.make_persistent_id(format!("del_sp_{}", playlist.id));
         let trash_resp = ui
             .interact(trash_rect, trash_id, Sense::click())
-            .on_hover_text("Delete smart playlist");
+            .on_hover_text(tr!(Msg::S4161CC1EC08A7B2F));
         trash_resp.widget_info(|| {
             egui::WidgetInfo::labeled(egui::Role::Button, true, "Delete smart playlist")
         });
@@ -478,7 +481,7 @@ impl<'a> SideBar<'a> {
         let trash_id = ui.make_persistent_id(format!("del_pl_{}", playlist.id));
         let trash_resp = ui
             .interact(trash_rect, trash_id, Sense::click())
-            .on_hover_text("Delete playlist");
+            .on_hover_text(tr!(Msg::SAD9F16B467D53F18));
         trash_resp
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Delete playlist"));
 

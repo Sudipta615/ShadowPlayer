@@ -90,7 +90,7 @@ pub fn show_smart_playlist_editor(
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.label(
-                            egui::RichText::new("Saved")
+                            egui::RichText::new(tr!("Saved"))
                                 .font(crate::theme::font(13.5))
                                 .strong()
                                 .color(theme.text_primary),
@@ -103,7 +103,7 @@ pub fn show_smart_playlist_editor(
                             .show(ui, |ui| {
                                 if playlists.is_empty() {
                                     ui.label(
-                                        egui::RichText::new("None yet.")
+                                        egui::RichText::new(tr!("None yet."))
                                             .font(crate::theme::font(11.5))
                                             .color(theme.text_muted),
                                     );
@@ -122,8 +122,8 @@ pub fn show_smart_playlist_editor(
                                             actions.open = Some(sp.id);
                                         }
                                         if ui
-                                            .small_button("Delete playlist")
-                                            .on_hover_text("Delete")
+                                            .small_button(tr!(Msg::SAD9F16B467D53F18))
+                                            .on_hover_text(tr!(Msg::SDC673E73B5C13AEA))
                                             .clicked()
                                         {
                                             actions.delete = Some(sp.id);
@@ -143,14 +143,14 @@ pub fn show_smart_playlist_editor(
                     |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Name")
+                                egui::RichText::new(tr!("Name"))
                                     .font(crate::theme::font(12.5))
                                     .color(theme.text_secondary),
                             );
                             if ui
                                 .add(
                                     egui::TextEdit::singleline(&mut state.draft.name)
-                                        .hint_text("e.g. Long FLACs I love")
+                                        .hint_text(tr!(Msg::S9D8617B1A686A83D))
                                         .desired_width(ui.available_width() - 70.0),
                                 )
                                 .changed()
@@ -185,7 +185,7 @@ pub fn show_smart_playlist_editor(
                         // AND / OR
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Match:")
+                                egui::RichText::new(tr!("Match:"))
                                     .font(crate::theme::font(12.0))
                                     .color(theme.text_secondary),
                             );
@@ -209,9 +209,7 @@ pub fn show_smart_playlist_editor(
                                     .font(crate::theme::font(11.5))
                                     .color(theme.destructive),
                             )
-                            .on_hover_text(
-                                "The playlist will not be saved until every rule is complete.",
-                            );
+                            .on_hover_text(tr!(Msg::SABE7A4AB105B00FD));
                         }
 
                         ui.separator();
@@ -291,8 +289,8 @@ pub fn show_smart_playlist_editor(
                                         }
 
                                         if ui
-                                            .small_button("Del")
-                                            .on_hover_text("Remove rule")
+                                            .small_button(tr!(Msg::SE0A34419921B022A))
+                                            .on_hover_text(tr!(Msg::S440FB245DF9F0819))
                                             .clicked()
                                         {
                                             remove = Some(i);
@@ -306,7 +304,7 @@ pub fn show_smart_playlist_editor(
                         }
 
                         ui.add_space(4.0);
-                        if ui.button("+ Add rule").clicked() {
+                        if ui.button(tr!(Msg::S13E29684902A9319)).clicked() {
                             state.draft.rules.push(SmartRule::new(SmartField::Artist));
                             state.draft_dirty = true;
                         }
@@ -325,7 +323,7 @@ pub fn show_smart_playlist_editor(
                                     state.draft_dirty = true;
                                 }
                                 ui.label(
-                                    egui::RichText::new("tracks")
+                                    egui::RichText::new(tr!("tracks"))
                                         .font(crate::theme::font(11.5))
                                         .color(theme.text_muted),
                                 );
@@ -334,7 +332,7 @@ pub fn show_smart_playlist_editor(
 
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Sort by")
+                                egui::RichText::new(tr!("Sort by"))
                                     .font(crate::theme::font(12.0))
                                     .color(theme.text_secondary),
                             );

@@ -47,6 +47,11 @@ impl AudioEngine {
         self.graph.set_crossfeed_profile(profile);
     }
 
+    /// Apply the creative-effects insert's settings.
+    pub(super) fn handle_set_fx_config(&mut self, config: config::FxConfig) {
+        self.graph.set_fx_config(config);
+    }
+
     pub(super) fn handle_set_crossfeed_custom_params(
         &mut self,
         frequency_hz: f32,

@@ -16,6 +16,8 @@ pub struct SettingsViewActions {
     pub cancel_loudness_scan: bool,
     /// Open the duplicate-track finder.
     pub find_duplicates: bool,
+    /// The interface language changed. `None` means "follow the environment".
+    pub locale_changed: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -30,6 +32,8 @@ pub fn render_settings_view(
     import_active: bool,
     imported_dirs: &[PathBuf],
     loudness: &LoudnessProgress,
+    // The saved language preference; empty means "follow the environment".
+    locale: &str,
     mut on_start_scan: impl FnMut(PathBuf),
     mut on_import: impl FnMut(ImportKind),
 ) -> SettingsViewActions {
@@ -83,6 +87,7 @@ pub fn render_settings_view(
             output_devices: &dsp_state.output_devices,
             graph_build_ms: session.graph_build_stats().0,
             graph_builds: session.graph_build_stats().1,
+            locale,
         };
 
         let s_actions = show_settings_tab_extended(ui, &mut dsp_state.settings_tab, theme, &extra);
@@ -115,6 +120,9 @@ pub fn render_settings_view(
         }
         if s_actions.cancel_loudness_scan {
             view_actions.cancel_loudness_scan = true;
+        }
+        if let Some(locale) = s_actions.locale_changed.clone() {
+            view_actions.locale_changed = Some(locale);
         }
 
         dsp_state.handle_settings_actions(session, &s_actions);

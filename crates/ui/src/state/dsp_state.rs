@@ -206,6 +206,9 @@ impl DspState {
             session.load_correction_ir(std::path::PathBuf::from(&eq.correction_ir_path));
         }
 
+        // Creative effects: the whole insert in one call.
+        session.set_fx_config(eq.fx);
+
         // Mix bus.
         let st = &self.settings_tab;
         session.set_bass_management(st.bass_management.clone());
@@ -614,6 +617,9 @@ impl DspState {
 
     /// Dispatch equalizer studio and dynamics actions
     pub fn handle_eq_panel_actions(&mut self, session: &AudioSession, eq_actions: EqPanelActions) {
+        if eq_actions.fx_changed {
+            session.set_fx_config(self.eq_panel.fx);
+        }
         if let Some(b) = eq_actions.eq_enabled_changed {
             session.set_eq_enabled(b);
         }

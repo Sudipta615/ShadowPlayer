@@ -71,13 +71,13 @@ pub fn show_bit_perfect_modal(
                                 paint_status_dot(ui, theme.bit_perfect_green, 6.5);
                                 ui.vertical(|ui| {
                                     ui.label(
-                                        egui::RichText::new("SIGNAL PATH IS 100% BIT-PERFECT")
+                                        egui::RichText::new(tr!("SIGNAL PATH IS 100% BIT-PERFECT"))
                                             .font(crate::theme::font(14.0))
                                             .strong()
                                             .color(theme.bit_perfect_green),
                                     );
                                     ui.label(
-                                        egui::RichText::new("Direct unmolested bitstream to audio hardware DAC. Zero DSP coloration.")
+                                        egui::RichText::new(tr!("Direct unmolested bitstream to audio hardware DAC. Zero DSP coloration."))
                                             .font(crate::theme::font(11.5))
                                             .color(theme.text_secondary),
                                     );
@@ -86,7 +86,7 @@ pub fn show_bit_perfect_modal(
                                 paint_warning_triangle(ui, theme.accent_highlight);
                                 ui.vertical(|ui| {
                                     ui.label(
-                                        egui::RichText::new("DSP SIGNAL ALTERATION ACTIVE")
+                                        egui::RichText::new(tr!("DSP SIGNAL ALTERATION ACTIVE"))
                                             .font(crate::theme::font(14.0))
                                             .strong()
                                             .color(theme.accent_highlight),
@@ -114,7 +114,7 @@ pub fn show_bit_perfect_modal(
 
                 // 2. Visual Signal Path Diagram
                 ui.label(
-                    egui::RichText::new("AUDIO SIGNAL FLOW")
+                    egui::RichText::new(tr!("AUDIO SIGNAL FLOW"))
                         .font(crate::theme::font(11.0))
                         .strong()
                         .color(theme.text_muted),
@@ -220,7 +220,7 @@ pub fn show_bit_perfect_modal(
 
                 // 3. Detailed Signal Path Telemetry Table
                 ui.label(
-                    egui::RichText::new("SIGNAL SPECIFICATIONS")
+                    egui::RichText::new(tr!("SIGNAL SPECIFICATIONS"))
                         .font(crate::theme::font(11.0))
                         .strong()
                         .color(theme.text_muted),
@@ -267,7 +267,7 @@ pub fn show_bit_perfect_modal(
                 // renders; the modal does not assemble an independent opinion
                 // about exclusive access or the device.
                 ui.label(
-                    egui::RichText::new("NEGOTIATED OUTPUT")
+                    egui::RichText::new(tr!("NEGOTIATED OUTPUT"))
                         .font(crate::theme::font(11.0))
                         .strong()
                         .color(theme.text_muted),
@@ -283,7 +283,7 @@ pub fn show_bit_perfect_modal(
                 // 5. Action Row: 1-Click Bit-Perfect Pure Direct Mode
                 ui.horizontal(|ui| {
                     let pure_direct_btn = egui::Button::new(
-                        egui::RichText::new("Enable Bit-Perfect Pure Direct")
+                        egui::RichText::new(tr!("Enable Bit-Perfect Pure Direct"))
                             .font(crate::theme::font(12.5))
                             .strong()
                             .color(Color32::WHITE),
@@ -314,7 +314,7 @@ pub fn show_bit_perfect_modal(
                         dsp_state.settings_tab.bit_perfect = true;
                     }
 
-                    if ui.button("Close").clicked() {
+                    if ui.button(tr!(Msg::S5E8250FB85D64C23)).clicked() {
                         close_clicked = true;
                     }
                 });

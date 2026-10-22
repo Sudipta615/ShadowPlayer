@@ -190,6 +190,7 @@ pub const CANONICAL_CHAIN: &[ProdStage] = &[
     ProdStage::Balance,
     ProdStage::Crossfeed,
     ProdStage::Stereo,
+    ProdStage::CreativeFx,
     ProdStage::Timestretch,
     ProdStage::Volume,
     ProdStage::SeekFade,

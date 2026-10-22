@@ -55,7 +55,7 @@ pub fn show_import_playlists_modal(
                 ui.add_space(theme.space_lg);
                 ui.vertical_centered(|ui| {
                     ui.label(
-                        egui::RichText::new("No playlists found")
+                        egui::RichText::new(tr!("No playlists found"))
                             .font(crate::theme::font(13.5))
                             .strong()
                             .color(theme.text_primary),
@@ -63,9 +63,7 @@ pub fn show_import_playlists_modal(
                     ui.add_space(theme.space_xs);
                     ui.label(
                         egui::RichText::new(
-                            "ShadowPlayer looked for the playlists Rhythmbox, Audacious, \
-                             Winamp, foobar2000, MusicBee, iTunes, Clementine and Strawberry \
-                             leave behind. There were none on this machine.",
+                            tr!("ShadowPlayer looked for the playlists Rhythmbox, Audacious, \n                             Winamp, foobar2000, MusicBee, iTunes, Clementine and Strawberry \n                             leave behind. There were none on this machine."),
                         )
                         .font(crate::theme::font(11.5))
                         .color(theme.text_muted),
@@ -77,8 +75,7 @@ pub fn show_import_playlists_modal(
 
             ui.label(
                 egui::RichText::new(
-                    "These playlists were found on this machine. Only the tracks that \
-                     are in your library are brought in.",
+                    tr!("These playlists were found on this machine. Only the tracks that \n                     are in your library are brought in."),
                 )
                 .font(crate::theme::font(12.0))
                 .color(theme.text_secondary),

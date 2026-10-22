@@ -142,7 +142,7 @@ impl MiniPlayer<'_> {
             24.0,
             crate::components::icons::draw_skip_prev,
         );
-        let _ = previous.clone().on_hover_text("Previous track");
+        let _ = previous.clone().on_hover_text(tr!(Msg::S9C2CFDED8ECFF47F));
         previous
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Previous track"));
         if previous.clicked() {
@@ -188,7 +188,7 @@ impl MiniPlayer<'_> {
             24.0,
             crate::components::icons::draw_skip_next,
         );
-        let _ = next.clone().on_hover_text("Next track");
+        let _ = next.clone().on_hover_text(tr!(Msg::SDC4932D8AABB325F));
         next.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Next track"));
         if next.clicked() {
             events.next = true;
@@ -217,7 +217,7 @@ impl MiniPlayer<'_> {
             CornerRadius::same(self.theme.radius_xs),
             rc,
         );
-        let _ = restore.clone().on_hover_text("Restore the full player");
+        let _ = restore.clone().on_hover_text(tr!(Msg::S22296B89B750827C));
         restore.widget_info(|| {
             egui::WidgetInfo::labeled(egui::Role::Button, true, "Restore full player")
         });

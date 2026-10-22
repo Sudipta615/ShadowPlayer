@@ -281,14 +281,13 @@ pub fn render_report_body(
         ui.add_space(theme.space_md);
         ui.vertical_centered(|ui| {
             ui.label(
-                egui::RichText::new("Nothing has been scrobbled yet")
+                egui::RichText::new(tr!("Nothing has been scrobbled yet"))
                     .font(crate::theme::font(13.0))
                     .color(theme.text_muted),
             );
             ui.label(
                 egui::RichText::new(
-                    "A play is scrobbled once it has been heard for thirty \
-                     seconds, or half the track, whichever comes first.",
+                    tr!("A play is scrobbled once it has been heard for thirty \n                     seconds, or half the track, whichever comes first."),
                 )
                 .font(crate::theme::font(11.5))
                 .color(theme.text_dim),
@@ -434,7 +433,7 @@ pub fn render_report_body(
     let busiest = day_values.iter().copied().max().unwrap_or(0);
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("Last 30 days")
+            egui::RichText::new(tr!("Last 30 days"))
                 .font(crate::theme::font(10.5))
                 .color(theme.text_dim),
         );
@@ -521,8 +520,7 @@ pub fn render_report_body(
     });
     ui.label(
         egui::RichText::new(
-            "Export writes the whole history, not only the selected period. \
-             The file is yours; nothing leaves the machine.",
+            tr!("Export writes the whole history, not only the selected period. \n             The file is yours; nothing leaves the machine."),
         )
         .font(crate::theme::font(10.5))
         .color(theme.text_dim),
@@ -772,7 +770,7 @@ fn top_list(ui: &mut egui::Ui, title: &str, entries: &[ScrobbleCount], theme: &T
     section_heading(ui, title, theme);
     if entries.is_empty() {
         ui.label(
-            egui::RichText::new("Nothing yet")
+            egui::RichText::new(tr!("Nothing yet"))
                 .font(crate::theme::font(11.0))
                 .color(theme.text_dim),
         );

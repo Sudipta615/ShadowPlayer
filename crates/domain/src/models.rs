@@ -347,6 +347,13 @@ pub struct AppSettings {
     pub allow_multiple_instances: bool,
     pub window_width: f32,
     pub window_height: f32,
+    /// The interface language.
+    ///
+    /// Empty means "ask the environment": the POSIX locale variables decide,
+    /// and English is the fallback. A non-empty value is a language code
+    /// (`"en"`, `"de"`) or a locale (`"de_DE.UTF-8"`); the part before the
+    /// region is what matters.
+    pub locale: String,
 }
 
 impl Default for AppSettings {
@@ -366,6 +373,7 @@ impl Default for AppSettings {
             allow_multiple_instances: false,
             window_width: 1280.0,
             window_height: 800.0,
+            locale: String::new(),
         }
     }
 }

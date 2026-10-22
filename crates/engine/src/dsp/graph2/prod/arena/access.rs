@@ -206,6 +206,27 @@ impl DspGraph {
         }
     }
 
+    /// The creative-effects insert.
+    pub fn fx(&self) -> &FxNode {
+        match &self.active.nodes[node_id::FX] {
+            GraphNode::Fx(n) => n,
+            _ => unreachable!("arena slot FX holds an FxNode"),
+        }
+    }
+
+    /// The creative-effects insert's settings.
+    pub fn fx_config(&self) -> config::FxConfig {
+        self.fx().config()
+    }
+
+    /// The creative-effects insert, mutably.
+    pub fn fx_mut(&mut self) -> &mut FxNode {
+        match &mut self.active.nodes[node_id::FX] {
+            GraphNode::Fx(n) => n,
+            _ => unreachable!("arena slot FX holds an FxNode"),
+        }
+    }
+
     pub fn stereo(&self) -> &StereoNode {
         match &self.active.nodes[node_id::STEREO] {
             GraphNode::Stereo(n) => n,

@@ -5,6 +5,7 @@ pub mod crossfeed_node;
 pub mod dither_node;
 pub mod dynamics_node;
 pub mod eq_node;
+pub mod fx_node;
 pub mod gain_node;
 pub mod limiter_node;
 pub mod loudness_node;
@@ -25,6 +26,7 @@ pub use crossfeed_node::CrossfeedNode;
 pub use dither_node::DitherNode;
 pub use dynamics_node::DynamicsNode;
 pub use eq_node::EqNode;
+pub use fx_node::FxNode;
 pub use gain_node::{BalanceNode, GainNode, SeekFadeNode};
 pub use limiter_node::LimiterNode;
 pub use loudness_node::LoudnessNode;
@@ -57,6 +59,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.capability(),
             GraphNode::Crossfeed(n) => n.capability(),
             GraphNode::Stereo(n) => n.capability(),
+            GraphNode::Fx(n) => n.capability(),
             GraphNode::TimeStretch(n) => n.capability(),
             GraphNode::Volume(n) => n.capability(),
             GraphNode::SeekFade(n) => n.capability(),
@@ -80,6 +83,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.is_active(),
             GraphNode::Crossfeed(n) => n.is_active(),
             GraphNode::Stereo(n) => n.is_active(),
+            GraphNode::Fx(n) => n.is_active(),
             GraphNode::TimeStretch(n) => n.is_active(),
             GraphNode::Volume(n) => n.is_active(),
             GraphNode::SeekFade(n) => n.is_active(),
@@ -103,6 +107,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.latency_samples(),
             GraphNode::Crossfeed(n) => n.latency_samples(),
             GraphNode::Stereo(n) => n.latency_samples(),
+            GraphNode::Fx(n) => n.latency_samples(),
             GraphNode::TimeStretch(n) => n.latency_samples(),
             GraphNode::Volume(n) => n.latency_samples(),
             GraphNode::SeekFade(n) => n.latency_samples(),
@@ -126,6 +131,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.tail_samples(),
             GraphNode::Crossfeed(n) => n.tail_samples(),
             GraphNode::Stereo(n) => n.tail_samples(),
+            GraphNode::Fx(n) => n.tail_samples(),
             GraphNode::TimeStretch(n) => n.tail_samples(),
             GraphNode::Volume(n) => n.tail_samples(),
             GraphNode::SeekFade(n) => n.tail_samples(),
@@ -149,6 +155,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.reset(),
             GraphNode::Crossfeed(n) => n.reset(),
             GraphNode::Stereo(n) => n.reset(),
+            GraphNode::Fx(n) => n.reset(),
             GraphNode::TimeStretch(n) => n.reset(),
             GraphNode::Volume(n) => n.reset(),
             GraphNode::SeekFade(n) => n.reset(),
@@ -172,6 +179,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.prepare(sample_rate, max_channels),
             GraphNode::Crossfeed(n) => n.prepare(sample_rate, max_channels),
             GraphNode::Stereo(n) => n.prepare(sample_rate, max_channels),
+            GraphNode::Fx(n) => n.prepare(sample_rate, max_channels),
             GraphNode::TimeStretch(n) => n.prepare(sample_rate, max_channels),
             GraphNode::Volume(n) => n.prepare(sample_rate, max_channels),
             GraphNode::SeekFade(n) => n.prepare(sample_rate, max_channels),
@@ -195,6 +203,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.process_block_f32(planes),
             GraphNode::Crossfeed(n) => n.process_block_f32(planes),
             GraphNode::Stereo(n) => n.process_block_f32(planes),
+            GraphNode::Fx(n) => n.process_block_f32(planes),
             GraphNode::TimeStretch(n) => n.process_block_f32(planes),
             GraphNode::Volume(n) => n.process_block_f32(planes),
             GraphNode::SeekFade(n) => n.process_block_f32(planes),
@@ -218,6 +227,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.process_block_f64(planes),
             GraphNode::Crossfeed(n) => n.process_block_f64(planes),
             GraphNode::Stereo(n) => n.process_block_f64(planes),
+            GraphNode::Fx(n) => n.process_block_f64(planes),
             GraphNode::TimeStretch(n) => n.process_block_f64(planes),
             GraphNode::Volume(n) => n.process_block_f64(planes),
             GraphNode::SeekFade(n) => n.process_block_f64(planes),
@@ -254,6 +264,7 @@ impl DspNode for GraphNode {
             GraphNode::Balance(n) => n.persistent_bytes(),
             GraphNode::Crossfeed(n) => n.persistent_bytes(),
             GraphNode::Stereo(n) => n.persistent_bytes(),
+            GraphNode::Fx(n) => n.persistent_bytes(),
             GraphNode::TimeStretch(n) => n.persistent_bytes(),
             GraphNode::Volume(n) => n.persistent_bytes(),
             GraphNode::SeekFade(n) => n.persistent_bytes(),

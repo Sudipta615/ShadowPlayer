@@ -341,9 +341,9 @@ pub fn show_autoeq_modal(
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xl);
 
                     ui.label(
-                        egui::RichText::new(
-                            "Auto-compensate frequency response using the AutoEQ database",
-                        )
+                        egui::RichText::new(tr!(
+                            "Auto-compensate frequency response using the AutoEQ database"
+                        ))
                         .font(crate::theme::font(12.5))
                         .color(theme.text_secondary),
                     );
@@ -351,7 +351,7 @@ pub fn show_autoeq_modal(
                     // Search Bar
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("Search:")
+                            egui::RichText::new(tr!("Search:"))
                                 .font(crate::theme::font(13.0))
                                 .color(theme.text_primary),
                         );
@@ -359,7 +359,7 @@ pub fn show_autoeq_modal(
                             egui::TextEdit::singleline(&mut state.search_query)
                                 .desired_width(ui.available_width() - 80.0),
                         );
-                        if ui.button("Clear").clicked() {
+                        if ui.button(tr!(Msg::SB4F1DFFBB6BE6302)).clicked() {
                             state.search_query.clear();
                         }
                     });
@@ -368,7 +368,7 @@ pub fn show_autoeq_modal(
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(theme.space_3xl, 0.0);
                         ui.label(
-                            egui::RichText::new("Target Curve:")
+                            egui::RichText::new(tr!("Target Curve:"))
                                 .font(crate::theme::font(12.0))
                                 .color(theme.text_secondary),
                         );
@@ -382,7 +382,7 @@ pub fn show_autoeq_modal(
                         }
 
                         ui.label(
-                            egui::RichText::new("Max Boost:")
+                            egui::RichText::new(tr!("Max Boost:"))
                                 .font(crate::theme::font(12.0))
                                 .color(theme.text_secondary),
                         );
@@ -494,7 +494,7 @@ pub fn show_autoeq_modal(
 
                         ui.horizontal(|ui| {
                             let apply_btn = egui::Button::new(
-                                egui::RichText::new("Apply Calibration to Audio Engine")
+                                egui::RichText::new(tr!("Apply Calibration to Audio Engine"))
                                     .font(crate::theme::font(13.0))
                                     .strong()
                                     .color(Color32::WHITE),
@@ -528,7 +528,7 @@ pub fn show_autoeq_modal(
                                 state.is_open = false;
                             }
 
-                            if ui.button("Close").clicked() {
+                            if ui.button(tr!(Msg::S5E8250FB85D64C23)).clicked() {
                                 state.is_open = false;
                             }
                         });

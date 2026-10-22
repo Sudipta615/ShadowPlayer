@@ -24,6 +24,8 @@ pub struct MainViewAction {
     pub removed_track: bool,
     /// The user asked to edit the rules of a smart playlist.
     pub edit_smart_playlist: Option<domain::ids::PlaylistId>,
+    /// The user asked to re-evaluate the smart playlists.
+    pub refresh_smart_playlist: bool,
     /// The user asked to organize the current selection.
     pub organize_tracks: Option<Vec<Track>>,
     /// A grouped-search chip asked to run a narrower query.
@@ -178,7 +180,7 @@ pub fn render_main_playback_view(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                 ui.label(
-                    egui::RichText::new("Matches")
+                    egui::RichText::new(tr!("Matches"))
                         .font(crate::theme::font(11.0))
                         .color(theme.text_muted),
                 );
@@ -229,7 +231,7 @@ pub fn render_main_playback_view(
         NavItem::Favorites => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("Favorites")
+                    egui::RichText::new(tr!("Favorites"))
                         .font(crate::theme::font(16.0))
                         .strong()
                         .color(theme.accent_warm),
@@ -248,7 +250,7 @@ pub fn render_main_playback_view(
         NavItem::RecentlyAdded => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("Recently Added")
+                    egui::RichText::new(tr!("Recently Added"))
                         .font(crate::theme::font(16.0))
                         .strong()
                         .color(theme.info),
@@ -267,7 +269,7 @@ pub fn render_main_playback_view(
         NavItem::RecentlyPlayed => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("Recently Played History")
+                    egui::RichText::new(tr!("Recently Played History"))
                         .font(crate::theme::font(16.0))
                         .strong()
                         .color(theme.info),
@@ -286,7 +288,7 @@ pub fn render_main_playback_view(
         NavItem::MostPlayed => {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("Most Played Tracks")
+                    egui::RichText::new(tr!("Most Played Tracks"))
                         .font(crate::theme::font(16.0))
                         .strong()
                         .color(theme.accent_warm),
@@ -328,8 +330,11 @@ pub fn render_main_playback_view(
                     .color(theme.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Edit Rules").clicked() {
+                    if ui.button(tr!(Msg::SFA0039F354707FEA)).clicked() {
                         view_action.edit_smart_playlist = Some(sp_id);
+                    }
+                    if ui.button(tr!("Refresh")).clicked() {
+                        view_action.refresh_smart_playlist = true;
                     }
                 });
             });

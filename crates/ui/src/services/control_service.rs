@@ -305,7 +305,7 @@ fn serve_connection(
         }
     };
     if !constant_time_eq(request.token.as_bytes(), token.as_bytes()) {
-        write_response(stream, &ControlResponse::error("invalid token"))?;
+        write_response(stream, &ControlResponse::error(tr!(Msg::S98410F89CEB1A1C5)))?;
         return Ok(());
     }
 
@@ -359,7 +359,7 @@ fn enqueue(
 ) -> ControlResponse {
     match commands.send(command) {
         Ok(()) => ControlResponse::ok(state),
-        Err(_) => ControlResponse::error("control channel closed"),
+        Err(_) => ControlResponse::error(tr!(Msg::S13006E13C04B566B)),
     }
 }
 

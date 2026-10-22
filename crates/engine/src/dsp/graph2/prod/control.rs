@@ -152,6 +152,9 @@ impl Graph2ControlHandle {
     pub fn set_crossfeed_profile(&self, profile: config::CrossfeedProfile) {
         self.inner.set_crossfeed_profile(profile);
     }
+    pub fn set_fx_config(&self, config: config::FxConfig) {
+        self.inner.set_fx_config(config);
+    }
     pub fn set_crossfeed_custom_params(&self, frequency_hz: f32, q: f32, delay_ms: f32) {
         self.inner
             .set_crossfeed_custom_params(frequency_hz, q, delay_ms);

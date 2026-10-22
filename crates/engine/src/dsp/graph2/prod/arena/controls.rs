@@ -196,6 +196,11 @@ pub(crate) enum NodeCmd {
     SetCrossfeedProfile(config::CrossfeedProfile),
     SetCrossfeedCustom(f32, f32, f32),
 
+    // ── Creative effects ──────────────────────────────────────────────────
+    /// The whole creative-effects insert: chorus, flanger, phaser, delay and
+    /// saturation, in one command so the settings can never disagree.
+    SetFxConfig(config::FxConfig),
+
     // ── Multiband compressor ──────────────────────────────────────────────
     SetCompressorEnabled(bool),
     SetCompressorBand {
@@ -355,6 +360,10 @@ pub(crate) struct ControlBus {
     /// The last live plugin parameter batch, mirrored across the thread
     /// boundary lock-free. See [`PluginParamsSlot`].
     user_plugin_params: PluginParamsSlot,
+    /// The creative-effects settings, mirrored so a generation rebuild
+    /// inherits them. The control path only: the audio thread reads the
+    /// node's own copy.
+    user_fx_config: Mutex<config::FxConfig>,
 }
 
 /// Lock-free mirror of the live plugin parameter batch.
@@ -558,6 +567,7 @@ impl ControlBus {
             },
             user_plugin_enabled: AtomicU8::new(1),
             user_plugin_params: PluginParamsSlot::new(),
+            user_fx_config: Mutex::new(config::FxConfig::default()),
         }
     }
 
@@ -859,6 +869,10 @@ impl ControlBus {
                 .expect("MAX_ACTIVE_CUES entries"),
             plugin_enabled: self.user_plugin_enabled.load(Ordering::Relaxed) != 0,
             plugin_params: self.user_plugin_params(),
+            fx: *self
+                .user_fx_config
+                .lock()
+                .expect("fx config mutex poisoned"),
             // Ducking + automation are NOT mirrored onto the bus atomics:
             // `DspGraph::reconfigure` reads them from the live generation
             // instead (single-threaded control access), so snapshots keep
@@ -1192,6 +1206,21 @@ impl GraphControlHandle {
             node_id::CROSSFEED,
             NodeCmd::SetCrossfeedCustom(frequency_hz, q, delay_ms),
         );
+    }
+
+    /// Apply the creative-effects insert's settings.
+    pub fn set_fx_config(&self, config: config::FxConfig) {
+        // The bus keeps a copy so a generation rebuild can inherit it: the
+        // fx settings are user state, like the volume.
+        {
+            let mut guard = self
+                .bus
+                .user_fx_config
+                .lock()
+                .expect("fx config mutex poisoned");
+            *guard = config;
+        }
+        self.enqueue(node_id::FX, NodeCmd::SetFxConfig(config));
     }
 
     pub fn set_compressor_enabled(&self, enabled: bool) {
@@ -2106,6 +2135,7 @@ fn apply_node_cmd(node: &mut GraphNode, cmd: &NodeCmd) {
         (GraphNode::Crossfeed(n), NodeCmd::SetCrossfeedCustom(f, q, d)) => {
             n.crossfeed.set_custom_params(*f, *q, *d)
         }
+        (GraphNode::Fx(n), NodeCmd::SetFxConfig(cfg)) => n.apply_config(cfg),
         (GraphNode::Dynamics(n), NodeCmd::SetCompressorEnabled(e)) => n.compressor.set_enabled(*e),
         (
             GraphNode::Dynamics(n),
@@ -2345,6 +2375,11 @@ impl DspGraph {
     pub fn set_crossfeed_custom_params(&self, frequency_hz: f32, q: f32, delay_ms: f32) {
         self.control_handle()
             .set_crossfeed_custom_params(frequency_hz, q, delay_ms);
+    }
+
+    /// Apply the creative-effects insert's settings.
+    pub fn set_fx_config(&self, config: config::FxConfig) {
+        self.control_handle().set_fx_config(config);
     }
 
     pub fn set_compressor_enabled(&self, enabled: bool) {

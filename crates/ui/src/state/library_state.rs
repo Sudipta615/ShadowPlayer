@@ -7,12 +7,33 @@ use database::{
 };
 use domain::ids::TrackId;
 use domain::models::{Album, Artist, Genre, Playlist, ScanRoot, Track};
-use domain::smart::SmartPlaylist;
+use domain::smart::{SmartPlaylist, SmartRefreshPolicy, SmartRefreshSettings};
 use search::SearchEngine;
 
 use crate::components::sidebar::NavItem;
 use crate::components::songs_table::QuickFilter;
+use domain::ids::PlaylistId;
 use domain::models::{SortField, SortOrder};
+
+/// The current time, in seconds since the epoch.
+///
+/// The refresh policy measures intervals in seconds, and the clock is only
+/// needed when a smart playlist is actually consulted.
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+/// One smart playlist's last evaluation.
+#[derive(Debug, Clone)]
+pub struct SmartPlaylistSnapshot {
+    /// When the query ran, in seconds since the epoch.
+    pub evaluated_at: i64,
+    /// The tracks it matched.
+    pub tracks: Vec<Track>,
+}
 
 /// State store managing music tracks, collections, playlists, and drilldown views
 #[derive(Default)]
@@ -28,6 +49,21 @@ pub struct LibraryState {
     pub smart_playlists: Vec<SmartPlaylist>,
     /// Tracks matched by the smart playlist currently open in the editor.
     pub smart_playlist_tracks: Vec<Track>,
+    /// When the smart playlists are re-evaluated.
+    ///
+    /// The policy is a preference, not a fact about the library, so it lives
+    /// in the state the app pushes the saved value into.
+    pub smart_refresh: SmartRefreshSettings,
+    /// The last evaluation of each smart playlist.
+    ///
+    /// A smart playlist is a query over the library, and a query over a large
+    /// library is not free. Under the timer and manual policies the result is
+    /// kept, and the query runs again only when the policy says so.
+    smart_playlist_cache: HashMap<PlaylistId, SmartPlaylistSnapshot>,
+    /// The library changed since the cache was filled.
+    library_changed: bool,
+    /// The user asked for a refresh; it happens on the next evaluation.
+    refresh_requested: bool,
     /// Multi-selection for the songs table (survives tab switches).
     pub selected_track_ids: HashSet<TrackId>,
     /// Anchor row for shift-range selection.
@@ -56,6 +92,13 @@ pub struct LibraryState {
     /// bounces between tabs.
     displayed_key: Option<(NavItem, String, SortField, SortOrder, QuickFilter)>,
 
+    /// How many times the visible list was built from scratch.
+    ///
+    /// A *sort* does not count: changing the sort re-orders the list that is
+    /// already there. This counter is what the library budget test watches —
+    /// a rebuild that came back would show up here.
+    pub rebuilds: u64,
+
     /// A representative track for each album, used to show the cover art in
     /// the album grid. The grid used to paint a permanent placeholder disc,
     /// because artwork is cached per *track* and the grid only knows the
@@ -67,6 +110,123 @@ pub struct LibraryState {
 }
 
 impl LibraryState {
+    /// Note that the library changed.
+    ///
+    /// Under the library-change policy this is what makes the smart
+    /// playlists stale; under the manual policy it changes nothing, because
+    /// the user asked for the result to be frozen.
+    pub fn note_library_change(&mut self) {
+        self.library_changed = true;
+    }
+
+    /// Ask for the smart playlists to be evaluated again.
+    ///
+    /// This is the manual refresh: the user pressed the button, so the
+    /// policy does not get a say. Every cached result is dropped, so the
+    /// next visit to any smart playlist runs its query again.
+    pub fn request_smart_refresh(&mut self) {
+        self.refresh_requested = true;
+        // The visible list is rebuilt, or the view would keep showing the
+        // result the refresh was supposed to replace.
+        self.displayed_key = None;
+    }
+
+    /// Whether a timer-driven refresh is due.
+    ///
+    /// Under the timer policy the playlists are re-evaluated every few
+    /// minutes; under the other two policies the timer says nothing.
+    pub fn smart_refresh_due(&self) -> bool {
+        if self.smart_refresh.policy != SmartRefreshPolicy::Interval {
+            return false;
+        }
+        let now = now_secs();
+        let interval = self.smart_refresh.interval_secs();
+        self.smart_playlist_cache
+            .values()
+            .any(|snapshot| now - snapshot.evaluated_at >= interval)
+    }
+
+    /// The tracks a smart playlist matches, evaluated according to the policy.
+    ///
+    /// The query runs when the policy says it should — the library changed,
+    /// the timer is due, or the user asked — and the previous result is
+    /// served in between.
+    pub fn smart_playlist_tracks(
+        &mut self,
+        repo: &SmartPlaylistRepo,
+        sp: &SmartPlaylist,
+        now: i64,
+    ) -> Vec<Track> {
+        if self.refresh_is_due(sp, now) {
+            // Every cached result is dropped, not just this one: the library
+            // changed, so every smart playlist's answer changed too.
+            self.smart_playlist_cache.clear();
+            self.library_changed = false;
+            self.refresh_requested = false;
+        }
+
+        if let Some(snapshot) = self.smart_playlist_cache.get(&sp.id) {
+            return snapshot.tracks.clone();
+        }
+
+        let tracks = match repo.evaluate(sp) {
+            Ok(tracks) => tracks,
+            Err(e) => {
+                log::warn!("Could not run the smart playlist: {e}");
+                Vec::new()
+            }
+        };
+        self.smart_playlist_cache.insert(
+            sp.id,
+            SmartPlaylistSnapshot {
+                evaluated_at: now,
+                tracks: tracks.clone(),
+            },
+        );
+        tracks
+    }
+
+    /// Whether this playlist's query is due to run again.
+    fn refresh_is_due(&self, sp: &SmartPlaylist, now: i64) -> bool {
+        if self.refresh_requested {
+            return true;
+        }
+        match self.smart_refresh.policy {
+            // The library changed: the answer may have changed with it.
+            SmartRefreshPolicy::LibraryChange => self.library_changed,
+            // The timer is the point of this policy; a library change also
+            // invalidates the answer.
+            SmartRefreshPolicy::Interval => {
+                self.library_changed
+                    || match self.smart_playlist_cache.get(&sp.id) {
+                        Some(snapshot) => {
+                            now - snapshot.evaluated_at >= self.smart_refresh.interval_secs()
+                        }
+                        None => true,
+                    }
+            }
+            // The result is frozen until the user asks. The only exception is
+            // a playlist that was never run: it has to run once to show
+            // anything at all.
+            SmartRefreshPolicy::Manual => !self.smart_playlist_cache.contains_key(&sp.id),
+        }
+    }
+
+    /// Drop every cached smart-playlist result.
+    ///
+    /// Used when the policy itself changes: the next evaluation must follow
+    /// the new rules, not the old ones.
+    pub fn clear_smart_cache(&mut self) {
+        self.smart_playlist_cache.clear();
+        self.library_changed = true;
+        self.refresh_requested = false;
+    }
+
+    /// The time of the last evaluation of a smart playlist, if any.
+    pub fn smart_playlist_evaluated_at(&self, id: &PlaylistId) -> Option<i64> {
+        self.smart_playlist_cache.get(id).map(|s| s.evaluated_at)
+    }
+
     /// Pick one track per album to stand in for its cover art.
     ///
     /// Artwork is cached per track, so the album grid needs to know which
@@ -204,7 +364,31 @@ impl LibraryState {
         if self.displayed_key.as_ref() == Some(&key) {
             return;
         }
+
+        // Only the sort changed: the list in front of the user is the same
+        // set of tracks in a different order, so it is sorted where it
+        // lies.
+        //
+        // This is the difference between a sort that costs a copy of the
+        // library and one that costs a sort. At 100,000 tracks the copy is
+        // five hundred thousand string allocations — a visible hitch every
+        // time the user clicks a column header.
+        if let Some(previous) = self.displayed_key.as_ref() {
+            let same_list = previous.0 == active_nav
+                && previous.1 == search_query
+                && previous.4 == self.quick_filter;
+            let only_the_sort_changed =
+                same_list && (previous.2 != current_sort || previous.3 != sort_order);
+            if only_the_sort_changed {
+                if active_nav != NavItem::RecentlyAdded {
+                    sort_tracks(&mut self.displayed_tracks, current_sort, sort_order);
+                }
+                self.displayed_key = Some(key);
+                return;
+            }
+        }
         self.displayed_key = Some(key);
+        self.rebuilds += 1;
 
         let mut tracks = if !search_query.trim().is_empty() {
             let result = search_engine.search(search_query, 100);
@@ -251,13 +435,12 @@ impl LibraryState {
                 NavItem::SmartPlaylist(sp_id) => {
                     let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
                     match playlist {
-                        Some(sp) => match smart_repo.evaluate(sp) {
-                            Ok(tracks) => tracks,
-                            Err(e) => {
-                                log::warn!("Could not run the smart playlist: {e}");
-                                Vec::new()
-                            }
-                        },
+                        // The policy decides whether the query runs now or
+                        // the previous result is served.
+                        Some(sp) => {
+                            let sp = sp.clone();
+                            self.smart_playlist_tracks(smart_repo, &sp, now_secs())
+                        }
                         None => Vec::new(),
                     }
                 }
@@ -379,6 +562,11 @@ fn apply_quick_filter(
     }
 }
 
+/// Sort the tracks in place.
+///
+/// The sort is a *stable* sort over cached keys: the key of every track is
+/// computed once, so the comparisons are cheap and the sort does not
+/// re-lower-case a title for every comparison it makes.
 pub fn sort_tracks(tracks: &mut [Track], field: SortField, order: SortOrder) {
     match field {
         SortField::Title => tracks.sort_by_cached_key(|t| t.title.to_lowercase()),
@@ -533,5 +721,200 @@ mod sort_tests {
         apply_quick_filter(&mut tracks, &favorites, QuickFilter::Rating);
         assert_eq!(titles(&tracks), ["two"]);
         assert!(tracks[0].rating > 0);
+    }
+}
+
+#[cfg(test)]
+mod smart_refresh_tests {
+    use super::*;
+    use database::{Database, TrackRepo};
+    use domain::ids::{PlaylistId, TrackId};
+    use domain::smart::{SmartField, SmartOp, SmartRule};
+    use std::path::PathBuf;
+
+    fn track(title: &str) -> Track {
+        Track {
+            id: TrackId::new(),
+            // The path is the track's identity in the database, so two
+            // tracks need two paths.
+            path: PathBuf::from(format!("/music/{title}.flac")),
+            title: title.to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            genre: None,
+            year: None,
+            track_number: Some(1),
+            disc_number: Some(1),
+            duration_secs: 100.0,
+            sample_rate: 44100,
+            channels: 2,
+            format: "FLAC".to_string(),
+            bitrate_kbps: None,
+            bit_depth: None,
+            is_lossless: true,
+            replaygain_track_db: None,
+            replaygain_track_peak: None,
+            replaygain_album_db: None,
+            replaygain_album_peak: None,
+            r128_loudness_lufs: None,
+            file_size_bytes: 0,
+            mtime_unix_secs: 0,
+            mtime_nanos: 0,
+            content_hash: None,
+            file_id: None,
+            is_favorite: false,
+            rating: 0,
+            has_lyrics: false,
+            play_count: 0,
+            skip_count: 0,
+            last_played_at: None,
+            added_at: 0,
+        }
+    }
+
+    /// A smart playlist that matches every track whose title contains "Keep".
+    fn definition() -> SmartPlaylist {
+        SmartPlaylist {
+            id: PlaylistId::new(),
+            name: "Keep".to_string(),
+            match_all: true,
+            rules: vec![SmartRule {
+                field: SmartField::Title,
+                op: SmartOp::Contains,
+                value: "Keep".to_string(),
+            }],
+            limit_count: None,
+            sort_by: None,
+            sort_desc: false,
+            created_at: 0,
+            updated_at: 0,
+            rules_unreadable: false,
+        }
+    }
+
+    fn library_with(titles: &[&str]) -> (Database, SmartPlaylistRepo) {
+        let db = Database::in_memory().expect("in-memory database");
+        let tracks = TrackRepo::new(db.clone());
+        for title in titles {
+            tracks
+                .upsert(&track(title))
+                .expect("the track should be indexed");
+        }
+        let repo = SmartPlaylistRepo::new(db.clone());
+        (db, repo)
+    }
+
+    #[test]
+    fn the_default_policy_re_evaluates_when_the_library_changes() {
+        let (db, repo) = library_with(&["Keep me"]);
+        let mut state = LibraryState::default();
+        assert_eq!(
+            state.smart_refresh.policy,
+            SmartRefreshPolicy::LibraryChange
+        );
+
+        let sp = definition();
+        assert_eq!(state.smart_playlist_tracks(&repo, &sp, 100).len(), 1);
+
+        // A new track arrives, and the library changes.
+        TrackRepo::new(db.clone())
+            .upsert(&track("Keep me too"))
+            .expect("the track should be indexed");
+        state.note_library_change();
+
+        assert_eq!(
+            state.smart_playlist_tracks(&repo, &sp, 200).len(),
+            2,
+            "the library-change policy re-runs the query after a change"
+        );
+    }
+
+    #[test]
+    fn the_default_policy_serves_the_cached_result_otherwise() {
+        let (_db, repo) = library_with(&["Keep me"]);
+        let mut state = LibraryState::default();
+        let sp = definition();
+
+        assert_eq!(state.smart_playlist_tracks(&repo, &sp, 100).len(), 1);
+        assert_eq!(
+            state.smart_playlist_evaluated_at(&sp.id),
+            Some(100),
+            "the time of the evaluation is remembered"
+        );
+        assert_eq!(
+            state.smart_playlist_tracks(&repo, &sp, 200).len(),
+            1,
+            "without a library change the cached result is served"
+        );
+        assert_eq!(state.smart_playlist_evaluated_at(&sp.id), Some(100));
+    }
+
+    #[test]
+    fn the_manual_policy_keeps_the_result_until_it_is_asked_for() {
+        let (db, repo) = library_with(&["Keep me"]);
+        let mut state = LibraryState::default();
+        state.smart_refresh.policy = SmartRefreshPolicy::Manual;
+        let sp = definition();
+
+        assert_eq!(state.smart_playlist_tracks(&repo, &sp, 100).len(), 1);
+
+        TrackRepo::new(db.clone())
+            .upsert(&track("Keep me too"))
+            .expect("the track should be indexed");
+        state.note_library_change();
+
+        assert_eq!(
+            state.smart_playlist_tracks(&repo, &sp, 200).len(),
+            1,
+            "the manual policy freezes the result across a library change"
+        );
+
+        state.request_smart_refresh();
+        assert_eq!(
+            state.smart_playlist_tracks(&repo, &sp, 300).len(),
+            2,
+            "the manual refresh re-runs the query"
+        );
+    }
+
+    #[test]
+    fn the_timer_policy_re_evaluates_when_the_interval_has_passed() {
+        let (_db, repo) = library_with(&["Keep me"]);
+        let mut state = LibraryState::default();
+        state.smart_refresh.policy = SmartRefreshPolicy::Interval;
+        state.smart_refresh.interval_minutes = 1;
+        let sp = definition();
+
+        assert_eq!(state.smart_playlist_tracks(&repo, &sp, 100).len(), 1);
+        assert_eq!(
+            state.smart_playlist_evaluated_at(&sp.id),
+            Some(100),
+            "the time of the evaluation is remembered"
+        );
+        assert_eq!(
+            state.smart_playlist_tracks(&repo, &sp, 130).len(),
+            1,
+            "the interval has not passed, so the cached result is served"
+        );
+        assert_eq!(state.smart_playlist_evaluated_at(&sp.id), Some(100));
+
+        // A minute later the timer is due.
+        assert_eq!(state.smart_playlist_tracks(&repo, &sp, 161).len(), 1);
+        assert_eq!(
+            state.smart_playlist_evaluated_at(&sp.id),
+            Some(161),
+            "the timer re-ran the query"
+        );
+    }
+
+    #[test]
+    fn the_interval_is_clamped_to_something_useful() {
+        let settings = SmartRefreshSettings {
+            policy: SmartRefreshPolicy::Interval,
+            interval_minutes: 0,
+        }
+        .clamped();
+        assert_eq!(settings.interval_minutes, 1);
+        assert_eq!(settings.interval_secs(), 60);
     }
 }

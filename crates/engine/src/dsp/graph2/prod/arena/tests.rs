@@ -1632,3 +1632,65 @@ fn phase6_aux_bus_node_per_send_automation_and_independent_metering() {
         "converged per-send meters remain independent (slot2 {s2_end} vs slot3 {s3_end})"
     );
 }
+
+/// The creative-effects insert must be transparent until the user asks for
+/// an effect, and it must actually change the signal once they do.
+#[test]
+fn the_creative_fx_insert_is_transparent_until_it_is_engaged() {
+    let sr = 48_000.0;
+    let cfg = EngineConfig::default();
+    let mut graph = DspGraph::from_config(&cfg, sr);
+
+    let n = 512;
+    let mut left: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.05).sin() * 0.4).collect();
+    let mut right: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.07).cos() * 0.4).collect();
+    let original = left.clone();
+
+    // Nothing engaged: the signal comes out unchanged.
+    graph.process_block(&mut left, &mut right);
+    assert_eq!(left, original, "an insert with no effect is transparent");
+
+    // A chorus engaged: the signal changes.
+    let mut fx = config::FxConfig::default();
+    fx.chorus.enabled = true;
+    fx.chorus.wet = 0.8;
+    fx.chorus.dry = 0.8;
+    graph.set_fx_config(fx);
+
+    let mut left: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.05).sin() * 0.4).collect();
+    let mut right: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.07).cos() * 0.4).collect();
+    graph.process_block(&mut left, &mut right);
+    assert!(left != original, "an engaged chorus must change the signal");
+    assert!(
+        left.iter().all(|s| s.is_finite()),
+        "the output stays finite"
+    );
+}
+
+/// The insert's settings survive a generation rebuild: they are user state,
+/// like the volume.
+#[test]
+fn the_creative_fx_settings_survive_a_rebuild() {
+    let sr = 48_000.0;
+    let cfg = EngineConfig::default();
+    let mut graph = DspGraph::from_config(&cfg, sr);
+
+    let mut fx = config::FxConfig::default();
+    fx.phaser.enabled = true;
+    fx.delay.enabled = true;
+    fx.delay.time_ms = 300.0;
+    graph.set_fx_config(fx);
+
+    // Drain the control queue so the node has the settings.
+    let mut left = vec![0.1f32; 256];
+    let mut right = vec![0.1f32; 256];
+    graph.process_block(&mut left, &mut right);
+    assert!(graph.fx().is_engaged(), "the insert is engaged");
+
+    // A rebuild (the path a sample-rate change takes) must not drop them.
+    graph.reconfigure(&cfg);
+    assert!(
+        graph.fx().is_engaged(),
+        "the fx settings survive a generation rebuild"
+    );
+}

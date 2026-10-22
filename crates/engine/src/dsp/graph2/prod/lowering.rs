@@ -124,8 +124,10 @@ mod tests {
         let steps = lowered_plan_steps();
         let mut slots: Vec<usize> = steps.iter().map(|&(s, _)| s).collect();
         slots.sort_unstable();
-        let expected: Vec<usize> = (0..18usize)
-            .filter(|&s| s != 11 && s != 12 && s != 13)
+        // Every arena slot except the output-domain ones (which run through
+        // their own endpoints) must appear in the chain exactly once.
+        let expected: Vec<usize> = (0..crate::dsp::graph2::prod::arena::node_count())
+            .filter(|&s| !super::is_output_domain(s))
             .collect();
         assert_eq!(slots, expected, "chain slots must appear exactly once");
     }

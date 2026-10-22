@@ -175,7 +175,7 @@ pub fn show_track_properties_modal(
                     ui.separator();
 
                     ui.label(
-                        egui::RichText::new("File Path:")
+                        egui::RichText::new(tr!("File Path:"))
                             .font(crate::theme::font(11.5))
                             .color(theme.text_muted),
                     );
@@ -198,7 +198,7 @@ fn render_rating_row(ui: &mut egui::Ui, rating: u8, theme: &Theme) {
         ui.add_sized(
             [110.0, 18.0],
             egui::Label::new(
-                egui::RichText::new("Rating")
+                egui::RichText::new(tr!("Rating"))
                     .font(crate::theme::font(12.0))
                     .color(theme.text_muted),
             ),

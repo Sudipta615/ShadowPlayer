@@ -160,7 +160,7 @@ pub fn show_track_dsp_modal(
                     );
                 } else {
                     ui.label(
-                        egui::RichText::new("inherits the library gain")
+                        egui::RichText::new(tr!("inherits the library gain"))
                             .font(crate::theme::font(11.0))
                             .color(theme.text_muted),
                     );
@@ -265,17 +265,14 @@ pub fn show_track_dsp_modal(
                 .add_enabled(
                     can_save,
                     egui::Button::new(
-                        egui::RichText::new("Save the current chain for this track")
+                        egui::RichText::new(tr!("Save the current chain for this track"))
                             .font(crate::theme::font(12.5))
                             .color(theme.text_primary),
                     )
                     .fill(theme.bg_pill)
                     .corner_radius(CornerRadius::same(theme.radius_md)),
                 )
-                .on_hover_text(
-                    "Store the difference between your global chain and the chain \
-                     as it stands now, and apply it whenever this track plays",
-                );
+                .on_hover_text(tr!(Msg::S68096000BDD795F8));
             if save.clicked() {
                 actions.save_profile = true;
             }
@@ -284,14 +281,14 @@ pub fn show_track_dsp_modal(
                 let clear = ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new("Remove the override")
+                            egui::RichText::new(tr!("Remove the override"))
                                 .font(crate::theme::font(12.5))
                                 .color(theme.destructive),
                         )
                         .fill(Color32::TRANSPARENT)
                         .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
-                    .on_hover_text("Play this track with the global chain again");
+                    .on_hover_text(tr!(Msg::S96484CE189BEF311));
                 if clear.clicked() {
                     actions.clear_profile = true;
                 }
@@ -311,9 +308,7 @@ pub fn show_track_dsp_modal(
         } else if is_current_track {
             ui.label(
                 egui::RichText::new(
-                    "The chain as it stands matches the chain this track started with. \
-                     Change the EQ, tone, dynamics, filters or mix bus while it plays, \
-                     then save.",
+                    tr!("The chain as it stands matches the chain this track started with. \n                     Change the EQ, tone, dynamics, filters or mix bus while it plays, \n                     then save."),
                 )
                 .font(crate::theme::font(11.0))
                 .color(theme.text_dim),
@@ -321,8 +316,7 @@ pub fn show_track_dsp_modal(
         } else {
             ui.label(
                 egui::RichText::new(
-                    "Play this track to shape its own chain: the editor compares what \
-                     you hear with the chain the track started with.",
+                    tr!("Play this track to shape its own chain: the editor compares what \n                     you hear with the chain the track started with."),
                 )
                 .font(crate::theme::font(11.0))
                 .color(theme.text_dim),
@@ -333,8 +327,7 @@ pub fn show_track_dsp_modal(
             if note.overrides.is_none() && has_profile {
                 ui.label(
                     egui::RichText::new(
-                        "This override was saved by an older version as a graphic EQ \
-                         curve; saving it again stores it as a full chain diff.",
+                        tr!("This override was saved by an older version as a graphic EQ \n                         curve; saving it again stores it as a full chain diff."),
                     )
                     .font(crate::theme::font(10.5))
                     .color(theme.text_dim),

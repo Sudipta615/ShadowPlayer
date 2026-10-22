@@ -1,3 +1,5 @@
+#[macro_use]
+pub mod i18n;
 pub mod app;
 pub mod components;
 pub mod dialog;

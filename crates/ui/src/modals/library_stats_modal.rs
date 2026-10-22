@@ -194,7 +194,7 @@ pub fn show_library_stats_modal(
             section_heading(ui, "Formats", theme);
             if stats.formats.is_empty() {
                 ui.label(
-                    egui::RichText::new("No tracks yet.")
+                    egui::RichText::new(tr!("No tracks yet."))
                         .font(crate::theme::font(12.0))
                         .color(theme.text_muted),
                 );
@@ -272,7 +272,7 @@ pub fn show_library_stats_modal(
                     );
                     if is_hires {
                         ui.label(
-                            egui::RichText::new("Hi-Res")
+                            egui::RichText::new(tr!("Hi-Res"))
                                 .font(crate::theme::font(10.0))
                                 .strong()
                                 .color(theme.bit_perfect_green),

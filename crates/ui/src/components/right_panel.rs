@@ -186,8 +186,8 @@ impl<'a> RightPanel<'a> {
                             "Lyrics",
                         )
                     });
-                    let _ = q_resp.on_hover_text("Show the play queue");
-                    let _ = l_resp.on_hover_text("Show the lyrics for the current track");
+                    let _ = q_resp.on_hover_text(tr!(Msg::S2F46849AD1D28614));
+                    let _ = l_resp.on_hover_text(tr!(Msg::S2321681328DA5F17));
                 });
 
                 ui.add_space(10.0);
@@ -206,7 +206,7 @@ impl<'a> RightPanel<'a> {
                         // Header: "Up Next" and "X songs • MM:SS"
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Up Next")
+                                egui::RichText::new(tr!("Up Next"))
                                     .font(crate::theme::font(15.5))
                                     .strong()
                                     .color(self.theme.text_primary),
@@ -587,7 +587,7 @@ impl<'a> RightPanel<'a> {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(40.0);
                                     ui.label(
-                                        egui::RichText::new("Looking for lyrics...")
+                                        egui::RichText::new(tr!("Looking for lyrics..."))
                                             .font(crate::theme::font(13.5))
                                             .color(self.theme.text_muted),
                                     );
@@ -596,22 +596,24 @@ impl<'a> RightPanel<'a> {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(40.0);
                                     ui.label(
-                                        egui::RichText::new("No lyrics available")
+                                        egui::RichText::new(tr!("No lyrics available"))
                                             .font(crate::theme::font(13.5))
                                             .color(self.theme.text_muted),
                                     );
                                     ui.add_space(6.0);
                                     ui.label(
-                                        egui::RichText::new(
-                                            "Place a .lrc or .txt file beside the track,",
-                                        )
+                                        egui::RichText::new(tr!(
+                                            "Place a .lrc or .txt file beside the track,"
+                                        ))
                                         .font(crate::theme::font(11.5))
                                         .color(self.theme.text_dim),
                                     );
                                     ui.label(
-                                        egui::RichText::new("or embed lyrics in the file's tags.")
-                                            .font(crate::theme::font(11.5))
-                                            .color(self.theme.text_dim),
+                                        egui::RichText::new(tr!(
+                                            "or embed lyrics in the file's tags."
+                                        ))
+                                        .font(crate::theme::font(11.5))
+                                        .color(self.theme.text_dim),
                                     );
                                 });
                             }
