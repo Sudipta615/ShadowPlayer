@@ -1,9 +1,10 @@
 //! Importing the playlists other players left behind.
 //!
 //! Everyone arrives with a library built somewhere else. This finds the
-//! playlists Rhythmbox, iTunes and Audacious left on the machine and brings
-//! them in, matching the files against the library so only the tracks that
-//! are actually here come across.
+//! playlists Rhythmbox, Audacious, Winamp, foobar2000, MusicBee, iTunes,
+//! Clementine and Strawberry left on the machine and brings them in, matching
+//! the files against the library so only the tracks that are actually here
+//! come across.
 
 use crate::theme::Theme;
 use domain::models::Track;
@@ -62,8 +63,9 @@ pub fn show_import_playlists_modal(
                     ui.add_space(theme.space_xs);
                     ui.label(
                         egui::RichText::new(
-                            "ShadowPlayer looked for the playlists Rhythmbox, iTunes and \
-                             Audacious leave behind. There were none on this machine.",
+                            "ShadowPlayer looked for the playlists Rhythmbox, Audacious, \
+                             Winamp, foobar2000, MusicBee, iTunes, Clementine and Strawberry \
+                             leave behind. There were none on this machine.",
                         )
                         .font(crate::theme::font(11.5))
                         .color(theme.text_muted),
@@ -154,12 +156,19 @@ pub fn match_count(playlist: &FoundPlaylist, library_tracks: &[Track]) -> usize 
         .count()
 }
 
-/// The tracks of a playlist that are in the library.
+/// The tracks of a playlist that are in the library, in playlist order.
 pub fn matched_tracks(playlist: &FoundPlaylist, library_tracks: &[Track]) -> Vec<Track> {
-    // The library's own tracks whose file the playlist points at.
-    library_tracks
+    let by_path: std::collections::HashMap<&std::path::Path, &Track> = library_tracks
         .iter()
-        .filter(|t| playlist.paths.iter().any(|p| p == &t.path))
+        .map(|track| (track.path.as_path(), track))
+        .collect();
+    // Walk the playlist rather than the library. Importing must preserve the
+    // order the other player saved; filtering the library would silently
+    // replace it with album/scan order.
+    playlist
+        .paths
+        .iter()
+        .filter_map(|path| by_path.get(path.as_path()).copied())
         .cloned()
         .collect()
 }
@@ -172,5 +181,71 @@ pub fn summary_color(matched: usize, total: usize, theme: &Theme) -> Color32 {
         theme.text_dim
     } else {
         theme.text_muted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::ids::TrackId;
+    use std::path::{Path, PathBuf};
+
+    fn track(path: &str) -> Track {
+        Track {
+            id: TrackId::new(),
+            path: PathBuf::from(path),
+            title: path.to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            genre: None,
+            year: None,
+            track_number: None,
+            disc_number: None,
+            duration_secs: 1.0,
+            sample_rate: 44100,
+            channels: 2,
+            format: "FLAC".to_string(),
+            bitrate_kbps: None,
+            bit_depth: Some(16),
+            is_lossless: true,
+            replaygain_track_db: None,
+            replaygain_track_peak: None,
+            replaygain_album_db: None,
+            replaygain_album_peak: None,
+            r128_loudness_lufs: None,
+            file_size_bytes: 0,
+            mtime_unix_secs: 0,
+            mtime_nanos: 0,
+            content_hash: None,
+            file_id: None,
+            is_favorite: false,
+            rating: 0,
+            has_lyrics: false,
+            play_count: 0,
+            skip_count: 0,
+            last_played_at: None,
+            added_at: 0,
+        }
+    }
+
+    #[test]
+    fn imported_tracks_keep_the_playlist_order() {
+        let library = vec![track("/music/a.flac"), track("/music/b.flac")];
+        let playlist = FoundPlaylist {
+            source: "Test",
+            name: "Mix".to_string(),
+            paths: vec![
+                PathBuf::from("/music/b.flac"),
+                PathBuf::from("/music/missing.flac"),
+                PathBuf::from("/music/a.flac"),
+            ],
+        };
+        let matched = matched_tracks(&playlist, &library);
+        let paths: Vec<_> = matched.iter().map(|t| t.path.as_path()).collect();
+        assert_eq!(
+            paths,
+            [Path::new("/music/b.flac"), Path::new("/music/a.flac")]
+        );
+        assert_eq!(match_count(&playlist, &library), 2);
     }
 }

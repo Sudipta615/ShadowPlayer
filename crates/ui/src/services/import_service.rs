@@ -10,7 +10,7 @@ const AUDIO_EXTENSIONS: &[&str] = &[
 ];
 
 /// Extensions recognised as playlists.
-const PLAYLIST_EXTENSIONS: &[&str] = &["m3u", "m3u8"];
+const PLAYLIST_EXTENSIONS: &[&str] = &["m3u", "m3u8", "pls", "xspf", "asx", "wpl"];
 
 /// Extensions offered when picking a CLAP plugin library.
 ///
@@ -96,10 +96,39 @@ impl ImportService {
 
     /// Open the native "save playlist as" dialog, suggesting `suggested_name`.
     pub fn request_save_m3u(&mut self, suggested_name: String) {
+        self.request_save_playlist(suggested_name, library::PlaylistFormat::M3u8);
+    }
+
+    /// Open the native "save playlist as" dialog for a specific format.
+    ///
+    /// The suggested filename carries the chosen extension, so a user who
+    /// accepts the dialog's default gets the format the dropdown promised.
+    pub fn request_save_playlist(
+        &mut self,
+        suggested_name: String,
+        format: library::PlaylistFormat,
+    ) {
         if self.active.is_some() {
             return;
         }
-        self.suggested_name = suggested_name;
+        let trimmed = suggested_name.trim();
+        // The dropdown owns the extension. A playlist called "Mix v1.2" has a
+        // dot in its name but no playlist extension, and must not be mistaken
+        // for a file that already has one; a name ending in `.m3u8` that is
+        // being exported as PLS must become `.pls`, or the extension would lie
+        // about the contents.
+        let stem = std::path::Path::new(trimmed)
+            .extension()
+            .and_then(|e| e.to_str())
+            .filter(|ext| library::PlaylistFormat::from_extension(ext).is_some())
+            .and_then(|_| std::path::Path::new(trimmed).file_stem())
+            .and_then(|s| s.to_str())
+            .map(str::to_owned);
+        self.suggested_name = match stem.as_deref() {
+            Some(stem) if !stem.is_empty() => format!("{stem}.{}", format.extension()),
+            _ if trimmed.is_empty() => format!("playlist.{}", format.extension()),
+            _ => format!("{trimmed}.{}", format.extension()),
+        };
         self.request(ImportKind::SaveM3u);
     }
 
@@ -179,8 +208,9 @@ fn run_picker(kind: ImportKind, suggested_name: String) -> ImportResult {
         }
         ImportKind::Playlist => {
             let dialog = dialog
-                .set_title("Open M3U Playlist")
-                .add_filter("Playlists", PLAYLIST_EXTENSIONS);
+                .set_title("Open Playlist")
+                .add_filter("Playlists", PLAYLIST_EXTENSIONS)
+                .add_filter("All Files", &["*"]);
             match dialog.pick_file() {
                 Some(path) => ImportResult::Playlist(path),
                 None => ImportResult::Cancelled,
@@ -189,6 +219,11 @@ fn run_picker(kind: ImportKind, suggested_name: String) -> ImportResult {
         ImportKind::SaveM3u => {
             let name = if suggested_name.trim().is_empty() {
                 "playlist.m3u8".to_string()
+            } else if std::path::Path::new(suggested_name.trim())
+                .extension()
+                .is_some()
+            {
+                suggested_name.trim().to_string()
             } else {
                 format!("{}.m3u8", suggested_name.trim())
             };

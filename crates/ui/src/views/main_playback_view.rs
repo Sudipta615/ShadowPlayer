@@ -89,6 +89,7 @@ pub fn render_main_playback_view(
         album,
         is_playing: telemetry.is_playing,
         is_favorite: is_cur_fav,
+        rating: current_track.map(|t| t.rating).unwrap_or(0),
         is_shuffle: coordinator.is_shuffle(),
         is_repeat: coordinator.repeat_mode() != RepeatModeChoice::Off,
         position_secs: telemetry.position_secs,
@@ -338,6 +339,7 @@ pub fn render_main_playback_view(
         is_grid_view: app_state.is_grid_view,
         quick_filter: library_state.quick_filter,
         column_widths: app_state.column_widths,
+        rating_width: app_state.rating_width,
         density: app_state.row_density,
         selected_track_ids: &mut library_state.selected_track_ids,
         last_clicked_index: &mut library_state.last_clicked_index,
@@ -369,6 +371,9 @@ pub fn render_main_playback_view(
     if let Some(widths) = table_action.column_widths_changed {
         app_state.column_widths = widths;
     }
+    if let Some(width) = table_action.rating_width_changed {
+        app_state.rating_width = width;
+    }
     if table_action.column_drag_finished {
         view_action.settings_dirty = true;
     }
@@ -378,6 +383,8 @@ pub fn render_main_playback_view(
     }
     if table_action.reset_columns {
         app_state.column_widths = Default::default();
+        app_state.rating_width =
+            crate::components::songs_table::SongTablePrefs::default().rating_width;
         view_action.settings_dirty = true;
     }
 
@@ -388,6 +395,8 @@ pub fn render_main_playback_view(
     if table_action.sort_field_changed.is_some()
         || table_action.remove_track.is_some()
         || table_action.toggle_favorite.is_some()
+        || table_action.set_rating.is_some()
+        || table_action.rate_selected.is_some()
         || table_action.add_to_playlist.is_some()
         || table_action.add_selected_to_playlist.is_some()
         || table_action.favorite_selected
@@ -538,6 +547,27 @@ fn handle_songs_table_action(
         let selected = library_state.selected_tracks_in_order();
         for track in selected {
             library_state.add_favorite(favorites_repo, track.id);
+        }
+    }
+    if let Some((track_id, rating)) = action.set_rating {
+        match track_repo.set_rating(&track_id, rating) {
+            Ok(()) => coordinator.update_track_rating(track_id, rating.min(5)),
+            Err(e) => log::warn!("Could not save the rating for {track_id}: {e}"),
+        }
+    }
+    if let Some(rating) = action.rate_selected {
+        let ids: Vec<TrackId> = library_state
+            .selected_tracks_in_order()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        match track_repo.rate_many(&ids, rating) {
+            Ok(()) => {
+                for id in ids {
+                    coordinator.update_track_rating(id, rating.min(5));
+                }
+            }
+            Err(e) => log::warn!("Could not save the selected ratings: {e}"),
         }
     }
     if action.remove_selected {

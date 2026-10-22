@@ -99,7 +99,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 70] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 75] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -463,14 +463,44 @@ pub static SETTINGS_INDEX: [SettingsEntry; 70] = [
     SettingsEntry {
         category: SettingsCategory::Tools,
         card: "Runtime Diagnostics",
-        label: "Negotiated Output",
-        description: "The backend the engine actually opened, and the one you asked for. Exclusive requests fall back to shared mode when the native path is unavailable",
+        label: "Requested backend",
+        description: "The backend selected in Settings. Auto asks the engine to choose the best available path.",
     },
     SettingsEntry {
         category: SettingsCategory::Tools,
         card: "Runtime Diagnostics",
-        label: "Output Latency",
-        description: "Round-trip buffering between the DSP graph and the hardware device",
+        label: "Negotiated backend",
+        description: "The backend that actually opened the device. A difference from the request means a fallback.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "Access mode",
+        description: "Shared streams pass through the OS mixer. Direct hardware and exclusive streams bypass it.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "Verification",
+        description: "Whether direct hardware access was independently verified by the driver, and why not when it was not.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "Output device",
+        description: "The operating system device identity the engine opened, including the ALSA hw: or plughw: node.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "Negotiated rate / container",
+        description: "The sample rate and sample container agreed with the driver, including dither when it modifies an integer stream.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Runtime Diagnostics",
+        label: "Period / buffer",
+        description: "ALSA's settled period and buffer sizes, the callback buffer on other backends, and round-trip latency.",
     },
     SettingsEntry {
         category: SettingsCategory::Tools,
@@ -1121,6 +1151,9 @@ pub struct SettingsExtraContext<'a> {
     /// engine fell back — which the user needs to see, because the fallback is
     /// shared-mode.
     pub actual_backend: Option<AudioBackend>,
+    /// The full negotiated output snapshot. Shared with the Bit-Perfect modal
+    /// so both surfaces render exactly the same facts.
+    pub output_info: Option<&'a engine::output::OutputInfo>,
     /// The output devices the *selected* backend can open.
     ///
     /// Each backend enumerates its own devices, so a device chosen from this
@@ -3297,47 +3330,17 @@ fn render_tools_category(
             theme,
         );
 
-        setting_item(
-            ui,
-            "Negotiated Output",
-            "The backend the engine actually opened, and the one you asked for. Exclusive requests fall back to shared mode when the native path is unavailable",
-            theme,
-            |ui| {
-                match (extra.requested_backend, extra.actual_backend) {
-                    (Some(req), Some(actual)) if req != actual => {
-                        badge_label(
-                            ui,
-                            format!(
-                                "{} (requested {} — fell back)",
-                                crate::components::backend_options::backend_label(actual),
-                                crate::components::backend_options::backend_label(req)
-                            ),
-                            theme,
-                        );
-                    }
-                    (_, Some(actual)) => {
-                        badge_label(
-                            ui,
-                            crate::components::backend_options::backend_label(actual),
-                            theme,
-                        );
-                    }
-                    _ => {
-                        badge_label(ui, "Waiting for output".to_string(), theme);
-                    }
-                }
-            },
-        );
-
-        setting_item(
-            ui,
-            "Output Latency",
-            "Round-trip buffering between the DSP graph and the hardware device",
-            theme,
-            |ui| {
-                badge_label(ui, format!("{:.1} ms", extra.latency_ms), theme);
-            },
-        );
+        // These rows come from `output_facts`, the same function the
+        // Bit-Perfect modal uses. Do not add a diagnostics row here directly:
+        // a fact that exists on only one surface is exactly the drift this
+        // shared list prevents.
+        for fact in
+            crate::components::output_facts::output_facts(extra.output_info, extra.latency_ms)
+        {
+            setting_item(ui, fact.label, fact.detail, theme, |ui| {
+                badge_label_toned(ui, fact.value, fact.tone, theme);
+            });
+        }
 
         setting_item(
             ui,
@@ -3970,6 +3973,36 @@ fn pill_btn(label: &str, selected: bool, theme: &Theme) -> egui::Button<'static>
     .min_size(Vec2::new(0.0, 24.0))
 }
 
+fn badge_label_toned(
+    ui: &mut egui::Ui,
+    text: impl Into<String>,
+    tone: crate::components::output_facts::FactTone,
+    theme: &Theme,
+) {
+    let t = text.into();
+    let color = match tone {
+        crate::components::output_facts::FactTone::Neutral => theme.text_primary,
+        crate::components::output_facts::FactTone::Good => theme.bit_perfect_green,
+        crate::components::output_facts::FactTone::Warn => theme.warning_yellow,
+    };
+    egui::Frame::NONE
+        .fill(theme.bg_pill)
+        .stroke(Stroke::new(1.0, theme.border_card))
+        .corner_radius(CornerRadius::same(theme.radius_sm))
+        .inner_margin(egui::Margin::symmetric(
+            theme.space_md as i8,
+            theme.space_xxs as i8,
+        ))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(t)
+                    .font(crate::theme::font(11.5))
+                    .strong()
+                    .color(color),
+            );
+        });
+}
+
 fn badge_label(ui: &mut egui::Ui, text: impl Into<String>, theme: &Theme) {
     let t = text.into();
     egui::Frame::NONE
@@ -4058,6 +4091,26 @@ mod search_tests {
                     rows.push((start, label));
                 }
                 from = after;
+            }
+        }
+
+        // The diagnostics card renders one row per `OutputFact` in a loop.
+        // The labels are static by design; list them here so the search index
+        // remains addressable without pretending the runtime list is
+        // discoverable by parsing a `for` body.
+        // `rustfmt` wraps the iterator expression onto its own line, so search
+        // for the call rather than for a single-line `for … in …` spelling.
+        if let Some(at) = source.find("crate::components::output_facts::output_facts(") {
+            for label in [
+                "Requested backend",
+                "Negotiated backend",
+                "Access mode",
+                "Verification",
+                "Output device",
+                "Negotiated rate / container",
+                "Period / buffer",
+            ] {
+                rows.push((at, label.to_string()));
             }
         }
         rows.sort_by_key(|(at, _)| *at);

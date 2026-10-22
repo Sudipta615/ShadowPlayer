@@ -38,6 +38,55 @@ pub enum MprisCommand {
     Quit,
 }
 
+/// Turn an artwork path into a URI the desktop media APIs can fetch.
+///
+/// MPRIS and SMTC both want a URI, not a filesystem path. Windows paths need
+/// forward slashes and a drive/UNC form; spaces and non-ASCII bytes need
+/// percent-encoding. Getting this wrong is invisible on Linux and shows up as
+/// a missing thumbnail in the Windows flyout, so the conversion has tests for
+/// every platform shape rather than only the host's.
+pub fn artwork_file_url(path: &std::path::Path) -> String {
+    let raw = path.to_string_lossy().replace('\\', "/");
+    // On a Unix host `Path::is_absolute` says a Windows drive or UNC path is
+    // relative. The URL conversion still has to recognise those shapes: they
+    // are exactly what arrives from a Windows library on a shared drive, and
+    // prepending the current directory would make the URI point nowhere.
+    let windows_absolute = raw.starts_with("//")
+        || (raw.len() >= 2 && raw.as_bytes()[0].is_ascii_alphabetic() && raw.as_bytes()[1] == b':');
+    let text = if path.is_absolute() || windows_absolute {
+        raw
+    } else {
+        let absolute = std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf());
+        absolute.to_string_lossy().replace('\\', "/")
+    };
+    let encoded = percent_encode_uri_path(&text);
+
+    if let Some(unc) = encoded.strip_prefix("//") {
+        // `\\server\share\art.jpg` is a URI authority, not a local path.
+        format!("file://{unc}")
+    } else if encoded.starts_with('/') {
+        format!("file://{encoded}")
+    } else {
+        format!("file:///{encoded}")
+    }
+}
+
+fn percent_encode_uri_path(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.as_bytes() {
+        let keep = byte.is_ascii_alphanumeric()
+            || matches!(*byte, b'/' | b':' | b'-' | b'_' | b'.' | b'~');
+        if keep {
+            out.push(*byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 /// The player state published to the desktop. Refreshed once per UI frame.
 #[derive(Debug, Clone, Default)]
 pub struct MprisSnapshot {
@@ -707,6 +756,123 @@ mod linux {
         #[zbus(property)]
         fn can_control(&self) -> bool {
             true
+        }
+    }
+}
+
+#[cfg(test)]
+mod artifact_url_tests {
+    use super::artwork_file_url;
+    use std::path::Path;
+
+    #[test]
+    fn unix_paths_become_file_uris() {
+        assert_eq!(
+            artwork_file_url(Path::new("/home/user/Music/art 1.jpg")),
+            "file:///home/user/Music/art%201.jpg"
+        );
+    }
+
+    #[test]
+    fn windows_drive_paths_get_the_uri_slash() {
+        assert_eq!(
+            artwork_file_url(Path::new(r"C:\Users\me\Artwork\cover.jpg")),
+            "file:///C:/Users/me/Artwork/cover.jpg"
+        );
+    }
+
+    #[test]
+    fn unc_paths_become_an_authority() {
+        assert_eq!(
+            artwork_file_url(Path::new(r"\\server\share\cover art.jpg")),
+            "file://server/share/cover%20art.jpg"
+        );
+    }
+
+    #[test]
+    fn non_ascii_is_percent_encoded_as_utf8() {
+        assert_eq!(
+            artwork_file_url(Path::new("/music/Björk/cover.jpg")),
+            "file:///music/Bj%C3%B6rk/cover.jpg"
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod mpris_integration_tests {
+    use super::{MprisCommand, MprisService};
+    use std::time::{Duration, Instant};
+
+    /// Drive the real D-Bus service the way `playerctl` does.
+    ///
+    /// This is skipped (not failed) when the test host has no session bus,
+    /// which is true of a bare container. CI runs it under `dbus-run-session`.
+    #[test]
+    fn mpris_service_appears_on_the_session_bus_and_accepts_play_pause() {
+        if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+            return;
+        }
+
+        let service = MprisService::start();
+        assert!(
+            service.is_active(),
+            "the MPRIS service did not start on the session bus"
+        );
+
+        let bus_name = "org.mpris.MediaPlayer2.shadowplayer";
+        let object_path = "/org/mpris/MediaPlayer2";
+        let player_iface = "org.mpris.MediaPlayer2.Player";
+
+        let connected = pollster::block_on(async {
+            let conn = zbus::Connection::session().await?;
+            let bus = zbus::Proxy::new(
+                &conn,
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+            )
+            .await?;
+
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let names: Vec<String> = bus.call("ListNames", &()).await?;
+                if names.iter().any(|name| name == bus_name) {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    return Err::<(), zbus::Error>(zbus::Error::Failure(
+                        "MPRIS service name never appeared".into(),
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+
+            let player = zbus::Proxy::new(&conn, bus_name, object_path, player_iface).await?;
+            let status: String = player.get_property("PlaybackStatus").await?;
+            assert_eq!(status, "Stopped");
+
+            // This is the same method playerctl calls for `playerctl play-pause`.
+            player.call::<_, _, ()>("PlayPause", &()).await?;
+            Ok(())
+        });
+
+        if let Err(e) = connected {
+            panic!("MPRIS D-Bus integration failed: {e}");
+        }
+
+        // The method call crossed D-Bus and landed in the command queue the UI
+        // drains, which is the complete playerctl path.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(command) = service.try_recv() {
+                assert_eq!(command, MprisCommand::PlayPause);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "PlayPause never reached the command queue"
+            );
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 }

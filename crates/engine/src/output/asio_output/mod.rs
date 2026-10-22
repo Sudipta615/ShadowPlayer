@@ -761,6 +761,7 @@ impl Output for AsioOutput {
             channels: self.channels,
             buffer_size_frames: self.buffer_size_frames,
             buffer_size_estimated: false,
+            period_frames: 0,
             sample_format,
             dither_enabled: !dsd,
             is_fallback: false,

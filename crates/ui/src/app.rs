@@ -123,8 +123,8 @@ pub struct ShadowPlayerApp {
     scan_toast_wanted: bool,
     /// Context used to wake the idle UI loop when a watched file changes.
     wake_ctx: Option<egui::Context>,
-    /// Playlist staged for M3U export, written once the save dialog returns.
-    pending_m3u_export: Option<(String, Vec<library::M3uEntry>)>,
+    /// Playlist staged for export, written once the save dialog returns.
+    pending_playlist_export: Option<(String, Vec<library::M3uEntry>, library::PlaylistFormat)>,
     /// Duplicate-track finder state.
     duplicates: DuplicatesState,
     /// Batch organize / rename state.
@@ -254,7 +254,7 @@ impl ShadowPlayerApp {
             scan_queue: std::collections::VecDeque::new(),
             scan_toast_wanted: false,
             wake_ctx: Some(_cc.egui_ctx.clone()),
-            pending_m3u_export: None,
+            pending_playlist_export: None,
             duplicates: DuplicatesState::default(),
             organize: OrganizeState::default(),
             watch_suppress_until: None,
@@ -416,6 +416,85 @@ impl ShadowPlayerApp {
         }
     }
 
+    /// The tracks a rating shortcut applies to: the multi-selection when one
+    /// exists, otherwise the track that is playing.
+    fn rating_targets(&self) -> Vec<domain::ids::TrackId> {
+        let selected: Vec<domain::ids::TrackId> = self
+            .library_state
+            .selected_tracks_in_order()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        if !selected.is_empty() {
+            return selected;
+        }
+        self.coordinator
+            .current_track()
+            .map(|t| vec![t.id])
+            .unwrap_or_default()
+    }
+
+    /// Set (or clear, with 0) the rating of the selection or the playing track.
+    fn rate_targets(&mut self, rating: u8) {
+        let ids = self.rating_targets();
+        if ids.is_empty() {
+            return;
+        }
+        match self.track_repo.rate_many(&ids, rating) {
+            Ok(()) => {
+                for id in ids {
+                    self.coordinator.update_track_rating(id, rating.min(5));
+                }
+                // Reload the view so a Rating sort or the Rating filter sees
+                // the new value immediately.
+                self.refresh_after_rating();
+            }
+            Err(e) => log::warn!("Could not save the rating: {e}"),
+        }
+    }
+
+    /// Step the selection's rating up or down, clamping at 0 and 5.
+    fn step_target_rating(&mut self, delta: i8) {
+        let ids = self.rating_targets();
+        if ids.is_empty() {
+            return;
+        }
+        for id in ids {
+            let current = self
+                .library_state
+                .all_tracks
+                .iter()
+                .find(|t| t.id == id)
+                .map(|t| t.rating)
+                .or_else(|| {
+                    self.track_repo
+                        .get_by_id(&id)
+                        .ok()
+                        .flatten()
+                        .map(|t| t.rating)
+                })
+                .unwrap_or(0);
+            let next = (current as i16 + delta as i16).clamp(0, 5) as u8;
+            if next != current {
+                match self.track_repo.set_rating(&id, next) {
+                    Ok(()) => self.coordinator.update_track_rating(id, next),
+                    Err(e) => log::warn!("Could not save the rating for {id}: {e}"),
+                }
+            }
+        }
+        self.refresh_after_rating();
+    }
+
+    /// Refresh the library after a rating change.
+    ///
+    /// Ratings affect the visible sort, the Rating quick filter and saved
+    /// smart playlists, and they are also part of the in-memory track model
+    /// shown by the properties modal. Reloading from the database keeps all of
+    /// those in step with the value that was just persisted.
+    fn refresh_after_rating(&mut self) {
+        self.reload_library();
+    }
+
     /// Handle the app-wide keyboard shortcuts.
     ///
     /// Two subtleties shape this function, and both were wrong before:
@@ -438,7 +517,35 @@ impl ShadowPlayerApp {
             // Ctrl/Cmd chords are explicit app commands, and none of them is a
             // key a text field wants, so they stay live even while a field has
             // focus.
-            if ctrl {
+            if ctrl && i.modifiers.alt {
+                // Ctrl/Cmd+Alt+Up/Down steps the rating. It is checked first so
+                // Alt does not fall through to the volume arrows below.
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    self.step_target_rating(1);
+                }
+                if i.key_pressed(egui::Key::ArrowDown) {
+                    self.step_target_rating(-1);
+                }
+            } else if ctrl {
+                let rating_key = if i.key_pressed(egui::Key::Num0) {
+                    Some(0)
+                } else if i.key_pressed(egui::Key::Num1) {
+                    Some(1)
+                } else if i.key_pressed(egui::Key::Num2) {
+                    Some(2)
+                } else if i.key_pressed(egui::Key::Num3) {
+                    Some(3)
+                } else if i.key_pressed(egui::Key::Num4) {
+                    Some(4)
+                } else if i.key_pressed(egui::Key::Num5) {
+                    Some(5)
+                } else {
+                    None
+                };
+                if let Some(rating) = rating_key {
+                    self.rate_targets(rating);
+                }
+
                 if i.key_pressed(egui::Key::N) {
                     self.app_state.open_playlist_editor = true;
                 }
@@ -725,7 +832,7 @@ impl ShadowPlayerApp {
         entries.push(PaletteEntry::new(
             "Library",
             "Import from other players",
-            "playlists left by Rhythmbox, iTunes and Audacious",
+            "Rhythmbox, Audacious, Winamp, foobar2000, MusicBee, iTunes and more",
             PaletteAction::OpenImportPlaylists,
         ));
         entries.push(PaletteEntry::new(
@@ -1135,6 +1242,7 @@ impl ShadowPlayerApp {
             match serde_json::from_str::<crate::components::songs_table::SongTablePrefs>(&json) {
                 Ok(prefs) => {
                     self.app_state.column_widths = prefs.widths;
+                    self.app_state.rating_width = prefs.rating_width;
                     self.app_state.row_density = prefs.density;
                 }
                 Err(e) => log::warn!("Could not read the saved song-table layout: {e}"),
@@ -1316,6 +1424,7 @@ impl ShadowPlayerApp {
         let table_prefs = crate::components::songs_table::SongTablePrefs {
             widths: self.app_state.column_widths,
             density: self.app_state.row_density,
+            rating_width: self.app_state.rating_width,
         };
         if let Ok(json) = serde_json::to_string(&table_prefs) {
             if let Err(e) = self.settings_repo.set_value("song_table_prefs", &json) {
@@ -1386,7 +1495,7 @@ impl ShadowPlayerApp {
                 self.import_m3u_playlist(&path);
             }
             ImportResult::SavePath(path) => {
-                self.write_pending_m3u_export(&path);
+                self.write_pending_playlist_export(&path);
             }
             ImportResult::OrganizeDestination(path) => {
                 self.organize.set_destination(Some(path));
@@ -1829,25 +1938,34 @@ impl ShadowPlayerApp {
     /// library, importing any that are missing, and the result becomes a new
     /// playlist (named after the file) in playlist order.
     fn import_m3u_playlist(&mut self, path: &std::path::Path) {
-        let entries = match library::parse_m3u_file(path) {
-            Ok(entries) => entries,
+        let mut parsed = match library::parse_playlist(path) {
+            Ok(parsed) => parsed,
             Err(e) => {
                 log::warn!("Could not read playlist {}: {e}", path.display());
                 return;
             }
         };
+        let Some(playlist_file) = parsed.drain(..).next() else {
+            log::info!("Playlist {} had no entries", path.display());
+            return;
+        };
+        let entries = playlist_file.entries;
         if entries.is_empty() {
             log::info!("Playlist {} had no entries", path.display());
             return;
         }
 
-        let name = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
+        let name = playlist_file
+            .title
             .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                path.file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .filter(|s| !s.trim().is_empty())
+            })
             .unwrap_or_else(|| "Imported Playlist".to_string());
 
-        let playlist = match self.playlist_repo.create(&name, Some("Imported from M3U")) {
+        let playlist = match self.playlist_repo.create(&name, Some("Imported playlist")) {
             Ok(p) => p,
             Err(e) => {
                 log::warn!("Could not create playlist '{name}': {e}");
@@ -1887,20 +2005,26 @@ impl ShadowPlayerApp {
         self.reload_library();
     }
 
-    /// Write the queued M3U export to the path the user chose in the save dialog.
-    fn write_pending_m3u_export(&mut self, path: &std::path::Path) {
-        let Some((_name, entries)) = self.pending_m3u_export.take() else {
+    /// Write the queued export to the path the user chose in the save dialog.
+    fn write_pending_playlist_export(&mut self, path: &std::path::Path) {
+        let Some((_name, entries, format)) = self.pending_playlist_export.take() else {
             return;
         };
         // Prefer relative paths when the playlist lands on the same volume as
         // the music, so it survives being copied alongside the library.
-        let text = library::write_m3u(&entries, path.parent());
+        let text = library::write_playlist(format, &entries, path.parent());
         match std::fs::write(path, text) {
             Ok(()) => {
-                log::info!("Exported {} track(s) to {}", entries.len(), path.display());
-                self.toasts.success(format!(
-                    "Exported {} track(s) to {}",
+                log::info!(
+                    "Exported {} track(s) as {} to {}",
                     entries.len(),
+                    format.label(),
+                    path.display()
+                );
+                self.toasts.success(format!(
+                    "Exported {} track(s) as {} to {}",
+                    entries.len(),
+                    format.label(),
                     path.display()
                 ));
             }
@@ -2085,8 +2209,18 @@ impl ShadowPlayerApp {
         self.reload_library();
     }
 
-    /// Stage an M3U export and ask the user where to save it.
+    /// Stage an M3U8 export and ask the user where to save it.
     pub fn export_playlist_as_m3u(&mut self, name: String, tracks: Vec<domain::models::Track>) {
+        self.export_playlist(name, tracks, library::PlaylistFormat::M3u8);
+    }
+
+    /// Stage a playlist export in the chosen format.
+    pub fn export_playlist(
+        &mut self,
+        name: String,
+        tracks: Vec<domain::models::Track>,
+        format: library::PlaylistFormat,
+    ) {
         let entries: Vec<library::M3uEntry> = tracks
             .iter()
             .map(|t| library::M3uEntry {
@@ -2099,8 +2233,8 @@ impl ShadowPlayerApp {
         if entries.is_empty() {
             return;
         }
-        self.pending_m3u_export = Some((name.clone(), entries));
-        self.import_service.request_save_m3u(name);
+        self.pending_playlist_export = Some((name.clone(), entries, format));
+        self.import_service.request_save_playlist(name, format);
     }
 
     pub fn start_scan(&mut self, path: PathBuf) {
@@ -2176,7 +2310,7 @@ impl ShadowPlayerApp {
                 .manager()
                 .get_cached_thumbnail_path(&t.id);
             if p.exists() {
-                Some(format!("file://{}", p.display()))
+                Some(crate::services::mpris_service::artwork_file_url(&p))
             } else {
                 None
             }
@@ -2721,6 +2855,7 @@ impl eframe::App for ShadowPlayerApp {
                             channels: 2,
                             format: "MP3".to_string(),
                             bitrate_kbps: Some(128),
+                            bit_depth: None,
                             is_lossless: false,
                             replaygain_track_db: None,
                             replaygain_track_peak: None,
@@ -2733,6 +2868,8 @@ impl eframe::App for ShadowPlayerApp {
                             content_hash: Some(format!("eval-hash-{i}")),
                             file_id: None,
                             is_favorite: false,
+                            rating: 0,
+                            has_lyrics: false,
                             play_count: 0,
                             skip_count: 0,
                             last_played_at: None,
@@ -2927,6 +3064,7 @@ impl eframe::App for ShadowPlayerApp {
                             channels: 2,
                             format: if i % 4 == 3 { "MP3" } else { "FLAC" }.to_string(),
                             bitrate_kbps: Some(if i % 4 == 3 { 320 } else { 1000 }),
+                            bit_depth: Some(if i % 4 == 3 { 16 } else { 24 }),
                             is_lossless: i % 4 != 3,
                             replaygain_track_db: Some(-6.0 - (i as f32) * 0.4),
                             replaygain_track_peak: Some(0.91),
@@ -2939,6 +3077,8 @@ impl eframe::App for ShadowPlayerApp {
                             content_hash: None,
                             file_id: None,
                             is_favorite: i % 3 == 0,
+                            rating: (i % 6) as u8,
+                            has_lyrics: i % 5 == 0,
                             play_count: (i as u32) * 7,
                             skip_count: 0,
                             last_played_at: Some(1_700_000_000),
@@ -3000,6 +3140,7 @@ impl eframe::App for ShadowPlayerApp {
                             channels: 2,
                             format: "FLAC".to_string(),
                             bitrate_kbps: Some(900),
+                            bit_depth: Some(16),
                             is_lossless: true,
                             replaygain_track_db: Some(-6.0),
                             replaygain_track_peak: Some(0.9),
@@ -3012,6 +3153,8 @@ impl eframe::App for ShadowPlayerApp {
                             content_hash: None,
                             file_id: None,
                             is_favorite: false,
+                            rating: 0,
+                            has_lyrics: false,
                             play_count: 0,
                             skip_count: 0,
                             last_played_at: None,
@@ -4037,7 +4180,7 @@ impl eframe::App for ShadowPlayerApp {
         if let Some(id) = pl_actions.select_changed {
             self.playlist_editor_tracks = load_playlist_tracks(&self.playlist_repo, &id);
         }
-        if pl_actions.export_m3u {
+        if let Some(format) = pl_actions.export {
             if let Some(id) = self.app_state.playlist_editor.selected {
                 let name = self
                     .library_state
@@ -4047,7 +4190,7 @@ impl eframe::App for ShadowPlayerApp {
                     .map(|p| p.name.clone())
                     .unwrap_or_else(|| "playlist".to_string());
                 let tracks = self.playlist_editor_tracks.clone();
-                self.export_playlist_as_m3u(name, tracks);
+                self.export_playlist(name, tracks, format);
             }
         }
         if pl_changed {

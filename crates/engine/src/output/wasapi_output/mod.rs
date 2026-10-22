@@ -519,6 +519,7 @@ impl WasapiOutput {
             channels: self.client().channels,
             buffer_size_frames: self.client().buffer_size_frames,
             buffer_size_estimated: false,
+            period_frames: 0,
             sample_format,
             dither_enabled: self.dither_enabled.load(Ordering::Relaxed),
             access_mode: OutputAccessMode::Exclusive,

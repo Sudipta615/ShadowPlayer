@@ -99,6 +99,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         description: "Toggle the equalizer & DSP panel",
     },
     Shortcut {
+        keys: "Ctrl + 1 to 5",
+        description: "Rate the selected tracks or the playing track 1–5 stars",
+    },
+    Shortcut {
+        keys: "Ctrl + 0",
+        description: "Clear the rating on the selection or the playing track",
+    },
+    Shortcut {
+        keys: "Ctrl + Alt + Up / Down",
+        description: "Step the selection's rating up or down",
+    },
+    Shortcut {
         keys: "Escape",
         description: "Close the open dialog (one layer per press), or clear the search",
     },

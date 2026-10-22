@@ -82,6 +82,10 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
     });
     let embedded_artwork = artwork;
 
+    // Index the lyric flag alongside the tags. The lyrics panel reads the same
+    // two sources, so "Has Lyrics" and the panel agree.
+    let has_lyrics = crate::has_lyrics(path);
+
     let track_id = TrackId::from_canonical_path(path);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -103,6 +107,7 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         channels,
         format: format_name,
         bitrate_kbps,
+        bit_depth: bits_per_sample,
         is_lossless,
         replaygain_track_db: loudness.replaygain_track_db,
         replaygain_track_peak: loudness.replaygain_track_peak,
@@ -120,6 +125,8 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         // open here, so this costs one `stat` and nothing more.
         file_id: domain::file_identity::file_identity(path).map(|identity| identity.to_key()),
         is_favorite: false,
+        rating: 0,
+        has_lyrics,
         play_count: 0,
         skip_count: 0,
         last_played_at: None,
@@ -233,6 +240,7 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             channels: audio_meta.track.channels,
             format: format!("CUE+{}", audio_meta.track.format),
             bitrate_kbps: audio_meta.track.bitrate_kbps,
+            bit_depth: audio_meta.track.bit_depth,
             is_lossless: audio_meta.track.is_lossless,
             replaygain_track_db: None,
             replaygain_track_peak: None,
@@ -246,6 +254,8 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             content_hash: None,
             file_id: None,
             is_favorite: false,
+            rating: 0,
+            has_lyrics: audio_meta.track.has_lyrics,
             play_count: 0,
             skip_count: 0,
             last_played_at: None,

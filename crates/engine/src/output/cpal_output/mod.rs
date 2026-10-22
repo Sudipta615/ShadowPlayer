@@ -909,6 +909,7 @@ impl CpalOutput {
             channels: self.stream_config.channels,
             buffer_size_frames: self.buffer_size_frames,
             buffer_size_estimated: self.buffer_size_estimated,
+            period_frames: 0,
             sample_format: match self.sample_format {
                 SampleFormat::F32 => crate::dsp::pipeline::OutputSampleFormat::F32,
                 SampleFormat::F64 => crate::dsp::pipeline::OutputSampleFormat::F64,

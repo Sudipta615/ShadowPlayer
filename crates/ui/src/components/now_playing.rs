@@ -35,6 +35,8 @@ pub struct NowPlayingCard<'a> {
     pub album: &'a str,
     pub is_playing: bool,
     pub is_favorite: bool,
+    /// The current track's 0–5 star rating.
+    pub rating: u8,
     pub is_shuffle: bool,
     pub is_repeat: bool,
     pub position_secs: f64,
@@ -263,6 +265,27 @@ impl<'a> NowPlayingCard<'a> {
                                 .font(crate::theme::font(12.5))
                                 .color(self.theme.text_muted),
                         );
+                    }
+
+                    // The listener's own rating, drawn from vectors because
+                    // the bundled fonts have no star glyph. An unrated track
+                    // shows five faint outlines rather than a blank gap.
+                    if !dense {
+                        let (rating_rect, rating_resp) =
+                            ui.allocate_exact_size(Vec2::new(64.0, 13.0), Sense::hover());
+                        crate::components::songs_table::paint_rating_stars(
+                            ui.painter(),
+                            rating_rect.center(),
+                            rating_rect.width(),
+                            self.rating,
+                            None,
+                            self.theme,
+                        );
+                        rating_resp.on_hover_text(if self.rating == 0 {
+                            "Unrated — use Ctrl+1 to 5 to rate it".to_string()
+                        } else {
+                            format!("{} of 5 stars", self.rating)
+                        });
                     }
 
                     ui.add_space(if compact { 2.0 } else { 3.0 });

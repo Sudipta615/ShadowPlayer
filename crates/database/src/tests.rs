@@ -23,6 +23,7 @@ mod unit {
             channels: 2,
             format: "FLAC".to_string(),
             bitrate_kbps: Some(950),
+            bit_depth: Some(16),
             is_lossless: true,
             replaygain_track_db: Some(-6.5),
             replaygain_track_peak: Some(0.98),
@@ -35,6 +36,8 @@ mod unit {
             content_hash: None,
             file_id: None,
             is_favorite: false,
+            rating: 0,
+            has_lyrics: false,
             play_count: 0,
             skip_count: 0,
             last_played_at: None,
@@ -436,6 +439,71 @@ mod unit {
         assert_eq!(count, 2, "a hard link is two entries, and stays two");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn migration_v11_defaults_old_tracks_to_unrated_and_adds_the_indexes() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tracks (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 title TEXT NOT NULL,
+                 artist TEXT NOT NULL,
+                 album TEXT NOT NULL,
+                 genre TEXT,
+                 path TEXT NOT NULL
+             );
+             CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL);
+             INSERT INTO schema_migrations VALUES (10, 0);
+             INSERT INTO tracks (id, title, artist, album, path)
+             VALUES ('old', 'Old', 'Artist', 'Album', '/music/old.flac');",
+        )
+        .unwrap();
+
+        crate::schema::apply_v11_for_test(&mut conn).expect("V11 must apply");
+
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(tracks);").unwrap();
+            let rows = stmt.query_map([], |r| r.get::<_, String>(1)).unwrap();
+            rows.map(|r| r.unwrap()).collect()
+        };
+        for name in ["rating", "bit_depth", "has_lyrics"] {
+            assert!(columns.iter().any(|column| column == name), "{columns:?}");
+        }
+
+        let defaults: (i64, Option<i64>, i64) = conn
+            .query_row(
+                "SELECT rating, bit_depth, has_lyrics FROM tracks WHERE id = 'old';",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            defaults,
+            (0, None, 0),
+            "an old row is unrated, has unknown depth, and has no known lyrics"
+        );
+
+        let indexes: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'index';")
+                .unwrap();
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+            rows.map(|r| r.unwrap()).collect()
+        };
+        for name in [
+            "idx_tracks_rating",
+            "idx_tracks_bit_depth",
+            "idx_tracks_has_lyrics",
+        ] {
+            assert!(indexes.iter().any(|index| index == name), "{indexes:?}");
+        }
+
+        // A lost migration row must not make the ALTER run twice.
+        conn.execute("DELETE FROM schema_migrations WHERE version = 11;", [])
+            .unwrap();
+        crate::schema::apply_v11_for_test(&mut conn)
+            .expect("re-applying V11 with the columns present must be safe");
     }
 
     #[test]
@@ -1228,7 +1296,9 @@ mod unit {
         let sp3 = sp_repo.save(&sp3).unwrap();
         assert_eq!(sp_repo.evaluate(&sp3).unwrap().len(), 2);
 
-        // Incomplete rules (empty value) are ignored, not fatal.
+        // Incomplete rules are invalid and match nothing. Dropping the rule
+        // would widen an AND playlist to "everything", which is worse than an
+        // empty result the editor explains.
         let mut sp4 = SmartPlaylist::draft(PlaylistId::new());
         sp4.name = "Incomplete".to_string();
         sp4.rules = vec![SmartRule {
@@ -1237,7 +1307,7 @@ mod unit {
             value: "   ".to_string(),
         }];
         let sp4 = sp_repo.save(&sp4).unwrap();
-        assert_eq!(sp_repo.evaluate(&sp4).unwrap().len(), 3);
+        assert_eq!(sp_repo.evaluate(&sp4).unwrap().len(), 0);
 
         // Limit + sort descending by title -> only "Gamma".
         let mut sp5 = SmartPlaylist::draft(PlaylistId::new());
@@ -1530,6 +1600,149 @@ mod unit {
             0,
             "no tokens means no results, not a syntax error"
         );
+    }
+
+    #[test]
+    fn ratings_are_clamped_bulk_rated_sorted_and_cleared() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = TrackRepo::new(db.clone());
+
+        let a = sample_track(TrackId::new(), "/music/a.flac", "A", "X", "A");
+        let b = sample_track(TrackId::new(), "/music/b.flac", "B", "X", "A");
+        let c = sample_track(TrackId::new(), "/music/c.flac", "C", "X", "A");
+        for track in [&a, &b, &c] {
+            repo.upsert(track).unwrap();
+        }
+
+        repo.set_rating(&a.id, 9).unwrap();
+        assert_eq!(
+            repo.get_by_id(&a.id).unwrap().unwrap().rating,
+            5,
+            "a rating above five is clamped, not stored as an impossible value"
+        );
+
+        repo.rate_many(&[b.id, c.id], 3).unwrap();
+        assert_eq!(repo.get_by_id(&b.id).unwrap().unwrap().rating, 3);
+        assert_eq!(repo.get_by_id(&c.id).unwrap().unwrap().rating, 3);
+
+        repo.clear_rating(&c.id).unwrap();
+        let ascending = repo.list(SortField::Rating, SortOrder::Ascending).unwrap();
+        assert_eq!(
+            ascending.iter().map(|t| t.rating).collect::<Vec<_>>(),
+            vec![0, 3, 5]
+        );
+        let descending = repo.list(SortField::Rating, SortOrder::Descending).unwrap();
+        assert_eq!(
+            descending.iter().map(|t| t.rating).collect::<Vec<_>>(),
+            vec![5, 3, 0]
+        );
+    }
+
+    #[test]
+    fn a_rating_survives_closing_and_reopening_the_database() {
+        let path = std::env::temp_dir().join(format!(
+            "sp_rating_persist_{}_{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let track = sample_track(TrackId::new(), "/music/persist.flac", "Star", "X", "A");
+        let id = track.id;
+
+        {
+            let db = Database::open(&path).expect("open database");
+            let repo = TrackRepo::new(db);
+            repo.upsert(&track).unwrap();
+            repo.set_rating(&id, 4).unwrap();
+        }
+
+        {
+            let db = Database::open(&path).expect("reopen database");
+            let repo = TrackRepo::new(db);
+            let loaded = repo.get_by_id(&id).unwrap().expect("track survives");
+            assert_eq!(loaded.rating, 4, "the rating belongs to the library row");
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn new_smart_fields_filter_and_invalid_rules_match_nothing() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = SmartPlaylistRepo::new(db.clone());
+        let track_repo = TrackRepo::new(db.clone());
+
+        let mut a = sample_track(TrackId::new(), "/music/a.flac", "A", "X", "A");
+        a.rating = 5;
+        a.has_lyrics = true;
+        a.bit_depth = Some(24);
+        let mut b = sample_track(TrackId::new(), "/music/b.flac", "B", "X", "A");
+        b.rating = 2;
+        b.has_lyrics = false;
+        b.bit_depth = Some(16);
+        b.play_count = 5;
+        let mut c = sample_track(TrackId::new(), "/music/c.flac", "C", "X", "A");
+        c.has_lyrics = true;
+        c.bit_depth = Some(24);
+        for track in [&a, &b, &c] {
+            track_repo.upsert(track).unwrap();
+        }
+
+        let evaluate = |field: SmartField, op: SmartOp, value: &str| {
+            let mut playlist = SmartPlaylist::draft(PlaylistId::new());
+            playlist.name = format!("{} {}", field.label(), op.label());
+            playlist.rules = vec![SmartRule {
+                field,
+                op,
+                value: value.to_string(),
+            }];
+            repo.save(&playlist).unwrap();
+            repo.evaluate(&playlist).unwrap()
+        };
+
+        let rated = evaluate(SmartField::Rating, SmartOp::GreaterThan, "3");
+        assert_eq!(rated.iter().map(|t| t.id).collect::<Vec<_>>(), vec![a.id]);
+
+        let lyrics = evaluate(SmartField::HasLyrics, SmartOp::IsTrue, "");
+        assert_eq!(lyrics.len(), 2, "two tracks have lyrics");
+
+        let never_played = evaluate(SmartField::NeverPlayed, SmartOp::IsTrue, "");
+        assert_eq!(
+            never_played.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![a.id, c.id],
+            "play_count is the source of truth, not a stored flag"
+        );
+
+        let hi_depth = evaluate(SmartField::BitDepth, SmartOp::GreaterThan, "16");
+        assert_eq!(
+            hi_depth.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![a.id, c.id]
+        );
+
+        // An impossible value is rejected visibly before it reaches SQL, and
+        // evaluation matches nothing rather than silently dropping the rule.
+        let mut invalid = SmartPlaylist::draft(PlaylistId::new());
+        invalid.name = "Impossible".to_string();
+        invalid.rules = vec![SmartRule {
+            field: SmartField::Rating,
+            op: SmartOp::GreaterThan,
+            value: "9".to_string(),
+        }];
+        assert!(invalid.validation_error().is_some());
+        repo.save(&invalid).unwrap();
+        assert!(repo.evaluate(&invalid).unwrap().is_empty());
+
+        let mut incomplete = SmartPlaylist::draft(PlaylistId::new());
+        incomplete.name = "Incomplete".to_string();
+        incomplete.rules = vec![SmartRule {
+            field: SmartField::Title,
+            op: SmartOp::Contains,
+            value: "   ".to_string(),
+        }];
+        assert!(incomplete.validation_error().is_some());
+        assert!(repo.evaluate(&incomplete).unwrap().is_empty());
     }
 
     /// Smart-playlist rules that the field cannot express are repaired on load,

@@ -18,6 +18,10 @@ pub struct Track {
     pub channels: usize,
     pub format: String,
     pub bitrate_kbps: Option<u32>,
+    /// Source PCM precision in bits, where the container reports it. `None`
+    /// for lossy streams and for containers that do not expose a bit depth.
+    #[serde(default)]
+    pub bit_depth: Option<u32>,
     pub is_lossless: bool,
     pub replaygain_track_db: Option<f32>,
     pub replaygain_track_peak: Option<f32>,
@@ -54,6 +58,17 @@ pub struct Track {
     #[serde(default)]
     pub file_id: Option<String>,
     pub is_favorite: bool,
+    /// The listener's 0–5 star rating. `0` means unrated, not zero stars.
+    ///
+    /// Ratings live in the library database rather than in the file's tags:
+    /// they belong to the listener, and scoring a track must not rewrite the
+    /// user's music. This is the model foobar2000 and AIMP use.
+    #[serde(default)]
+    pub rating: u8,
+    /// Whether a sidecar or embedded lyric was found when the track was
+    /// indexed. Kept in the database so "Has Lyrics" is a cheap smart rule.
+    #[serde(default)]
+    pub has_lyrics: bool,
     pub play_count: u32,
     /// How many times this track was skipped before it was heard.
     pub skip_count: u32,
@@ -175,6 +190,9 @@ pub enum SortField {
     /// Favorites first. There is no "unfavorite" ranking, so this is a
     /// one-sided key rather than a text or numeric column.
     Favorite,
+    /// The listener's star rating, 0–5. Unlike Favorites this is a normal
+    /// numeric key, so descending puts the five-star tracks first.
+    Rating,
 }
 
 impl std::fmt::Display for SortField {
@@ -187,6 +205,7 @@ impl std::fmt::Display for SortField {
             Self::TrackNumber => write!(f, "Track Number"),
             Self::DateAdded => write!(f, "Date Added"),
             Self::Favorite => write!(f, "Favorites"),
+            Self::Rating => write!(f, "Rating"),
         }
     }
 }

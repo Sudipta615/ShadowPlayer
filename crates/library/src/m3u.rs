@@ -81,30 +81,76 @@ fn percent_decode(s: &str) -> String {
     domain::text::decode_text_bytes(&decoded).0
 }
 
+/// Decode a `file://` URI into a filesystem path.
+///
+/// Handles the three shapes a real playlist exports:
+///
+/// * `file:///home/me/song.flac` — local path with the URI's required slash;
+/// * `file:///C:/Music/song.flac` — Windows drive path, slash removed again;
+/// * `file://server/share/song.flac` — UNC path, restored as `//server/share`.
+///
+/// `localhost` is accepted as the local host, case-insensitively. Returning
+/// `None` for anything that is not a `file://` URI keeps the callers' fallback
+/// paths distinct from this one.
+pub(crate) fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
+    let rest = uri.trim().strip_prefix("file://")?;
+    let rest = if rest
+        .get(..9)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("localhost"))
+    {
+        let boundary = rest[9..].chars().next();
+        if boundary.is_none() || matches!(boundary, Some('/') | Some('\\')) {
+            &rest[9..]
+        } else {
+            rest
+        }
+    } else {
+        rest
+    };
+
+    let decoded = percent_decode(rest);
+    if decoded.is_empty() {
+        return None;
+    }
+    // `file:///C:/Music/x.flac` has the extra slash the URI form requires;
+    // the Windows filesystem path does not.
+    let decoded = match decoded.as_bytes() {
+        [b'/', drive, b':', ..] if drive.is_ascii_alphabetic() => decoded[1..].to_string(),
+        _ => decoded,
+    };
+    let path = if decoded.starts_with('/') || is_windows_drive(&decoded) {
+        decoded
+    } else {
+        // A URI host other than `localhost` is a UNC share.
+        format!("//{decoded}")
+    };
+    Some(PathBuf::from(path))
+}
+
+/// Whether text begins with a Windows drive prefix (`C:` or `c:`).
+fn is_windows_drive(text: &str) -> bool {
+    text.len() >= 2 && text.as_bytes()[0].is_ascii_alphabetic() && text.as_bytes()[1] == b':'
+}
+
 /// Resolve a playlist path token against the playlist's directory. Handles
 /// Windows separators, `file://` URIs and their `%xx` escapes so playlists
 /// exported elsewhere still resolve. Absolute paths are returned as-is.
-fn resolve(raw: &str, base_dir: Option<&Path>) -> PathBuf {
+pub(crate) fn resolve(raw: &str, base_dir: Option<&Path>) -> PathBuf {
     let trimmed = raw.trim().trim_matches('"');
     let unescaped = trimmed.replace('\\', "/");
 
-    // file:///home/me/song.flac -> /home/me/song.flac
-    if let Some(rest) = unescaped.strip_prefix("file://") {
-        // RFC 8089 allows a host, but only localhost is meaningful for a
-        // playlist: `file://localhost/music/x.flac`.
-        let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-        let decoded = percent_decode(rest);
-        // `file:///C:/Music/x.flac` carries the slash the URI form requires;
-        // the filesystem path on Windows does not.
-        let decoded = match decoded.as_bytes() {
-            [b'/', drive, b':', ..] if drive.is_ascii_alphabetic() => decoded[1..].to_string(),
-            _ => decoded,
-        };
-        return PathBuf::from(decoded);
+    if unescaped.starts_with("file://") {
+        if let Some(path) = file_uri_to_path(&unescaped) {
+            return path;
+        }
     }
 
     let p = PathBuf::from(&unescaped);
-    if p.is_absolute() {
+    // `Path::is_absolute` is host-specific: on Unix a Windows drive path is
+    // "relative" and would be joined to the playlist directory. Preserve the
+    // shape instead, so a library on a mounted Windows share is not silently
+    // redirected into the playlist's own folder.
+    if p.is_absolute() || is_windows_drive(&unescaped) {
         return p;
     }
     match base_dir {
@@ -206,7 +252,7 @@ pub fn parse_m3u_file(path: &Path) -> std::io::Result<Vec<M3uEntry>> {
 /// every entry was written as an absolute path — a playlist that silently only
 /// worked on the machine that wrote it. Both sides are canonicalised first, and
 /// the plain comparison is kept as the fallback for paths that no longer exist.
-fn relative_to(path: &Path, base_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn relative_to(path: &Path, base_dir: &Path) -> Option<PathBuf> {
     if let (Ok(real_path), Ok(real_base)) =
         (std::fs::canonicalize(path), std::fs::canonicalize(base_dir))
     {
@@ -357,6 +403,34 @@ mod tests {
         // A malformed escape is left alone instead of eating the character.
         let broken = parse_m3u("/music/100%zz.flac", None);
         assert_eq!(broken[0].path, PathBuf::from("/music/100%zz.flac"));
+    }
+
+    #[test]
+    fn unc_share_uris_and_windows_paths_survive_a_unix_import() {
+        let entries = parse_m3u(
+            "#EXTM3U\n\
+             file://server/share/Music/My%20Song.flac\n\
+             \\\\server\\share\\Music\\Other.flac\n\
+             C:\\Users\\me\\Music\\Local.flac\n",
+            Some(Path::new("/playlists")),
+        );
+        assert_eq!(
+            entries[0].path,
+            PathBuf::from("//server/share/Music/My Song.flac")
+        );
+        assert_eq!(
+            entries[1].path,
+            PathBuf::from("//server/share/Music/Other.flac")
+        );
+        // A Windows drive path is not relative just because the host is Unix.
+        assert_eq!(
+            entries[2].path,
+            PathBuf::from("C:/Users/me/Music/Local.flac")
+        );
+        assert_eq!(
+            file_uri_to_path("file://LOCALHOST/music/x.flac"),
+            Some(PathBuf::from("/music/x.flac"))
+        );
     }
 
     /// A library root reached through a symlink must still produce relative

@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::playlist_format::{parse_playlist, ParsedPlaylist};
+
 /// A playlist found in another player's library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundPlaylist {
@@ -18,21 +20,90 @@ pub struct FoundPlaylist {
     pub paths: Vec<PathBuf>,
 }
 
+/// How a player's discovery candidate should be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CandidateKind {
+    /// A file in one of the supported playlist formats.
+    Playlist,
+    /// A directory of playlist files.
+    Directory,
+    /// An INI/text file that points at playlist files or audio paths.
+    Pointer(&'static str),
+}
+
 /// The well-known places other players keep their playlists.
 ///
 /// The paths are the ones a normal install uses. A player that keeps its
 /// playlists somewhere else simply is not found, which is why every lookup
 /// is optional rather than fatal.
-fn candidate_files() -> Vec<(&'static str, PathBuf)> {
+fn candidate_files() -> Vec<(&'static str, PathBuf, CandidateKind)> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    vec![
+    let appdata = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join("AppData/Roaming"));
+    let mut candidates = vec![
         (
             "Rhythmbox",
             home.join(".local/share/rhythmbox/playlists.xml"),
+            CandidateKind::Pointer("rhythmbox"),
         ),
-        ("iTunes", home.join("Music/iTunes/iTunes Library.xspf")),
-        ("Audacious", home.join(".config/audacious/playlists.txt")),
-    ]
+        (
+            "iTunes",
+            home.join("Music/iTunes/iTunes Library.xspf"),
+            CandidateKind::Playlist,
+        ),
+        (
+            "iTunes",
+            home.join("Music/iTunes/iTunes Playlist.xspf"),
+            CandidateKind::Playlist,
+        ),
+        (
+            "Audacious",
+            home.join(".config/audacious/playlists.txt"),
+            CandidateKind::Pointer("audacious"),
+        ),
+        (
+            "Clementine",
+            home.join(".config/Clementine/playlists.ini"),
+            CandidateKind::Pointer("clementine"),
+        ),
+        (
+            "Clementine",
+            home.join(".config/clementine/playlists.ini"),
+            CandidateKind::Pointer("clementine"),
+        ),
+        (
+            "Winamp",
+            appdata.join("Winamp/Winamp.ini"),
+            CandidateKind::Pointer("winamp"),
+        ),
+        (
+            "foobar2000",
+            appdata.join("foobar2000/foo_playlists.txt"),
+            CandidateKind::Pointer("foobar"),
+        ),
+        (
+            "iTunes",
+            appdata.join("Apple Computer/iTunes/iTunes Playlist.xspf"),
+            CandidateKind::Playlist,
+        ),
+    ];
+
+    for (source, directory) in [
+        ("Winamp", appdata.join("Winamp/Plugins/ml/playlists")),
+        ("Winamp", appdata.join("Winamp/playlists")),
+        ("foobar2000", appdata.join("foobar2000/playlists")),
+        ("MusicBee", appdata.join("MusicBee/Playlists")),
+        ("Clementine", home.join(".config/Clementine/playlists")),
+        ("Strawberry", home.join(".config/strawberry/playlists")),
+        (
+            "Strawberry",
+            home.join(".config/StrawberryMusicPlayer/playlists"),
+        ),
+    ] {
+        candidates.push((source, directory, CandidateKind::Directory));
+    }
+    candidates
 }
 
 /// Find every playlist the other players left behind.
@@ -40,18 +111,253 @@ fn candidate_files() -> Vec<(&'static str, PathBuf)> {
 /// A file that cannot be read or parsed is skipped rather than fatal: one
 /// broken playlist must not stop the rest from being imported.
 pub fn find_playlists() -> Vec<FoundPlaylist> {
+    find_playlists_in(candidate_files())
+}
+
+/// The discovery walk, separated from the host-specific candidate list so a
+/// test can point it at a temporary directory.
+fn find_playlists_in(
+    candidates: impl IntoIterator<Item = (&'static str, PathBuf, CandidateKind)>,
+) -> Vec<FoundPlaylist> {
     let mut out = Vec::new();
-    for (source, path) in candidate_files() {
-        let Ok(text) = std::fs::read_to_string(&path) else {
+    for (source, path, kind) in candidates {
+        if !path.exists() {
             continue;
-        };
-        match source {
-            "Rhythmbox" => out.extend(parse_rhythmbox(&text)),
-            "iTunes" => out.extend(parse_xspf(&text)),
-            "Audacious" => out.extend(parse_audacious(&text)),
-            _ => {}
+        }
+        match kind {
+            CandidateKind::Directory => scan_playlist_dir(source, &path, &mut out),
+            CandidateKind::Playlist => {
+                // iTunes' own XSPF export is read by the older parser, which
+                // knows to describe multiple `<playlist>` blocks. Everything
+                // else goes through the shared format dispatcher.
+                if source == "iTunes"
+                    && path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("xspf"))
+                {
+                    if let Ok(text) = std::fs::read_to_string(&path) {
+                        out.extend(parse_xspf(&text));
+                    }
+                } else if let Some(parsed) = parse_one_playlist(&path) {
+                    push_parsed(source, &path, parsed, &mut out);
+                }
+            }
+            CandidateKind::Pointer(kind) => {
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                match kind {
+                    "rhythmbox" => out.extend(parse_rhythmbox(&text)),
+                    "audacious" => out.extend(parse_audacious(&text)),
+                    "clementine" => out.extend(parse_ini_paths(source, &text, &path)),
+                    "winamp" | "foobar" => out.extend(parse_pointer_file(source, &text, &path)),
+                    _ => {}
+                }
+            }
         }
     }
+
+    // A directory and a pointer file can name the same playlist. Deduplicate
+    // without making the user choose between two identical rows.
+    let mut unique: Vec<FoundPlaylist> = Vec::with_capacity(out.len());
+    for found in out {
+        if !unique.iter().any(|existing| {
+            existing.source == found.source
+                && existing.name == found.name
+                && existing.paths == found.paths
+        }) {
+            unique.push(found);
+        }
+    }
+    unique
+}
+
+fn parse_one_playlist(path: &Path) -> Option<ParsedPlaylist> {
+    parse_playlist(path)
+        .ok()
+        .and_then(|mut parsed| parsed.drain(..).next())
+        .filter(|playlist| !playlist.entries.is_empty())
+}
+
+fn push_parsed(
+    source: &'static str,
+    path: &Path,
+    parsed: ParsedPlaylist,
+    out: &mut Vec<FoundPlaylist>,
+) {
+    if parsed.entries.is_empty() {
+        return;
+    }
+    let fallback = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Imported playlist")
+        .to_string();
+    out.push(FoundPlaylist {
+        source,
+        name: parsed.title.unwrap_or(fallback),
+        paths: parsed.entries.into_iter().map(|entry| entry.path).collect(),
+    });
+}
+
+fn scan_playlist_dir(source: &'static str, directory: &Path, out: &mut Vec<FoundPlaylist>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    // Directory enumeration order is not specified. Sorting makes the import
+    // list stable between launches, which matters when two playlists have the
+    // same name and the user has to choose one.
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| {
+            path.extension()
+                .and_then(|e| e.to_str())
+                .and_then(crate::playlist_format::PlaylistFormat::from_extension)
+                .is_some()
+        })
+        .collect();
+    files.sort();
+    for path in files {
+        if let Some(parsed) = parse_one_playlist(&path) {
+            push_parsed(source, &path, parsed, out);
+        }
+    }
+}
+
+/// Parse an INI-style playlist store: `[Playlist name]` sections with indexed
+/// paths or URLs. Clementine and Strawberry both use this shape.
+fn parse_ini_paths(source: &'static str, text: &str, path: &Path) -> Vec<FoundPlaylist> {
+    let base = path.parent();
+    let mut out = Vec::new();
+    let mut name = String::new();
+    let mut paths = Vec::new();
+
+    let flush = |out: &mut Vec<FoundPlaylist>, name: &mut String, paths: &mut Vec<PathBuf>| {
+        if !paths.is_empty() {
+            out.push(FoundPlaylist {
+                source,
+                name: if name.is_empty() {
+                    "Imported playlist".to_string()
+                } else {
+                    name.clone()
+                },
+                paths: std::mem::take(paths),
+            });
+        }
+        name.clear();
+    };
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if let Some(header) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            flush(&mut out, &mut name, &mut paths);
+            name = header.trim().to_string();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        if !(key.contains("url")
+            || key.contains("file")
+            || key.contains("path")
+            || key.chars().all(|c| c.is_ascii_digit()))
+        {
+            continue;
+        }
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if let Some(p) = file_url_to_path(value) {
+            paths.push(p);
+        } else if !value.contains("://") {
+            let candidate = PathBuf::from(value.replace('\\', "/"));
+            paths.push(if candidate.is_absolute() {
+                candidate
+            } else {
+                base.map(|b| b.join(&candidate)).unwrap_or(candidate)
+            });
+        }
+    }
+    flush(&mut out, &mut name, &mut paths);
+    out
+}
+
+/// Parse Winamp's `Winamp.ini` and foobar2000's `foo_playlists.txt`.
+///
+/// These are pointer files: a section/list can name playlist files (which are
+/// then parsed in their real format) or contain audio paths directly.
+fn parse_pointer_file(source: &'static str, text: &str, path: &Path) -> Vec<FoundPlaylist> {
+    let base = path.parent();
+    let mut out = Vec::new();
+    let mut loose_name = String::new();
+    let mut loose_paths = Vec::new();
+
+    let flush_loose =
+        |out: &mut Vec<FoundPlaylist>, name: &mut String, paths: &mut Vec<PathBuf>| {
+            if !paths.is_empty() {
+                out.push(FoundPlaylist {
+                    source,
+                    name: if name.is_empty() {
+                        "Imported playlist".to_string()
+                    } else {
+                        name.clone()
+                    },
+                    paths: std::mem::take(paths),
+                });
+            }
+            name.clear();
+        };
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if let Some(header) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            flush_loose(&mut out, &mut loose_name, &mut loose_paths);
+            loose_name = header.trim().to_string();
+            continue;
+        }
+        let value = line.split_once('=').map(|(_, v)| v.trim()).unwrap_or(line);
+        if value.is_empty() {
+            continue;
+        }
+        // Winamp and foobar2000 both store some entries as `file://` URLs.
+        // Treating the URL as a filename meant the playlist they pointed at
+        // was never found.
+        let candidate = file_url_to_path(value).unwrap_or_else(|| {
+            let candidate = PathBuf::from(value.replace('\\', "/"));
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                base.map(|b| b.join(&candidate)).unwrap_or(candidate)
+            }
+        });
+        if candidate.is_file()
+            && candidate
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(crate::playlist_format::PlaylistFormat::from_extension)
+                .is_some()
+        {
+            if let Some(parsed) = parse_one_playlist(&candidate) {
+                push_parsed(source, &candidate, parsed, &mut out);
+            }
+        } else if candidate.is_dir() {
+            scan_playlist_dir(source, &candidate, &mut out);
+        } else if looks_like_audio(&candidate) {
+            loose_paths.push(candidate);
+        }
+    }
+    flush_loose(&mut out, &mut loose_name, &mut loose_paths);
     out
 }
 
@@ -184,7 +490,7 @@ fn xml_attr(block: &str, name: &str) -> Option<String> {
     }
     let rest = &rest[quote.len_utf8()..];
     let end = rest.find(quote)?;
-    Some(rest[..end].to_string())
+    Some(crate::playlist_format::decode_xml_entities(&rest[..end]))
 }
 
 /// The text of every `<tag>…</tag>` element in a block.
@@ -198,7 +504,9 @@ fn xml_values(block: &str, tag: &str) -> Vec<String> {
         let Some(end) = body.find(&close) else {
             break;
         };
-        out.push(body[..end].trim().to_string());
+        out.push(crate::playlist_format::decode_xml_entities(
+            body[..end].trim(),
+        ));
         rest = &body[end + close.len()..];
     }
     out
@@ -210,16 +518,13 @@ fn xml_values(block: &str, tag: &str) -> Vec<String> {
 /// the path will not match anything in the library.
 pub fn file_url_to_path(url: &str) -> Option<PathBuf> {
     let url = url.trim();
-    let rest = if let Some(rest) = url.strip_prefix("file://") {
-        rest
-    } else if url.starts_with('/') {
-        url
-    } else {
+    if let Some(path) = crate::m3u::file_uri_to_path(url) {
+        return Some(path);
+    }
+    if !url.starts_with('/') {
         return None;
-    };
-    // `file:///home/x` leaves a leading slash; `file://host/path` is rare and
-    // is not supported.
-    let decoded = percent_decode(rest);
+    }
+    let decoded = percent_decode(url);
     if decoded.is_empty() {
         return None;
     }
@@ -283,19 +588,19 @@ mod tests {
     fn parses_rhythmbox_playlists() {
         let xml = r#"<?xml version="1.0"?>
         <rhythmbox-playlists>
-          <playlist name="Chill" type="location">
-            <location>file:///home/u/Music/a%20song.flac</location>
+          <playlist name="Chill &amp; Rain" type="location">
+            <location>file:///home/u/Music/a%20song&amp;mix.flac</location>
             <location>file:///home/u/Music/b.flac</location>
           </playlist>
           <playlist name="Empty" type="location"/>
         </rhythmbox-playlists>"#;
         let found = parse_rhythmbox(xml);
         assert_eq!(found.len(), 1, "a playlist with no tracks is not offered");
-        assert_eq!(found[0].name, "Chill");
+        assert_eq!(found[0].name, "Chill & Rain");
         assert_eq!(found[0].paths.len(), 2);
         assert_eq!(
             found[0].paths[0],
-            PathBuf::from("/home/u/Music/a song.flac")
+            PathBuf::from("/home/u/Music/a song&mix.flac")
         );
     }
 
@@ -333,6 +638,74 @@ mod tests {
             Some(PathBuf::from("/a b/c+d.flac"))
         );
         assert_eq!(file_url_to_path("http://example.com/x.mp3"), None);
+    }
+
+    #[test]
+    fn unc_file_urls_keep_their_share_authority() {
+        assert_eq!(
+            file_url_to_path("file://server/share/Music/My%20Song.flac"),
+            Some(PathBuf::from("//server/share/Music/My Song.flac"))
+        );
+        assert_eq!(
+            file_url_to_path("file://LOCALHOST/music/a.flac"),
+            Some(PathBuf::from("/music/a.flac"))
+        );
+        assert_eq!(
+            file_url_to_path("file:///C:/Users/me/Music/a.flac"),
+            Some(PathBuf::from("C:/Users/me/Music/a.flac"))
+        );
+    }
+
+    #[test]
+    fn discovery_reads_a_directory_and_deduplicates_a_pointer_to_it() {
+        let root = std::env::temp_dir().join(format!(
+            "sp_discovery_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let playlists = root.join("Playlists");
+        std::fs::create_dir_all(&playlists).unwrap();
+        std::fs::write(
+            playlists.join("mix.pls"),
+            "[playlist]\nFile1=/music/a.flac\nNumberOfEntries=1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            playlists.join("other.wpl"),
+            "<?wpl version=\"1.0\"?><smil><body><seq><media src=\"/music/b.flac\"/></seq></body></smil>",
+        )
+        .unwrap();
+        // A non-playlist file is not offered.
+        std::fs::write(playlists.join("notes.txt"), "not a playlist").unwrap();
+
+        let pointer = root.join("playlists.txt");
+        // The pointer names the same PLS by absolute path so deduplication is
+        // exercised against the directory scan.
+        let pls_url = format!(
+            "file://{}",
+            playlists
+                .join("mix.pls")
+                .to_string_lossy()
+                .replace(' ', "%20")
+        );
+        std::fs::write(&pointer, format!("[Saved]\n{pls_url}\n")).unwrap();
+
+        let found = find_playlists_in([
+            ("TestPlayer", playlists.clone(), CandidateKind::Directory),
+            ("TestPlayer", pointer, CandidateKind::Pointer("winamp")),
+            // The same directory can be reached by two candidate paths.
+            ("TestPlayer", playlists, CandidateKind::Directory),
+        ]);
+        let names: Vec<_> = found.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["mix", "other"], "{found:?}");
+        assert!(found
+            .iter()
+            .all(|p| p.source == "TestPlayer" && !p.paths.is_empty()));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

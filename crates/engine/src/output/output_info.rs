@@ -45,6 +45,13 @@ pub struct OutputInfo {
     #[serde(default)]
     pub buffer_size_estimated: bool,
 
+    /// The period size in frames, when the backend exposes one. ALSA settles
+    /// on a period during `hw_params` negotiation and writes one period per
+    /// callback; the buffer is normally a multiple of it. 0 on backends where
+    /// the concept does not apply or was not reported.
+    #[serde(default)]
+    pub period_frames: u32,
+
     /// Concrete sample container negotiated with the device.
     pub sample_format: OutputSampleFormat,
 
@@ -111,6 +118,7 @@ impl OutputInfo {
             channels,
             buffer_size_frames: 0,
             buffer_size_estimated: true,
+            period_frames: 0,
             sample_format: OutputSampleFormat::Unknown,
             dither_enabled: false,
             access_mode,
@@ -162,6 +170,7 @@ impl OutputInfo {
             channels,
             buffer_size_frames: 0,
             buffer_size_estimated: true,
+            period_frames: 0,
             sample_format: OutputSampleFormat::Unknown,
             dither_enabled: false,
             access_mode: OutputAccessMode::Shared,
@@ -228,6 +237,7 @@ mod tests {
             channels: 2,
             buffer_size_frames: 0,
             buffer_size_estimated: true,
+            period_frames: 0,
             sample_format,
             dither_enabled: dither,
             access_mode: OutputAccessMode::Shared,

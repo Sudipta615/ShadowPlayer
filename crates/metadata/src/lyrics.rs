@@ -49,6 +49,54 @@ pub fn extract_lyrics(path: &Path) -> Option<String> {
     tagged.tags().iter().find_map(lyrics_in)
 }
 
+/// Whether a track has any lyrics the player would show: embedded in its tags
+/// or in a sidecar file beside it.
+///
+/// The scanner stores this as `tracks.has_lyrics`, because evaluating a smart
+/// playlist must not open every matching file. The check is deliberately the
+/// same two sources the lyrics panel reads, so the rule and the panel cannot
+/// disagree about what "has lyrics" means.
+pub fn has_lyrics(path: &Path) -> bool {
+    extract_lyrics(path).is_some() || sidecar_lyrics_exists(path)
+}
+
+/// Whether a `.lrc` or `.txt` lyric file with this song's stem exists beside it.
+///
+/// Case-insensitive, matching `lyrics::find_sidecar_lyrics`: `Song.FLAC` may
+/// be accompanied by `song.LRC`.
+fn sidecar_lyrics_exists(song_path: &Path) -> bool {
+    if song_path.with_extension("lrc").is_file() {
+        return true;
+    }
+    let (Some(stem), Some(dir)) = (
+        song_path.file_stem().and_then(|s| s.to_str()),
+        song_path.parent(),
+    ) else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        let Some(entry_stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if entry_stem.eq_ignore_ascii_case(stem)
+            && (ext.eq_ignore_ascii_case("lrc") || ext.eq_ignore_ascii_case("txt"))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Read an ID3v2 `SYLT` frame and render it as LRC text.
 ///
 /// `lofty` keeps `SYLT` as an opaque binary frame and does not expose the

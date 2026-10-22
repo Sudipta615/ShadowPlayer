@@ -80,6 +80,7 @@ pub fn show_smart_playlist_editor(
         theme,
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
+            let validation = state.draft.validation_error();
 
             ui.horizontal_top(|ui| {
                 // ── Left: saved smart playlists ────────────────────────
@@ -156,8 +157,11 @@ pub fn show_smart_playlist_editor(
                             {
                                 state.draft_dirty = true;
                             }
-                            if ui
-                                .add(
+                            let can_save =
+                                !state.draft.name.trim().is_empty() && validation.is_none();
+                            let save_resp = ui
+                                .add_enabled(
+                                    can_save,
                                     egui::Button::new(
                                         egui::RichText::new(if state.is_new {
                                             "Create"
@@ -168,9 +172,12 @@ pub fn show_smart_playlist_editor(
                                     )
                                     .fill(theme.accent),
                                 )
-                                .clicked()
-                                && !state.draft.name.trim().is_empty()
-                            {
+                                .on_disabled_hover_text(
+                                    validation
+                                        .clone()
+                                        .unwrap_or_else(|| "Give the playlist a name".to_string()),
+                                );
+                            if save_resp.clicked() {
                                 actions.save = Some(state.draft.clone());
                             }
                         });
@@ -195,6 +202,17 @@ pub fn show_smart_playlist_editor(
                                 state.draft_dirty = true;
                             }
                         });
+
+                        if let Some(message) = &validation {
+                            ui.label(
+                                egui::RichText::new(message)
+                                    .font(crate::theme::font(11.5))
+                                    .color(theme.destructive),
+                            )
+                            .on_hover_text(
+                                "The playlist will not be saved until every rule is complete.",
+                            );
+                        }
 
                         ui.separator();
 
@@ -229,6 +247,7 @@ pub fn show_smart_playlist_editor(
                                                                 .copied()
                                                                 .unwrap_or(SmartOp::Contains);
                                                         }
+                                                        state.draft_dirty = true;
                                                     }
                                                 }
                                             });
@@ -239,11 +258,16 @@ pub fn show_smart_playlist_editor(
                                             .width(112.0)
                                             .show_ui(ui, |ui| {
                                                 for op in rule.field.operators() {
-                                                    ui.selectable_value(
-                                                        &mut rule.op,
-                                                        *op,
-                                                        op.label(),
-                                                    );
+                                                    if ui
+                                                        .selectable_value(
+                                                            &mut rule.op,
+                                                            *op,
+                                                            op.label(),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        state.draft_dirty = true;
+                                                    }
                                                 }
                                             });
 
@@ -254,11 +278,16 @@ pub fn show_smart_playlist_editor(
                                             } else {
                                                 "value"
                                             };
-                                            ui.add(
-                                                egui::TextEdit::singleline(&mut rule.value)
-                                                    .hint_text(hint)
-                                                    .desired_width(70.0),
-                                            );
+                                            if ui
+                                                .add(
+                                                    egui::TextEdit::singleline(&mut rule.value)
+                                                        .hint_text(hint)
+                                                        .desired_width(70.0),
+                                                )
+                                                .changed()
+                                            {
+                                                state.draft_dirty = true;
+                                            }
                                         }
 
                                         if ui

@@ -24,6 +24,8 @@ pub struct AppState {
     pub is_grid_view: bool,
     /// The song table's flexible column shares, persisted between launches.
     pub column_widths: crate::components::songs_table::ColumnWidths,
+    /// Width of the fixed rating column, persisted between launches.
+    pub rating_width: f32,
     /// Comfortable or compact song-table rows, persisted between launches.
     pub row_density: crate::components::songs_table::RowDensity,
     pub right_tab: RightTab,
@@ -95,6 +97,7 @@ impl Default for AppState {
             current_sort_order: SortOrder::Ascending,
             is_grid_view: false,
             column_widths: Default::default(),
+            rating_width: crate::components::songs_table::SongTablePrefs::default().rating_width,
             row_density: Default::default(),
             right_tab: RightTab::Queue,
             visualizer_mode: VisualizerMode::Spectrum,

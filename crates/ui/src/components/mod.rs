@@ -11,6 +11,7 @@ pub mod info_box;
 pub mod mini_player;
 pub mod now_playing;
 pub mod now_playing_full;
+pub mod output_facts;
 pub mod page;
 pub mod right_panel;
 pub mod settings_tab;

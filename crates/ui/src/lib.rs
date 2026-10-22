@@ -1,6 +1,7 @@
 pub mod app;
 pub mod components;
 pub mod dialog;
+pub mod features;
 pub mod layout;
 pub mod modals;
 pub mod services;

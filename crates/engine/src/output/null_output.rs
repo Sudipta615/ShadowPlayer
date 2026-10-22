@@ -225,9 +225,15 @@ impl NullOutput {
                 // for a whole block period. Counted once per period, not per
                 // sample, so the number means "starvation events".
                 underruns.fetch_add(1, Ordering::Relaxed);
-            } else if n > 0 {
+            }
+            if n > 0 {
                 // Retain what was drained, bounded: overwrite the oldest by
                 // resetting the tail when it is full rather than growing it.
+                //
+                // This must be independent of the starvation branch above.
+                // It used to be an `else if`, so every short block — including
+                // the final partial block at the end of a stream — was counted
+                // as an underrun and then thrown away instead of captured.
                 if tail.available_frames(ch) + n > tail_capacity_frames.max(ch) {
                     tail.reset();
                 }
@@ -302,6 +308,7 @@ impl Output for NullOutput {
             channels: self.channels,
             buffer_size_frames: self.buffer_size_frames,
             buffer_size_estimated: false,
+            period_frames: 0,
             sample_format: OutputSampleFormat::F32,
             dither_enabled: self.dither_enabled.load(Ordering::Relaxed),
             // No mixer is bypassed, because there is no mixer and no device.

@@ -19,8 +19,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam::channel::Receiver;
-use engine::buffer::PlaybackState;
+use engine::buffer::{FixedFrameBuffer, PlaybackState};
+use engine::decode::Decoder;
+use engine::dsp::pipeline::DspPipeline;
 use engine::events::EngineEvent;
+use engine::output::{NullOutput, Output};
 use engine::AudioBackend;
 use engine::{AudioEngine, EngineConfig, EngineHandle};
 
@@ -202,6 +205,108 @@ fn a_file_opens_plays_seeks_and_finishes_through_the_null_backend() {
     assert_ne!(handle.state(), PlaybackState::Playing);
 
     running.store(false, Ordering::Relaxed);
+}
+
+/// Pure Direct means the samples that leave the decoder are the samples that
+/// reach the device. `NullOutput` is the only sink whose output can be read
+/// back without hardware, so the assertion is made on its capture tail: decode
+/// → production `DspPipeline` (bit-perfect) → master ring → null drain. A
+/// failure here means gain, a stage, a fade, or the output path changed even
+/// one sample.
+#[test]
+fn pure_direct_samples_are_bit_identical_through_the_null_sink() {
+    let frames = 20_000usize;
+    let source = common::noise_burst(frames, 0xC0FF_EE12);
+    let file = common::write_wav(
+        "null_bitperfect",
+        &source,
+        common::CHANNELS,
+        common::SAMPLE_RATE,
+    );
+
+    let buffer = Arc::new(
+        FixedFrameBuffer::new(frames + 4096).expect("the capture ring must be allocatable"),
+    );
+    let mut output = NullOutput::new(
+        Arc::clone(&buffer),
+        common::SAMPLE_RATE,
+        common::CHANNELS,
+        // One block of headroom: the final partial block must not have to
+        // reset a capture tail that is exactly full.
+        frames + 512,
+    )
+    .expect("construct the null sink");
+
+    let mut config = EngineConfig {
+        output_backend: AudioBackend::Null,
+        ..EngineConfig::default()
+    };
+    config.limiter.enabled = false;
+    config.eq.enabled = false;
+    let mut pipeline = DspPipeline::from_config(&config, common::SAMPLE_RATE as f32);
+    pipeline.set_volume(1.0);
+    pipeline.volume.snap();
+    pipeline.set_bit_perfect(true);
+    assert!(pipeline.is_dsp_transparent().0);
+
+    let mut decoder = Decoder::open(file.path()).expect("open the float WAV");
+    let mut decoded = Vec::with_capacity(source.len());
+    while let Ok(chunk) = decoder.decode_next(4096) {
+        assert_eq!(chunk.sample_rate, common::SAMPLE_RATE);
+        assert_eq!(chunk.channels, common::CHANNELS as usize);
+        let mut processed = Vec::with_capacity(chunk.samples.len());
+        for pair in chunk.samples.as_chunks::<2>().0 {
+            let (left, right) = pipeline.process(pair[0], pair[1]);
+            processed.push(left);
+            processed.push(right);
+        }
+        let pushed = buffer.push_frames_interleaved(&processed, common::CHANNELS as usize);
+        assert_eq!(
+            pushed,
+            processed.len() / common::CHANNELS as usize,
+            "the master ring refused audio before the sink started"
+        );
+        decoded.extend_from_slice(&processed);
+    }
+    assert_eq!(decoded.len(), source.len());
+
+    output.start().expect("start the null drain thread");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while output.frames_played() < frames as u64 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the null sink did not drain all {frames} frames"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let captured = output.take_all_captured();
+    output.stop();
+
+    assert_eq!(
+        captured.len(),
+        decoded.len(),
+        "the sink lost or added samples: {} captured against {} decoded",
+        captured.len(),
+        decoded.len()
+    );
+    assert_eq!(
+        captured, decoded,
+        "Pure Direct must deliver the decoder's f32 samples unchanged"
+    );
+
+    // Sensitivity control: the fixture is not all zeros, so a gain stage would
+    // produce visibly different samples and the equality above is not vacuous.
+    let changed = source
+        .iter()
+        .filter(|&&sample| {
+            let faded = sample * 0.5;
+            faded.to_bits() != sample.to_bits()
+        })
+        .count();
+    assert!(
+        changed > source.len() / 2,
+        "the fixture is not sensitive enough to detect gain"
+    );
 }
 
 #[test]

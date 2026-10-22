@@ -25,15 +25,18 @@ pub enum QuickFilter {
     HiRes,
     Favorites,
     Played,
+    /// Only tracks the listener has given at least one star.
+    Rating,
 }
 
 impl QuickFilter {
-    pub const ALL: [QuickFilter; 5] = [
+    pub const ALL: [QuickFilter; 6] = [
         QuickFilter::All,
         QuickFilter::Lossless,
         QuickFilter::HiRes,
         QuickFilter::Favorites,
         QuickFilter::Played,
+        QuickFilter::Rating,
     ];
 
     pub fn label(self) -> &'static str {
@@ -43,6 +46,7 @@ impl QuickFilter {
             QuickFilter::HiRes => "Hi-Res",
             QuickFilter::Favorites => "Favorites",
             QuickFilter::Played => "Played",
+            QuickFilter::Rating => "Rating",
         }
     }
 
@@ -200,12 +204,36 @@ impl RowDensity {
     }
 }
 
+/// Width of the rating column: five 12 px stars and their gaps.
+const COL_RATING_W: f32 = 68.0;
+const COL_RATING_W_MIN: f32 = 54.0;
+const COL_RATING_W_MAX: f32 = 104.0;
+
+fn default_rating_width() -> f32 {
+    COL_RATING_W
+}
+
 /// Everything the table remembers between launches.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SongTablePrefs {
     pub widths: ColumnWidths,
     pub density: RowDensity,
+    /// Rating-column width in pixels. Ratings are a fixed-width cell rather
+    /// than a share of the flexible columns, but the user can still widen it
+    /// and expect the choice to survive a restart.
+    #[serde(default = "default_rating_width")]
+    pub rating_width: f32,
+}
+
+impl Default for SongTablePrefs {
+    fn default() -> Self {
+        Self {
+            widths: ColumnWidths::default(),
+            density: RowDensity::default(),
+            rating_width: default_rating_width(),
+        }
+    }
 }
 
 // ── Table geometry ──────────────────────────────────────────────────────────
@@ -248,6 +276,9 @@ struct TableColumns {
     album_w: f32,
     /// Left edge of the duration column.
     duration_x: f32,
+    /// Left edge and width of the rating column.
+    rating_x: f32,
+    rating_w: f32,
     /// Left edge of the favorite-heart column.
     favorite_x: f32,
     /// Left edge of the overflow-menu column.
@@ -258,8 +289,13 @@ struct TableColumns {
 
 impl TableColumns {
     /// Lay the table out for a content area `full_width` wide.
-    fn new(full_width: f32, widths: ColumnWidths, density: RowDensity) -> Self {
-        let right_block = COL_TIME_W + COL_FAV_W + COL_MENU_W;
+    fn new(full_width: f32, widths: ColumnWidths, density: RowDensity, rating_w: f32) -> Self {
+        let rating_w = if rating_w.is_finite() {
+            rating_w.clamp(COL_RATING_W_MIN, COL_RATING_W_MAX)
+        } else {
+            COL_RATING_W
+        };
+        let right_block = COL_TIME_W + rating_w + COL_FAV_W + COL_MENU_W;
         let fixed = COL_NUM_W + right_block + COL_GAP * 3.0;
         let flexible = (full_width - fixed).max(180.0);
         let weights = widths.normalized();
@@ -285,6 +321,8 @@ impl TableColumns {
             album_x,
             album_w,
             duration_x: full_width - right_block,
+            rating_x: full_width - rating_w - COL_FAV_W - COL_MENU_W,
+            rating_w,
             favorite_x: full_width - COL_FAV_W - COL_MENU_W,
             menu_x: full_width - COL_MENU_W,
             flexible_w: flexible,
@@ -400,6 +438,7 @@ const SORT_FIELDS: &[(SortField, &str)] = &[
     (SortField::Duration, "Duration"),
     (SortField::DateAdded, "Added"),
     (SortField::Favorite, "Favorites"),
+    (SortField::Rating, "Rating"),
 ];
 
 /// The short name of a sort field, as shown on the sort pill.
@@ -460,6 +499,7 @@ fn quick_filter_tooltip(filter: QuickFilter) -> &'static str {
         QuickFilter::HiRes => "Show only Hi-Res tracks (above 48 kHz or 1000 kbps)",
         QuickFilter::Favorites => "Show only tracks you have favorited",
         QuickFilter::Played => "Show only tracks you have played before",
+        QuickFilter::Rating => "Show only tracks with at least one star",
     }
 }
 
@@ -483,6 +523,8 @@ pub struct SongsTableAction {
     pub add_to_queue: Option<TrackId>,
     pub add_to_playlist: Option<(TrackId, PlaylistId)>,
     pub toggle_favorite: Option<TrackId>,
+    /// Set one track's rating to 0–5 stars.
+    pub set_rating: Option<(TrackId, u8)>,
     pub sort_field_changed: Option<SortField>,
     /// User tapped the ascending/descending toggle.
     pub sort_order_changed: Option<SortOrder>,
@@ -490,6 +532,8 @@ pub struct SongsTableAction {
     pub quick_filter_changed: Option<QuickFilter>,
     /// The user dragged a column separator to a new set of shares.
     pub column_widths_changed: Option<ColumnWidths>,
+    /// The rating column was dragged to a new pixel width.
+    pub rating_width_changed: Option<f32>,
     /// The drag ended; this is the moment to persist the widths.
     pub column_drag_finished: bool,
     /// The density button was tapped.
@@ -514,6 +558,8 @@ pub struct SongsTableAction {
     pub add_selected_to_playlist: Option<PlaylistId>,
     /// Add every selected track to Favorites.
     pub favorite_selected: bool,
+    /// Set every selected track to this rating (0 clears).
+    pub rate_selected: Option<u8>,
     /// Hand the selected tracks to the batch organizer.
     pub organize_selected: bool,
     pub remove_selected: bool,
@@ -538,6 +584,8 @@ pub struct SongsTable<'a> {
     pub quick_filter: QuickFilter,
     /// The flexible columns' persisted shares.
     pub column_widths: ColumnWidths,
+    /// Persisted width of the fixed rating column.
+    pub rating_width: f32,
     /// Whether rows are comfortable or compact.
     pub density: RowDensity,
     /// Multi-selection, shared with the app so it survives tab changes.
@@ -567,10 +615,12 @@ impl<'a> SongsTable<'a> {
             add_to_queue: None,
             add_to_playlist: None,
             toggle_favorite: None,
+            set_rating: None,
             sort_field_changed: None,
             sort_order_changed: None,
             quick_filter_changed: None,
             column_widths_changed: None,
+            rating_width_changed: None,
             column_drag_finished: false,
             toggle_density: false,
             reset_columns: false,
@@ -585,6 +635,7 @@ impl<'a> SongsTable<'a> {
             add_selected_to_queue: false,
             add_selected_to_playlist: None,
             favorite_selected: false,
+            rate_selected: None,
             organize_selected: false,
             remove_selected: false,
             clear_selection: false,
@@ -605,6 +656,7 @@ impl<'a> SongsTable<'a> {
             is_grid_view,
             quick_filter,
             column_widths,
+            rating_width,
             density,
             selected_track_ids,
             last_clicked_index,
@@ -1071,7 +1123,7 @@ impl<'a> SongsTable<'a> {
             // Static column headers, painted on the same column model the rows
             // use, so the two can never drift apart.
             let full_width = ui.available_width();
-            let cols = TableColumns::new(full_width, column_widths, density);
+            let cols = TableColumns::new(full_width, column_widths, density, rating_width);
 
             let (header_rect, _) =
                 ui.allocate_exact_size(Vec2::new(full_width, 20.0), Sense::hover());
@@ -1245,7 +1297,29 @@ impl<'a> SongsTable<'a> {
                 action.sort_field_changed = Some(SortField::Duration);
             }
 
-            // Column 6: favorites.
+            // Column 6: rating.
+            let rating_h_resp = header_cell(ui, "hdr_rating", cols.rating_x, cols.rating_w);
+            let rating_col = if current_sort == SortField::Rating {
+                theme.accent_highlight
+            } else {
+                theme.text_muted
+            };
+            let rating_label =
+                hp.layout_no_wrap("RATING".to_string(), crate::theme::font(11.0), rating_col);
+            let rating_label_w = rating_label.size().x;
+            hp.galley(
+                Pos2::new(
+                    header_rect.min.x + cols.rating_x + (cols.rating_w - rating_label_w) * 0.5,
+                    header_y - rating_label.size().y * 0.5,
+                ),
+                rating_label,
+                rating_col,
+            );
+            if rating_h_resp.on_hover_text("Sort by Rating").clicked() {
+                action.sort_field_changed = Some(SortField::Rating);
+            }
+
+            // Column 7: favorites.
             let heart_resp = header_cell(ui, "hdr_fav", cols.favorite_x, COL_FAV_W);
             let heart_icon_rect = Rect::from_center_size(
                 Pos2::new(
@@ -1305,6 +1379,39 @@ impl<'a> SongsTable<'a> {
                 if sep.drag_stopped() {
                     action.column_drag_finished = true;
                 }
+            }
+
+            // The rating column's right edge is draggable too. It is fixed
+            // width, so this changes the pixel width rather than a share.
+            let rating_sep_rect = Rect::from_min_size(
+                Pos2::new(header_rect.min.x + cols.favorite_x - 4.0, header_rect.min.y),
+                Vec2::new(8.0, 20.0),
+            );
+            let rating_sep = ui.interact(
+                rating_sep_rect,
+                ui.make_persistent_id("column_separator_rating"),
+                Sense::click_and_drag(),
+            );
+            if rating_sep.hovered() || rating_sep.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                hp.line_segment(
+                    [
+                        Pos2::new(rating_sep_rect.center().x, header_rect.min.y),
+                        Pos2::new(rating_sep_rect.center().x, header_rect.max.y),
+                    ],
+                    Stroke::new(1.0_f32, theme.accent_highlight),
+                );
+            }
+            rating_sep.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Button, true, "Resize the Rating column")
+            });
+            if rating_sep.dragged() {
+                let dx = ui.input(|i| i.pointer.delta().x);
+                action.rating_width_changed =
+                    Some((cols.rating_w + dx).clamp(COL_RATING_W_MIN, COL_RATING_W_MAX));
+            }
+            if rating_sep.drag_stopped() {
+                action.column_drag_finished = true;
             }
 
             ui.add_space(4.0);
@@ -1392,14 +1499,34 @@ impl<'a> SongsTable<'a> {
                             Pos2::new(vis_rect.min.x + cols.menu_x + COL_MENU_W * 0.5, cy),
                             Vec2::new(20.0, 20.0),
                         );
+                        let rating_rect = Rect::from_center_size(
+                            Pos2::new(vis_rect.min.x + cols.rating_x + cols.rating_w * 0.5, cy),
+                            Vec2::new(cols.rating_w, row_h.min(24.0)),
+                        );
+                        let rating_resp = ui.interact(
+                            rating_rect,
+                            ui.scope_id().with(("row_rating", idx)),
+                            Sense::click(),
+                        );
+                        let pointer = ui.input(|i| i.pointer.interact_pos());
+                        let hover_star = if rating_resp.hovered() {
+                            pointer.and_then(|p| {
+                                rating_star_at(cols.rating_x, cols.rating_w, p.x, vis_rect.min.x)
+                            })
+                        } else {
+                            None
+                        };
                         // Selection checkbox lives in the first column.
                         let check_rect = Rect::from_center_size(
                             Pos2::new(vis_rect.min.x + 16.0, cy),
                             Vec2::new(20.0, 20.0),
                         );
-                        let pointer = ui.input(|i| i.pointer.interact_pos());
                         let over_widget = pointer
-                            .map(|p| fav_rect.contains(p) || menu_rect.contains(p))
+                            .map(|p| {
+                                fav_rect.contains(p)
+                                    || menu_rect.contains(p)
+                                    || rating_rect.contains(p)
+                            })
                             .unwrap_or(false);
                         let over_check = pointer.map(|p| check_rect.contains(p)).unwrap_or(false);
 
@@ -1430,6 +1557,30 @@ impl<'a> SongsTable<'a> {
                                 *last_clicked_index = Some(idx);
                             }
                         }
+
+                        if rating_resp.clicked() {
+                            if let Some(star) = rating_star_at(
+                                cols.rating_x,
+                                cols.rating_w,
+                                pointer.map(|p| p.x).unwrap_or(0.0),
+                                vis_rect.min.x,
+                            ) {
+                                action.set_rating = Some((track.id, star));
+                            }
+                        }
+                        if rating_resp.secondary_clicked() {
+                            action.set_rating = Some((track.id, 0));
+                        }
+                        rating_resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                true,
+                                format!("Rating: {} of 5", track.rating),
+                            )
+                        });
+                        let _ = rating_resp
+                            .clone()
+                            .on_hover_text("Click a star to rate · right-click to clear");
 
                         // Column 1: selection box, else hover play button, else index.
                         if is_selected {
@@ -1621,7 +1772,7 @@ impl<'a> SongsTable<'a> {
                         );
 
                         // Column 5: Duration
-                        let dur_x = vis_rect.max.x - COL_MENU_W - COL_FAV_W - COL_TIME_W + 4.0;
+                        let dur_x = vis_rect.min.x + cols.duration_x + 4.0;
                         let dur_str = format_duration(track.duration_secs as f64);
                         painter.text(
                             Pos2::new(dur_x, cy),
@@ -1635,7 +1786,18 @@ impl<'a> SongsTable<'a> {
                             },
                         );
 
-                        // Column 6: Heart Favorite Toggle.
+                        // Column 6: Rating. Five vector stars; the bundled
+                        // fonts have no star glyph.
+                        paint_rating_stars(
+                            &painter,
+                            Pos2::new(vis_rect.min.x + cols.rating_x + cols.rating_w * 0.5, cy),
+                            cols.rating_w,
+                            track.rating,
+                            hover_star,
+                            theme,
+                        );
+
+                        // Column 7: Heart Favorite Toggle.
                         //
                         // A real widget, so the heart can be reached by
                         // keyboard and announced by a screen reader — it used
@@ -1706,22 +1868,84 @@ impl<'a> SongsTable<'a> {
                                 );
                             });
 
-                        // Right-Click Context Menu on Row
-                        row_resp.context_menu(|ui| {
-                            render_track_context_menu(
-                                ui,
-                                track,
-                                is_favorite,
-                                playlists,
-                                &mut action,
-                                theme,
-                            );
-                        });
+                        // Right-Click Context Menu on Row. The rating cell owns
+                        // its own right-click, which clears the rating, so it
+                        // must not also open the row menu.
+                        if !rating_resp.hovered() {
+                            row_resp.context_menu(|ui| {
+                                render_track_context_menu(
+                                    ui,
+                                    track,
+                                    is_favorite,
+                                    playlists,
+                                    &mut action,
+                                    theme,
+                                );
+                            });
+                        }
                     }
                 });
         }
 
         action
+    }
+}
+
+/// Which star (1–5) a pointer at `pointer_x` is over, for a rating cell of
+/// `cell_w` starting at `cell_x` inside a row whose left edge is `row_min_x`.
+fn rating_star_at(cell_x: f32, cell_w: f32, pointer_x: f32, row_min_x: f32) -> Option<u8> {
+    if !cell_w.is_finite() || cell_w <= 0.0 {
+        return None;
+    }
+    let local = pointer_x - row_min_x - cell_x;
+    if !(0.0..cell_w).contains(&local) {
+        return None;
+    }
+    let slot = cell_w / 5.0;
+    Some(((local / slot).floor() as u8 + 1).min(5))
+}
+
+/// Paint five vector stars.
+///
+/// The rating cell is also its own control: hovering previews a rating and
+/// clicking commits it. A filled star is the listener's rating; a half-lit
+/// preview shows what a click would produce without changing anything yet.
+pub(crate) fn paint_rating_stars(
+    painter: &egui::Painter,
+    center: Pos2,
+    cell_w: f32,
+    rating: u8,
+    hover: Option<u8>,
+    theme: &Theme,
+) {
+    let slot = cell_w / 5.0;
+    let outer = (slot * 0.42).clamp(3.8, 5.6);
+    let inner = outer * 0.48;
+    let first_x = center.x - slot * 2.0;
+    for star in 1..=5u8 {
+        let star_center = Pos2::new(first_x + slot * (star - 1) as f32, center.y);
+        let filled = star <= rating;
+        let preview = !filled && hover.is_some_and(|h| star <= h);
+        let (fill, stroke) = if filled {
+            (theme.accent_warm, Stroke::new(1.0_f32, theme.accent_warm))
+        } else if preview {
+            (
+                theme.accent_highlight.gamma_multiply(0.55),
+                Stroke::new(1.0_f32, theme.accent_highlight),
+            )
+        } else {
+            (Color32::TRANSPARENT, Stroke::new(1.0_f32, theme.text_dim))
+        };
+        let mut points = Vec::with_capacity(10);
+        for i in 0..10 {
+            let angle = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+            let radius = if i % 2 == 0 { outer } else { inner };
+            points.push(Pos2::new(
+                star_center.x + angle.cos() * radius,
+                star_center.y + angle.sin() * radius,
+            ));
+        }
+        painter.add(egui::Shape::convex_polygon(points, fill, stroke));
     }
 }
 
@@ -1820,6 +2044,25 @@ fn render_bulk_bar(
                 {
                     action.favorite_selected = true;
                 }
+                ui.menu_button(
+                    egui::RichText::new("Rate").font(crate::theme::font(12.0)),
+                    |ui| {
+                        for stars in 1..=5u8 {
+                            let label = match stars {
+                                1 => "1 star".to_string(),
+                                _ => format!("{stars} stars"),
+                            };
+                            if ui.button(label).clicked() {
+                                action.rate_selected = Some(stars);
+                                ui.close();
+                            }
+                        }
+                        if ui.button("Clear Rating").clicked() {
+                            action.rate_selected = Some(0);
+                            ui.close();
+                        }
+                    },
+                );
                 if ui
                     .button(egui::RichText::new("Organize").font(crate::theme::font(12.0)))
                     .clicked()
@@ -2040,6 +2283,23 @@ fn render_track_context_menu(
         ui.close();
     }
 
+    ui.menu_button("Rating", |ui| {
+        for stars in 1..=5u8 {
+            let label = match stars {
+                1 => "1 star".to_string(),
+                _ => format!("{stars} stars"),
+            };
+            if ui.selectable_label(track.rating == stars, label).clicked() {
+                action.set_rating = Some((track.id, stars));
+                ui.close();
+            }
+        }
+        if track.rating > 0 && ui.button("Clear Rating").clicked() {
+            action.set_rating = Some((track.id, 0));
+            ui.close();
+        }
+    });
+
     if !playlists.is_empty() {
         ui.menu_button("Add to Playlist", |ui| {
             for pl in playlists {
@@ -2171,7 +2431,7 @@ mod tests {
             artist: 0.15,
             album: 0.15,
         };
-        let cols = TableColumns::new(1200.0, wide_title, RowDensity::Comfortable);
+        let cols = TableColumns::new(1200.0, wide_title, RowDensity::Comfortable, COL_RATING_W);
         assert!(cols.title_text_w > cols.artist_w);
         assert!(cols.artist_x > cols.title_x);
         assert!(cols.album_x > cols.artist_x);
@@ -2180,9 +2440,62 @@ mod tests {
     #[test]
     fn compact_rows_give_the_title_the_space_the_smaller_artwork_frees() {
         let widths = ColumnWidths::default();
-        let comfortable = TableColumns::new(1200.0, widths, RowDensity::Comfortable);
-        let compact = TableColumns::new(1200.0, widths, RowDensity::Compact);
+        let comfortable = TableColumns::new(1200.0, widths, RowDensity::Comfortable, COL_RATING_W);
+        let compact = TableColumns::new(1200.0, widths, RowDensity::Compact, COL_RATING_W);
         assert!(compact.title_text_w > comfortable.title_text_w);
         assert!(compact.title_text_x < comfortable.title_text_x);
+    }
+
+    #[test]
+    fn the_rating_column_is_fixed_width_and_sits_before_the_heart() {
+        let cols = TableColumns::new(
+            1200.0,
+            ColumnWidths::default(),
+            RowDensity::Comfortable,
+            82.0,
+        );
+        assert_eq!(cols.rating_w, 82.0);
+        assert!((cols.rating_x + cols.rating_w - cols.favorite_x).abs() < 0.01);
+        assert!((cols.duration_x + COL_TIME_W - cols.rating_x).abs() < 0.01);
+        // A corrupt saved width falls back to the default instead of
+        // collapsing the column or pushing it off the row.
+        let nan = TableColumns::new(
+            1200.0,
+            ColumnWidths::default(),
+            RowDensity::Comfortable,
+            f32::NAN,
+        );
+        assert_eq!(nan.rating_w, COL_RATING_W);
+        let huge = TableColumns::new(
+            1200.0,
+            ColumnWidths::default(),
+            RowDensity::Comfortable,
+            10_000.0,
+        );
+        assert_eq!(huge.rating_w, COL_RATING_W_MAX);
+    }
+
+    #[test]
+    fn a_pointer_maps_to_the_star_under_it() {
+        // The cell starts 80 px into a row whose left edge is x=20, so its
+        // absolute span is 100..150. Each of the five slots is 10 px.
+        assert_eq!(rating_star_at(80.0, 50.0, 100.0, 20.0), Some(1));
+        assert_eq!(rating_star_at(80.0, 50.0, 109.9, 20.0), Some(1));
+        assert_eq!(rating_star_at(80.0, 50.0, 110.0, 20.0), Some(2));
+        assert_eq!(rating_star_at(80.0, 50.0, 149.9, 20.0), Some(5));
+        assert_eq!(rating_star_at(80.0, 50.0, 150.0, 20.0), None);
+        assert_eq!(rating_star_at(80.0, 50.0, 99.9, 20.0), None);
+        assert_eq!(rating_star_at(80.0, 0.0, 100.0, 20.0), None);
+    }
+
+    #[test]
+    fn a_settings_file_without_a_rating_width_uses_the_default() {
+        let legacy = r#"{
+            "widths": { "title": 0.42, "artist": 0.26, "album": 0.26 },
+            "density": "Compact"
+        }"#;
+        let prefs: SongTablePrefs = serde_json::from_str(legacy).unwrap();
+        assert_eq!(prefs.rating_width, COL_RATING_W);
+        assert_eq!(prefs.density, RowDensity::Compact);
     }
 }

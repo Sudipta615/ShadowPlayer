@@ -141,6 +141,7 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         channels: row.get::<_, i64>("channels")? as usize,
         format: row.get("format")?,
         bitrate_kbps: row.get("bitrate_kbps")?,
+        bit_depth: row.get("bit_depth")?,
         is_lossless: is_lossless_int != 0,
         replaygain_track_db: row.get("replaygain_track_db")?,
         replaygain_track_peak: row.get("replaygain_track_peak")?,
@@ -154,6 +155,8 @@ fn map_track(row: &Row<'_>) -> Result<Track> {
         content_hash: row.get("content_hash")?,
         file_id: row.get("file_id")?,
         is_favorite: is_fav_int != 0,
+        rating: row.get::<_, i64>("rating")?.clamp(0, 5) as u8,
+        has_lyrics: row.get::<_, i64>("has_lyrics")? != 0,
         play_count: row.get("play_count")?,
         last_played_at: row.get("last_played_at")?,
         added_at: row.get("added_at")?,
@@ -174,12 +177,12 @@ impl TrackRepo {
             conn.execute(
                 "INSERT INTO tracks (
                     id, path, title, artist, album, genre, year, track_number, disc_number,
-                    duration_secs, sample_rate, channels, format, bitrate_kbps, is_lossless,
+                    duration_secs, sample_rate, channels, format, bitrate_kbps, bit_depth, is_lossless,
                     replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
                     replaygain_album_db, replaygain_album_peak,
                     file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash, file_id,
-                    is_favorite, play_count, skip_count, last_played_at, added_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
+                    is_favorite, rating, has_lyrics, play_count, skip_count, last_played_at, added_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)
                 ON CONFLICT(path) DO UPDATE SET
                     title = excluded.title,
                     artist = excluded.artist,
@@ -193,12 +196,14 @@ impl TrackRepo {
                     channels = excluded.channels,
                     format = excluded.format,
                     bitrate_kbps = excluded.bitrate_kbps,
+                    bit_depth = excluded.bit_depth,
                     is_lossless = excluded.is_lossless,
                     replaygain_track_db = excluded.replaygain_track_db,
                     replaygain_track_peak = excluded.replaygain_track_peak,
                     r128_loudness_lufs = excluded.r128_loudness_lufs,
                     replaygain_album_db = excluded.replaygain_album_db,
                     replaygain_album_peak = excluded.replaygain_album_peak,
+                    has_lyrics = excluded.has_lyrics,
                     skip_count = excluded.skip_count,
                     file_size_bytes = excluded.file_size_bytes,
                     mtime_unix_secs = excluded.mtime_unix_secs,
@@ -220,6 +225,7 @@ impl TrackRepo {
                     track.channels as i64,
                     track.format,
                     track.bitrate_kbps,
+                    track.bit_depth,
                     if track.is_lossless { 1 } else { 0 },
                     track.replaygain_track_db,
                     track.replaygain_track_peak,
@@ -232,6 +238,8 @@ impl TrackRepo {
                     track.content_hash,
                     track.file_id,
                     if track.is_favorite { 1 } else { 0 },
+                    track.rating.min(5) as i64,
+                    if track.has_lyrics { 1 } else { 0 },
                     track.play_count,
                     track.skip_count as i64,
                     track.last_played_at,
@@ -441,12 +449,26 @@ impl TrackRepo {
                 // One-sided by design: favourites first, then title, in both
                 // directions the caller may ask for.
                 SortField::Favorite => "is_favorite DESC, title COLLATE NOCASE",
+                SortField::Rating => "rating, title COLLATE NOCASE",
             };
             let dir = match order {
                 SortOrder::Ascending => "ASC",
                 SortOrder::Descending => "DESC",
             };
-            let query = format!("SELECT * FROM tracks ORDER BY {} {};", sort_col, dir);
+            // The direction applies to every key, not just the last one.
+            // `ORDER BY rating, title DESC` sorts the rating ascending and
+            // only breaks ties the other way, which made "sort by rating,
+            // highest first" quietly do nothing.
+            let order_expr = if sort == SortField::Favorite {
+                sort_col.to_string()
+            } else {
+                sort_col
+                    .split(", ")
+                    .map(|column| format!("{column} {dir}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let query = format!("SELECT * FROM tracks ORDER BY {order_expr};");
             let mut stmt = conn.prepare(&query)?;
             let iter = stmt.query_map([], map_track)?;
             let mut tracks = Vec::new();
@@ -475,6 +497,55 @@ impl TrackRepo {
                     params![id.to_string()],
                 )?;
             }
+            Ok(())
+        })
+    }
+
+    /// Store a listener's star rating. `0` means unrated; values above five
+    /// are clamped rather than becoming an unreachable sixth star.
+    pub fn set_rating(&self, id: &TrackId, rating: u8) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE tracks SET rating = ?1 WHERE id = ?2;",
+                params![rating.min(5) as i64, id.to_string()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Rate several tracks in one transaction.
+    ///
+    /// Bulk rating is a common gesture (select an album, press Ctrl+4); doing
+    /// one transaction per row would fsync the database once per track.
+    pub fn rate_many(&self, ids: &[TrackId], rating: u8) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            {
+                let mut stmt = tx.prepare("UPDATE tracks SET rating = ?1 WHERE id = ?2;")?;
+                for id in ids {
+                    stmt.execute(params![rating.min(5) as i64, id.to_string()])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Clear a track's rating (set it back to unrated).
+    pub fn clear_rating(&self, id: &TrackId) -> Result<()> {
+        self.set_rating(id, 0)
+    }
+
+    /// Record whether a lyric was found for this track.
+    pub fn set_has_lyrics(&self, id: &TrackId, has_lyrics: bool) -> Result<()> {
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE tracks SET has_lyrics = ?1 WHERE id = ?2;",
+                params![if has_lyrics { 1 } else { 0 }, id.to_string()],
+            )?;
             Ok(())
         })
     }
@@ -2100,6 +2171,15 @@ fn rule_to_clause(rule: &SmartRule) -> Option<(String, Vec<SqlValue>)> {
     let col = rule.field.column();
     let v = rule.value.trim();
 
+    // "Never Played" is a property of the play count, not a stored flag.
+    if rule.field == SmartField::NeverPlayed {
+        return match rule.op {
+            SmartOp::IsTrue => Some(("play_count = 0".to_string(), vec![])),
+            SmartOp::IsFalse => Some(("play_count > 0".to_string(), vec![])),
+            _ => None,
+        };
+    }
+
     match rule.op {
         SmartOp::IsTrue => Some((format!("{col} = 1"), vec![])),
         SmartOp::IsFalse => Some((format!("{col} = 0"), vec![])),
@@ -2180,6 +2260,14 @@ fn build_smart_query(sp: &SmartPlaylist) -> (String, Vec<SqlValue>) {
     // conditions: matching the whole library would silently relabel every track
     // as a member of a playlist that is, in fact, broken.
     if sp.rules_unreadable {
+        return (" WHERE 0".to_string(), Vec::new());
+    }
+
+    // A rule with an impossible pair or an unparseable value must not be
+    // silently dropped: dropping it from an AND playlist widens the result,
+    // and a playlist that matches everything is the opposite of what the user
+    // saved. Match nothing and let the editor show the validation message.
+    if sp.rules.iter().any(|rule| rule.validate().is_err()) {
         return (" WHERE 0".to_string(), Vec::new());
     }
 

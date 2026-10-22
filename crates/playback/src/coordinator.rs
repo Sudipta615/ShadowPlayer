@@ -114,6 +114,24 @@ impl PlaybackCoordinator {
         self.current_track.as_ref()
     }
 
+    /// Reflect a rating change in the in-memory queue and current track.
+    ///
+    /// Ratings are persisted by `TrackRepo`; the coordinator holds its own
+    /// clones for playback, and the now-playing card reads those clones. This
+    /// keeps the card in step without reloading the queue from disk.
+    pub fn update_track_rating(&mut self, id: domain::ids::TrackId, rating: u8) {
+        for track in &mut self.queue {
+            if track.id == id {
+                track.rating = rating;
+            }
+        }
+        if let Some(track) = self.current_track.as_mut() {
+            if track.id == id {
+                track.rating = rating;
+            }
+        }
+    }
+
     pub fn current_index(&self) -> Option<usize> {
         self.current_index
     }

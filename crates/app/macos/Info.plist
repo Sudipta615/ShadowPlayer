@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>ShadowPlayer</string>
+    <key>CFBundleExecutable</key>
+    <string>shadowplayer</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.shadowplayer.ShadowPlayer</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>ShadowPlayer</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.13.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <!-- A normal foreground app. LSUIElement = true would remove the Dock
+         icon and make the Now Playing controls harder to reach. -->
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
+    <!-- Deliberately absent: NSMicrophoneUsageDescription. ShadowPlayer has
+         no microphone capture path; if one is ever added, this file and the
+         documentation must change together. -->
+</dict>
+</plist>

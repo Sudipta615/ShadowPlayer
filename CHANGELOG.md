@@ -8,6 +8,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-22
+
+*Released with audio-engine 1.6.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Star ratings belong to the listener.** Rate any track from 1 to 5 in the songs table, clear it
+  from the context menu, or rate a multi-selection in one action. Ratings live in the library
+  database (schema V11), sort and filter beside the other columns, and survive a restart.
+  `Ctrl + 1`–`Ctrl + 5` rate the selection (or the playing track when nothing is selected),
+  `Ctrl + 0` clears it, and `Ctrl + Alt + Up/Down` steps it.
+- **Four more playlist dialects.** PLS, XSPF, ASX and WPL are sniffed by content before the file
+  extension is trusted, so a PLS file named `.m3u` still imports. The playlist editor exports
+  M3U8 by default and offers every supported format in a dropdown; XSPF, ASX, WPL and PLS write as
+  well as read.
+- **Imports from six more players.** Winamp, foobar2000, MusicBee, iTunes, Clementine and
+  Strawberry playlists are discovered alongside Rhythmbox and Audacious. Directory scans are
+  deterministic, pointer files can carry `file://` values, and duplicate discoveries collapse into
+  one row.
+- **Smart playlists can ask about ratings and stream detail.** New fields: Rating, Has Lyrics,
+  Bit Depth and Never Played. Invalid field/operator/value combinations are rejected before SQL
+  runs, the editor shows the reason and disables Save, and a stored invalid rule matches nothing
+  instead of silently matching everything.
+- **One set of output facts.** The Settings diagnostics card and the Bit-Perfect Signal Path
+  Inspector now render the same list of requested/negotiated backend, access mode, verification,
+  device, format, buffer and period. ALSA reports its real period size through the engine's new
+  `OutputInfo.period_frames`.
+- **The platform matrix is generated.** `crates/ui/src/features.rs` is the source for both the
+  in-app Help table and the README, and a test ties the claims to the `cfg` gates in the code.
+- **The release artefacts describe the real bundle.** A committed `Info.plist` keeps the Dock icon,
+  omits microphone permission, and is rewritten to the workspace version by
+  `crates/app/macos/package-app.sh`; the Windows `.ico` and version resource are checked by
+  structure tests. The MPRIS artwork helper now produces valid `file://` URIs for Windows drive and
+  UNC paths, including when tested on a Unix host.
+- **A platform-independent Pure Direct proof.** The null-output end-to-end suite captures what the
+  sink receives after decode and the production DSP pipeline, and asserts it is bit-identical to
+  the decoder's samples. The suite also proves it can detect a gain change.
+
+### Fixed
+- **Short null-output blocks were discarded.** The capture tail was written in an `else if` branch
+  attached to underrun detection, so a stream's final partial block was counted as starvation and
+  then thrown away. It is now always captured.
+- **Descending sorts applied to only the last key.** `ORDER BY rating, title DESC` sorted the rating
+  ascending; the direction now applies to every key. Favorites remain one-sided by design.
+- **Windows and UNC playlist paths survive a Unix import.** `file://server/share/...` becomes a
+  `//server/share/...` UNC path, drive-letter paths are not rebased under the playlist directory,
+  and `localhost` is accepted case-insensitively.
+
+### Testing and release
+- Player suites now cover the V11 migration and indexes, rating persistence across reopen, rating
+  clamp/bulk/sort/clear behaviour, smart-field SQL and invalid-rule matching, format sniffing and
+  round trips with golden fixtures, discovery deduplication, UNC/drive imports, rating geometry and
+  hit-testing, legacy preference defaults, and the bundle/icon inputs.
+- CI runs the MPRIS playerctl-style integration test under `dbus-run-session` and a headless
+  Wayland launch of the real release binary. The golden-screenshot harness is still absent from the
+  tree, so the old job that referenced a non-existent test target was replaced by that smoke job.
+
 ## [0.12.0] - 2026-10-22
 
 *Released with audio-engine 1.5.0. The player and the engine are versioned separately and released

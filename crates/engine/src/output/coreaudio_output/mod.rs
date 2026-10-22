@@ -768,6 +768,7 @@ impl CoreAudioOutput {
             channels: self.channels,
             buffer_size_frames: self.buffer_size,
             buffer_size_estimated: false,
+            period_frames: 0,
             sample_format: self.sample_format,
             dither_enabled: self.dither_enabled,
             access_mode: self.access_state.actual,

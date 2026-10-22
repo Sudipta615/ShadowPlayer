@@ -1458,6 +1458,100 @@ fn exclusive_backend_sentence() -> String {
     }
 }
 
+/// Width of one platform column in the feature matrix.
+const MATRIX_PLATFORM_WIDTH: f32 = 64.0;
+
+/// Draw one fixed-size matrix cell.
+///
+/// `allocate_ui_with_layout` lets a child UI shrink back to its content, which
+/// made the platform headings and the `Yes` cells collapse into one run of
+/// adjacent text. Allocating the full cell and painting the text at its left
+/// edge makes the column width part of the parent's layout, not a hint.
+fn matrix_cell(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left(), rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        font,
+        color,
+    );
+}
+
+/// Render the platform feature matrix used by the Help page.
+fn render_feature_matrix(ui: &mut egui::Ui, theme: &Theme) {
+    let gap = theme.space_sm;
+    let label_width =
+        (ui.available_width() - MATRIX_PLATFORM_WIDTH * 3.0 - gap * 3.0).clamp(150.0, 320.0);
+    let header_font = crate::theme::font(11.0);
+    let row_font = crate::theme::font(12.0);
+
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        ui.horizontal(|ui| {
+            matrix_cell(
+                ui,
+                label_width,
+                18.0,
+                "Capability",
+                header_font.clone(),
+                theme.text_muted,
+            );
+            for platform in crate::features::Platform::ALL {
+                matrix_cell(
+                    ui,
+                    MATRIX_PLATFORM_WIDTH,
+                    18.0,
+                    platform.label(),
+                    header_font.clone(),
+                    theme.text_muted,
+                );
+            }
+        });
+
+        for feature in crate::features::FEATURES {
+            ui.horizontal(|ui| {
+                matrix_cell(
+                    ui,
+                    label_width,
+                    20.0,
+                    feature.label,
+                    row_font.clone(),
+                    theme.text_primary,
+                );
+                for platform in crate::features::Platform::ALL {
+                    let supported = feature.supports(platform);
+                    matrix_cell(
+                        ui,
+                        MATRIX_PLATFORM_WIDTH,
+                        20.0,
+                        if supported { "Yes" } else { "-" },
+                        row_font.clone(),
+                        if supported {
+                            theme.bit_perfect_green
+                        } else {
+                            theme.text_dim
+                        },
+                    );
+                }
+            });
+            ui.label(
+                egui::RichText::new(feature.note)
+                    .font(crate::theme::font(11.0))
+                    .color(theme.text_muted),
+            );
+            ui.add_space(theme.space_sm);
+        }
+    });
+}
+
 /// The "This Build" tab: the facts about the running binary.
 ///
 /// Everything here is read from the live engine rather than written out, which
@@ -1487,6 +1581,17 @@ fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme: &Them
             ],
             theme,
         );
+    });
+
+    manual_card(ui, theme, |ui| {
+        card_title(
+            ui,
+            "Platform Feature Matrix",
+            "The same generated matrix as the README. Each platform claim is checked against the cfg gates in the code.",
+            theme,
+        );
+
+        render_feature_matrix(ui, theme);
     });
 
     manual_card(ui, theme, |ui| {
@@ -1972,4 +2077,47 @@ fn spec_badge(ui: &mut egui::Ui, label: &str, value: &str, color: Color32, theme
                 );
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{Pos2, RawInput};
+
+    #[test]
+    fn feature_matrix_columns_do_not_collapse_into_each_other() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        let theme = Theme::dark();
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1100.0, 2000.0))),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            ui.set_width(1000.0);
+            render_feature_matrix(ui, &theme);
+        });
+
+        let mut positions = std::collections::HashMap::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::Text(text) = &clipped.shape {
+                positions.insert(text.galley.text().to_string(), text.pos.x);
+            }
+        }
+        let linux = positions["Linux"];
+        let windows = positions["Windows"];
+        let macos = positions["macOS"];
+        assert!(
+            windows - linux >= MATRIX_PLATFORM_WIDTH,
+            "Linux and Windows columns overlap: {linux} vs {windows}"
+        );
+        assert!(
+            macos - windows >= MATRIX_PLATFORM_WIDTH,
+            "Windows and macOS columns overlap: {windows} vs {macos}"
+        );
+
+        // Acknowledge the font atlas so epaint's drop check does not fire;
+        // these tests have no renderer to upload it to.
+        output.textures_delta.clear();
+    }
 }

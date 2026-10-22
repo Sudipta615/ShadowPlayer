@@ -23,6 +23,10 @@ pub fn show_bit_perfect_modal(
     let is_bit_perfect = playback_info.bit_perfect;
     let cause = session.bit_perfect_cause();
     let engine_stats = playback_info.engine_stats.as_ref();
+    let output_facts = crate::components::output_facts::output_facts(
+        playback_info.output_info.as_ref(),
+        session.latency_ms(),
+    );
 
     let mut open = *is_open;
     let mut close_clicked = false;
@@ -237,8 +241,6 @@ pub fn show_bit_perfect_modal(
                         ("Source Precision", engine_stats.map(|s| s.dsp_precision.as_str()).unwrap_or("f32")),
                         ("Volume Gain", &format!("{:.1} dB ({})", 20.0 * (playback_info.volume + 0.00001).log10(), if playback_info.volume == 1.0 { "Unity 0 dB" } else { "Scaled" })),
                         ("DSD Transport", if playback_info.native_dsd_active { "Native Direct Bitstream (1-bit DSD)" } else if playback_info.dop_active { "DSD over PCM (DoP 24-bit)" } else { "PCM Direct" }),
-                        ("Hardware Output", engine_stats.map(|s| s.output_backend.as_str()).unwrap_or("Default Backend")),
-                        ("Output Mode", if engine_stats.map(|s| s.output_is_exclusive).unwrap_or(false) { "Exclusive Mode (Bit-Perfect)" } else { "Shared / Low Latency" }),
                     ];
 
                     for (label, val) in rows {
@@ -259,9 +261,26 @@ pub fn show_bit_perfect_modal(
                     }
                 });
 
+                ui.add_space(theme.space_lg);
+
+                // 4. Negotiated output facts. This is the same list Settings
+                // renders; the modal does not assemble an independent opinion
+                // about exclusive access or the device.
+                ui.label(
+                    egui::RichText::new("NEGOTIATED OUTPUT")
+                        .font(crate::theme::font(11.0))
+                        .strong()
+                        .color(theme.text_muted),
+                );
+                crate::components::output_facts::render_fact_table(
+                    ui,
+                    &output_facts,
+                    theme,
+                );
+
                 ui.add_space(6.0);
 
-                // 4. Action Row: 1-Click Bit-Perfect Pure Direct Mode
+                // 5. Action Row: 1-Click Bit-Perfect Pure Direct Mode
                 ui.horizontal(|ui| {
                     let pure_direct_btn = egui::Button::new(
                         egui::RichText::new("Enable Bit-Perfect Pure Direct")

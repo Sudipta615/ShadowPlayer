@@ -1,0 +1,11 @@
+<asx version="3.0">
+  <title>Fixture Radio</title>
+  <entry>
+    <title>Alpha &amp; Friends</title>
+    <ref href="/fixtures/Music/Alpha.flac" />
+  </entry>
+  <entry>
+    <title>Beta</title>
+    <ref href="Music/Beta.flac" />
+  </entry>
+</asx>

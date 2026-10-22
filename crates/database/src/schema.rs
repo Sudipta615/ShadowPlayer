@@ -82,6 +82,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v10(conn)?;
     }
 
+    if current_version < 11 {
+        apply_v11(conn)?;
+    }
+
     Ok(())
 }
 
@@ -788,6 +792,75 @@ fn merge_duplicate_file_identities(tx: &rusqlite::Transaction<'_>) -> Result<usi
 #[cfg(test)]
 pub(crate) fn apply_v10_for_test(conn: &mut Connection) -> Result<()> {
     apply_v10(conn)
+}
+
+/// Exposed for the migration's own test.
+#[cfg(test)]
+pub(crate) fn apply_v11_for_test(conn: &mut Connection) -> Result<()> {
+    apply_v11(conn)
+}
+
+/// V11: star ratings, indexed stream precision, and the lyrics flag.
+///
+/// A rating belongs to the listener, not to the file: foobar2000 and AIMP both
+/// store it in their library database, and so does ShadowPlayer. Re-tagging
+/// every file just to record a personal score would rewrite the user's music
+/// and make the rating travel with the file instead of the person.
+///
+/// `bit_depth` and `has_lyrics` are indexed alongside it so the smart-playlist
+/// fields "Bit Depth >= N" and "Has Lyrics" can be answered by SQL rather than
+/// by opening every file whenever a playlist is viewed.
+fn apply_v11(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V11 (ratings, bit depth, lyrics flag)");
+    let tx = conn.transaction()?;
+
+    // `ALTER TABLE ADD COLUMN` has no `IF NOT EXISTS`, so every column is
+    // guarded exactly as V3/V5/V6/V8/V10 do.
+    let existing: Vec<String> = {
+        let mut stmt = tx.prepare("PRAGMA table_info(tracks);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = Vec::new();
+        for name in names {
+            found.push(name?);
+        }
+        found
+    };
+
+    if !existing.iter().any(|n| n == "rating") {
+        tx.execute(
+            "ALTER TABLE tracks ADD COLUMN rating INTEGER NOT NULL DEFAULT 0;",
+            [],
+        )?;
+    }
+    if !existing.iter().any(|n| n == "bit_depth") {
+        tx.execute("ALTER TABLE tracks ADD COLUMN bit_depth INTEGER;", [])?;
+    }
+    if !existing.iter().any(|n| n == "has_lyrics") {
+        tx.execute(
+            "ALTER TABLE tracks ADD COLUMN has_lyrics INTEGER NOT NULL DEFAULT 0;",
+            [],
+        )?;
+    }
+
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tracks_rating ON tracks(rating);",
+        [],
+    )?;
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tracks_bit_depth ON tracks(bit_depth);",
+        [],
+    )?;
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tracks_has_lyrics ON tracks(has_lyrics);",
+        [],
+    )?;
+    tx.execute(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (11, strftime('%s', 'now'));",
+        [],
+    )?;
+
+    tx.commit()?;
+    Ok(())
 }
 
 /// V5: sub-second modification times, the indexes the hot queries need, and an

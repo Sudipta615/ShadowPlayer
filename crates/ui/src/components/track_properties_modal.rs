@@ -157,6 +157,20 @@ pub fn show_track_properties_modal(
                         &format!("{} times", track.play_count),
                         theme,
                     );
+                    render_rating_row(ui, track.rating, theme);
+                    render_property_row(
+                        ui,
+                        "Lyrics",
+                        if track.has_lyrics {
+                            "Available"
+                        } else {
+                            "None"
+                        },
+                        theme,
+                    );
+                    if let Some(depth) = track.bit_depth {
+                        render_property_row(ui, "Bit Depth", &format!("{depth} bit"), theme);
+                    }
 
                     ui.separator();
 
@@ -177,6 +191,37 @@ pub fn show_track_properties_modal(
     if closed {
         *is_open = false;
     }
+}
+
+fn render_rating_row(ui: &mut egui::Ui, rating: u8, theme: &Theme) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [110.0, 18.0],
+            egui::Label::new(
+                egui::RichText::new("Rating")
+                    .font(crate::theme::font(12.0))
+                    .color(theme.text_muted),
+            ),
+        );
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(72.0, 16.0), egui::Sense::hover());
+        crate::components::songs_table::paint_rating_stars(
+            ui.painter(),
+            rect.center(),
+            rect.width(),
+            rating,
+            None,
+            theme,
+        );
+        ui.label(
+            egui::RichText::new(if rating == 0 {
+                "Unrated".to_string()
+            } else {
+                format!("{rating} of 5")
+            })
+            .font(crate::theme::font(12.0))
+            .color(theme.text_secondary),
+        );
+    });
 }
 
 fn render_property_row(ui: &mut egui::Ui, label: &str, value: &str, theme: &Theme) {

@@ -93,15 +93,26 @@ has to discover it by disappointment:
 
 ## Platform support
 
-What works where. The "This Build" section of the in-app manual renders the
-same information from the running binary, so it is never out of date.
+What works where. The table below is generated from
+`crates/ui/src/features.rs`, and the "This Build" section of the in-app manual
+renders the same matrix. A test fails if either drifts from the platform-`cfg`
+gates in the code.
 
-| | Linux | Windows | macOS |
-| :--- | :--- | :--- | :--- |
-| Bit-perfect exclusive output | ALSA (`hw:`) | WASAPI Exclusive, ASIO | CoreAudio hog mode |
-| System media integration | MPRIS2 | SMTC | Now Playing |
-| File and folder picker | XDG portal | native | native |
-| The whole feature set | ✅ | ✅ | ✅ |
+<!-- platform-features:start -->
+| Capability | Linux | Windows | macOS | Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| Bit-perfect exclusive output | Yes | Yes | Yes | ALSA hw: on Linux; WASAPI Exclusive and ASIO on Windows; CoreAudio hog mode on macOS. |
+| System media integration | Yes | Yes | Yes | MPRIS2, System Media Transport Controls, and macOS Now Playing respectively. |
+| MPRIS2 and playerctl | Yes | - | - | org.mpris.MediaPlayer2.shadowplayer on the session bus, including play/pause and metadata. |
+| SMTC artwork | - | Yes | - | Track artwork and metadata in the Windows media flyout and hardware media keys. |
+| macOS Now Playing | - | - | Yes | souvlaki publishes metadata and artwork; the app bundle remains a normal foreground app (LSUIElement = false). |
+| Native file and folder picker | Yes | Yes | Yes | rfd with the XDG desktop portal on Linux, and the native dialogs on Windows and macOS. |
+| Wayland portal picker | Yes | - | - | The XDG portal backend is used under Wayland; the picker does not depend on an X11 display. |
+| Windows application icon | - | Yes | - | The executable and window carry the committed multi-resolution .ico. |
+| macOS app bundle | - | - | Yes | The committed package-app.sh wraps the binary in a foreground .app with the icon and no microphone key. |
+| No microphone permission | Yes | Yes | Yes | The app captures nothing, and the macOS bundle omits NSMicrophoneUsageDescription. |
+| Null output backend | Yes | Yes | Yes | A platform-independent output used by the bit-identical Pure Direct test. |
+<!-- platform-features:end -->
 
 **Bit-perfect means what it says, and the app tells you when it cannot.**
 Exclusive output requires the operating system's permission: on Linux the
@@ -185,6 +196,9 @@ files or write ReplayGain tags.
 | Ctrl + N | Open the playlist editor (create or manage playlists) |
 | Ctrl + O | Open Folders & library manager |
 | Ctrl + E | Toggle the equalizer & DSP panel |
+| Ctrl + 1 to 5 | Rate the selected tracks or the playing track 1–5 stars |
+| Ctrl + 0 | Clear the rating on the selection or the playing track |
+| Ctrl + Alt + Up / Down | Step the selection's rating up or down |
 | Escape | Close the open dialog (one layer per press), or clear the search |
 
 ---

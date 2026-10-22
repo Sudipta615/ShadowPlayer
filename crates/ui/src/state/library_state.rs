@@ -267,16 +267,7 @@ impl LibraryState {
 
         // Quality/format chips narrow whatever the view produced. Safe on top
         // of search results too.
-        match self.quick_filter {
-            QuickFilter::All => {}
-            QuickFilter::Lossless => tracks.retain(|t| t.is_lossless),
-            QuickFilter::HiRes => tracks.retain(|t| t.is_hires()),
-            QuickFilter::Favorites => {
-                let favs = &self.favorite_ids;
-                tracks.retain(|t| favs.contains(&t.id));
-            }
-            QuickFilter::Played => tracks.retain(|t| t.play_count > 0),
-        }
+        apply_quick_filter(&mut tracks, &self.favorite_ids, self.quick_filter);
 
         // "Recently Added" defines itself by recency, so the user's global sort
         // would fight the view. Everything else honours the chosen sort.
@@ -372,6 +363,22 @@ impl LibraryState {
 /// used to allocate two `String`s on every sort step. `Album` used to compare
 /// case-*sensitively* while `Title` and `Artist` did not, so the same list could
 /// order differently depending only on which column was chosen.
+/// Apply the active quality/format chip to a materialised track list.
+fn apply_quick_filter(
+    tracks: &mut Vec<Track>,
+    favorite_ids: &HashSet<TrackId>,
+    filter: QuickFilter,
+) {
+    match filter {
+        QuickFilter::All => {}
+        QuickFilter::Lossless => tracks.retain(|t| t.is_lossless),
+        QuickFilter::HiRes => tracks.retain(|t| t.is_hires()),
+        QuickFilter::Favorites => tracks.retain(|t| favorite_ids.contains(&t.id)),
+        QuickFilter::Played => tracks.retain(|t| t.play_count > 0),
+        QuickFilter::Rating => tracks.retain(|t| t.rating > 0),
+    }
+}
+
 pub fn sort_tracks(tracks: &mut [Track], field: SortField, order: SortOrder) {
     match field {
         SortField::Title => tracks.sort_by_cached_key(|t| t.title.to_lowercase()),
@@ -404,6 +411,7 @@ pub fn sort_tracks(tracks: &mut [Track], field: SortField, order: SortOrder) {
             tracks.sort_by_key(|t| std::cmp::Reverse(t.is_favorite));
             return;
         }
+        SortField::Rating => tracks.sort_by_key(|t| t.rating),
     }
     if order == SortOrder::Descending {
         tracks.reverse();
@@ -432,6 +440,7 @@ mod sort_tests {
             channels: 2,
             format: "FLAC".to_string(),
             bitrate_kbps: None,
+            bit_depth: None,
             is_lossless: true,
             replaygain_track_db: None,
             replaygain_track_peak: None,
@@ -444,6 +453,8 @@ mod sort_tests {
             content_hash: None,
             file_id: None,
             is_favorite: favorite,
+            rating: 0,
+            has_lyrics: false,
             play_count: 0,
             skip_count: 0,
             last_played_at: None,
@@ -492,5 +503,35 @@ mod sort_tests {
         assert_eq!(tracks[0].title, "two");
         sort_tracks(&mut tracks, SortField::Favorite, SortOrder::Descending);
         assert_eq!(tracks[0].title, "two", "a favorite is never last");
+    }
+
+    #[test]
+    fn rating_sort_puts_five_stars_first_when_descending() {
+        let mut tracks = vec![
+            track("one", "A", "A", false, 1.0),
+            track("two", "A", "A", false, 1.0),
+            track("three", "A", "A", false, 1.0),
+        ];
+        tracks[0].rating = 2;
+        tracks[1].rating = 5;
+        // tracks[2] is deliberately unrated.
+        sort_tracks(&mut tracks, SortField::Rating, SortOrder::Descending);
+        assert_eq!(titles(&tracks), ["two", "one", "three"]);
+        sort_tracks(&mut tracks, SortField::Rating, SortOrder::Ascending);
+        assert_eq!(titles(&tracks), ["three", "one", "two"]);
+    }
+
+    #[test]
+    fn the_rating_chip_hides_unrated_tracks() {
+        let mut tracks = vec![
+            track("one", "A", "A", false, 1.0),
+            track("two", "A", "A", false, 1.0),
+            track("three", "A", "A", false, 1.0),
+        ];
+        tracks[1].rating = 3;
+        let favorites = HashSet::new();
+        apply_quick_filter(&mut tracks, &favorites, QuickFilter::Rating);
+        assert_eq!(titles(&tracks), ["two"]);
+        assert!(tracks[0].rating > 0);
     }
 }

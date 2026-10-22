@@ -19,6 +19,8 @@ pub struct PlaylistEditorState {
     pub search: String,
     /// Cache of the last search string so filtering only runs when it changes.
     search_cache: String,
+    /// Format used by the next export.
+    pub export_format: library::PlaylistFormat,
     /// Whether the studio was open last frame. Used to move the keyboard
     /// focus into the name field exactly once, when it opens.
     was_open: bool,
@@ -47,8 +49,8 @@ pub struct PlaylistEditorActions {
     pub move_track: Option<(PlaylistId, usize, usize)>,
     /// The user picked a different playlist; the caller should load its tracks.
     pub select_changed: Option<PlaylistId>,
-    /// Save the selected playlist to an `.m3u8` file.
-    pub export_m3u: bool,
+    /// Export the selected playlist in this format.
+    pub export: Option<library::PlaylistFormat>,
 }
 
 const MAX_SEARCH_RESULTS: usize = 60;
@@ -192,7 +194,7 @@ pub fn show_playlist_editor(
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 let can_export = state.selected.is_some() && !playlist_tracks.is_empty();
                                 let btn = egui::Button::new(
-                                    egui::RichText::new("Export M3U")
+                                    egui::RichText::new("Export")
                                         .font(crate::theme::font(11.0))
                                         .color(if can_export { theme.text_secondary } else { theme.text_muted }),
                                 )
@@ -201,11 +203,27 @@ pub fn show_playlist_editor(
 
                                 if ui
                                     .add_enabled(can_export, btn)
-                                    .on_hover_text("Export selected playlist to .m3u8")
+                                    .on_hover_text(format!(
+                                        "Export selected playlist to .{}",
+                                        state.export_format.extension()
+                                    ))
                                     .clicked()
                                 {
-                                    actions.export_m3u = true;
+                                    actions.export = Some(state.export_format);
                                 }
+
+                                egui::ComboBox::from_id_salt("playlist_export_format")
+                                    .selected_text(state.export_format.label())
+                                    .width(100.0)
+                                    .show_ui(ui, |ui| {
+                                        for format in library::PlaylistFormat::ALL {
+                                            ui.selectable_value(
+                                                &mut state.export_format,
+                                                format,
+                                                format.label(),
+                                            );
+                                        }
+                                    });
                             });
                         });
 

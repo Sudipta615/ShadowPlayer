@@ -751,6 +751,7 @@ impl super::output::Output for AlsaOutput {
             channels: self.channels,
             buffer_size_frames: self.buffer_size_frames,
             buffer_size_estimated: false,
+            period_frames: self.period_frames,
             sample_format: if self.dsd_active {
                 OutputSampleFormat::Unknown
             } else {
