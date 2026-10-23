@@ -23,11 +23,9 @@ pub struct ThemeCardInfo {
 pub struct ThemeManager {
     /// Directory scanned for `.shadowtheme` files.
     pub themes_dir: PathBuf,
-    /// Legacy directory scanned for `.shadowskin` files.
-    pub skins_dir: PathBuf,
     /// Loaded user themes.
     pub loaded_themes: Vec<LoadedTheme>,
-    /// Sorted names of available custom themes (for compatibility).
+    /// Sorted names of available custom themes.
     pub theme_names: Vec<String>,
     /// Load errors reported per file.
     pub errors: Vec<(PathBuf, ThemeError)>,
@@ -37,8 +35,6 @@ pub struct ThemeManager {
     pub staged_id: Option<String>,
     /// Favorite theme IDs.
     pub favorites: Vec<String>,
-    /// Legacy public compatibility field.
-    pub active: Option<String>,
 }
 
 impl ThemeManager {
@@ -46,32 +42,26 @@ impl ThemeManager {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             themes_dir: data_dir.join("themes"),
-            skins_dir: data_dir.join("skins"),
             loaded_themes: Vec::new(),
             theme_names: Vec::new(),
             errors: Vec::new(),
             active_id: "system:dark".to_string(),
             staged_id: None,
             favorites: Vec::new(),
-            active: None,
         }
     }
 
-    /// Scan both `themes/` and legacy `skins/` directories and load all files.
+    /// Scan `themes/` directory and load all `.shadowtheme` files.
     pub fn load_all(&mut self) {
         self.loaded_themes.clear();
         self.errors.clear();
         self.theme_names.clear();
 
-        // Ensure directories exist
+        // Ensure themes directory exists
         let _ = std::fs::create_dir_all(&self.themes_dir);
-        let _ = std::fs::create_dir_all(&self.skins_dir);
 
-        // 1. Scan themes directory
+        // Scan themes directory
         self.scan_directory(&self.themes_dir.clone(), &["shadowtheme", "json"]);
-
-        // 2. Scan legacy skins directory
-        self.scan_directory(&self.skins_dir.clone(), &["shadowskin", "shadowtheme"]);
 
         // Deduplicate loaded themes by ID/name
         let mut seen = std::collections::HashSet::new();
@@ -126,8 +116,7 @@ impl ThemeManager {
         // 1. System themes
         for sys in system_theme_catalog() {
             let t = (sys.theme_fn)();
-            let is_active = self.active_id == sys.id
-                || (self.active.is_none() && sys.id == "system:dark");
+            let is_active = self.active_id == sys.id;
             let is_staged = self.staged_id.as_deref() == Some(sys.id);
 
             cards.push(ThemeCardInfo {
@@ -148,9 +137,7 @@ impl ThemeManager {
         for user in &self.loaded_themes {
             let t = user.into_theme();
             let is_active = self.active_id == user.metadata.id
-                || self.active_id == user.metadata.name
-                || self.active.as_deref() == Some(&user.metadata.name)
-                || self.active.as_deref() == Some(&user.metadata.id);
+                || self.active_id == user.metadata.name;
             let is_staged = self.staged_id.as_deref() == Some(&user.metadata.id)
                 || self.staged_id.as_deref() == Some(&user.metadata.name);
 
@@ -207,8 +194,7 @@ impl ThemeManager {
 
     /// Return the concrete Theme for the active committed ID.
     pub fn active_theme(&self) -> Theme {
-        let name = self.active.as_deref().unwrap_or(&self.active_id);
-        self.resolve_theme(name, false)
+        self.resolve_theme(&self.active_id, false)
     }
 
     /// Return the concrete Theme currently effective (staged if in preview, otherwise active).
@@ -234,11 +220,6 @@ impl ThemeManager {
     pub fn commit_staged(&mut self) -> Option<String> {
         if let Some(staged) = self.staged_id.take() {
             self.active_id = staged.clone();
-            self.active = if staged.starts_with("system:") {
-                None
-            } else {
-                Some(staged.clone())
-            };
             Some(staged)
         } else {
             None
@@ -256,23 +237,9 @@ impl ThemeManager {
         if path.exists() {
             return Ok(path);
         }
-        let example = include_str!("../../../../docs/skins/example_ocean_night.shadowskin");
+        let example = include_str!("../../../../docs/themes/example_ocean_night.shadowtheme");
         std::fs::write(&path, example)?;
         Ok(path)
-    }
-
-    // ── Legacy Compatibility Layer ──────────────────────────────────────────
-
-    pub fn skins(&self) -> &[LoadedTheme] {
-        &self.loaded_themes
-    }
-
-    pub fn available_skins(&self) -> &[String] {
-        &self.theme_names
-    }
-
-    pub fn active_skin_name(&self) -> Option<&str> {
-        self.active.as_deref()
     }
 
     pub fn errors(&self) -> &[(PathBuf, ThemeError)] {
@@ -286,14 +253,7 @@ impl ThemeManager {
             .map(|t| t.into_theme())
     }
 
-    pub fn write_example_skin(&self) -> std::io::Result<PathBuf> {
-        let _ = self.write_example_theme();
-        let path = self.skins_dir.join("example_ocean_night.shadowskin");
-        if path.exists() {
-            return Ok(path);
-        }
-        let example = include_str!("../../../../docs/skins/example_ocean_night.shadowskin");
-        std::fs::write(&path, example)?;
-        Ok(path)
+    pub fn active_id(&self) -> &str {
+        &self.active_id
     }
 }

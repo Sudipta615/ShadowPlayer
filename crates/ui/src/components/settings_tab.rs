@@ -1233,10 +1233,6 @@ pub struct SettingsTabActions {
     pub import_playlist: bool,
     /// User pressed "Find Duplicates" — open the duplicate finder.
     pub find_duplicates: bool,
-    /// User selected a custom theme / skin.
-    pub skin_changed: Option<String>,
-    /// User pressed "Reload Skins".
-    pub reload_skins: bool,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
 
@@ -1271,9 +1267,6 @@ pub struct SettingsExtraContext<'a> {
     pub track_count: usize,
     pub is_scanning: bool,
     pub is_dark_theme: bool,
-    pub available_skins: &'a [String],
-    pub active_skin: Option<&'a str>,
-    pub skin_errors: &'a [(PathBuf, crate::skin::SkinError)],
     pub theme_manager: Option<&'a crate::theme::ThemeManager>,
     /// A native import picker is currently open (disables the import buttons).
     pub import_active: bool,
@@ -4292,7 +4285,7 @@ fn render_appearance_category(
 
     // Card 2: Staged Live Preview Sandbox
     let staged_id = manager.staged_id.as_deref();
-    let preview_id = staged_id.unwrap_or_else(|| manager.active_skin_name().unwrap_or("system:dark"));
+    let preview_id = staged_id.unwrap_or_else(|| manager.active_id());
     let preview_theme = manager.resolve_theme(preview_id, theme.is_light);
     let preview_name = match preview_id {
         "system:dark" => "Obsidian Jade",

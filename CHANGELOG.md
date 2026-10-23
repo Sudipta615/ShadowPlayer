@@ -21,9 +21,9 @@ together; the startup log prints both.*
 - **The interface speaks French, Spanish, Japanese and Chinese as well as German.** Each catalogue
   is compiled into the binary, a missing translation falls back to English, and `Auto` still
   follows the system locale. The skin, auto-tag and artwork screens are included.
-- **Themes can be supplied as `.shadowskin` files.** The JSON format is validated for WCAG AA text
+- **Themes can be supplied as `.shadowtheme` files.** The JSON format is validated for WCAG AA text
   contrast before it is offered, merged over the current light or dark theme, and selectable live
-  in Settings. An invalid skin is rejected with the reason, and `docs/skins/` contains a working
+  in Settings. An invalid theme is rejected with the reason, and `docs/themes/` contains a working
   example.
 - **Cover art can be filled in for a whole selection.** The Cover Art Archive is queried in the
   background for albums with no artwork, results are cached locally, and an existing image is not

@@ -1,6 +1,9 @@
 {
+  "schema_version": 2,
+  "id": "ocean-night",
   "name": "Ocean Night",
   "author": "ShadowPlayer Community",
+  "description": "Deep ocean blue night aesthetic",
   "is_light": false,
   "colors": {
     "bg_app":            "#070F1A",
@@ -28,9 +31,15 @@
     "bg_active_row":     "#1A3A4C",
     "border_active_row": "#2DC0D0",
     "artwork_placeholder":"#102030",
-    "destructive":       "#E87080",
+    "overlay_scrim":     "#00000099",
+    "modal_backdrop":    "#000000B3",
+    "drawer_scrim":      "#00000080",
+    "shadow":            "#00000066",
     "meter_bg":          "#060C16",
     "meter_gutter":      "#0C1420",
-    "scan_banner_bg":    "#102830"
+    "meter_grid":        "#1E3040",
+    "scan_banner_bg":    "#102830",
+    "sun_accent":        "#E5960A",
+    "destructive":       "#E87080"
   }
 }

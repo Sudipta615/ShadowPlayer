@@ -3,7 +3,7 @@
 ShadowPlayer provides a unified, high-performance theming architecture.
 The UI reads every colour, radius, and spacing step from [`ui::theme::Theme`].
 Themes can be system presets (Obsidian Jade, Studio Mint, OLED Midnight) or custom
-user themes loaded from `.shadowtheme` (v2) or legacy `.shadowskin` (v1) files.
+user themes loaded from `.shadowtheme` files.
 
 ---
 
@@ -17,8 +17,8 @@ The theming engine is organized into modular components under `crates/ui/src/the
   - `light()` — *Studio Mint*: Crisp studio-light surfaces with teal accents.
   - `oled()` — *OLED Midnight*: Pure black (#000000) background engineered for zero-power OLED displays.
 * **`contrast.rs`**: WCAG 2.1 relative luminance calculator, contrast ratio evaluator, and an iterative lightness-stepping algorithm (`auto_adjust_contrast`) to rescue low-contrast tokens.
-* **`schema.rs`**: Theme file serialization supporting `.shadowtheme` (schema v2) and `.shadowskin` (schema v1) formats.
-* **`manager.rs`**: Filesystem discovery across `themes/` and legacy `skins/` directories, active theme selection, and staged live preview lifecycle.
+* **`schema.rs`**: Theme file serialization supporting the `.shadowtheme` format.
+* **`manager.rs`**: Filesystem discovery across the `themes/` directory, active theme selection, and staged live preview lifecycle.
 * **`preview.rs`**: Sandbox rendering a mini playback shell with simulated album artwork, 3-track playlist table, transport controls, volume slider, and VU meters.
 * **`gallery.rs`**: Responsive card grid with search, category filtering (All, Dark, Light, OLED, Custom), and active state indicators.
 * **`editor.rs`**: In-app color customizer with grouped pickers, real-time WCAG AA compliance validation, auto-fix button, and JSON file export.
@@ -116,7 +116,7 @@ The Theme Editor provides live validation and an **Auto-Fix Contrast** algorithm
 
 ## 4. Theme File Format (`.shadowtheme`)
 
-Themes are stored in JSON files under the `themes/` directory (or legacy `skins/`):
+Themes are stored in JSON files under the `themes/` directory:
 
 ```json
 {

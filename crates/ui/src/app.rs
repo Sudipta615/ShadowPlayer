@@ -31,7 +31,7 @@ use crate::services::{
     MediaToolEvent, MediaToolsService, MprisCommand, MprisService, MprisSnapshot, PodcastEvent,
     PodcastService, ScannerService, WaveformService,
 };
-use crate::skin::SkinManager;
+use crate::theme::ThemeManager;
 use crate::state::{
     AppState, DspState, LibraryState, PodcastState, SleepTimerMode, TelemetryState,
 };
@@ -126,7 +126,7 @@ pub struct ShadowPlayerApp {
     applied_theme: Option<Theme>,
     settings_dirty: bool,
 
-    pub skin_manager: SkinManager,
+    pub theme_manager: ThemeManager,
     pub autotag_service: AutotagService,
     pub autotag_modal: AutotagModalState,
     pub artwork_fetch_service: ArtworkFetchService,
@@ -252,9 +252,9 @@ impl ShadowPlayerApp {
         let mpris_service = MprisService::start();
         let (watch_tx, watch_rx) = crossbeam::channel::unbounded::<PathBuf>();
 
-        let mut skin_manager = SkinManager::new(&data_dir);
-        let _ = skin_manager.write_example_skin();
-        skin_manager.load_all();
+        let mut theme_manager = ThemeManager::new(&data_dir);
+        let _ = theme_manager.write_example_theme();
+        theme_manager.load_all();
 
         let autotag_service = AutotagService::new();
         let autotag_modal = AutotagModalState::default();
@@ -308,7 +308,7 @@ impl ShadowPlayerApp {
             applied_theme: None,
             settings_dirty: false,
 
-            skin_manager,
+            theme_manager,
             autotag_service,
             autotag_modal,
             artwork_fetch_service,
@@ -1631,20 +1631,12 @@ impl ShadowPlayerApp {
                 .get_value("active_theme")
                 .ok()
                 .flatten()
-                .filter(|s| !s.is_empty())
-                .or_else(|| {
-                    self.settings_repo
-                        .get_value("active_skin")
-                        .ok()
-                        .flatten()
-                        .filter(|s| !s.is_empty())
-                });
+                .filter(|s| !s.is_empty());
 
             if let Some(theme_name) = active_theme_pref {
-                self.skin_manager.active_id = theme_name.clone();
-                self.skin_manager.active = Some(theme_name.clone());
+                self.theme_manager.active_id = theme_name.clone();
                 self.theme = self
-                    .skin_manager
+                    .theme_manager
                     .resolve_theme(&theme_name, !app_settings.theme_dark);
             }
             self.app_state.volume = app_settings.volume;
@@ -4466,7 +4458,7 @@ impl eframe::App for ShadowPlayerApp {
                             &mut self.dsp_state,
                             &self.session,
                             &mut self.theme,
-                            &self.skin_manager,
+                            &self.theme_manager,
                             &self.scan_roots_repo,
                             &self.track_repo,
                             is_scanning,
@@ -4539,55 +4531,33 @@ impl eframe::App for ShadowPlayerApp {
                             self.set_locale(locale);
                         }
                         if let Some(preview_id) = sv_actions.preview_theme {
-                            self.skin_manager.stage_theme(&preview_id);
-                            self.theme = self.skin_manager.effective_theme();
+                            self.theme_manager.stage_theme(&preview_id);
+                            self.theme = self.theme_manager.effective_theme();
                             self.applied_theme = None;
                         }
                         if let Some(apply_id) = sv_actions.apply_theme {
-                            self.skin_manager.stage_theme(&apply_id);
-                            if let Some(committed) = self.skin_manager.commit_staged() {
+                            self.theme_manager.stage_theme(&apply_id);
+                            if let Some(committed) = self.theme_manager.commit_staged() {
                                 self.theme = self
-                                    .skin_manager
+                                    .theme_manager
                                     .resolve_theme(&committed, self.theme.is_light);
                                 let _ = self.settings_repo.set_value("active_theme", &committed);
-                                let _ = self.settings_repo.set_value("active_skin", &committed);
                             }
                             self.applied_theme = None;
                             self.settings_dirty = true;
                             self.toasts.success("Theme applied");
                         }
                         if sv_actions.cancel_theme_preview {
-                            self.skin_manager.unstage_theme();
-                            self.theme = self.skin_manager.effective_theme();
+                            self.theme_manager.unstage_theme();
+                            self.theme = self.theme_manager.effective_theme();
                             self.applied_theme = None;
                         }
-                        if let Some(skin) = sv_actions.skin_changed {
-                            if skin.is_empty() {
-                                self.skin_manager.active = None;
-                                self.theme = if !self.theme.is_light {
-                                    Theme::dark()
-                                } else {
-                                    Theme::light()
-                                };
-                                let _ = self.settings_repo.set_value("active_skin", "");
-                                let _ = self.settings_repo.set_value("active_theme", "");
-                            } else {
-                                self.skin_manager.active = Some(skin.clone());
-                                self.theme =
-                                    self.skin_manager.resolve_theme(&skin, self.theme.is_light);
-                                let _ = self.settings_repo.set_value("active_skin", &skin);
-                                let _ = self.settings_repo.set_value("active_theme", &skin);
-                            }
+                        if sv_actions.reload_themes {
+                            self.theme_manager.load_all();
+                            self.theme = self
+                                .theme_manager
+                                .resolve_theme(&self.theme_manager.active_id.clone(), self.theme.is_light);
                             self.applied_theme = None;
-                            self.settings_dirty = true;
-                        }
-                        if sv_actions.reload_skins || sv_actions.reload_themes {
-                            self.skin_manager.load_all();
-                            if let Some(active) = &self.skin_manager.active {
-                                self.theme =
-                                    self.skin_manager.resolve_theme(active, self.theme.is_light);
-                                self.applied_theme = None;
-                            }
                             self.toasts.info("Themes reloaded");
                         }
                         if sv_actions.open_artwork_fetch {

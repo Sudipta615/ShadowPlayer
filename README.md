@@ -68,7 +68,7 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
   Controls on Windows, Now Playing on macOS.
 - Headless mode (`--headless`) runs the engine and the loopback control socket
   without a window, for a server or a minimal listening session.
-- Light and dark themes, custom `.shadowskin` themes, an interface in English,
+- Light, dark, and OLED themes, custom `.shadowtheme` themes, an interface in English,
   German, French, Spanish, Japanese or Chinese, toasts for anything that fails,
   and a Help view whose shortcut list is generated from the same descriptions
   the app uses.

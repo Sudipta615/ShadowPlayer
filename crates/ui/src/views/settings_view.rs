@@ -20,10 +20,6 @@ pub struct SettingsViewActions {
     pub find_duplicates: bool,
     /// The interface language changed. `None` means "follow the environment".
     pub locale_changed: Option<String>,
-    /// User selected a custom theme / skin.
-    pub skin_changed: Option<String>,
-    /// User pressed "Reload Skins".
-    pub reload_skins: bool,
     pub preview_theme: Option<String>,
     pub apply_theme: Option<String>,
     pub cancel_theme_preview: bool,
@@ -50,7 +46,7 @@ pub fn render_settings_view(
     dsp_state: &mut DspState,
     session: &AudioSession,
     theme: &mut Theme,
-    skin_manager: &crate::skin::SkinManager,
+    theme_manager: &crate::theme::ThemeManager,
     scan_roots_repo: &ScanRootsRepo,
     track_repo: &TrackRepo,
     is_scanning: bool,
@@ -95,10 +91,7 @@ pub fn render_settings_view(
             track_count,
             is_scanning,
             is_dark_theme: !theme.is_light,
-            available_skins: skin_manager.available_skins(),
-            active_skin: skin_manager.active_skin_name(),
-            skin_errors: skin_manager.errors(),
-            theme_manager: Some(skin_manager),
+            theme_manager: Some(theme_manager),
             import_active,
             imported_dirs,
             loudness_running: loudness.running,
@@ -127,12 +120,6 @@ pub fn render_settings_view(
         // ── 3. Handle Settings Actions ─────────────────────────────────────
         if s_actions.toggle_theme {
             theme.toggle();
-        }
-        if let Some(ref skin) = s_actions.skin_changed {
-            view_actions.skin_changed = Some(skin.clone());
-        }
-        if s_actions.reload_skins {
-            view_actions.reload_skins = true;
         }
         if let Some(ref prev) = s_actions.preview_theme {
             view_actions.preview_theme = Some(prev.clone());
