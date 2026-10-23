@@ -35,7 +35,7 @@ fn main() {
         res.set("LegalCopyright", "Apache-2.0");
 
         match res.compile() {
-            Ok(()) => println!("cargo:rustc-link-arg-bins=/SUBSYSTEM:WINDOWS"),
+            Ok(()) => {}
             Err(e) => {
                 // A resource compiler that is missing or unhappy is a warning,
                 // not a build failure: the app still runs, and still shows its

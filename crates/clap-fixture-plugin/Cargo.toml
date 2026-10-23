@@ -2,6 +2,7 @@
 name = "clap-fixture-plugin"
 version = "0.14.0"
 edition = "2021"
+license = "Apache-2.0"
 publish = false
 description = "A tiny CLAP plugin used only by this repository's tests and eval hooks."
 

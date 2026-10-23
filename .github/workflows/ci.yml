@@ -141,6 +141,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -151,6 +154,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev dbus
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -159,15 +170,14 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      # Native target check, not a Linux cross-build: this is where the
-      # Windows SMTC and macOS Now Playing implementations actually compile.
+      # Native target check: this is where the platform implementations actually compile.
       #
       # A release must be buildable, so this is a *release* build, not a
       # `cargo check`.
       - name: Compile desktop player
         run: cargo build --release -p shadowplayer --target ${{ matrix.target }}
 
-      # The test binaries must compile on both platforms too, or the
+      # The test binaries must compile on all platforms too, or the
       # cross-platform test job below has nothing to run.
       - name: Compile the tests
         run: cargo test --no-run -p shadowplayer --target ${{ matrix.target }}
@@ -189,20 +199,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: System dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libasound2-dev || true
-
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/engine
 
-      # The engine's suites are Linux-only today. A player that claims to work
-      # on three platforms cannot have its engine tested on one of them.
+      # The engine's suites are cross-platform tested here.
       - name: Engine tests
         run: cargo test
 

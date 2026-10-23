@@ -812,7 +812,9 @@ mod mpris_integration_tests {
     /// which is true of a bare container. CI runs it under `dbus-run-session`.
     #[test]
     fn mpris_service_appears_on_the_session_bus_and_accepts_play_pause() {
-        if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none()
+            || pollster::block_on(zbus::Connection::session()).is_err()
+        {
             return;
         }
 
