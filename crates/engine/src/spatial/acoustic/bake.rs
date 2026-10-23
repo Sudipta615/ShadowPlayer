@@ -470,7 +470,7 @@ impl BakedScene {
     /// path is excluded (the renderer renders the direct path through its
     /// normal pair solve). Writes into `out`, returning the count.
     ///
-    ///     /// **Spectral fork (v3.47):** each tap also carries the surface's
+    /// **Spectral fork (v3.47):** each tap also carries the surface's
     /// low-pass corner — from its full per-band material spectrum (via
     /// `surface_lowpass_hz`) when one is present, else its collapsed
     /// diffraction/transmission low-pass corner, else ∞ (flat). The realtime

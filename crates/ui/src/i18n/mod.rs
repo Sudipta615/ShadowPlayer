@@ -71,22 +71,32 @@ static MISSING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(H
 /// Initialise the active locale from an explicit preference, then the POSIX
 /// environment (`LC_ALL`, `LC_MESSAGES`, `LANG`), then English.
 pub fn init(preference: &str) {
-    let explicit = Locale::from_code(preference);
-    let environment = std::env::var("LC_ALL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("LC_MESSAGES").ok().filter(|s| !s.is_empty()))
-        .or_else(|| std::env::var("LANG").ok().filter(|s| !s.is_empty()));
-    let locale = explicit
-        .or_else(|| environment.as_deref().and_then(Locale::from_code))
-        .unwrap_or_default();
-    if explicit.is_none() {
-        if let Some(raw) = environment {
-            if Locale::from_code(&raw).is_none() {
+    let pref = preference.trim();
+    let locale = if !pref.is_empty() {
+        if let Some(loc) = Locale::from_code(pref) {
+            loc
+        } else {
+            log::info!(
+                "Locale {preference:?} is not shipped by this build; falling back to English"
+            );
+            Locale::English
+        }
+    } else {
+        let environment = std::env::var("LC_ALL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("LC_MESSAGES").ok().filter(|s| !s.is_empty()))
+            .or_else(|| std::env::var("LANG").ok().filter(|s| !s.is_empty()));
+        if let Some(raw) = &environment {
+            if Locale::from_code(raw).is_none() {
                 log::info!("Locale {raw:?} is not shipped by this build; falling back to English");
             }
         }
-    }
+        environment
+            .as_deref()
+            .and_then(Locale::from_code)
+            .unwrap_or_default()
+    };
     set_locale(locale);
 }
 
@@ -297,6 +307,8 @@ mod tests {
         assert_eq!(message_key("Close"), "S5E8250FB85D64C23");
     }
 
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
     /// The preference wins over the environment, and an unknown preference
     /// falls back to English rather than to an unloaded language.
     ///
@@ -305,12 +317,26 @@ mod tests {
     /// locale it leaves behind must not decide another test's outcome.
     #[test]
     fn the_preference_decides_the_locale() {
-        let previous = std::env::var("LANG").ok();
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_all = std::env::var("LC_ALL").ok();
+        let previous_msg = std::env::var("LC_MESSAGES").ok();
+        let previous_lang = std::env::var("LANG").ok();
+
+        std::env::remove_var("LC_ALL");
+        std::env::remove_var("LC_MESSAGES");
         std::env::set_var("LANG", "de_DE.UTF-8");
 
-        let restore = || match previous.clone() {
-            Some(value) => std::env::set_var("LANG", value),
-            None => std::env::remove_var("LANG"),
+        let restore = || {
+            for (key, value) in [
+                ("LC_ALL", previous_all.clone()),
+                ("LC_MESSAGES", previous_msg.clone()),
+                ("LANG", previous_lang.clone()),
+            ] {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
         };
 
         init("en");
@@ -336,6 +362,7 @@ mod tests {
     /// With no preference, the environment decides.
     #[test]
     fn the_environment_decides_when_there_is_no_preference() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let previous_all = std::env::var("LC_ALL").ok();
         let previous_msg = std::env::var("LC_MESSAGES").ok();
         let previous_lang = std::env::var("LANG").ok();

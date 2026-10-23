@@ -24,6 +24,14 @@ fn auto_is_always_the_first_entry() {
         Some(&AudioBackend::Auto),
         "Auto is the only entry that is meaningful everywhere, so it must be first"
     );
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        all(
+            target_os = "windows",
+            any(feature = "wasapi-native", feature = "asio-native")
+        ),
+    ))]
     assert!(
         backends.len() >= 2,
         "the picker must offer at least one platform backend besides Auto"
