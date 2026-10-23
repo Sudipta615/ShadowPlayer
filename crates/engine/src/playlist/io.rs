@@ -894,6 +894,12 @@ fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
     if decoded.is_empty() {
         return None;
     }
+    // On Windows, a URI like `file:///C:/music` yields `/C:/music`.
+    // Stripping the leading slash when followed by a drive letter produces `C:/music`.
+    let bytes = decoded.as_bytes();
+    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[2] == b':' && bytes[1].is_ascii_alphabetic() {
+        return Some(PathBuf::from(&decoded[1..]));
+    }
     Some(PathBuf::from(decoded))
 }
 

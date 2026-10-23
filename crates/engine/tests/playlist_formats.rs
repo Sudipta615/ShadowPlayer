@@ -35,7 +35,7 @@ fn parsed_paths(parsed: &engine::playlist::ParsedPlaylist) -> Vec<String> {
         .entries
         .iter()
         .map(|source| match source {
-            AudioSource::File(path) => path.to_string_lossy().into_owned(),
+            AudioSource::File(path) => path.to_string_lossy().replace('\\', "/"),
             other => format!("{other:?}"),
         })
         .collect()
