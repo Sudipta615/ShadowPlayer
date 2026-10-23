@@ -8,7 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-23
+
+*Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
 ### Added
+- **Auto-tagging can identify a file and show its evidence.** A selection is fingerprinted with
+  AcoustID, looked up on MusicBrainz, and presented side by side with the tags already in the file,
+  so the listener can apply only the fields they trust. Nothing is written until the review is
+  accepted, and the lookup runs only when the action is invoked.
+- **The interface speaks French, Spanish, Japanese and Chinese as well as German.** Each catalogue
+  is compiled into the binary, a missing translation falls back to English, and `Auto` still
+  follows the system locale. The skin, auto-tag and artwork screens are included.
+- **Themes can be supplied as `.shadowskin` files.** The JSON format is validated for WCAG AA text
+  contrast before it is offered, merged over the current light or dark theme, and selectable live
+  in Settings. An invalid skin is rejected with the reason, and `docs/skins/` contains a working
+  example.
+- **Cover art can be filled in for a whole selection.** The Cover Art Archive is queried in the
+  background for albums with no artwork, results are cached locally, and an existing image is not
+  replaced unless the listener asks for it.
+- **Waveform seek bars show the shape of the track.** Peaks are computed once in the background
+  and cached, so the now-playing bar and the full-screen view share the same waveform instead of
+  decoding the file on the UI thread.
+- **A crossfade can be heard before it is used.** A short local render demonstrates the selected
+  curve with its waveform, without touching the queue or the current output.
+- **Artists and albums can carry biographies.** The pane reads text the listener wrote, or
+  `.txt`/`.md` files from a folder they choose, and caches the result in the library database. It
+  never contacts the network.
+- **Podcasts are subscriptions, not library tracks.** RSS and Atom feeds are fetched on a worker
+  thread, episodes download into their own folder, and every episode keeps its own resume state.
+  Removing a feed leaves the music library untouched.
+- **`.lrc` lyrics can be edited in place.** The inline editor writes the sidecar back without
+  disturbing the audio file, and the synced-lyrics panel picks up the change immediately.
+- **Radio is local and seedable.** Starting from a track builds a station from genre, BPM and
+  rating, and Refresh reshuffles it without contacting a streaming service.
+- **The songs table has editable column presets.** Columns can be added, removed and resized, a
+  preset can be copied or reset to its factory layout, and the chosen preset survives a restart.
 - **Room correction has a measurement wizard.** The Settings → Tools card opens a guided flow:
   choose the microphone or interface input, choose the sweep length and pre-emphasis, start the
   measurement, and watch each engine stage. An explicit input never falls back to the system mix,
@@ -41,6 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there is no background polling, and the setting is off by default.
 
 ### Changed
+- **BPM became part of the library and the smart-playlist vocabulary.** The BPM tag is extracted
+  during the scan, stored by schema V13, and available to smart rules and the local radio seed.
 - **Accessibility names reached the remaining painted controls.** Sort headers and the sort pill,
   row rating and overflow menus, playlist rename/delete/remove, album and genre rows, info-box
   dismiss, help signal cards, settings jumps and toggles, the waveform seek bar, the equalizer
@@ -56,12 +94,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the database.
 
 ### Testing and release
+- Auto-tag review and parsed lookups, skin contrast validation, cover-art batch state, podcast
+  feed parsing and downloads, waveform peak buckets, crossfade envelopes, biography caching,
+  column-preset round trips, lyrics editing, and the local radio seed are covered by unit tests.
 - `media-tools` covers the dynamic-library loader, Markdown parsing and safe links, resampling,
   FLAC/Opus format selection, CDDB response parsing, release-asset selection and checksum
-  rejection. Database tests cover the V14 migration and the album-notes repository. UI tests cover
-  the measurement phases, the tools modal state and the liner-notes editor. Accessibility and
-  documentation claims are checked by source and platform tests; CI now runs the `media-tools`
-  suite with the player suite.
+  rejection. Database tests cover the V13 and V14 migrations, podcast and biography repositories,
+  and the album-notes repository. UI tests cover the measurement phases, the tools modal state and
+  the liner-notes editor. Accessibility and documentation claims are checked by source and
+  platform tests; CI now runs the `media-tools` suite with the player suite.
 
 ## [0.14.0] - 2026-10-22
 

@@ -32,6 +32,7 @@ const PLAYER_CRATES: &[&str] = &[
     "library",
     "playback",
     "ui",
+    "media-tools",
     "app",
     "clap-fixture-plugin",
 ];

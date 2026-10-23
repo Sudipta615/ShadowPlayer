@@ -3,7 +3,8 @@
 A local-first, audiophile desktop music player for Linux, Windows and macOS:
 Rust, [egui](https://github.com/emilk/egui), SQLite, and a real bit-perfect audio
 engine — no accounts and no telemetry. Network access exists only for features
-you switch on: podcast subscriptions and the opt-in update check.
+you switch on: auto-tagging, cover-art lookup, podcast subscriptions, and the
+opt-in update check.
 
 The player is the `crates/` workspace. The audio engine it is built on
 (`crates/engine`) is a separate, independently versioned workspace with its own
@@ -19,19 +20,28 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
   rescan.
 - Stable track identity: a file that is moved or renamed keeps its play count,
   favorites, playlist membership and lyrics.
-- Songs table with sortable columns, quick-filter chips, multi-select and bulk
-  actions; Albums, Artists, Genres and Folders views.
+- Songs table with sortable, re-orderable columns, saved column presets,
+  quick-filter chips, multi-select and bulk actions; Albums, Artists, Genres and
+  Folders views.
+- Auto-tagging through AcoustID fingerprints and MusicBrainz, with a
+  field-by-field review before any tag is written; bulk cover-art lookup from
+  the Cover Art Archive with a local cache.
+- Artist and album biographies from text you write or `.txt`/`.md` files you
+  point at, cached in the library database.
+- Podcast subscriptions (RSS/Atom) with per-episode downloads and resume, plus
+  local smart radio seeded from a track's genre, BPM and rating.
 - Standard playlists, smart (rule-based) playlists with a stated refresh
   policy — after every scan, on a timer, or only when you ask — duplicate
   finder, batch organizer with a reviewable rename plan, M3U import/export.
 - Embedded tag lyrics and `.lrc` sidecars (including ID3v2 `SYLT` timed lyrics
-  and non-UTF-8 files), with a synced-lyrics panel.
+  and non-UTF-8 files), with a synced-lyrics panel and an inline `.lrc` editor.
 - Markdown album liner notes, previewed in the album view and stored in the
   library database alongside the album identity.
 
 **Playback**
 - Gapless, crossfade, fade and hard-stop transitions; shuffle and repeat with a
-  queue that survives a restart.
+  queue that survives a restart. Waveform seek bars share a cached peak table,
+  and a crossfade can be auditioned locally before it is used.
 - Bit-perfect "Pure Direct" mode that bypasses the whole DSP chain, with a
   modal that says exactly which stages are bypassed and why.
 - CUE sheets, DSD, all codecs the engine ships; ReplayGain / EBU R128 (from
@@ -58,9 +68,10 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
   Controls on Windows, Now Playing on macOS.
 - Headless mode (`--headless`) runs the engine and the loopback control socket
   without a window, for a server or a minimal listening session.
-- Light and dark themes, custom skins, an interface in English or German,
-  toasts for anything that fails, and a Help view whose shortcut list is
-  generated from the same descriptions the app uses.
+- Light and dark themes, custom `.shadowskin` themes, an interface in English,
+  German, French, Spanish, Japanese or Chinese, toasts for anything that fails,
+  and a Help view whose shortcut list is generated from the same descriptions
+  the app uses.
 
 ---
 
@@ -97,10 +108,10 @@ A player with a hundred features is not the same as a player that is good at
 one thing. This is what ShadowPlayer deliberately does not do, so that nobody
 has to discover it by disappointment:
 
-- **No streaming services, internet radio, accounts or telemetry.** Podcast
-  subscriptions and the update check contact the network, and only when you
-  ask them to. Your library, listening history and statistics stay on your
-  machine.
+- **No streaming services, internet radio, accounts or telemetry.** Auto-tagging,
+  cover-art lookup, podcast subscriptions and the update check contact the network
+  only when you ask them to. Your library, listening history and statistics stay
+  on your machine.
 - **No automatic updates.** The update check is opt-in, a download is verified
   against the release's SHA-256 checksum, and the app never installs or runs
   the file for you. Installing is a deliberate act.
@@ -109,9 +120,11 @@ has to discover it by disappointment:
   window forward and exits. Concurrent windows are an explicit opt-in in
   Settings → Library; each has its own playback, while the first window owns
   the remote-control socket.
-- **English and German, and German is not finished.** The long prose in the
-  Help manual is still English; the German catalogue covers labels, buttons
-  and menus, and falls back to English rather than showing a key.
+- **Six interface languages, and the long prose is not fully translated.**
+  English, German, French, Spanish, Japanese and Chinese catalogues cover
+  labels, buttons and menus; the long prose in the Help manual is still
+  English, and a missing string falls back to English rather than showing a
+  key.
 
 ---
 
