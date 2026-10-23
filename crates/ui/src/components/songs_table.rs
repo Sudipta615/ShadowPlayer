@@ -548,6 +548,8 @@ pub struct SongsTableAction {
     pub edit_track: Option<TrackId>,
     /// User chose "Per-track DSP" from the context menu.
     pub open_dsp: Option<TrackId>,
+    /// User chose "Auto-Tag with MusicBrainz" from the context menu.
+    pub autotag_track: Option<TrackId>,
 
     // ── Bulk (multi-select) actions ─────────────────────────────────────────
     // The selected ids themselves live in `LibraryState`; these flags only say
@@ -562,6 +564,10 @@ pub struct SongsTableAction {
     pub rate_selected: Option<u8>,
     /// Hand the selected tracks to the batch organizer.
     pub organize_selected: bool,
+    /// Bulk auto-tag selected tracks.
+    pub autotag_selected: bool,
+    /// Bulk artwork fetch for selected tracks.
+    pub fetch_artwork_selected: bool,
     pub remove_selected: bool,
     pub clear_selection: bool,
     /// The empty state asked the user to add a music folder.
@@ -630,6 +636,7 @@ impl<'a> SongsTable<'a> {
             remove_track: None,
             edit_track: None,
             open_dsp: None,
+            autotag_track: None,
             play_selected: false,
             queue_next_selected: false,
             add_selected_to_queue: false,
@@ -637,6 +644,8 @@ impl<'a> SongsTable<'a> {
             favorite_selected: false,
             rate_selected: None,
             organize_selected: false,
+            autotag_selected: false,
+            fetch_artwork_selected: false,
             remove_selected: false,
             clear_selection: false,
             open_folders: false,
@@ -2087,6 +2096,18 @@ fn render_bulk_bar(
                 {
                     action.organize_selected = true;
                 }
+                if ui
+                    .button(egui::RichText::new("Auto-Tag").font(crate::theme::font(12.0)))
+                    .clicked()
+                {
+                    action.autotag_selected = true;
+                }
+                if ui
+                    .button(egui::RichText::new("Fetch Artwork").font(crate::theme::font(12.0)))
+                    .clicked()
+                {
+                    action.fetch_artwork_selected = true;
+                }
                 if !playlists.is_empty() {
                     ui.menu_button(
                         egui::RichText::new(tr!("Add to Playlist")).font(crate::theme::font(12.0)),
@@ -2350,6 +2371,11 @@ fn render_track_context_menu(
 
     if ui.button(tr!(Msg::S5851EE93B1C93A0E)).clicked() {
         action.edit_track = Some(track.id);
+        ui.close();
+    }
+
+    if ui.button("Auto-Tag with MusicBrainz…").clicked() {
+        action.autotag_track = Some(track.id);
         ui.close();
     }
 

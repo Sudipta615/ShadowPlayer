@@ -22,15 +22,30 @@ pub enum Locale {
     #[default]
     English,
     German,
+    French,
+    Spanish,
+    Japanese,
+    Chinese,
 }
 
 impl Locale {
-    pub const ALL: [Locale; 2] = [Locale::English, Locale::German];
+    pub const ALL: [Locale; 6] = [
+        Locale::English,
+        Locale::German,
+        Locale::French,
+        Locale::Spanish,
+        Locale::Japanese,
+        Locale::Chinese,
+    ];
 
     pub fn code(self) -> &'static str {
         match self {
             Self::English => "en",
             Self::German => "de",
+            Self::French => "fr",
+            Self::Spanish => "es",
+            Self::Japanese => "ja",
+            Self::Chinese => "zh",
         }
     }
 
@@ -39,6 +54,10 @@ impl Locale {
         match self {
             Self::English => "English",
             Self::German => "Deutsch",
+            Self::French => "Français",
+            Self::Spanish => "Español",
+            Self::Japanese => "Nihongo (Japanese)",
+            Self::Chinese => "Zhongwen (Chinese)",
         }
     }
 
@@ -54,6 +73,10 @@ impl Locale {
         match language {
             "en" => Some(Self::English),
             "de" => Some(Self::German),
+            "fr" => Some(Self::French),
+            "es" => Some(Self::Spanish),
+            "ja" => Some(Self::Japanese),
+            "zh" => Some(Self::Chinese),
             _ => None,
         }
     }
@@ -63,6 +86,30 @@ static ACTIVE_LOCALE: LazyLock<RwLock<Locale>> = LazyLock::new(|| RwLock::new(Lo
 static GERMAN: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../locales/de.json")).unwrap_or_else(|e| {
         log::error!("The German catalogue is not valid JSON: {e}");
+        HashMap::new()
+    })
+});
+static FRENCH: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../locales/fr.json")).unwrap_or_else(|e| {
+        log::error!("The French catalogue is not valid JSON: {e}");
+        HashMap::new()
+    })
+});
+static SPANISH: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../locales/es.json")).unwrap_or_else(|e| {
+        log::error!("The Spanish catalogue is not valid JSON: {e}");
+        HashMap::new()
+    })
+});
+static JAPANESE: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../locales/ja.json")).unwrap_or_else(|e| {
+        log::error!("The Japanese catalogue is not valid JSON: {e}");
+        HashMap::new()
+    })
+});
+static CHINESE: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../locales/zh.json")).unwrap_or_else(|e| {
+        log::error!("The Chinese catalogue is not valid JSON: {e}");
         HashMap::new()
     })
 });
@@ -120,6 +167,10 @@ pub fn tr(msg: Msg) -> String {
     let catalogue = match locale {
         Locale::English => unreachable!(),
         Locale::German => &*GERMAN,
+        Locale::French => &*FRENCH,
+        Locale::Spanish => &*SPANISH,
+        Locale::Japanese => &*JAPANESE,
+        Locale::Chinese => &*CHINESE,
     };
     if let Some(text) = catalogue.get(msg.key()) {
         return text.clone();
@@ -260,6 +311,26 @@ mod tests {
         for key in german_catalogue().keys() {
             assert!(en.contains_key(key), "de.json has unknown key {key}");
         }
+        let fr: HashMap<String, String> =
+            serde_json::from_str(include_str!("../../locales/fr.json")).unwrap();
+        for key in fr.keys() {
+            assert!(en.contains_key(key), "fr.json has unknown key {key}");
+        }
+        let es: HashMap<String, String> =
+            serde_json::from_str(include_str!("../../locales/es.json")).unwrap();
+        for key in es.keys() {
+            assert!(en.contains_key(key), "es.json has unknown key {key}");
+        }
+        let ja: HashMap<String, String> =
+            serde_json::from_str(include_str!("../../locales/ja.json")).unwrap();
+        for key in ja.keys() {
+            assert!(en.contains_key(key), "ja.json has unknown key {key}");
+        }
+        let zh: HashMap<String, String> =
+            serde_json::from_str(include_str!("../../locales/zh.json")).unwrap();
+        for key in zh.keys() {
+            assert!(en.contains_key(key), "zh.json has unknown key {key}");
+        }
     }
 
     #[test]
@@ -299,7 +370,11 @@ mod tests {
     fn locale_codes_are_parsed_with_region_and_encoding() {
         assert_eq!(Locale::from_code("de_DE.UTF-8"), Some(Locale::German));
         assert_eq!(Locale::from_code("en-GB"), Some(Locale::English));
-        assert_eq!(Locale::from_code("fr_FR"), None);
+        assert_eq!(Locale::from_code("fr_FR"), Some(Locale::French));
+        assert_eq!(Locale::from_code("es_ES.UTF-8"), Some(Locale::Spanish));
+        assert_eq!(Locale::from_code("ja_JP"), Some(Locale::Japanese));
+        assert_eq!(Locale::from_code("zh_CN"), Some(Locale::Chinese));
+        assert_eq!(Locale::from_code("it_IT"), None);
     }
 
     #[test]
@@ -350,6 +425,18 @@ mod tests {
         assert_eq!(locale(), Locale::German);
 
         init("fr");
+        assert_eq!(locale(), Locale::French);
+
+        init("es");
+        assert_eq!(locale(), Locale::Spanish);
+
+        init("ja");
+        assert_eq!(locale(), Locale::Japanese);
+
+        init("zh");
+        assert_eq!(locale(), Locale::Chinese);
+
+        init("it");
         assert_eq!(
             locale(),
             Locale::English,

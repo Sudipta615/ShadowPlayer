@@ -69,6 +69,12 @@ impl ArtworkManager {
         }
         None
     }
+
+    /// Check if cover art exists for a track (cached thumbnail or folder image).
+    pub fn has_artwork(&self, track_id: &TrackId, song_path: &Path) -> bool {
+        self.get_cached_thumbnail_path(track_id).exists()
+            || self.find_folder_artwork(song_path).is_some()
+    }
 }
 
 #[cfg(test)]

@@ -178,7 +178,10 @@ fn the_readme_test_commands_are_the_commands_ci_runs() {
 }
 
 fn normalize_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    text.replace('\\', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[test]

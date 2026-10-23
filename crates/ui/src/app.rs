@@ -18,15 +18,18 @@ use crate::components::sidebar::NavItem;
 use crate::components::topbar::{render_action_button, TopbarAction};
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
-    show_autoeq_modal, show_bit_perfect_modal, show_duplicates_modal, show_edit_track_modal,
-    show_eq_panel, show_organize_modal, show_playlist_editor, show_smart_playlist_editor,
-    show_track_properties_modal, DuplicateGroup, DuplicatesState, OrganizeState,
+    show_artwork_fetch_modal, show_autoeq_modal, show_autotag_modal, show_bit_perfect_modal,
+    show_duplicates_modal, show_edit_track_modal, show_eq_panel, show_organize_modal,
+    show_playlist_editor, show_smart_playlist_editor, show_track_properties_modal,
+    ArtworkFetchModalState, AutotagModalState, DuplicateGroup, DuplicatesState, OrganizeState,
     SmartPlaylistEditorState,
 };
 use crate::services::{
-    ArtworkService, ControlService, ImportKind, ImportResult, ImportService, LoudnessService,
-    LyricsService, MprisCommand, MprisService, MprisSnapshot, ScannerService,
+    ArtworkFetchService, ArtworkService, AutotagService, ControlService, ImportKind, ImportResult,
+    ImportService, LoudnessService, LyricsService, MprisCommand, MprisService, MprisSnapshot,
+    ScannerService,
 };
+use crate::skin::SkinManager;
 use crate::state::{AppState, DspState, LibraryState, SleepTimerMode, TelemetryState};
 use crate::theme::Theme;
 use crate::views::{
@@ -111,6 +114,12 @@ pub struct ShadowPlayerApp {
     /// this differs from `theme.is_light`.
     applied_theme: Option<bool>,
     settings_dirty: bool,
+
+    pub skin_manager: SkinManager,
+    pub autotag_service: AutotagService,
+    pub autotag_modal: AutotagModalState,
+    pub artwork_fetch_service: ArtworkFetchService,
+    pub artwork_fetch_modal: ArtworkFetchModalState,
 
     /// Tracks belonging to the playlist currently selected in the manager.
     playlist_editor_tracks: Vec<domain::models::Track>,
@@ -221,6 +230,15 @@ impl ShadowPlayerApp {
         let mpris_service = MprisService::start();
         let (watch_tx, watch_rx) = crossbeam::channel::unbounded::<PathBuf>();
 
+        let mut skin_manager = SkinManager::new(&data_dir);
+        let _ = skin_manager.write_example_skin();
+        skin_manager.load_all();
+
+        let autotag_service = AutotagService::new();
+        let autotag_modal = AutotagModalState::default();
+        let artwork_fetch_service = ArtworkFetchService::new();
+        let artwork_fetch_modal = ArtworkFetchModalState::default();
+
         let mut app = Self {
             session,
             coordinator,
@@ -260,6 +278,12 @@ impl ShadowPlayerApp {
             theme: Theme::default(),
             applied_theme: None,
             settings_dirty: false,
+
+            skin_manager,
+            autotag_service,
+            autotag_modal,
+            artwork_fetch_service,
+            artwork_fetch_modal,
 
             playlist_editor_tracks: Vec::new(),
             prev_track_id: None,
@@ -1246,6 +1270,14 @@ impl ShadowPlayerApp {
             } else {
                 Theme::light()
             };
+            if let Ok(Some(skin_name)) = self.settings_repo.get_value("active_skin") {
+                if !skin_name.is_empty() {
+                    self.skin_manager.active = Some(skin_name.clone());
+                    self.theme = self
+                        .skin_manager
+                        .resolve_theme(&skin_name, !app_settings.theme_dark);
+                }
+            }
             self.app_state.volume = app_settings.volume;
             self.app_state.is_muted = app_settings.is_muted;
             self.app_state.current_sort = app_settings.sort_field;
@@ -2720,6 +2752,45 @@ impl eframe::App for ShadowPlayerApp {
             ctx.request_repaint();
         }
 
+        // 2f1. Auto-tag service polling.
+        if self.autotag_service.poll() {
+            ctx.request_repaint();
+        }
+        self.autotag_modal
+            .mark_progress(self.autotag_service.progress().clone());
+        if !self.autotag_service.pending.is_empty() {
+            let pending = std::mem::take(&mut self.autotag_service.pending);
+            for res in pending {
+                if let Some(track) = self
+                    .library_state
+                    .all_tracks
+                    .iter()
+                    .find(|t| t.id == res.track_id)
+                    .cloned()
+                {
+                    self.autotag_modal.push_result(res, track);
+                }
+            }
+            ctx.request_repaint();
+        }
+
+        // 2f2. Cover art fetch service polling.
+        let saved_art_tracks = self.artwork_fetch_service.poll();
+        self.artwork_fetch_modal.progress = self.artwork_fetch_service.progress().clone();
+        if !self.artwork_fetch_service.is_running()
+            && self.artwork_fetch_modal.progress.total > 0
+            && self.artwork_fetch_modal.progress.done >= self.artwork_fetch_modal.progress.total
+        {
+            self.artwork_fetch_modal.finished = true;
+        }
+        if !saved_art_tracks.is_empty() {
+            for track_id in &saved_art_tracks {
+                self.artwork_service.invalidate_track(track_id);
+            }
+            self.reload_library();
+            ctx.request_repaint();
+        }
+
         // 2g. Chain-preset feedback. Saving or applying a profile also marks
         // the settings dirty so it persists now rather than at the next
         // periodic save.
@@ -3953,6 +4024,7 @@ impl eframe::App for ShadowPlayerApp {
                             &mut self.dsp_state,
                             &self.session,
                             &mut self.theme,
+                            &self.skin_manager,
                             &self.scan_roots_repo,
                             &self.track_repo,
                             is_scanning,
@@ -3999,6 +4071,42 @@ impl eframe::App for ShadowPlayerApp {
                         }
                         if let Some(locale) = sv_actions.locale_changed {
                             self.set_locale(locale);
+                        }
+                        if let Some(skin) = sv_actions.skin_changed {
+                            if skin.is_empty() {
+                                self.skin_manager.active = None;
+                                self.theme = if !self.theme.is_light {
+                                    Theme::dark()
+                                } else {
+                                    Theme::light()
+                                };
+                                let _ = self.settings_repo.set_value("active_skin", "");
+                            } else {
+                                self.skin_manager.active = Some(skin.clone());
+                                self.theme =
+                                    self.skin_manager.resolve_theme(&skin, self.theme.is_light);
+                                let _ = self.settings_repo.set_value("active_skin", &skin);
+                            }
+                            self.applied_theme = None;
+                            self.settings_dirty = true;
+                        }
+                        if sv_actions.reload_skins {
+                            self.skin_manager.load_all();
+                            if let Some(active) = &self.skin_manager.active {
+                                self.theme =
+                                    self.skin_manager.resolve_theme(active, self.theme.is_light);
+                                self.applied_theme = None;
+                            }
+                            self.toasts.info("Skins reloaded");
+                        }
+                        if sv_actions.open_artwork_fetch {
+                            let missing_count = self
+                                .library_state
+                                .all_tracks
+                                .iter()
+                                .filter(|t| !self.artwork_service.has_artwork(&t.id, &t.path))
+                                .count();
+                            self.artwork_fetch_modal.open(missing_count);
                         }
                     }
                     NavItem::Help => {
@@ -4073,6 +4181,22 @@ impl eframe::App for ShadowPlayerApp {
                         }
                         if let Some(tracks) = view_action.organize_tracks {
                             self.open_organize(tracks, "Selection".to_string());
+                        }
+                        if let Some(tracks) = view_action.autotag_tracks {
+                            let pairs: Vec<(domain::ids::TrackId, PathBuf)> =
+                                tracks.iter().map(|t| (t.id, t.path.clone())).collect();
+                            self.autotag_service.enqueue(pairs, false);
+                            self.autotag_modal
+                                .open_progress(self.autotag_service.progress().clone());
+                        }
+                        if let Some(tracks) = view_action.fetch_artwork_tracks {
+                            let missing_count = tracks
+                                .iter()
+                                .filter(|t| !self.artwork_service.has_artwork(&t.id, &t.path))
+                                .count();
+                            self.artwork_fetch_modal.open(missing_count);
+                            self.artwork_fetch_service
+                                .start(tracks, self.artwork_service.manager());
                         }
                     }
                 }
@@ -4736,6 +4860,94 @@ impl eframe::App for ShadowPlayerApp {
             self.coordinator.current_track(),
             &self.theme,
         );
+
+        // The MusicBrainz / AcoustID Auto-Tag modal.
+        let autotag_actions = show_autotag_modal(&ctx, &mut self.autotag_modal, &self.theme);
+        if autotag_actions.cancelled {
+            self.autotag_service.cancel();
+            self.autotag_modal.close();
+        }
+        if !autotag_actions.apply.is_empty() {
+            for (review, m) in autotag_actions.apply {
+                let track_id = review.result.track_id;
+                if let Ok(Some(mut track)) = self.track_repo.get_by_id(&track_id) {
+                    if review.fields.title {
+                        track.title = m.title.clone();
+                    }
+                    if review.fields.artist {
+                        track.artist = m.artist.clone();
+                    }
+                    if review.fields.album {
+                        track.album = m.album.clone();
+                    }
+                    if review.fields.year {
+                        track.year = m.year;
+                    }
+                    if review.fields.track_number {
+                        track.track_number = m.track_number;
+                    }
+                    if review.fields.disc_number {
+                        track.disc_number = m.disc_number;
+                    }
+                    if review.fields.genre && m.genre.is_some() {
+                        track.genre = m.genre.clone();
+                    }
+                    let _ = self.track_repo.upsert(&track);
+
+                    let editorial = engine::decode::EditorialTags {
+                        title: if review.fields.title {
+                            Some(m.title)
+                        } else {
+                            None
+                        },
+                        artist: if review.fields.artist {
+                            Some(m.artist)
+                        } else {
+                            None
+                        },
+                        album: if review.fields.album {
+                            Some(m.album)
+                        } else {
+                            None
+                        },
+                        genre: if review.fields.genre { m.genre } else { None },
+                        year: if review.fields.year { m.year } else { None },
+                        track_number: if review.fields.track_number {
+                            m.track_number
+                        } else {
+                            None
+                        },
+                        disc_number: if review.fields.disc_number {
+                            m.disc_number
+                        } else {
+                            None
+                        },
+                    };
+                    let _ = engine::decode::write_editorial_tags(&track.path, &editorial);
+                }
+            }
+            self.reload_library();
+            self.toasts.info("Tags applied successfully");
+            self.autotag_modal.close();
+        }
+
+        // The Bulk Cover Art Fetch modal.
+        let artwork_actions =
+            show_artwork_fetch_modal(&ctx, &mut self.artwork_fetch_modal, &self.theme);
+        if artwork_actions.start {
+            let missing_tracks: Vec<domain::models::Track> = self
+                .library_state
+                .all_tracks
+                .iter()
+                .filter(|t| !self.artwork_service.has_artwork(&t.id, &t.path))
+                .cloned()
+                .collect();
+            self.artwork_fetch_service
+                .start(missing_tracks, self.artwork_service.manager());
+        }
+        if artwork_actions.cancel {
+            self.artwork_fetch_service.cancel();
+        }
 
         // The command palette. It is a modal, so it traps the keyboard and
         // the background stays inert while it is open.

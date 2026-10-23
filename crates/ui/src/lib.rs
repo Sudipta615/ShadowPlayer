@@ -8,6 +8,7 @@ pub mod layout;
 pub mod modals;
 pub mod services;
 pub mod shortcuts;
+pub mod skin;
 pub mod state;
 pub mod theme;
 pub mod views;

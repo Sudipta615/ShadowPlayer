@@ -28,6 +28,10 @@ pub struct MainViewAction {
     pub refresh_smart_playlist: bool,
     /// The user asked to organize the current selection.
     pub organize_tracks: Option<Vec<Track>>,
+    /// The user asked to auto-tag track(s).
+    pub autotag_tracks: Option<Vec<Track>>,
+    /// The user asked to fetch missing artwork for track(s).
+    pub fetch_artwork_tracks: Option<Vec<Track>>,
     /// A grouped-search chip asked to run a narrower query.
     pub search_query: Option<String>,
     /// The loudness inspector was requested.
@@ -428,6 +432,22 @@ pub fn render_main_playback_view(
         // Hand the current selection to the app-level organizer; the modal and
         // the disk work both live there.
         view_action.organize_tracks = Some(library_state.selected_tracks_in_order());
+    }
+    if let Some(track_id) = table_action.autotag_track {
+        if let Some(track) = library_state
+            .all_tracks
+            .iter()
+            .find(|t| t.id == track_id)
+            .cloned()
+        {
+            view_action.autotag_tracks = Some(vec![track]);
+        }
+    }
+    if table_action.autotag_selected {
+        view_action.autotag_tracks = Some(library_state.selected_tracks_in_order());
+    }
+    if table_action.fetch_artwork_selected {
+        view_action.fetch_artwork_tracks = Some(library_state.selected_tracks_in_order());
     }
 
     handle_songs_table_action(

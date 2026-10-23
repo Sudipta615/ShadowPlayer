@@ -77,9 +77,23 @@ impl ArtworkService {
         self.missing.contains(track_id)
     }
 
+    /// Check if cover art exists for a track.
+    pub fn has_artwork(&self, track_id: &TrackId, song_path: &std::path::Path) -> bool {
+        self.manager.has_artwork(track_id, song_path)
+    }
+
     /// Forget a failed lookup (e.g. after a new import or scan).
     pub fn invalidate(&mut self, track_id: &TrackId) {
         self.missing.remove(track_id);
+    }
+
+    /// Completely evict and invalidate a track's cached artwork.
+    pub fn invalidate_track(&mut self, track_id: &TrackId) {
+        self.missing.remove(track_id);
+        self.texture_cache.remove(track_id);
+        if let Some(pos) = self.order.iter().position(|id| id == track_id) {
+            self.order.remove(pos);
+        }
     }
 
     /// Clear all "missing" markers, e.g. after a library scan/import.

@@ -1,4 +1,6 @@
+pub mod artwork_fetch_service;
 pub mod artwork_service;
+pub mod autotag_service;
 pub mod control_service;
 pub mod import_service;
 pub mod loudness_service;
@@ -6,7 +8,11 @@ pub mod lyrics_service;
 pub mod mpris_service;
 pub mod scanner_service;
 
+pub use artwork_fetch_service::{ArtworkFetchEvent, ArtworkFetchProgress, ArtworkFetchService};
 pub use artwork_service::ArtworkService;
+pub use autotag_service::{
+    AutotagMatch, AutotagOutcome, AutotagProgress, AutotagResult, AutotagService,
+};
 pub use control_service::{
     activate_existing_instance, multi_instance_enabled, read_endpoint, send_control_command,
     set_multi_instance_enabled, ControlEndpoint, ControlRequest, ControlResponse, ControlService,

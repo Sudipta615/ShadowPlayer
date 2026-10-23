@@ -1160,6 +1160,12 @@ pub struct SettingsTabActions {
     pub import_playlist: bool,
     /// User pressed "Find Duplicates" — open the duplicate finder.
     pub find_duplicates: bool,
+    /// User selected a custom theme / skin.
+    pub skin_changed: Option<String>,
+    /// User pressed "Reload Skins".
+    pub reload_skins: bool,
+    /// User pressed "Fetch Missing Artwork".
+    pub open_artwork_fetch: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1172,6 +1178,9 @@ pub struct SettingsExtraContext<'a> {
     pub track_count: usize,
     pub is_scanning: bool,
     pub is_dark_theme: bool,
+    pub available_skins: &'a [String],
+    pub active_skin: Option<&'a str>,
+    pub skin_errors: &'a [(PathBuf, crate::skin::SkinError)],
     /// A native import picker is currently open (disables the import buttons).
     pub import_active: bool,
     /// Directories that individual songs were imported from, newest first.
@@ -3606,6 +3615,50 @@ fn render_library_category(
                 {
                     actions.toggle_theme = true;
                 }
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Skin:")
+                            .font(crate::theme::font(12.0))
+                            .color(theme.text_secondary),
+                    );
+                    let current = extra.active_skin.unwrap_or("Built-in Theme");
+                    egui::ComboBox::from_id_salt("settings_skin_picker")
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(extra.active_skin.is_none(), "Built-in Theme")
+                                .clicked()
+                            {
+                                actions.skin_changed = Some(String::new());
+                            }
+                            for skin in extra.available_skins {
+                                let is_active = extra.active_skin == Some(skin.as_str());
+                                if ui.selectable_label(is_active, skin).clicked() {
+                                    actions.skin_changed = Some(skin.clone());
+                                }
+                            }
+                        });
+                    if ui
+                        .small_button(egui::RichText::new("Reload").color(theme.info))
+                        .clicked()
+                    {
+                        actions.reload_skins = true;
+                    }
+                });
+
+                if !extra.skin_errors.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Warning: {} skin(s) failed validation",
+                            extra.skin_errors.len()
+                        ))
+                        .font(crate::theme::font(11.0))
+                        .color(theme.warning_yellow),
+                    );
+                }
             },
         );
 
@@ -3706,9 +3759,14 @@ fn render_library_category(
             &tr!("Group tracks with identical audio content (matched by fingerprint, not tags) and remove the extra copies"),
             theme,
             |ui| {
-                if ui.add(pill_btn(tr!(Msg::SCD03664EB9D51130), false, theme)).clicked() {
-                    actions.find_duplicates = true;
-                }
+                ui.horizontal(|ui| {
+                    if ui.add(pill_btn(tr!(Msg::SCD03664EB9D51130), false, theme)).clicked() {
+                        actions.find_duplicates = true;
+                    }
+                    if ui.add(pill_btn("Fetch Missing Artwork…", false, theme)).clicked() {
+                        actions.open_artwork_fetch = true;
+                    }
+                });
             },
         );
 

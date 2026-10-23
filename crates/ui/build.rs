@@ -23,16 +23,32 @@ fn main() {
     let locales = manifest.join("locales");
     let en_path = locales.join("en.json");
     let de_path = locales.join("de.json");
+    let fr_path = locales.join("fr.json");
+    let es_path = locales.join("es.json");
+    let ja_path = locales.join("ja.json");
+    let zh_path = locales.join("zh.json");
     println!("cargo:rerun-if-changed={}", en_path.display());
     println!("cargo:rerun-if-changed={}", de_path.display());
+    println!("cargo:rerun-if-changed={}", fr_path.display());
+    println!("cargo:rerun-if-changed={}", es_path.display());
+    println!("cargo:rerun-if-changed={}", ja_path.display());
+    println!("cargo:rerun-if-changed={}", zh_path.display());
 
     let en: BTreeMap<String, String> = read_catalogue(&en_path);
-    let de: BTreeMap<String, String> = read_catalogue(&de_path);
-    for key in de.keys() {
-        assert!(
-            en.contains_key(key),
-            "locales/de.json contains unknown key {key}; add it to en.json first"
-        );
+    for (name, path) in [
+        ("de", &de_path),
+        ("fr", &fr_path),
+        ("es", &es_path),
+        ("ja", &ja_path),
+        ("zh", &zh_path),
+    ] {
+        let cat: BTreeMap<String, String> = read_catalogue(path);
+        for key in cat.keys() {
+            assert!(
+                en.contains_key(key),
+                "locales/{name}.json contains unknown key {key}; add it to en.json first"
+            );
+        }
     }
 
     let mut used = BTreeSet::new();

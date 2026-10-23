@@ -431,6 +431,29 @@ impl Theme {
     }
 }
 
+/// Parse a `#RRGGBB` or `#RRGGBBAA` hex colour string.
+///
+/// Returns `None` if the input is malformed.
+pub fn parse_hex_color(hex: &str) -> Option<Color32> {
+    let hex = hex.trim().strip_prefix('#').unwrap_or(hex.trim());
+    match hex.len() {
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some(Color32::from_rgb(r, g, b))
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some(Color32::from_rgba_unmultiplied(r, g, b, a))
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Theme;
