@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-24
+
+*Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Unified Theming Architecture.** The UI reads every colour, radius, and spacing step from
+  `ui::theme::Theme`. Custom themes use the `.shadowtheme` JSON format, with declarative macros
+  serving as a single source of truth across the engine, schema, and editor.
+- **Theme Gallery with Real-Time Staged Previews.** A responsive gallery grid supports category
+  filtering, search, author/version labels, tag chips, and active/staged badges. Themes can be
+  previewed live across the app without committing, or auditioned in a sandbox playback preview.
+- **In-App Theme Editor & WCAG AA Contrast Auto-Fix.** Custom themes can be created and adjusted
+  in real time. The editor validates WCAG AA text contrast (4.5:1) and non-text border contrast
+  (3.0:1) with multi-failure reporting, and an HSL lightness-only algorithm rescues low-contrast
+  tokens while preserving original hue and saturation.
+- **Automatic Schema Migration (v1 → v2).** Legacy theme files lacking `schema_version` or root
+  metadata are automatically upgraded on load, deriving missing tokens from existing palette
+  surfaces with contrast-safe defaults.
+- **Active Theme Persistence & Fast Import.** Committed theme selections persist to `active_theme.txt`
+  across app restarts. Importing themes from native file dialogs performs an in-memory cache upsert
+  without expensive disk traversal.
+
 ## [0.15.0] - 2026-10-23
 
 *Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
