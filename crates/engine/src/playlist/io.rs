@@ -393,8 +393,8 @@ fn resolve_entry(entry: &str, base_dir: Option<&Path>) -> AudioSource {
         return AudioSource::Uri(trimmed.to_string());
     }
 
-    // A leading slash is an absolute path, not a relative one.
-    if trimmed.starts_with('/') {
+    // A leading slash or backslash is an absolute or rooted path, not a relative one.
+    if trimmed.starts_with('/') || trimmed.starts_with('\\') {
         return AudioSource::File(PathBuf::from(trimmed));
     }
 
