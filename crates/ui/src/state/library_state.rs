@@ -87,6 +87,15 @@ pub struct LibraryState {
     pub folder_tracks: Vec<Track>,
     pub new_folder_input: String,
 
+    /// The track the current local radio station was seeded from.
+    pub radio_seed: Option<TrackId>,
+    /// A human-readable station name, e.g. "Boards of Canada Radio".
+    pub radio_label: String,
+    /// The station's current running order. Kept separately from
+    /// `displayed_tracks` so leaving and returning to Radio does not re-query
+    /// or reshuffle the station.
+    pub radio_tracks: Vec<Track>,
+
     /// Identity of the currently materialised `displayed_tracks`. Used to skip
     /// needless rebuilds (and the associated 10k-track clones) when the user
     /// bounces between tabs.
@@ -380,7 +389,9 @@ impl LibraryState {
             let only_the_sort_changed =
                 same_list && (previous.2 != current_sort || previous.3 != sort_order);
             if only_the_sort_changed {
-                if active_nav != NavItem::RecentlyAdded {
+                // Recently Added and Radio own their running order: one is
+                // defined by recency, the other is a deliberate shuffle.
+                if active_nav != NavItem::RecentlyAdded && active_nav != NavItem::Radio {
                     sort_tracks(&mut self.displayed_tracks, current_sort, sort_order);
                 }
                 self.displayed_key = Some(key);
@@ -432,6 +443,7 @@ impl LibraryState {
                         Vec::new()
                     }
                 },
+                NavItem::Radio => self.radio_tracks.clone(),
                 NavItem::SmartPlaylist(sp_id) => {
                     let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
                     match playlist {
@@ -453,8 +465,10 @@ impl LibraryState {
         apply_quick_filter(&mut tracks, &self.favorite_ids, self.quick_filter);
 
         // "Recently Added" defines itself by recency, so the user's global sort
-        // would fight the view. Everything else honours the chosen sort.
-        if active_nav != NavItem::RecentlyAdded {
+        // would fight the view. Radio owns its scored, salted running order for
+        // the same reason: re-sorting it alphabetically would throw away the
+        // shuffle the user asked for. Everything else honours the chosen sort.
+        if active_nav != NavItem::RecentlyAdded && active_nav != NavItem::Radio {
             sort_tracks(&mut tracks, current_sort, sort_order);
         }
 
@@ -475,6 +489,18 @@ impl LibraryState {
         if let Some(ref folder) = self.selected_folder {
             self.folder_tracks = track_repo.get_tracks_by_folder(folder).unwrap_or_default();
         }
+    }
+
+    /// Replace the current local radio station.
+    ///
+    /// The running order is stored here rather than rebuilt from
+    /// `displayed_tracks`, so leaving Radio and coming back does not re-query
+    /// the library or reshuffle the station.
+    pub fn set_radio_station(&mut self, seed: TrackId, label: String, tracks: Vec<Track>) {
+        self.radio_seed = Some(seed);
+        self.radio_label = label;
+        self.radio_tracks = tracks;
+        self.displayed_key = None;
     }
 
     pub fn toggle_favorite(&mut self, favorites_repo: &FavoritesRepo, track_id: TrackId) {
@@ -624,6 +650,7 @@ mod sort_tests {
             track_number: Some(1),
             disc_number: Some(1),
             duration_secs: duration,
+            bpm: None,
             sample_rate: 44100,
             channels: 2,
             format: "FLAC".to_string(),
@@ -746,6 +773,7 @@ mod smart_refresh_tests {
             track_number: Some(1),
             disc_number: Some(1),
             duration_secs: 100.0,
+            bpm: None,
             sample_rate: 44100,
             channels: 2,
             format: "FLAC".to_string(),

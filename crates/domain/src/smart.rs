@@ -32,11 +32,13 @@ pub enum SmartField {
     NeverPlayed,
     /// Source PCM precision in bits (16, 24, 32, …).
     BitDepth,
+    /// Beats per minute, tagged by the file.
+    Bpm,
 }
 
 impl SmartField {
     /// Every field, in the order the UI should present them.
-    pub const ALL: [SmartField; 18] = [
+    pub const ALL: [SmartField; 19] = [
         SmartField::Title,
         SmartField::Artist,
         SmartField::Album,
@@ -55,6 +57,7 @@ impl SmartField {
         SmartField::HasLyrics,
         SmartField::NeverPlayed,
         SmartField::BitDepth,
+        SmartField::Bpm,
     ];
 
     pub fn label(self) -> &'static str {
@@ -77,6 +80,7 @@ impl SmartField {
             SmartField::HasLyrics => "Has Lyrics",
             SmartField::NeverPlayed => "Never Played",
             SmartField::BitDepth => "Bit Depth",
+            SmartField::Bpm => "BPM",
         }
     }
 
@@ -104,6 +108,7 @@ impl SmartField {
             // sorting still has a real key.
             SmartField::NeverPlayed => "play_count",
             SmartField::BitDepth => "bit_depth",
+            SmartField::Bpm => "bpm",
         }
     }
 
@@ -120,6 +125,7 @@ impl SmartField {
                 | SmartField::SkipCount
                 | SmartField::Rating
                 | SmartField::BitDepth
+                | SmartField::Bpm
         )
     }
 
@@ -629,5 +635,61 @@ mod tests {
         );
         draft.rules[0].value = "Radiohead".to_string();
         assert_eq!(draft.validation_error(), None);
+    }
+}
+
+/// A local "radio" station seeded from one track.
+///
+/// Radio is a smart shuffle, not a stream: it scores the library the user
+/// already owns and never makes a network request. The weights encode the
+/// three things a listener hears as "similar" — genre, tempo and rating —
+/// plus a small preference for tracks that have not been overplayed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioQuery {
+    pub genre: Option<String>,
+    pub artist: String,
+    pub bpm: Option<u16>,
+    pub rating: u8,
+    /// A per-request salt, so pressing "Start Radio" again gives a different
+    /// order without making the query itself random.
+    pub salt: u64,
+}
+
+impl RadioQuery {
+    /// How strongly `candidate` belongs on this station. Higher is better.
+    pub fn score(&self, candidate: &crate::models::Track) -> i64 {
+        let mut score = 0i64;
+
+        if let (Some(seed_genre), Some(candidate_genre)) = (&self.genre, &candidate.genre) {
+            if seed_genre.eq_ignore_ascii_case(candidate_genre) {
+                score += 40;
+            }
+        }
+        if self.artist.eq_ignore_ascii_case(&candidate.artist) {
+            score += 15;
+        }
+        if let (Some(seed_bpm), Some(candidate_bpm)) = (self.bpm, candidate.bpm) {
+            let distance = seed_bpm.abs_diff(candidate_bpm) as i64;
+            // Within 5 BPM is a near-match; the reward tapers to zero at 30.
+            score += (30 - distance * 2).clamp(0, 30);
+        }
+        let rating_distance = self.rating.abs_diff(candidate.rating) as i64;
+        score += (10 - rating_distance * 2).max(0);
+        // Prefer discovery over the same handful of tracks.
+        score += 8i64.saturating_sub(candidate.play_count.min(8) as i64);
+        // A recently skipped track should not come straight back.
+        score -= (candidate.skip_count.min(5) as i64) * 3;
+
+        score
+    }
+
+    /// A stable, salted tie-breaker. Two calls with the same salt produce the
+    /// same order; a new station uses a new salt and therefore a new shuffle.
+    pub fn shuffle_key(&self, candidate: &crate::models::Track) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.salt.hash(&mut hasher);
+        candidate.id.hash(&mut hasher);
+        hasher.finish()
     }
 }

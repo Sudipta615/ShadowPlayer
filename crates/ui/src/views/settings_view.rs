@@ -3,7 +3,9 @@ use database::{ScanRootsRepo, TrackRepo};
 use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
 
-use crate::components::settings_tab::{show_settings_tab_extended, SettingsExtraContext};
+use crate::components::settings_tab::{
+    show_settings_tab_extended, CrossfadePreviewContext, SettingsExtraContext,
+};
 use crate::services::{ImportKind, LoudnessProgress};
 use crate::state::DspState;
 use crate::theme::Theme;
@@ -24,6 +26,13 @@ pub struct SettingsViewActions {
     pub reload_skins: bool,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
+    /// Play or stop the crossfade audition.
+    pub toggle_crossfade_preview: bool,
+    /// The crossfade curve or duration changed while a preview might be
+    /// playing.
+    pub crossfade_config_changed: bool,
+    /// The folder biographies are read from changed.
+    pub biography_source_dir_changed: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -41,10 +50,12 @@ pub fn render_settings_view(
     loudness: &LoudnessProgress,
     // The saved language preference; empty means "follow the environment".
     locale: &str,
+    crossfade_preview: CrossfadePreviewContext<'_>,
     mut on_start_scan: impl FnMut(PathBuf),
     mut on_import: impl FnMut(ImportKind),
 ) -> SettingsViewActions {
     let mut view_actions = SettingsViewActions::default();
+    let biography_source_before = dsp_state.settings_tab.biography_source_dir.clone();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
 
@@ -70,6 +81,7 @@ pub fn render_settings_view(
         let playback_info = session.playback_info();
 
         let extra = SettingsExtraContext {
+            crossfade_preview,
             scan_roots: &scan_roots,
             track_count,
             is_scanning,
@@ -115,6 +127,12 @@ pub fn render_settings_view(
         if s_actions.open_artwork_fetch {
             view_actions.open_artwork_fetch = true;
         }
+        if s_actions.toggle_crossfade_preview {
+            view_actions.toggle_crossfade_preview = true;
+        }
+        if s_actions.crossfade_config_changed {
+            view_actions.crossfade_config_changed = true;
+        }
         if let Some(ref path) = s_actions.trigger_scan {
             let _ = scan_roots_repo.add(path);
             on_start_scan(path.clone());
@@ -147,5 +165,9 @@ pub fn render_settings_view(
         dsp_state.handle_settings_actions(session, &s_actions);
     });
 
+    if dsp_state.settings_tab.biography_source_dir != biography_source_before {
+        view_actions.biography_source_dir_changed =
+            Some(dsp_state.settings_tab.biography_source_dir.clone());
+    }
     view_actions
 }

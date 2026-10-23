@@ -19,17 +19,21 @@ pub struct RightPanelAction {
     pub clear_queue: bool,
     pub volume_changed: Option<f32>,
     pub toggle_mute: bool,
+    /// Write the lyrics editor's draft to the current track's `.lrc` sidecar.
+    pub save_lyrics: bool,
 }
 
 pub struct RightPanel<'a> {
     pub active_tab: RightTab,
     pub queue_tracks: &'a [Track],
     pub current_queue_idx: usize,
+    pub current_track: Option<&'a Track>,
     pub lyrics_lines: &'a [SyncedLyricLine],
     pub plain_lyrics: Option<&'a str>,
     /// Where the current track's lyrics came from; drives the caption.
     pub lyrics_source: Option<LyricsSource>,
     pub active_lyric_idx: Option<usize>,
+    pub lyrics_editor: &'a mut crate::state::LyricsEditorState,
     pub volume: f32,
     pub is_muted: bool,
     pub artwork: &'a mut ArtworkService,
@@ -46,6 +50,7 @@ impl<'a> RightPanel<'a> {
             clear_queue: false,
             volume_changed: None,
             toggle_mute: false,
+            save_lyrics: false,
         };
 
         ui.vertical(|ui| {
@@ -554,20 +559,87 @@ impl<'a> RightPanel<'a> {
                         // has not finished yet: tag lyrics are read off-thread,
                         // sidecars resolve synchronously.
                         let lyrics_resolved = self.lyrics_source.is_some();
+                        let track_id = self.current_track.map(|t| t.id);
+
+                        // A draft belongs to exactly one track: never let it
+                        // be saved onto the next song.
+                        if self.lyrics_editor.track_id.is_some()
+                            && self.lyrics_editor.track_id != track_id
+                        {
+                            self.lyrics_editor.close();
+                        }
+                        let editing_here =
+                            self.lyrics_editor.editing && self.lyrics_editor.track_id == track_id;
+
                         let caption = match self.lyrics_source {
                             Some(s) if s.has_lyrics() => s.caption(),
                             _ => None,
                         };
-                        if let Some(caption) = caption {
-                            ui.label(
-                                egui::RichText::new(caption)
-                                    .font(crate::theme::font(11.0))
-                                    .color(self.theme.text_dim),
+                        ui.horizontal(|ui| {
+                            if let Some(caption) = caption {
+                                ui.label(
+                                    egui::RichText::new(caption)
+                                        .font(crate::theme::font(11.0))
+                                        .color(self.theme.text_dim),
+                                );
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if editing_here {
+                                        if ui.small_button(tr!("Save")).clicked() {
+                                            action.save_lyrics = true;
+                                        }
+                                        if ui.small_button(tr!("Cancel")).clicked() {
+                                            self.lyrics_editor.close();
+                                        }
+                                    } else if let Some(id) = track_id {
+                                        if ui.small_button(tr!("Edit")).clicked() {
+                                            self.lyrics_editor.begin(
+                                                id,
+                                                self.plain_lyrics.unwrap_or("").to_string(),
+                                            );
+                                        }
+                                    }
+                                },
                             );
-                            ui.add_space(6.0);
-                        }
+                        });
+                        ui.add_space(6.0);
 
-                        if self.lyrics_lines.is_empty() {
+                        if editing_here {
+                            ui.label(
+                                egui::RichText::new(tr!(
+                                    "Edit the raw lyrics. Timestamps such as [00:12.50] stay synced; save writes a .lrc file beside the track."
+                                ))
+                                .font(crate::theme::font(11.0))
+                                .color(self.theme.text_dim),
+                            );
+                            ui.add_space(4.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("lyrics_editor_scroll")
+                                .max_height(420.0)
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::TextEdit::multiline(
+                                            &mut self.lyrics_editor.draft,
+                                        )
+                                        .desired_rows(16)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text(tr!(
+                                            "[00:00.00] First line\n[00:04.20] Second line"
+                                        ))
+                                        .font(egui::TextStyle::Monospace),
+                                    );
+                                });
+                            if let Some(error) = &self.lyrics_editor.error {
+                                ui.label(
+                                    egui::RichText::new(error)
+                                        .font(crate::theme::font(11.0))
+                                        .color(self.theme.destructive),
+                                );
+                            }
+                        } else if self.lyrics_lines.is_empty() {
                             if let Some(plain) = self.plain_lyrics {
                                 egui::ScrollArea::vertical()
                                     .id_salt("plain_lyrics_scroll")

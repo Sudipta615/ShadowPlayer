@@ -30,6 +30,8 @@ pub struct NowPlayingFull<'a> {
     pub position_secs: f64,
     pub duration_secs: f64,
     pub spectrum_db: &'a [f32],
+    /// Cached waveform peaks for the seek bar.
+    pub waveform: Option<&'a [f32]>,
     /// The synced lyric lines, if the track has any.
     pub lyrics_lines: &'a [SyncedLyricLine],
     /// The index of the line that is playing right now.
@@ -276,7 +278,6 @@ impl<'a> NowPlayingFull<'a> {
                     let time_w = 54.0;
                     let slider_w =
                         (ui.available_width() - time_w * 2.0 - theme.space_md * 2.0).max(80.0);
-                    let mut new_pos = pos;
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
                         ui.allocate_ui_with_layout(
@@ -290,17 +291,17 @@ impl<'a> NowPlayingFull<'a> {
                                 );
                             },
                         );
-                        let resp = ui.add_sized(
-                            [slider_w, 20.0],
-                            egui::Slider::new(&mut new_pos, 0.0..=dur)
-                                .show_value(false)
-                                .trailing_fill(true),
-                        );
-                        resp.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::Role::Slider, true, "Playback position")
-                        });
-                        if resp.changed() {
-                            events.seek_secs = Some(new_pos);
+                        let (_resp, seek) = crate::components::waveform_seek::WaveformSeek {
+                            peaks: self.waveform,
+                            position_secs: pos,
+                            duration_secs: dur,
+                            height: 20.0,
+                            width: Some(slider_w),
+                            theme,
+                        }
+                        .show(ui);
+                        if let Some(fraction) = seek {
+                            events.seek_secs = Some(fraction as f64 * dur);
                         }
                         ui.allocate_ui_with_layout(
                             Vec2::new(time_w, 20.0),

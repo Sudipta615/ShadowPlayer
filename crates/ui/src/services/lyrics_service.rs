@@ -231,6 +231,34 @@ impl LyricsService {
         self.cache.get(track_id).map(|e| e.source)
     }
 
+    /// Write edited lyrics to the track's `.lrc` sidecar and reload them.
+    ///
+    /// A sidecar is used even when the lyrics originally came from a tag: tags
+    /// should not be rewritten by a text edit, and a sidecar is what the
+    /// lyrics panel already prioritises on the next play.
+    pub fn save_sidecar(&mut self, track: &Track, text: &str) -> Result<PathBuf, String> {
+        let path = track.path.with_extension("lrc");
+        std::fs::write(&path, text).map_err(|e| {
+            tr_args!(
+                "Could not write {path}: {error}",
+                "path" => path.display(),
+                "error" => e
+            )
+        })?;
+        self.cache.remove(&track.id);
+        self.order.retain(|id| *id != track.id);
+        self.ensure_loaded(track);
+        Ok(path)
+    }
+
+    /// The raw text the editor should start from.
+    pub fn raw_text(&self, track_id: &TrackId) -> String {
+        self.cache
+            .get(track_id)
+            .and_then(|entry| entry.plain.clone())
+            .unwrap_or_default()
+    }
+
     /// Find current active synchronized lyric line index for time position.
     pub fn active_index(lines: &[SyncedLyricLine], position_secs: f32) -> Option<usize> {
         find_active_line(lines, position_secs)
@@ -304,6 +332,7 @@ mod tests {
             track_number: None,
             disc_number: None,
             duration_secs: 1.0,
+            bpm: None,
             sample_rate: 44100,
             channels: 2,
             format: "MP3".to_string(),

@@ -44,6 +44,8 @@ pub struct NowPlayingCard<'a> {
     pub position_secs: f64,
     pub duration_secs: f64,
     pub spectrum_db: &'a [f32],
+    /// Cached waveform peaks for the seek bar, when they have been generated.
+    pub waveform: Option<&'a [f32]>,
     pub artwork: Option<&'a TextureHandle>,
     pub format_str: Option<&'a str>,
     pub bit_perfect: bool,
@@ -328,68 +330,19 @@ impl<'a> NowPlayingCard<'a> {
                             self.theme.text_muted,
                         );
 
-                        // Scrubber Slider
-                        let (bar_rect, bar_resp) = ui.allocate_exact_size(
-                            Vec2::new(bar_width, if dense { 12.0 } else { 16.0 }),
-                            Sense::click_and_drag(),
-                        );
-                        let painter = ui.painter_at(bar_rect);
-
-                        let track_y = bar_rect.center().y;
-                        let track_rect = Rect::from_min_max(
-                            Pos2::new(bar_rect.min.x, track_y - 2.0),
-                            Pos2::new(bar_rect.max.x, track_y + 2.0),
-                        );
-                        // Background track (clearly visible in both dark & light modes)
-                        painter.rect_filled(
-                            track_rect,
-                            CornerRadius::same(self.theme.radius_xs),
-                            self.theme.slider_track,
-                        );
-
-                        // Progress fraction
-                        let fraction = if self.duration_secs > 0.0 {
-                            (self.position_secs / self.duration_secs).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-
-                        let filled_width = bar_width * fraction as f32;
-                        if filled_width > 0.0 {
-                            let fill_rect = Rect::from_min_max(
-                                Pos2::new(bar_rect.min.x, track_y - 2.0),
-                                Pos2::new(bar_rect.min.x + filled_width, track_y + 2.0),
-                            );
-                            painter.rect_filled(
-                                fill_rect,
-                                CornerRadius::same(self.theme.radius_xs),
-                                self.theme.accent_highlight,
-                            );
+                        // Waveform scrubber. Falls back to the plain line
+                        // while the first decode is still running.
+                        let (_bar_resp, seek) = crate::components::waveform_seek::WaveformSeek {
+                            peaks: self.waveform,
+                            position_secs: self.position_secs,
+                            duration_secs: self.duration_secs,
+                            height: if dense { 12.0 } else { 16.0 },
+                            width: Some(bar_width),
+                            theme: self.theme,
                         }
-
-                        // A quiet thumb, visible on hover/drag instead of a
-                        // permanent white dot.
-                        if bar_resp.hovered() || bar_resp.dragged() {
-                            let thumb_pos = Pos2::new(bar_rect.min.x + filled_width, track_y);
-                            painter.circle_filled(thumb_pos, 5.0, self.theme.text_primary);
-                            painter.circle_stroke(
-                                thumb_pos,
-                                5.0,
-                                Stroke::new(1.5_f32, self.theme.bg_card),
-                            );
-                        }
-
-                        bar_resp.widget_info(|| {
-                            egui::WidgetInfo::slider(true, fraction, "Playback position")
-                        });
-
-                        // Dragging or clicking progress bar to seek
-                        if bar_resp.dragged() || bar_resp.clicked() {
-                            if let Some(mouse_pos) = bar_resp.interact_pointer_pos() {
-                                let norm =
-                                    ((mouse_pos.x - bar_rect.min.x) / bar_width).clamp(0.0, 1.0);
-                                events.seek_secs = Some(norm as f64 * self.duration_secs);
-                            }
+                        .show(ui);
+                        if let Some(norm) = seek {
+                            events.seek_secs = Some(norm as f64 * self.duration_secs);
                         }
 
                         let (lbl2, _) = ui.allocate_exact_size(

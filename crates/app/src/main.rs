@@ -360,6 +360,7 @@ mod tests {
             track_number: None,
             disc_number: None,
             duration_secs: 60.0,
+            bpm: None,
             sample_rate: 44_100,
             channels: 2,
             format: "FLAC".to_string(),

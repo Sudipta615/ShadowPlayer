@@ -100,6 +100,7 @@ fn synthetic_library(count: usize) -> Vec<Track> {
                 track_number: Some(track_no),
                 disc_number: Some(1),
                 duration_secs: 120.0 + (i % 300) as f32,
+                bpm: None,
                 sample_rate: if i % 3 == 0 { 96_000 } else { 44_100 },
                 channels: 2,
                 format: if i % 3 == 0 { "FLAC" } else { "MP3" }.to_string(),
@@ -313,7 +314,7 @@ fn the_table_renders_a_hundred_thousand_tracks_inside_a_frame() {
     use std::collections::HashSet;
 
     use eframe::egui;
-    use ui::components::songs_table::{ColumnWidths, RowDensity, SongsTable};
+    use ui::components::songs_table::{ColumnPreset, RowDensity, SongsTable};
     use ui::services::artwork_service::ArtworkService;
     use ui::theme::Theme;
 
@@ -324,6 +325,9 @@ fn the_table_renders_a_hundred_thousand_tracks_inside_a_frame() {
     let mut last_clicked: Option<usize> = None;
     let favorites: HashSet<TrackId> = HashSet::new();
     let playlists: Vec<domain::models::Playlist> = Vec::new();
+    let preset = ColumnPreset::default();
+    let preset_names = vec![preset.name.clone()];
+    let mut preset_name_draft = String::new();
 
     let context = egui::Context::default();
     let input = egui::RawInput {
@@ -339,7 +343,7 @@ fn the_table_renders_a_hundred_thousand_tracks_inside_a_frame() {
     let mut frames = Vec::new();
     for frame in 0..5 {
         let started = Instant::now();
-        let _ = context.run_ui(input.clone(), |ui| {
+        let mut output = context.run_ui(input.clone(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let table = SongsTable {
                     tracks: &library,
@@ -351,7 +355,10 @@ fn the_table_renders_a_hundred_thousand_tracks_inside_a_frame() {
                     sort_order: SortOrder::Ascending,
                     is_grid_view: false,
                     quick_filter: ui::components::songs_table::QuickFilter::All,
-                    column_widths: ColumnWidths::default(),
+                    column_preset: &preset,
+                    column_preset_names: &preset_names,
+                    active_preset: 0,
+                    preset_name_draft: &mut preset_name_draft,
                     rating_width: 64.0,
                     density: RowDensity::default(),
                     selected_track_ids: &mut selected,
@@ -365,6 +372,10 @@ fn the_table_renders_a_hundred_thousand_tracks_inside_a_frame() {
                 let _ = table.show(ui);
             });
         });
+        // This is a layout/paint measurement, not a frame presented to a GPU:
+        // there is no renderer to upload the font-atlas delta to. epaint
+        // panics if deltas are dropped unhandled, so discard them explicitly.
+        output.textures_delta.clear();
         if frame > 0 {
             frames.push(started.elapsed());
         }

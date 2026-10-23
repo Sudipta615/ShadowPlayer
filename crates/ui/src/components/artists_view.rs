@@ -14,6 +14,8 @@ pub struct ArtistsViewAction {
     pub queue_artist: Option<String>,
     pub play_track: Option<TrackId>,
     pub toggle_favorite: Option<TrackId>,
+    /// A biography was saved or cleared in the pane.
+    pub biography_request: Option<crate::components::biography_pane::BiographyPaneRequest>,
 }
 
 pub struct ArtistsView<'a> {
@@ -28,6 +30,9 @@ pub struct ArtistsView<'a> {
     /// The artwork service, so the grid can load the covers it is about to
     /// show.
     pub artwork: &'a mut ArtworkService,
+    /// Cached biography for the selected artist, if any.
+    pub biography: Option<&'a domain::models::Biography>,
+    pub biography_editor: &'a mut crate::state::BiographyEditorState,
     pub theme: &'a Theme,
 }
 
@@ -38,6 +43,7 @@ impl<'a> ArtistsView<'a> {
             queue_artist: None,
             play_track: None,
             toggle_favorite: None,
+            biography_request: None,
         };
 
         if let Some(sel_name) = self.selected_artist.clone() {
@@ -137,7 +143,18 @@ impl<'a> ArtistsView<'a> {
                 });
             });
 
-            ui.add_space(10.0);
+            ui.add_space(8.0);
+
+            action.biography_request = crate::components::biography_pane::BiographyPane {
+                kind: "artist",
+                name: &sel_name,
+                biography: self.biography,
+                editor: self.biography_editor,
+                theme: self.theme,
+            }
+            .show(ui);
+
+            ui.add_space(8.0);
 
             // Artist Tracks Table
             egui::ScrollArea::vertical()

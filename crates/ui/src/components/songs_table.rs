@@ -165,6 +165,298 @@ impl ColumnWidths {
     }
 }
 
+/// A column that can appear in the songs table.
+///
+/// `Title` carries the artwork and the playing indicator and is always
+/// present. The rest are optional, ordered by the active [`ColumnPreset`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SongColumn {
+    Title,
+    Artist,
+    Album,
+    Year,
+    Genre,
+    BitDepth,
+    SampleRate,
+    Codec,
+    Bpm,
+    PlayCount,
+}
+
+impl SongColumn {
+    /// Columns the preset editor can add. `Title` is fixed first.
+    pub const OPTIONAL: [SongColumn; 9] = [
+        SongColumn::Artist,
+        SongColumn::Album,
+        SongColumn::Year,
+        SongColumn::Genre,
+        SongColumn::BitDepth,
+        SongColumn::SampleRate,
+        SongColumn::Codec,
+        SongColumn::Bpm,
+        SongColumn::PlayCount,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SongColumn::Title => "Title",
+            SongColumn::Artist => "Artist",
+            SongColumn::Album => "Album",
+            SongColumn::Year => "Year",
+            SongColumn::Genre => "Genre",
+            SongColumn::BitDepth => "Bit Depth",
+            SongColumn::SampleRate => "Sample Rate",
+            SongColumn::Codec => "Codec",
+            SongColumn::Bpm => "BPM",
+            SongColumn::PlayCount => "Plays",
+        }
+    }
+
+    /// The sort key this column maps to, if the table supports sorting by it.
+    pub fn sort_field(self) -> Option<SortField> {
+        match self {
+            SongColumn::Title => Some(SortField::Title),
+            SongColumn::Artist => Some(SortField::Artist),
+            SongColumn::Album => Some(SortField::Album),
+            _ => None,
+        }
+    }
+
+    /// A column's share of the flexible width before normalisation.
+    fn default_weight(self) -> f32 {
+        match self {
+            SongColumn::Title => 0.42,
+            SongColumn::Artist => 0.25,
+            SongColumn::Album => 0.25,
+            SongColumn::Year => 0.08,
+            SongColumn::Genre => 0.14,
+            SongColumn::BitDepth => 0.10,
+            SongColumn::SampleRate => 0.12,
+            SongColumn::Codec => 0.10,
+            SongColumn::Bpm => 0.08,
+            SongColumn::PlayCount => 0.09,
+        }
+    }
+
+    /// The cell text for a track. Empty values become an em dash so the row
+    /// does not look like it is missing a column.
+    pub fn value(self, track: &Track) -> String {
+        let value = match self {
+            SongColumn::Title => track.title.clone(),
+            SongColumn::Artist => track.artist.clone(),
+            SongColumn::Album => track.album.clone(),
+            SongColumn::Year => track.year.map(|year| year.to_string()).unwrap_or_default(),
+            SongColumn::Genre => track.genre.clone().unwrap_or_default(),
+            SongColumn::BitDepth => track
+                .bit_depth
+                .map(|bits| format!("{bits}-bit"))
+                .unwrap_or_default(),
+            SongColumn::SampleRate => {
+                if track.sample_rate == 0 {
+                    String::new()
+                } else {
+                    format!("{:.1} kHz", track.sample_rate as f32 / 1000.0)
+                }
+            }
+            SongColumn::Codec => track.format.clone(),
+            SongColumn::Bpm => track.bpm.map(|bpm| bpm.to_string()).unwrap_or_default(),
+            SongColumn::PlayCount => track.play_count.to_string(),
+        };
+        if value.trim().is_empty() {
+            "—".to_string()
+        } else {
+            value
+        }
+    }
+}
+
+/// A named table layout: an ordered list of columns and their width shares.
+///
+/// Presets are data, not code: the built-in Default / Casual / Audiophile
+/// layouts can be edited, copied or replaced, and the user's own presets are
+/// stored with the rest of the table preferences.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ColumnPreset {
+    pub name: String,
+    pub columns: Vec<SongColumn>,
+    /// One share per column, parallel to `columns`.
+    pub weights: Vec<f32>,
+}
+
+impl Default for ColumnPreset {
+    fn default() -> Self {
+        Self {
+            name: "Default".to_string(),
+            columns: vec![SongColumn::Title, SongColumn::Artist, SongColumn::Album],
+            weights: vec![0.42, 0.26, 0.26],
+        }
+        .normalized()
+    }
+}
+
+impl ColumnPreset {
+    /// Build the Default layout while keeping the column proportions an older
+    /// build saved in `SongTablePrefs::widths`.
+    pub fn from_legacy_widths(widths: ColumnWidths) -> Self {
+        let widths = widths.normalized();
+        Self {
+            name: "Default".to_string(),
+            columns: vec![SongColumn::Title, SongColumn::Artist, SongColumn::Album],
+            weights: vec![widths.title, widths.artist, widths.album],
+        }
+        .normalized()
+    }
+
+    /// The factory layout with this name, if it is one of the built-ins.
+    ///
+    /// "Reset this preset" uses this to restore Casual or Audiophile to the
+    /// layout they shipped with, rather than collapsing every preset to the
+    /// Default columns.
+    pub fn factory(name: &str) -> Option<Self> {
+        Self::builtins()
+            .into_iter()
+            .find(|preset| preset.name.eq_ignore_ascii_case(name))
+    }
+
+    /// The presets a fresh install starts with.
+    pub fn builtins() -> Vec<Self> {
+        vec![
+            Self::default(),
+            Self {
+                name: "Casual".to_string(),
+                columns: vec![SongColumn::Title, SongColumn::Artist],
+                weights: vec![0.68, 0.32],
+            }
+            .normalized(),
+            Self {
+                name: "Audiophile".to_string(),
+                columns: vec![
+                    SongColumn::Title,
+                    SongColumn::Artist,
+                    SongColumn::Album,
+                    SongColumn::Codec,
+                    SongColumn::BitDepth,
+                    SongColumn::SampleRate,
+                    SongColumn::Bpm,
+                ],
+                weights: vec![0.30, 0.17, 0.17, 0.09, 0.08, 0.10, 0.09],
+            }
+            .normalized(),
+        ]
+    }
+
+    /// Title first, no duplicates, one valid weight per column.
+    pub fn normalized(mut self) -> Self {
+        let mut seen = HashSet::new();
+        self.columns.retain(|column| seen.insert(*column));
+        if let Some(pos) = self
+            .columns
+            .iter()
+            .position(|column| *column == SongColumn::Title)
+        {
+            let title = self.columns.remove(pos);
+            self.columns.insert(0, title);
+        } else {
+            self.columns.insert(0, SongColumn::Title);
+        }
+
+        let mut weights = Vec::with_capacity(self.columns.len());
+        for (idx, column) in self.columns.iter().enumerate() {
+            let weight = self
+                .weights
+                .get(idx)
+                .copied()
+                .unwrap_or(column.default_weight());
+            weights.push(if weight.is_finite() {
+                weight.max(0.0)
+            } else {
+                column.default_weight()
+            });
+        }
+        let sum: f32 = weights.iter().sum();
+        if !sum.is_finite() || sum <= f32::EPSILON {
+            weights = self
+                .columns
+                .iter()
+                .map(|column| column.default_weight())
+                .collect();
+        } else {
+            for weight in &mut weights {
+                *weight /= sum;
+            }
+        }
+        self.weights = Self::enforce_minimums(&weights);
+        if self.name.trim().is_empty() {
+            self.name = "Custom".to_string();
+        }
+        self
+    }
+
+    fn enforce_minimums(weights: &[f32]) -> Vec<f32> {
+        const MIN: f32 = 0.06;
+        let mut out = weights.to_vec();
+        if out.len() <= 1 {
+            return vec![1.0];
+        }
+        let min = MIN.min(1.0 / out.len() as f32);
+        let mut deficit = 0.0;
+        for weight in &mut out {
+            if *weight < min {
+                deficit += min - *weight;
+                *weight = min;
+            }
+        }
+        if deficit > 0.0 {
+            let headroom: f32 = out.iter().map(|weight| (weight - min).max(0.0)).sum();
+            if headroom <= f32::EPSILON {
+                return vec![1.0 / out.len() as f32; out.len()];
+            }
+            for weight in &mut out {
+                if *weight > min {
+                    *weight -= deficit * (*weight - min) / headroom;
+                }
+            }
+        }
+        let sum: f32 = out.iter().sum();
+        for weight in &mut out {
+            *weight /= sum;
+        }
+        out
+    }
+
+    /// Drag the boundary after column `boundary` by `delta` fractions of the
+    /// flexible width.
+    pub fn drag(&self, boundary: usize, delta: f32) -> Self {
+        let mut next = self.clone().normalized();
+        if boundary + 1 >= next.columns.len() {
+            return next;
+        }
+        const MIN: f32 = 0.06;
+        let (left, right) = next.weights.split_at_mut(boundary + 1);
+        let left = &mut left[boundary];
+        let right = &mut right[0];
+        let delta = delta.clamp(MIN - *left, *right - MIN);
+        *left += delta;
+        *right -= delta;
+        let sum: f32 = next.weights.iter().sum();
+        if sum > f32::EPSILON {
+            for weight in &mut next.weights {
+                *weight /= sum;
+            }
+        }
+        next
+    }
+
+    pub fn move_column(&mut self, from: usize, to: usize) {
+        if from < self.columns.len() && to < self.columns.len() {
+            let column = self.columns.remove(from);
+            let weight = self.weights.remove(from);
+            self.columns.insert(to, column);
+            self.weights.insert(to, weight);
+        }
+    }
+}
+
 /// How tall a song-table row is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RowDensity {
@@ -214,9 +506,12 @@ fn default_rating_width() -> f32 {
 }
 
 /// Everything the table remembers between launches.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SongTablePrefs {
+    /// Kept for settings written before column presets existed. New layouts
+    /// use `presets`; this field is still read so an upgrade does not lose the
+    /// user's Title/Artist/Album proportions.
     pub widths: ColumnWidths,
     pub density: RowDensity,
     /// Rating-column width in pixels. Ratings are a fixed-width cell rather
@@ -224,6 +519,10 @@ pub struct SongTablePrefs {
     /// and expect the choice to survive a restart.
     #[serde(default = "default_rating_width")]
     pub rating_width: f32,
+    /// Named column layouts. Empty in settings written by older builds.
+    pub presets: Vec<ColumnPreset>,
+    /// Index into `presets`.
+    pub active_preset: usize,
 }
 
 impl Default for SongTablePrefs {
@@ -232,6 +531,8 @@ impl Default for SongTablePrefs {
             widths: ColumnWidths::default(),
             density: RowDensity::default(),
             rating_width: default_rating_width(),
+            presets: ColumnPreset::builtins(),
+            active_preset: 0,
         }
     }
 }
@@ -257,6 +558,13 @@ const ART_GAP: f32 = 8.0;
 /// positions separately and drifted apart: the header spent 8 px on each of
 /// its six gaps while the row budgeted 40 px in total, so the columns did not
 /// line up and the header overflowed the row by 8 px.
+#[derive(Debug, Clone, Copy)]
+struct ColumnSpan {
+    column: SongColumn,
+    x: f32,
+    w: f32,
+}
+
 struct TableColumns {
     /// Left edge of the row-number column.
     num_x: f32,
@@ -268,12 +576,8 @@ struct TableColumns {
     title_text_w: f32,
     /// Thumbnail width plus the gap before the title text.
     art_inset: f32,
-    /// Left edge and width of the artist column.
-    artist_x: f32,
-    artist_w: f32,
-    /// Left edge and width of the album column.
-    album_x: f32,
-    album_w: f32,
+    /// One span per preset column, in preset order.
+    spans: Vec<ColumnSpan>,
     /// Left edge of the duration column.
     duration_x: f32,
     /// Left edge and width of the rating column.
@@ -283,43 +587,64 @@ struct TableColumns {
     favorite_x: f32,
     /// Left edge of the overflow-menu column.
     menu_x: f32,
-    /// The width shared by title, artist and album.
+    /// The width shared by every preset column.
     flexible_w: f32,
 }
 
 impl TableColumns {
     /// Lay the table out for a content area `full_width` wide.
-    fn new(full_width: f32, widths: ColumnWidths, density: RowDensity, rating_w: f32) -> Self {
+    fn new(full_width: f32, preset: &ColumnPreset, density: RowDensity, rating_w: f32) -> Self {
+        let fallback;
+        let preset = if preset.columns.is_empty() {
+            fallback = ColumnPreset::default();
+            &fallback
+        } else {
+            preset
+        };
         let rating_w = if rating_w.is_finite() {
             rating_w.clamp(COL_RATING_W_MIN, COL_RATING_W_MAX)
         } else {
             COL_RATING_W
         };
         let right_block = COL_TIME_W + rating_w + COL_FAV_W + COL_MENU_W;
-        let fixed = COL_NUM_W + right_block + COL_GAP * 3.0;
+        let column_count = preset.columns.len().max(1);
+        let fixed = COL_NUM_W + right_block + COL_GAP * column_count as f32;
         let flexible = (full_width - fixed).max(180.0);
-        let weights = widths.normalized();
-        let title_w = flexible * weights.title;
-        let artist_w = flexible * weights.artist;
-        let album_w = flexible * weights.album;
+
         // The artwork shrinks in compact mode, and the title text follows it
         // rather than keeping a fixed inset that would waste its space.
         let art_inset = density.thumb_size() + ART_GAP;
 
-        let title_x = COL_NUM_W;
-        let artist_x = title_x + title_w + COL_GAP;
-        let album_x = artist_x + artist_w + COL_GAP;
+        let mut spans = Vec::with_capacity(preset.columns.len());
+        let mut x = COL_NUM_W;
+        for (idx, column) in preset.columns.iter().enumerate() {
+            let weight = preset.weights.get(idx).copied().unwrap_or(0.0);
+            let w = flexible * weight;
+            spans.push(ColumnSpan {
+                column: *column,
+                x,
+                w,
+            });
+            x += w + COL_GAP;
+        }
+
+        let title = spans
+            .iter()
+            .find(|span| span.column == SongColumn::Title)
+            .copied()
+            .unwrap_or(ColumnSpan {
+                column: SongColumn::Title,
+                x: COL_NUM_W,
+                w: flexible,
+            });
 
         Self {
             num_x: 0.0,
-            title_x,
-            title_text_x: title_x + art_inset,
-            title_text_w: (title_w - art_inset).max(40.0),
+            title_x: title.x,
+            title_text_x: title.x + art_inset,
+            title_text_w: (title.w - art_inset).max(40.0),
             art_inset,
-            artist_x,
-            artist_w,
-            album_x,
-            album_w,
+            spans,
             duration_x: full_width - right_block,
             rating_x: full_width - rating_w - COL_FAV_W - COL_MENU_W,
             rating_w,
@@ -530,8 +855,17 @@ pub struct SongsTableAction {
     pub sort_order_changed: Option<SortOrder>,
     /// User tapped a quality/format chip.
     pub quick_filter_changed: Option<QuickFilter>,
-    /// The user dragged a column separator to a new set of shares.
-    pub column_widths_changed: Option<ColumnWidths>,
+    /// The user dragged a separator to a new set of shares.
+    pub column_preset_changed: Option<ColumnPreset>,
+    /// A column was added, removed or reordered from the menu. Unlike a drag,
+    /// this is a completed edit and should be persisted immediately.
+    pub column_preset_edited: bool,
+    /// The user chose another saved preset.
+    pub select_column_preset: Option<usize>,
+    /// Store this layout under the name in `preset_name_draft`.
+    pub save_column_preset: Option<ColumnPreset>,
+    /// Remove the active preset.
+    pub delete_column_preset: bool,
     /// The rating column was dragged to a new pixel width.
     pub rating_width_changed: Option<f32>,
     /// The drag ended; this is the moment to persist the widths.
@@ -550,6 +884,8 @@ pub struct SongsTableAction {
     pub open_dsp: Option<TrackId>,
     /// User chose "Auto-Tag with MusicBrainz" from the context menu.
     pub autotag_track: Option<TrackId>,
+    /// Seed a local radio station from this track.
+    pub start_radio: Option<TrackId>,
 
     // ── Bulk (multi-select) actions ─────────────────────────────────────────
     // The selected ids themselves live in `LibraryState`; these flags only say
@@ -588,8 +924,14 @@ pub struct SongsTable<'a> {
     pub is_grid_view: bool,
     /// Active quality/format chip.
     pub quick_filter: QuickFilter,
-    /// The flexible columns' persisted shares.
-    pub column_widths: ColumnWidths,
+    /// The active column layout.
+    pub column_preset: &'a ColumnPreset,
+    /// Names of every saved preset, in menu order.
+    pub column_preset_names: &'a [String],
+    /// Index of `column_preset` in the saved list.
+    pub active_preset: usize,
+    /// Work-in-progress name for "Save as preset".
+    pub preset_name_draft: &'a mut String,
     /// Persisted width of the fixed rating column.
     pub rating_width: f32,
     /// Whether rows are comfortable or compact.
@@ -625,7 +967,11 @@ impl<'a> SongsTable<'a> {
             sort_field_changed: None,
             sort_order_changed: None,
             quick_filter_changed: None,
-            column_widths_changed: None,
+            column_preset_changed: None,
+            column_preset_edited: false,
+            select_column_preset: None,
+            save_column_preset: None,
+            delete_column_preset: false,
             rating_width_changed: None,
             column_drag_finished: false,
             toggle_density: false,
@@ -637,6 +983,7 @@ impl<'a> SongsTable<'a> {
             edit_track: None,
             open_dsp: None,
             autotag_track: None,
+            start_radio: None,
             play_selected: false,
             queue_next_selected: false,
             add_selected_to_queue: false,
@@ -664,7 +1011,10 @@ impl<'a> SongsTable<'a> {
             sort_order,
             is_grid_view,
             quick_filter,
-            column_widths,
+            column_preset,
+            column_preset_names,
+            active_preset,
+            preset_name_draft,
             rating_width,
             density,
             selected_track_ids,
@@ -703,6 +1053,18 @@ impl<'a> SongsTable<'a> {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+
+                    if !is_grid_view {
+                        render_column_preset_menu(
+                            ui,
+                            column_preset,
+                            column_preset_names,
+                            active_preset,
+                            preset_name_draft,
+                            theme,
+                            &mut action,
+                        );
+                    }
 
                     // View Mode Toggles (Grid vs List). The active button's
                     // fill fades in rather than snapping, and the animation
@@ -1132,7 +1494,7 @@ impl<'a> SongsTable<'a> {
             // Static column headers, painted on the same column model the rows
             // use, so the two can never drift apart.
             let full_width = ui.available_width();
-            let cols = TableColumns::new(full_width, column_widths, density, rating_width);
+            let cols = TableColumns::new(full_width, column_preset, density, rating_width);
 
             let (header_rect, _) =
                 ui.allocate_exact_size(Vec2::new(full_width, 20.0), Sense::hover());
@@ -1226,74 +1588,49 @@ impl<'a> SongsTable<'a> {
                 action.sort_field_changed = Some(SortField::Title);
             }
 
-            // Column 3: artist.
-            let artist_h_resp = header_cell(ui, "hdr_artist", cols.artist_x, cols.artist_w);
-            let artist_col = if current_sort == SortField::Artist {
-                theme.accent_highlight
-            } else {
-                theme.text_muted
-            };
-            let artist_label =
-                hp.layout_no_wrap("ARTIST".to_string(), crate::theme::font(11.8), artist_col);
-            let artist_label_w = artist_label.size().x;
-            hp.galley(
-                Pos2::new(
-                    header_rect.min.x + cols.artist_x,
-                    header_y - artist_label.size().y * 0.5,
-                ),
-                artist_label,
-                artist_col,
-            );
-            paint_sort_arrow(
-                &hp,
-                Pos2::new(
-                    header_rect.min.x + cols.artist_x + artist_label_w + 8.0,
-                    header_y,
-                ),
-                current_sort == SortField::Artist,
-                sort_order,
-                artist_col,
-            );
-            if artist_h_resp
-                .on_hover_text(tr!(Msg::S037ECF046DEFA93D))
-                .clicked()
-            {
-                action.sort_field_changed = Some(SortField::Artist);
-            }
-
-            // Column 4: album.
-            let album_h_resp = header_cell(ui, "hdr_album", cols.album_x, cols.album_w);
-            let album_col = if current_sort == SortField::Album {
-                theme.accent_highlight
-            } else {
-                theme.text_muted
-            };
-            let album_label =
-                hp.layout_no_wrap("ALBUM".to_string(), crate::theme::font(11.8), album_col);
-            let album_label_w = album_label.size().x;
-            hp.galley(
-                Pos2::new(
-                    header_rect.min.x + cols.album_x,
-                    header_y - album_label.size().y * 0.5,
-                ),
-                album_label,
-                album_col,
-            );
-            paint_sort_arrow(
-                &hp,
-                Pos2::new(
-                    header_rect.min.x + cols.album_x + album_label_w + 8.0,
-                    header_y,
-                ),
-                current_sort == SortField::Album,
-                sort_order,
-                album_col,
-            );
-            if album_h_resp
-                .on_hover_text(tr!(Msg::SC867FBA5A5646ED9))
-                .clicked()
-            {
-                action.sort_field_changed = Some(SortField::Album);
+            // Remaining preset columns, in the order the user chose.
+            for span in &cols.spans {
+                if span.column == SongColumn::Title {
+                    continue;
+                }
+                let sort = span.column.sort_field();
+                let is_sorted = sort.is_some_and(|field| field == current_sort);
+                let header_col = if is_sorted {
+                    theme.accent_highlight
+                } else {
+                    theme.text_muted
+                };
+                let salt = format!("hdr_col_{:?}", span.column);
+                let resp = header_cell(ui, &salt, span.x, span.w);
+                let label = hp.layout_no_wrap(
+                    span.column.label().to_uppercase(),
+                    crate::theme::font(11.0),
+                    header_col,
+                );
+                let label_w = label.size().x;
+                hp.galley(
+                    Pos2::new(header_rect.min.x + span.x, header_y - label.size().y * 0.5),
+                    label,
+                    header_col,
+                );
+                if let Some(field) = sort {
+                    paint_sort_arrow(
+                        &hp,
+                        Pos2::new(header_rect.min.x + span.x + label_w + 8.0, header_y),
+                        is_sorted,
+                        sort_order,
+                        header_col,
+                    );
+                    if resp
+                        .on_hover_text(tr_args!(
+                            "Sort by {column}",
+                            "column" => span.column.label()
+                        ))
+                        .clicked()
+                    {
+                        action.sort_field_changed = Some(field);
+                    }
+                }
             }
 
             // Column 5: duration.
@@ -1364,10 +1701,9 @@ impl<'a> SongsTable<'a> {
             // The separator is a real widget: it gets an accessible name, a
             // resize cursor and a drag state, rather than being a painted line
             // that happens to respond to the mouse.
-            for (boundary, x) in [
-                (0usize, cols.artist_x - COL_GAP * 0.5),
-                (1usize, cols.album_x - COL_GAP * 0.5),
-            ] {
+            for boundary in 0..cols.spans.len().saturating_sub(1) {
+                let span = cols.spans[boundary];
+                let x = span.x + span.w + COL_GAP * 0.5;
                 let sep_rect = Rect::from_min_size(
                     Pos2::new(header_rect.min.x + x - 4.0, header_rect.min.y),
                     Vec2::new(8.0, 20.0),
@@ -1387,21 +1723,15 @@ impl<'a> SongsTable<'a> {
                         Stroke::new(1.0_f32, theme.accent_highlight),
                     );
                 }
-                sep.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::Role::Button,
-                        true,
-                        if boundary == 0 {
-                            "Resize the Title column"
-                        } else {
-                            "Resize the Artist column"
-                        },
-                    )
-                });
+                let label = tr_args!(
+                    "Resize the {column} column",
+                    "column" => span.column.label()
+                );
+                sep.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
                 if sep.dragged() {
                     let dx = ui.input(|i| i.pointer.delta().x);
-                    let next = column_widths.drag(boundary, dx / cols.flexible_w.max(1.0));
-                    action.column_widths_changed = Some(next);
+                    let next = column_preset.drag(boundary, dx / cols.flexible_w.max(1.0));
+                    action.column_preset_changed = Some(next);
                 }
                 if sep.drag_stopped() {
                     action.column_drag_finished = true;
@@ -1744,59 +2074,29 @@ impl<'a> SongsTable<'a> {
                             }
                         }
 
-                        // Column 3: Artist
-                        let artist_galley = truncated_galley(
-                            &painter,
-                            track.artist.clone(),
-                            crate::theme::font(12.8),
-                            if is_active {
-                                theme.text_primary
-                            } else {
-                                theme.text_secondary
-                            },
-                            cols.artist_w,
-                        );
-                        painter.galley(
-                            Pos2::new(
-                                vis_rect.min.x + cols.artist_x,
-                                cy - artist_galley.size().y * 0.5,
-                            ),
-                            artist_galley,
-                            if is_active {
-                                theme.text_primary
-                            } else {
-                                theme.text_secondary
-                            },
-                        );
-
-                        // Column 4: Album
-                        let album_galley = truncated_galley(
-                            &painter,
-                            if track.album.is_empty() {
-                                "—".to_string()
-                            } else {
-                                track.album.clone()
-                            },
-                            crate::theme::font(12.5),
-                            if is_active {
+                        // Remaining preset columns, in the user's order.
+                        for span in &cols.spans {
+                            if span.column == SongColumn::Title {
+                                continue;
+                            }
+                            let color = if is_active {
                                 theme.text_secondary
                             } else {
                                 theme.text_muted
-                            },
-                            cols.album_w,
-                        );
-                        painter.galley(
-                            Pos2::new(
-                                vis_rect.min.x + cols.album_x,
-                                cy - album_galley.size().y * 0.5,
-                            ),
-                            album_galley,
-                            if is_active {
-                                theme.text_secondary
-                            } else {
-                                theme.text_muted
-                            },
-                        );
+                            };
+                            let galley = truncated_galley(
+                                &painter,
+                                span.column.value(track),
+                                crate::theme::font(12.4),
+                                color,
+                                span.w,
+                            );
+                            painter.galley(
+                                Pos2::new(vis_rect.min.x + span.x, cy - galley.size().y * 0.5),
+                                galley,
+                                color,
+                            );
+                        }
 
                         // Column 5: Duration
                         let dur_x = vis_rect.min.x + cols.duration_x + 4.0;
@@ -2016,6 +2316,121 @@ fn paint_checkbox(
             egui::StrokeKind::Inside,
         );
     }
+}
+
+/// The "Columns" menu: load a saved layout, reorder columns, and save the
+/// current arrangement as a new preset.
+fn render_column_preset_menu(
+    ui: &mut Ui,
+    column_preset: &ColumnPreset,
+    column_preset_names: &[String],
+    active_preset: usize,
+    preset_name_draft: &mut String,
+    theme: &Theme,
+    action: &mut SongsTableAction,
+) {
+    ui.menu_button(
+        egui::RichText::new(tr_args!(
+            "Columns · {name}",
+            "name" => &column_preset.name
+        ))
+        .font(crate::theme::font(11.0))
+        .color(theme.text_secondary),
+        |ui| {
+            ui.set_min_width(240.0);
+            for (idx, name) in column_preset_names.iter().enumerate() {
+                if ui.selectable_label(idx == active_preset, name).clicked() {
+                    action.select_column_preset = Some(idx);
+                    ui.close();
+                }
+            }
+
+            ui.separator();
+            ui.label(
+                egui::RichText::new(tr!("Column order"))
+                    .font(crate::theme::font(11.0))
+                    .strong()
+                    .color(theme.text_muted),
+            );
+
+            let mut edited = column_preset.clone();
+            let mut changed = false;
+            let count = edited.columns.len();
+            for (idx, column) in edited.columns.clone().iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(column.label())
+                            .font(crate::theme::font(11.5))
+                            .color(theme.text_primary),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if idx > 0 && ui.small_button("×").clicked() {
+                            edited.columns.remove(idx);
+                            edited.weights.remove(idx);
+                            changed = true;
+                        }
+                        if idx + 1 < count && ui.small_button("↓").clicked() {
+                            edited.move_column(idx, idx + 1);
+                            changed = true;
+                        }
+                        if idx > 0 && ui.small_button("↑").clicked() {
+                            edited.move_column(idx, idx - 1);
+                            changed = true;
+                        }
+                    });
+                });
+            }
+
+            let missing: Vec<SongColumn> = SongColumn::OPTIONAL
+                .iter()
+                .copied()
+                .filter(|column| !edited.columns.contains(column))
+                .collect();
+            if !missing.is_empty() {
+                ui.menu_button(tr!("Add column"), |ui| {
+                    for column in missing {
+                        if ui.button(column.label()).clicked() {
+                            edited.columns.push(column);
+                            edited.weights.push(column.default_weight());
+                            changed = true;
+                            ui.close();
+                        }
+                    }
+                });
+            }
+
+            if changed {
+                action.column_preset_changed = Some(edited.clone().normalized());
+                action.column_preset_edited = true;
+            }
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(preset_name_draft)
+                        .hint_text(tr!("Preset name"))
+                        .desired_width(130.0),
+                );
+                if ui.button(tr!("Save as preset")).clicked() {
+                    action.save_column_preset = Some(edited.clone().normalized());
+                    ui.close();
+                }
+            });
+            if ui.button(tr!("Reset this preset")).clicked() {
+                let reset = ColumnPreset::factory(&column_preset.name).unwrap_or_else(|| {
+                    let mut fallback = ColumnPreset::default();
+                    fallback.name = column_preset.name.clone();
+                    fallback
+                });
+                action.column_preset_changed = Some(reset);
+                ui.close();
+            }
+            if column_preset_names.len() > 1 && ui.button(tr!("Delete preset")).clicked() {
+                action.delete_column_preset = true;
+                ui.close();
+            }
+        },
+    );
 }
 
 /// The context-sensitive action strip shown while tracks are multi-selected.
@@ -2309,6 +2724,10 @@ fn render_track_context_menu(
         action.add_to_queue = Some(track.id);
         ui.close();
     }
+    if ui.button(tr!("Start Radio")).clicked() {
+        action.start_radio = Some(track.id);
+        ui.close();
+    }
 
     ui.separator();
 
@@ -2468,55 +2887,106 @@ mod tests {
         assert!(RowDensity::Compact.thumb_size() < RowDensity::Comfortable.thumb_size());
     }
 
+    fn find_span(cols: &TableColumns, column: SongColumn) -> &ColumnSpan {
+        cols.spans
+            .iter()
+            .find(|span| span.column == column)
+            .expect("column is in the preset")
+    }
+
     #[test]
-    fn table_columns_use_the_persisted_shares() {
-        let wide_title = ColumnWidths {
-            title: 0.70,
-            artist: 0.15,
-            album: 0.15,
-        };
-        let cols = TableColumns::new(1200.0, wide_title, RowDensity::Comfortable, COL_RATING_W);
-        assert!(cols.title_text_w > cols.artist_w);
-        assert!(cols.artist_x > cols.title_x);
-        assert!(cols.album_x > cols.artist_x);
+    fn table_columns_use_the_preset_order_and_shares() {
+        let preset = ColumnPreset {
+            name: "Wide title".to_string(),
+            columns: vec![SongColumn::Title, SongColumn::Artist, SongColumn::Album],
+            weights: vec![0.70, 0.15, 0.15],
+        }
+        .normalized();
+        let cols = TableColumns::new(1200.0, &preset, RowDensity::Comfortable, COL_RATING_W);
+        let artist = find_span(&cols, SongColumn::Artist);
+        let album = find_span(&cols, SongColumn::Album);
+        assert!(cols.title_text_w > artist.w);
+        assert!(artist.x > cols.title_x);
+        assert!(album.x > artist.x);
     }
 
     #[test]
     fn compact_rows_give_the_title_the_space_the_smaller_artwork_frees() {
-        let widths = ColumnWidths::default();
-        let comfortable = TableColumns::new(1200.0, widths, RowDensity::Comfortable, COL_RATING_W);
-        let compact = TableColumns::new(1200.0, widths, RowDensity::Compact, COL_RATING_W);
+        let preset = ColumnPreset::default();
+        let comfortable = TableColumns::new(1200.0, &preset, RowDensity::Comfortable, COL_RATING_W);
+        let compact = TableColumns::new(1200.0, &preset, RowDensity::Compact, COL_RATING_W);
         assert!(compact.title_text_w > comfortable.title_text_w);
         assert!(compact.title_text_x < comfortable.title_text_x);
     }
 
     #[test]
     fn the_rating_column_is_fixed_width_and_sits_before_the_heart() {
-        let cols = TableColumns::new(
-            1200.0,
-            ColumnWidths::default(),
-            RowDensity::Comfortable,
-            82.0,
-        );
+        let preset = ColumnPreset::default();
+        let cols = TableColumns::new(1200.0, &preset, RowDensity::Comfortable, 82.0);
         assert_eq!(cols.rating_w, 82.0);
         assert!((cols.rating_x + cols.rating_w - cols.favorite_x).abs() < 0.01);
         assert!((cols.duration_x + COL_TIME_W - cols.rating_x).abs() < 0.01);
         // A corrupt saved width falls back to the default instead of
         // collapsing the column or pushing it off the row.
-        let nan = TableColumns::new(
-            1200.0,
-            ColumnWidths::default(),
-            RowDensity::Comfortable,
-            f32::NAN,
-        );
+        let nan = TableColumns::new(1200.0, &preset, RowDensity::Comfortable, f32::NAN);
         assert_eq!(nan.rating_w, COL_RATING_W);
-        let huge = TableColumns::new(
-            1200.0,
-            ColumnWidths::default(),
-            RowDensity::Comfortable,
-            10_000.0,
-        );
+        let huge = TableColumns::new(1200.0, &preset, RowDensity::Comfortable, 10_000.0);
         assert_eq!(huge.rating_w, COL_RATING_W_MAX);
+    }
+
+    #[test]
+    fn a_preset_keeps_its_column_order_and_puts_title_first() {
+        let preset = ColumnPreset {
+            name: "  ".to_string(),
+            columns: vec![
+                SongColumn::Codec,
+                SongColumn::Artist,
+                SongColumn::Title,
+                SongColumn::Codec,
+            ],
+            weights: vec![0.2, 0.2, 0.6, 0.2],
+        }
+        .normalized();
+        assert_eq!(preset.name, "Custom");
+        assert_eq!(
+            preset.columns,
+            vec![SongColumn::Title, SongColumn::Codec, SongColumn::Artist]
+        );
+        assert!((preset.weights.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_audiophile_preset_exposes_quality_columns() {
+        let audiophile = ColumnPreset::builtins()
+            .into_iter()
+            .find(|preset| preset.name == "Audiophile")
+            .unwrap();
+        assert!(audiophile.columns.contains(&SongColumn::BitDepth));
+        assert!(audiophile.columns.contains(&SongColumn::SampleRate));
+        assert!(audiophile.columns.contains(&SongColumn::Codec));
+        assert_eq!(audiophile.columns.first(), Some(&SongColumn::Title));
+    }
+
+    #[test]
+    fn dragging_a_boundary_only_moves_the_two_neighbours() {
+        let preset = ColumnPreset::default();
+        let next = preset.drag(0, 0.10);
+        assert!(next.weights[0] > preset.weights[0]);
+        assert!(next.weights[1] < preset.weights[1]);
+        assert!((next.weights[2] - preset.weights[2]).abs() < 1e-5);
+        // Pulling far past the neighbour stops at the minimum.
+        let clamped = preset.drag(0, 5.0);
+        assert!(clamped.weights[1] >= 0.06 - 1e-6);
+        assert!((clamped.weights.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn preset_layouts_round_trip_through_settings_json() {
+        let prefs = SongTablePrefs::default();
+        let json = serde_json::to_string(&prefs).unwrap();
+        let parsed: SongTablePrefs = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.presets, prefs.presets);
+        assert_eq!(parsed.active_preset, 0);
     }
 
     #[test]
@@ -2541,5 +3011,33 @@ mod tests {
         let prefs: SongTablePrefs = serde_json::from_str(legacy).unwrap();
         assert_eq!(prefs.rating_width, COL_RATING_W);
         assert_eq!(prefs.density, RowDensity::Compact);
+    }
+
+    #[test]
+    fn legacy_widths_seed_the_default_preset() {
+        let widths = ColumnWidths {
+            title: 0.6,
+            artist: 0.25,
+            album: 0.15,
+        };
+        let preset = ColumnPreset::from_legacy_widths(widths);
+        assert_eq!(preset.name, "Default");
+        assert_eq!(
+            preset.columns,
+            vec![SongColumn::Title, SongColumn::Artist, SongColumn::Album]
+        );
+        assert!((preset.weights[0] - 0.6).abs() < 1e-5);
+        assert!((preset.weights[1] - 0.25).abs() < 1e-5);
+        assert!((preset.weights[2] - 0.15).abs() < 1e-5);
+        assert!((preset.weights.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resetting_a_builtin_restores_its_own_factory_columns() {
+        let casual = ColumnPreset::factory("Casual").unwrap();
+        assert_eq!(casual.columns, vec![SongColumn::Title, SongColumn::Artist]);
+        let audiophile = ColumnPreset::factory("audiophile").unwrap();
+        assert!(audiophile.columns.contains(&SongColumn::Codec));
+        assert!(ColumnPreset::factory("My Layout").is_none());
     }
 }

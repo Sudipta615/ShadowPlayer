@@ -32,6 +32,10 @@ pub struct MainViewAction {
     pub autotag_tracks: Option<Vec<Track>>,
     /// The user asked to fetch missing artwork for track(s).
     pub fetch_artwork_tracks: Option<Vec<Track>>,
+    /// Start a local radio station seeded from this track.
+    pub start_radio: Option<TrackId>,
+    /// Rebuild the current radio station with a new shuffle.
+    pub refresh_radio: bool,
     /// A grouped-search chip asked to run a narrower query.
     pub search_query: Option<String>,
     /// The loudness inspector was requested.
@@ -50,6 +54,7 @@ pub fn render_main_playback_view(
     session: &AudioSession,
     artwork_service: &mut ArtworkService,
     telemetry: &TelemetryState,
+    waveform: Option<&[f32]>,
     current_track: Option<&Track>,
     theme: &Theme,
     track_repo: &TrackRepo,
@@ -101,6 +106,7 @@ pub fn render_main_playback_view(
         position_secs: telemetry.position_secs,
         duration_secs: telemetry.duration_secs,
         spectrum_db: &telemetry.spectrum.spectrum_db,
+        waveform,
         artwork: art_tex.as_ref(),
         format_str: format_str.as_deref(),
         bit_perfect: telemetry.bit_perfect,
@@ -308,6 +314,34 @@ pub fn render_main_playback_view(
             });
             ui.add_space(4.0);
         }
+        NavItem::Radio => {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(if library_state.radio_label.is_empty() {
+                        tr!("Radio")
+                    } else {
+                        library_state.radio_label.clone()
+                    })
+                    .font(crate::theme::font(16.0))
+                    .strong()
+                    .color(theme.accent_warm),
+                );
+                ui.label(
+                    egui::RichText::new(tr_args!(
+                        "({count} tracks · local smart shuffle)",
+                        "count" => library_state.displayed_tracks.len()
+                    ))
+                    .font(crate::theme::font(12.0))
+                    .color(theme.text_muted),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(tr!("New Mix")).clicked() {
+                        view_action.refresh_radio = true;
+                    }
+                });
+            });
+            ui.add_space(4.0);
+        }
         NavItem::SmartPlaylist(sp_id) => {
             let sp = library_state
                 .smart_playlists
@@ -349,6 +383,19 @@ pub fn render_main_playback_view(
 
     // Songs Table
     let cur_id = current_track.map(|t| t.id);
+    let active_preset = app_state
+        .active_column_preset
+        .min(app_state.column_presets.len().saturating_sub(1));
+    let preset_names: Vec<String> = app_state
+        .column_presets
+        .iter()
+        .map(|preset| preset.name.clone())
+        .collect();
+    let preset = app_state
+        .column_presets
+        .get(active_preset)
+        .cloned()
+        .unwrap_or_default();
     let table_action = SongsTable {
         tracks: &library_state.displayed_tracks,
         active_track_id: cur_id,
@@ -359,7 +406,10 @@ pub fn render_main_playback_view(
         sort_order: app_state.current_sort_order,
         is_grid_view: app_state.is_grid_view,
         quick_filter: library_state.quick_filter,
-        column_widths: app_state.column_widths,
+        column_preset: &preset,
+        column_preset_names: &preset_names,
+        active_preset,
+        preset_name_draft: &mut app_state.column_preset_name,
         rating_width: app_state.rating_width,
         density: app_state.row_density,
         selected_track_ids: &mut library_state.selected_track_ids,
@@ -389,13 +439,54 @@ pub fn render_main_playback_view(
     // Column dragging updates the live layout immediately, but the settings
     // store is only written when the drag ends: a database write per frame
     // would be wasteful and would make the drag stutter.
-    if let Some(widths) = table_action.column_widths_changed {
-        app_state.column_widths = widths;
+    if let Some(idx) = table_action.select_column_preset {
+        if idx < app_state.column_presets.len() {
+            app_state.active_column_preset = idx;
+            view_action.settings_dirty = true;
+        }
+    }
+    if let Some(next) = table_action.column_preset_changed.clone() {
+        if app_state.active_column_preset < app_state.column_presets.len() {
+            app_state.column_presets[app_state.active_column_preset] = next.normalized();
+        }
+    }
+    if let Some(mut saved) = table_action.save_column_preset.clone() {
+        let name = app_state.column_preset_name.trim();
+        saved.name = if name.is_empty() {
+            "Custom".to_string()
+        } else {
+            name.to_string()
+        };
+        saved = saved.normalized();
+        let existing = app_state
+            .column_presets
+            .iter()
+            .position(|preset| preset.name.eq_ignore_ascii_case(&saved.name));
+        match existing {
+            Some(idx) => {
+                app_state.column_presets[idx] = saved;
+                app_state.active_column_preset = idx;
+            }
+            None => {
+                app_state.column_presets.push(saved);
+                app_state.active_column_preset = app_state.column_presets.len() - 1;
+            }
+        }
+        app_state.column_preset_name.clear();
+        view_action.settings_dirty = true;
+    }
+    if table_action.delete_column_preset && app_state.column_presets.len() > 1 {
+        let idx = app_state
+            .active_column_preset
+            .min(app_state.column_presets.len() - 1);
+        app_state.column_presets.remove(idx);
+        app_state.active_column_preset = idx.min(app_state.column_presets.len() - 1);
+        view_action.settings_dirty = true;
     }
     if let Some(width) = table_action.rating_width_changed {
         app_state.rating_width = width;
     }
-    if table_action.column_drag_finished {
+    if table_action.column_drag_finished || table_action.column_preset_edited {
         view_action.settings_dirty = true;
     }
     if table_action.toggle_density {
@@ -403,7 +494,18 @@ pub fn render_main_playback_view(
         view_action.settings_dirty = true;
     }
     if table_action.reset_columns {
-        app_state.column_widths = Default::default();
+        let idx = app_state
+            .active_column_preset
+            .min(app_state.column_presets.len().saturating_sub(1));
+        if let Some(current) = app_state.column_presets.get(idx) {
+            let reset = crate::components::songs_table::ColumnPreset::factory(&current.name)
+                .unwrap_or_else(|| {
+                    let mut fallback = crate::components::songs_table::ColumnPreset::default();
+                    fallback.name = current.name.clone();
+                    fallback
+                });
+            app_state.column_presets[idx] = reset.normalized();
+        }
         app_state.rating_width =
             crate::components::songs_table::SongTablePrefs::default().rating_width;
         view_action.settings_dirty = true;
@@ -448,6 +550,9 @@ pub fn render_main_playback_view(
     }
     if table_action.fetch_artwork_selected {
         view_action.fetch_artwork_tracks = Some(library_state.selected_tracks_in_order());
+    }
+    if let Some(seed) = table_action.start_radio {
+        view_action.start_radio = Some(seed);
     }
 
     handle_songs_table_action(

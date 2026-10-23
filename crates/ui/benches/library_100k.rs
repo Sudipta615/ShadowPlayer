@@ -74,6 +74,7 @@ fn synthetic_library(count: usize) -> Vec<Track> {
                 track_number: Some(track_no),
                 disc_number: Some(1),
                 duration_secs: 120.0 + (i % 300) as f32,
+                bpm: None,
                 sample_rate: if i % 3 == 0 { 96_000 } else { 44_100 },
                 channels: 2,
                 format: if i % 3 == 0 { "FLAC" } else { "MP3" }.to_string(),

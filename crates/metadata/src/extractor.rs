@@ -86,6 +86,12 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
     // two sources, so "Has Lyrics" and the panel agree.
     let has_lyrics = crate::has_lyrics(path);
 
+    // BPM is a first-class radio feature but not part of the engine's
+    // symphonia probe (which doesn't expose a typed tempo field). One lofty
+    // read here, alongside the lyric-flag check, keeps the extraction in the
+    // scanner where every other tag is read.
+    let bpm = extract_bpm(path);
+
     let track_id = TrackId::from_canonical_path(path);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -103,6 +109,7 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         track_number,
         disc_number,
         duration_secs,
+        bpm,
         sample_rate,
         channels,
         format: format_name,
@@ -140,6 +147,39 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         track,
         embedded_artwork,
     })
+}
+
+/// Read a track's tempo from its tags.
+///
+/// `TBPM`, `tmpo` and the MP4 `tmpo` atom all arrive as `IntegerBpm`; a few
+/// taggers write the free-form `BPM` key instead. Both are accepted, and a
+/// decimal value (`"128.5"`) is rounded because [`domain::models::Track`]
+/// stores a whole number of beats per minute.
+fn extract_bpm(path: &Path) -> Option<u16> {
+    use lofty::prelude::*;
+    use lofty::tag::ItemKey;
+
+    let tagged = lofty::read_from_path(path).ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    let raw = tag
+        .get(ItemKey::IntegerBpm)
+        .and_then(|item| item.value().text())
+        .or_else(|| tag.get(ItemKey::Bpm).and_then(|item| item.value().text()))?;
+    parse_bpm(raw)
+}
+
+/// Parse the tag's textual tempo, tolerating `"128"`, `"128.0"` and `"128 BPM"`.
+fn parse_bpm(raw: &str) -> Option<u16> {
+    let number: String = raw
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit() && *c != '.')
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let value: f32 = number.parse().ok()?;
+    if !value.is_finite() || value <= 0.0 || value > u16::MAX as f32 {
+        return None;
+    }
+    Some(value.round() as u16)
 }
 
 /// The audio file a standalone `.cue` sheet indexes, if one can be resolved.
@@ -236,6 +276,7 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             track_number: Some(cue_track.number),
             disc_number: Some(1),
             duration_secs: duration,
+            bpm: None,
             sample_rate: audio_meta.track.sample_rate,
             channels: audio_meta.track.channels,
             format: format!("CUE+{}", audio_meta.track.format),

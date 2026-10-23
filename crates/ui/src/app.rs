@@ -4,7 +4,7 @@ use std::sync::Arc;
 use audio_session::AudioSession;
 use database::{
     AlbumRepo, ArtistRepo, Database, FavoritesRepo, GenreRepo, HistoryRepo, PlaylistRepo,
-    ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
+    PodcastRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
 };
 use domain::models::Track;
 use eframe::egui::{self, Margin, Pos2, Rect, Sense, Vec2};
@@ -25,12 +25,15 @@ use crate::modals::{
     SmartPlaylistEditorState,
 };
 use crate::services::{
-    ArtworkFetchService, ArtworkService, AutotagService, ControlService, ImportKind, ImportResult,
-    ImportService, LoudnessService, LyricsService, MprisCommand, MprisService, MprisSnapshot,
-    ScannerService,
+    ArtworkFetchService, ArtworkService, AutotagService, BiographyService, ControlService,
+    CrossfadePreview, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
+    MprisCommand, MprisService, MprisSnapshot, PodcastEvent, PodcastService, ScannerService,
+    WaveformService,
 };
 use crate::skin::SkinManager;
-use crate::state::{AppState, DspState, LibraryState, SleepTimerMode, TelemetryState};
+use crate::state::{
+    AppState, DspState, LibraryState, PodcastState, SleepTimerMode, TelemetryState,
+};
 use crate::theme::Theme;
 use crate::views::{
     render_albums_view, render_artists_view, render_folders_view, render_genres_view,
@@ -86,6 +89,12 @@ pub struct ShadowPlayerApp {
 
     artwork_service: ArtworkService,
     lyrics_service: LyricsService,
+    waveform_service: WaveformService,
+    crossfade_preview: CrossfadePreview,
+    biography_service: BiographyService,
+    podcast_service: PodcastService,
+    podcast_repo: PodcastRepo,
+    podcast_state: PodcastState,
     scanner_service: ScannerService,
     import_service: ImportService,
     mpris_service: MprisService,
@@ -224,6 +233,11 @@ impl ShadowPlayerApp {
 
         let artwork_service = ArtworkService::new();
         let lyrics_service = LyricsService::new();
+        let waveform_service = WaveformService::new(db.clone());
+        let biography_service = BiographyService::new(db.clone());
+        let podcast_repo = PodcastRepo::new(db.clone());
+        let podcast_service = PodcastService::new(PodcastRepo::new(db.clone()), &data_dir);
+        let podcast_state = PodcastState::default();
         let loudness_service = LoudnessService::new(db.clone());
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
@@ -261,6 +275,12 @@ impl ShadowPlayerApp {
 
             artwork_service,
             lyrics_service,
+            waveform_service,
+            crossfade_preview: CrossfadePreview::new(),
+            biography_service,
+            podcast_service,
+            podcast_repo,
+            podcast_state,
             scanner_service,
             import_service,
             mpris_service,
@@ -311,6 +331,13 @@ impl ShadowPlayerApp {
 
         // Load all persistent settings (normal, theme, EQ, DSP)
         app.load_persisted_settings();
+        app.biography_service
+            .set_source_dir(&app.dsp_state.settings_tab.biography_source_dir);
+        app.crossfade_preview.set_preview(
+            app.dsp_state.settings_tab.crossfade_curve,
+            app.dsp_state.settings_tab.crossfade_duration_secs,
+        );
+        app.podcast_state.reload_feeds(&app.podcast_repo);
 
         app.reload_library();
 
@@ -413,6 +440,222 @@ impl ShadowPlayerApp {
             }
             self.scan_toast_wanted = true;
             self.pump_scan_queue();
+        }
+    }
+
+    /// Apply a finished podcast fetch/download on the UI thread.
+    fn poll_podcast_service(&mut self) {
+        let Some(event) = self.podcast_service.poll() else {
+            return;
+        };
+        match event {
+            PodcastEvent::FeedUpdated { feed_id } => {
+                self.podcast_state.reload_feeds(&self.podcast_repo);
+                self.podcast_state.selected_feed = Some(feed_id);
+                self.podcast_state.reload_episodes(&self.podcast_repo);
+                self.podcast_state.error = None;
+                self.toasts.success(tr!("Podcast feed updated"));
+            }
+            PodcastEvent::Downloaded { episode_id } => {
+                self.podcast_state.reload_episodes(&self.podcast_repo);
+                self.podcast_state.error = None;
+                if let Some(episode) = self.podcast_state.episode(episode_id) {
+                    self.toasts.success(tr_args!(
+                        "Downloaded “{title}”",
+                        "title" => episode.title
+                    ));
+                }
+            }
+            PodcastEvent::Error(message) => {
+                self.podcast_state.error = Some(message.clone());
+                self.toasts.warning(message);
+            }
+        }
+    }
+
+    /// Persist podcast resume state and notice the end of an episode.
+    fn poll_podcast_playback(&mut self, ctx: &egui::Context) {
+        // Starting a music track from the library takes the output back. Do
+        // not keep crediting the podcast transport in that case.
+        if self.coordinator.current_track().is_some() && self.session.is_playing() {
+            self.podcast_state.is_playing = false;
+            self.podcast_state.playing_episode = None;
+        }
+
+        let Some(id) = self.podcast_state.playing_episode else {
+            return;
+        };
+        let position = self.session.position_secs();
+        // Prefer the decoder's duration once the episode is open: feed
+        // metadata is often approximate, and a duration that is a minute too
+        // long would keep the episode from ever reaching its completion
+        // threshold. Fall back to the stored duration while the file is still
+        // being probed.
+        let live_duration = self.session.duration_secs();
+        let duration = if live_duration > 0.0 {
+            live_duration
+        } else {
+            self.podcast_state.duration_secs
+        };
+        self.podcast_state.position_secs = position;
+        self.podcast_state.duration_secs = duration;
+
+        let finished = self.podcast_state.is_playing
+            && !self.session.is_playing()
+            && duration > 0.0
+            && position >= duration - 0.75;
+        if finished {
+            let completed_at = duration;
+            let _ = self.podcast_repo.save_progress(&id, completed_at, true);
+            self.podcast_state.is_playing = false;
+            self.podcast_state.position_secs = completed_at;
+            self.podcast_state.last_saved_secs = completed_at;
+            self.podcast_state.reload_episodes(&self.podcast_repo);
+            self.toasts.info(tr!("Podcast episode finished"));
+            return;
+        }
+
+        if self.podcast_state.is_playing
+            && (position - self.podcast_state.last_saved_secs).abs() >= 5.0
+        {
+            let _ = self.podcast_repo.save_progress(&id, position, false);
+            self.podcast_state.last_saved_secs = position;
+            if let Some(episode) = self
+                .podcast_state
+                .episodes
+                .iter_mut()
+                .find(|episode| episode.id == id)
+            {
+                episode.position_secs = position;
+            }
+            ctx.request_repaint();
+        }
+    }
+
+    /// Build a local radio station around `seed_id` and start it.
+    ///
+    /// The station is a pure query over the user's own library: same genre,
+    /// nearby BPM, similar rating. A fresh salt gives a new shuffle without
+    /// making the query non-deterministic.
+    fn start_radio(&mut self, seed_id: domain::ids::TrackId) {
+        let Some(seed) = self.track_repo.get_by_id(&seed_id).ok().flatten() else {
+            self.toasts
+                .warning(tr!("That track is no longer in the library"));
+            return;
+        };
+        let salt = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1);
+        let mut tracks = vec![seed.clone()];
+        match self.track_repo.radio_station(&seed_id, 100, salt) {
+            Ok(next) => tracks.extend(next),
+            Err(e) => {
+                log::warn!("Could not build a radio station: {e}");
+                self.toasts.warning(tr!("Could not build a radio station"));
+            }
+        }
+
+        self.library_state.set_radio_station(
+            seed_id,
+            tr_args!("{artist} Radio", "artist" => seed.artist),
+            tracks.clone(),
+        );
+        // The station is its own view. A search left over from the songs
+        // table would filter the station down to whatever matched, which is
+        // not what "Start Radio" promises.
+        self.app_state.search_query.clear();
+        self.library_state.selected_album = None;
+        self.library_state.selected_artist = None;
+        self.library_state.selected_genre = None;
+        self.library_state.selected_folder = None;
+        self.library_state.clear_selection();
+        self.app_state.active_nav = NavItem::Radio;
+        self.refresh_view();
+
+        if let Some(first) = tracks.first().cloned() {
+            self.coordinator.play_track(first, Some(tracks));
+        }
+    }
+
+    /// Regenerate the current station with a new shuffle.
+    fn refresh_radio(&mut self) {
+        if let Some(seed) = self.library_state.radio_seed {
+            self.start_radio(seed);
+        } else {
+            self.toasts
+                .info(tr!("Start a station from any song's context menu first"));
+        }
+    }
+
+    /// Start (or resume) an episode through the main output.
+    fn play_podcast_episode(&mut self, id: domain::ids::PodcastEpisodeId) {
+        let Some(episode) = self
+            .podcast_repo
+            .get_episode(&id)
+            .ok()
+            .flatten()
+            .or_else(|| self.podcast_state.episode(id).cloned())
+        else {
+            return;
+        };
+        let Some(path) = episode.local_path.clone() else {
+            self.toasts
+                .warning(tr!("Download this episode before playing it"));
+            return;
+        };
+        if !path.exists() {
+            self.toasts
+                .warning(tr!("The downloaded episode is missing; download it again"));
+            return;
+        }
+
+        // The two transports share the output. Stop the music queue first so
+        // its end-of-track handler cannot advance over the podcast.
+        self.session.stop();
+        self.coordinator.clear_queue();
+
+        self.session.open_file(&path);
+        let resume_at = if episode.completed {
+            0.0
+        } else {
+            episode.position_secs.max(0.0)
+        };
+        if resume_at > 0.0 {
+            self.session.seek(resume_at);
+        }
+        self.session.play();
+
+        self.podcast_state.playing_episode = Some(id);
+        self.podcast_state.is_playing = true;
+        self.podcast_state.position_secs = resume_at;
+        self.podcast_state.duration_secs = episode.duration_secs.unwrap_or(0.0);
+        self.podcast_state.last_saved_secs = resume_at;
+        self.podcast_state.error = None;
+    }
+
+    fn toggle_podcast_playback(&mut self) {
+        if self.podcast_state.is_playing {
+            self.session.pause();
+            self.podcast_state.is_playing = false;
+            if let Some(id) = self.podcast_state.playing_episode {
+                let _ =
+                    self.podcast_repo
+                        .save_progress(&id, self.podcast_state.position_secs, false);
+            }
+            return;
+        }
+        if self.podcast_state.playing_episode.is_some() {
+            // Reaching the end leaves the source stopped at its duration; a
+            // resume from there would replay a single silent frame.
+            let at_end = self.podcast_state.duration_secs > 0.0
+                && self.podcast_state.position_secs >= self.podcast_state.duration_secs - 0.75;
+            if at_end {
+                self.session.seek(0.0);
+                self.podcast_state.position_secs = 0.0;
+            }
+            self.session.play();
+            self.podcast_state.is_playing = true;
         }
     }
 
@@ -737,11 +980,13 @@ impl ShadowPlayerApp {
         let mut entries: Vec<PaletteEntry> = Vec::new();
 
         // ── Navigation ─────────────────────────────────────────────────────
-        let nav: [(&str, NavItem, &str); 9] = [
+        let nav: [(&str, NavItem, &str); 11] = [
             ("Go to", NavItem::Home, "Home"),
             ("Go to", NavItem::Albums, "Albums"),
             ("Go to", NavItem::Artists, "Artists"),
             ("Go to", NavItem::Genres, "Genres"),
+            ("Go to", NavItem::Radio, "Radio"),
+            ("Go to", NavItem::Podcasts, "Podcasts"),
             ("Go to", NavItem::Folders, "Folders & library manager"),
             ("Go to", NavItem::Favorites, "Favorites"),
             ("Go to", NavItem::RecentlyPlayed, "Recently played"),
@@ -1315,6 +1560,29 @@ impl ShadowPlayerApp {
                     self.app_state.column_widths = prefs.widths;
                     self.app_state.rating_width = prefs.rating_width;
                     self.app_state.row_density = prefs.density;
+                    let mut presets = if prefs.presets.is_empty() {
+                        // Settings from a build before column presets have no
+                        // preset list, but do have the user's Title/Artist/Album
+                        // proportions. Carry those into the Default layout rather
+                        // than silently snapping back to the factory widths.
+                        let mut builtins = crate::components::songs_table::ColumnPreset::builtins();
+                        builtins[0] =
+                            crate::components::songs_table::ColumnPreset::from_legacy_widths(
+                                prefs.widths,
+                            );
+                        builtins
+                    } else {
+                        prefs.presets
+                    };
+                    if presets.is_empty() {
+                        presets = crate::components::songs_table::ColumnPreset::builtins();
+                    }
+                    for preset in &mut presets {
+                        *preset = preset.clone().normalized();
+                    }
+                    self.app_state.active_column_preset =
+                        prefs.active_preset.min(presets.len().saturating_sub(1));
+                    self.app_state.column_presets = presets;
                 }
                 Err(e) => log::warn!("Could not read the saved song-table layout: {e}"),
             }
@@ -1518,6 +1786,8 @@ impl ShadowPlayerApp {
             widths: self.app_state.column_widths,
             density: self.app_state.row_density,
             rating_width: self.app_state.rating_width,
+            presets: self.app_state.column_presets.clone(),
+            active_preset: self.app_state.active_column_preset,
         };
         if let Ok(json) = serde_json::to_string(&table_prefs) {
             if let Err(e) = self.settings_repo.set_value("song_table_prefs", &json) {
@@ -2752,6 +3022,18 @@ impl eframe::App for ShadowPlayerApp {
             ctx.request_repaint();
         }
 
+        // 2f0. Waveform decodes and podcast network work also happen off the
+        // UI thread. A finished waveform is only a repaint; a finished podcast
+        // job changes rows the view is showing.
+        if self.waveform_service.poll() {
+            ctx.request_repaint();
+        }
+        self.poll_podcast_service();
+        self.poll_podcast_playback(&ctx);
+        if self.crossfade_preview.is_playing() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
+
         // 2f1. Auto-tag service polling.
         if self.autotag_service.poll() {
             ctx.request_repaint();
@@ -2847,9 +3129,9 @@ impl eframe::App for ShadowPlayerApp {
         } else if !self.toasts.is_empty() {
             // Keep the fade-out animating while a notification is on screen.
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
-        } else if self.lyrics_service.is_loading() {
-            // Waiting on an embedded-lyrics read: tick until it lands, even
-            // while paused.
+        } else if self.lyrics_service.is_loading() || self.waveform_service.has_pending() {
+            // Waiting on an embedded-lyrics or waveform read: tick until it
+            // lands, even while paused.
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }
 
@@ -3065,6 +3347,7 @@ impl eframe::App for ShadowPlayerApp {
                             track_number: Some(*track_no),
                             disc_number: None,
                             duration_secs: 200.0,
+                            bpm: None,
                             sample_rate: 44100,
                             channels: 2,
                             format: "MP3".to_string(),
@@ -3273,6 +3556,7 @@ impl eframe::App for ShadowPlayerApp {
                             track_number: Some((i % 6) as u32 + 1),
                             disc_number: None,
                             duration_secs: 180.0 + (i as f32) * 23.5,
+                            bpm: None,
                             sample_rate: EVAL_SAMPLE_RATES[i % EVAL_SAMPLE_RATES.len()],
                             channels: 2,
                             format: if i % 4 == 3 { "MP3" } else { "FLAC" }.to_string(),
@@ -3349,6 +3633,7 @@ impl eframe::App for ShadowPlayerApp {
                             track_number: Some((i % 8) as u32 + 1),
                             disc_number: None,
                             duration_secs: 240.0,
+                            bpm: None,
                             sample_rate: 44_100,
                             channels: 2,
                             format: "FLAC".to_string(),
@@ -3612,6 +3897,9 @@ impl eframe::App for ShadowPlayerApp {
         if let Some(ref t) = current_track {
             self.lyrics_service.ensure_loaded(t);
             self.artwork_service.ensure_loaded(&ctx, t);
+            // First play decodes the file once and caches the peaks in the
+            // library database; later plays are a cache hit.
+            self.waveform_service.ensure_loaded(t);
         }
 
         let (active_lyrics, plain_lyrics) = current_track
@@ -3649,6 +3937,9 @@ impl eframe::App for ShadowPlayerApp {
                 position_secs: telemetry.position_secs,
                 duration_secs: telemetry.duration_secs,
                 spectrum_db: &telemetry.spectrum.spectrum_db,
+                waveform: current_track
+                    .as_ref()
+                    .and_then(|t| self.waveform_service.peaks(&t.id)),
                 lyrics_lines: &active_lyrics,
                 active_lyric: active_lyric_idx,
                 theme: &self.theme,
@@ -3760,6 +4051,9 @@ impl eframe::App for ShadowPlayerApp {
         );
 
         if let Some(nav) = nav_to_select {
+            if nav != NavItem::Settings {
+                self.crossfade_preview.stop();
+            }
             self.app_state.active_nav = nav;
             self.library_state.selected_album = None;
             self.library_state.selected_artist = None;
@@ -3953,6 +4247,8 @@ impl eframe::App for ShadowPlayerApp {
                             &mut self.library_state,
                             &mut self.coordinator,
                             &mut self.artwork_service,
+                            &mut self.biography_service,
+                            &mut self.app_state.biography_editor,
                             current_track.as_ref(),
                             is_playing,
                             &self.theme,
@@ -3966,6 +4262,8 @@ impl eframe::App for ShadowPlayerApp {
                             &mut self.library_state,
                             &mut self.coordinator,
                             &mut self.artwork_service,
+                            &mut self.biography_service,
+                            &mut self.app_state.biography_editor,
                             current_track.as_ref(),
                             is_playing,
                             &self.theme,
@@ -4032,6 +4330,12 @@ impl eframe::App for ShadowPlayerApp {
                             &self.app_state.imported_dirs,
                             self.loudness_service.progress(),
                             &self.locale,
+                            crate::components::settings_tab::CrossfadePreviewContext {
+                                playing: self.crossfade_preview.is_playing(),
+                                peaks: self.crossfade_preview.peaks(),
+                                progress: self.crossfade_preview.progress(),
+                                error: self.crossfade_preview.error(),
+                            },
                             |path| scan_to_start = Some(path),
                             |kind| import_req = Some(kind),
                         );
@@ -4058,6 +4362,24 @@ impl eframe::App for ShadowPlayerApp {
                         }
                         if let Some(kind) = import_req {
                             self.request_import(kind);
+                        }
+                        if sv_actions.toggle_crossfade_preview {
+                            let curve = self.dsp_state.settings_tab.crossfade_curve;
+                            let duration = self.dsp_state.settings_tab.crossfade_duration_secs;
+                            self.crossfade_preview.toggle(curve, duration);
+                        }
+                        if sv_actions.crossfade_config_changed {
+                            let curve = self.dsp_state.settings_tab.crossfade_curve;
+                            let duration = self.dsp_state.settings_tab.crossfade_duration_secs;
+                            if self.crossfade_preview.is_playing() {
+                                self.crossfade_preview.start(curve, duration);
+                            } else {
+                                self.crossfade_preview.set_preview(curve, duration);
+                            }
+                        }
+                        if let Some(dir) = sv_actions.biography_source_dir_changed.clone() {
+                            self.biography_service.set_source_dir(&dir);
+                            self.settings_dirty = true;
                         }
                         if sv_actions.start_loudness_scan {
                             let write_tags = self.dsp_state.settings_tab.loudness_write_tags;
@@ -4109,6 +4431,92 @@ impl eframe::App for ShadowPlayerApp {
                             self.artwork_fetch_modal.open(missing_count);
                         }
                     }
+                    NavItem::Podcasts => {
+                        let action = crate::components::podcasts_view::PodcastsView {
+                            state: &mut self.podcast_state,
+                            busy: self.podcast_service.is_busy(),
+                            status: self.podcast_service.status(),
+                            theme: &self.theme,
+                        }
+                        .show(ui);
+
+                        if let Some(url) = action.add_feed {
+                            match self.podcast_service.add_feed(&url) {
+                                Ok(()) => {
+                                    self.podcast_state.new_feed_url.clear();
+                                    self.podcast_state.error = None;
+                                }
+                                Err(e) => self.podcast_state.error = Some(e),
+                            }
+                        }
+                        if let Some(id) = action.select_feed {
+                            self.podcast_state.select_feed(&self.podcast_repo, id);
+                        }
+                        if let Some(id) = action.refresh_feed {
+                            if let Some(feed) = self
+                                .podcast_state
+                                .feeds
+                                .iter()
+                                .find(|feed| feed.id == id)
+                                .cloned()
+                            {
+                                if let Err(e) = self.podcast_service.refresh_feed(&feed) {
+                                    self.podcast_state.error = Some(e);
+                                }
+                            }
+                        }
+                        if let Some(id) = action.delete_feed {
+                            // If this feed owns the loaded episode, stop the
+                            // transport before the rows disappear.
+                            let playing_here = self
+                                .podcast_state
+                                .playing_episode
+                                .and_then(|episode| {
+                                    self.podcast_repo.get_episode(&episode).ok().flatten()
+                                })
+                                .is_some_and(|episode| episode.feed_id == id);
+                            if playing_here {
+                                self.session.stop();
+                                self.podcast_state.is_playing = false;
+                                self.podcast_state.playing_episode = None;
+                            }
+                            if let Err(e) = self.podcast_repo.delete_feed(&id) {
+                                self.podcast_state.error = Some(tr_args!(
+                                    "Could not remove the podcast feed: {error}",
+                                    "error" => e
+                                ));
+                            } else {
+                                self.podcast_state.selected_feed = None;
+                                self.podcast_state.reload_feeds(&self.podcast_repo);
+                            }
+                        }
+                        if let Some(id) = action.download_episode {
+                            if let Some(episode) = self
+                                .podcast_state
+                                .episodes
+                                .iter()
+                                .find(|episode| episode.id == id)
+                                .cloned()
+                            {
+                                if let Err(e) = self.podcast_service.download_episode(&episode) {
+                                    self.podcast_state.error = Some(e);
+                                }
+                            }
+                        }
+                        if let Some(id) = action.play_episode {
+                            self.play_podcast_episode(id);
+                        }
+                        if action.toggle_playback {
+                            self.toggle_podcast_playback();
+                        }
+                        if let Some(position) = action.seek_to {
+                            if let Some(id) = self.podcast_state.playing_episode {
+                                self.session.seek(position);
+                                self.podcast_state.position_secs = position;
+                                let _ = self.podcast_repo.save_progress(&id, position, false);
+                            }
+                        }
+                    }
                     NavItem::Help => {
                         render_help_view(
                             ui,
@@ -4127,6 +4535,9 @@ impl eframe::App for ShadowPlayerApp {
                             &self.session,
                             &mut self.artwork_service,
                             &telemetry,
+                            current_track
+                                .as_ref()
+                                .and_then(|t| self.waveform_service.peaks(&t.id)),
                             current_track.as_ref(),
                             &self.theme,
                             &self.track_repo,
@@ -4179,6 +4590,12 @@ impl eframe::App for ShadowPlayerApp {
                         if view_action.refresh_smart_playlist {
                             self.refresh_smart_playlists();
                         }
+                        if let Some(seed) = view_action.start_radio {
+                            self.start_radio(seed);
+                        }
+                        if view_action.refresh_radio {
+                            self.refresh_radio();
+                        }
                         if let Some(tracks) = view_action.organize_tracks {
                             self.open_organize(tracks, "Selection".to_string());
                         }
@@ -4220,6 +4637,8 @@ impl eframe::App for ShadowPlayerApp {
                         &mut self.coordinator,
                         &self.session,
                         &mut self.artwork_service,
+                        &mut self.lyrics_service,
+                        current_track.as_ref(),
                         &active_lyrics,
                         plain_lyrics.as_deref(),
                         lyrics_source,
@@ -4283,6 +4702,8 @@ impl eframe::App for ShadowPlayerApp {
                         &mut self.coordinator,
                         &self.session,
                         &mut self.artwork_service,
+                        &mut self.lyrics_service,
+                        current_track.as_ref(),
                         &active_lyrics,
                         plain_lyrics.as_deref(),
                         lyrics_source,

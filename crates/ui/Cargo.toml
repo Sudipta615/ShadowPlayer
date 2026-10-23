@@ -32,6 +32,13 @@ serde_json = "1.0"
 # Native OS file/folder picker. Default features use the XDG Desktop Portal
 # backend (no GTK3 dev libraries required on Linux).
 rfd = "0.17"
+# The crossfade preview opens its own short output stream, independent of the
+# main engine, so the demo can play without interrupting the current track.
+cpal = "0.18"
+# Podcast subscriptions: a small XML pull parser and a TLS-capable HTTP client.
+# Both are already in the dependency graph of the engine/tooling crates.
+roxmltree = "0.20"
+ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
 
 # ── Windows: the native, exclusive-mode output backends ───────────────────────
 # On Windows, the app negotiates a *real* exclusive stream: WASAPI Exclusive

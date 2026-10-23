@@ -16,6 +16,10 @@ pub enum NavItem {
     Albums,
     Artists,
     Genres,
+    /// Local smart-shuffle station seeded from a track.
+    Radio,
+    /// Podcast subscriptions, separate from the music library.
+    Podcasts,
     Folders,
     Favorites,
     RecentlyPlayed,
@@ -140,6 +144,8 @@ impl<'a> SideBar<'a> {
             self.render_nav_item(ui, NavItem::Albums, "Albums");
             self.render_nav_item(ui, NavItem::Artists, "Artists");
             self.render_nav_item(ui, NavItem::Genres, "Genres");
+            self.render_nav_item(ui, NavItem::Radio, "Radio");
+            self.render_nav_item(ui, NavItem::Podcasts, "Podcasts");
             self.render_nav_item(ui, NavItem::Folders, "Folders");
 
             // Collections section removed per user request
@@ -619,6 +625,8 @@ impl<'a> SideBar<'a> {
             NavItem::Albums => crate::components::icons::draw_disc(ui, icon_rect, text_color),
             NavItem::Artists => crate::components::icons::draw_artist(ui, icon_rect, text_color),
             NavItem::Genres => crate::components::icons::draw_genres(ui, icon_rect, text_color),
+            NavItem::Radio => crate::components::icons::draw_radio(ui, icon_rect, text_color),
+            NavItem::Podcasts => crate::components::icons::draw_mic(ui, icon_rect, text_color),
             NavItem::Folders => crate::components::icons::draw_folder(ui, icon_rect, text_color),
             NavItem::Settings => crate::components::icons::draw_gear(ui, icon_rect, text_color),
             NavItem::Help => crate::components::icons::draw_help(ui, icon_rect, text_color),

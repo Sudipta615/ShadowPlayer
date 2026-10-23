@@ -28,6 +28,12 @@ pub struct AppState {
     pub rating_width: f32,
     /// Comfortable or compact song-table rows, persisted between launches.
     pub row_density: crate::components::songs_table::RowDensity,
+    /// Named songs-table column layouts (Default, Casual, Audiophile, custom).
+    pub column_presets: Vec<crate::components::songs_table::ColumnPreset>,
+    /// Index of the active layout in `column_presets`.
+    pub active_column_preset: usize,
+    /// Name typed into the preset editor, not persisted.
+    pub column_preset_name: String,
     pub right_tab: RightTab,
     pub visualizer_mode: VisualizerMode,
     /// Wide layout: show the queue/lyrics drawer as a column.
@@ -86,6 +92,10 @@ pub struct AppState {
     pub edit_track: EditTrackState,
     /// Active sleep timer, if any.
     pub sleep_timer: Option<SleepTimer>,
+    /// Inline lyrics editor draft for the right-hand Lyrics tab.
+    pub lyrics_editor: crate::state::LyricsEditorState,
+    /// Inline biography draft for the Artist/Album detail pane.
+    pub biography_editor: crate::state::BiographyEditorState,
 }
 
 impl Default for AppState {
@@ -99,6 +109,9 @@ impl Default for AppState {
             column_widths: Default::default(),
             rating_width: crate::components::songs_table::SongTablePrefs::default().rating_width,
             row_density: Default::default(),
+            column_presets: crate::components::songs_table::ColumnPreset::builtins(),
+            active_column_preset: 0,
+            column_preset_name: String::new(),
             right_tab: RightTab::Queue,
             visualizer_mode: VisualizerMode::Spectrum,
             right_panel_visible: true,
@@ -132,6 +145,8 @@ impl Default for AppState {
             playlist_editor: PlaylistEditorState::default(),
             edit_track: EditTrackState::default(),
             sleep_timer: None,
+            lyrics_editor: Default::default(),
+            biography_editor: Default::default(),
         }
     }
 }

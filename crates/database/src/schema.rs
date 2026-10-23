@@ -90,6 +90,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v12(conn)?;
     }
 
+    if current_version < 13 {
+        apply_v13(conn)?;
+    }
+
     Ok(())
 }
 
@@ -955,6 +959,89 @@ fn apply_v12(conn: &mut Connection) -> Result<()> {
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
             log::error!("Migration V12 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// V13: Tier 2 — waveforms, biographies, podcasts, and BPM.
+///
+/// Waveforms are cached peaks, not audio: one byte per peak keeps a
+/// ten-minute track under a kilobyte, and the seekbar can paint from the
+/// cache before the file is decoded again.
+///
+/// Podcasts live in their own tables. An episode is not a library track —
+/// it has its own resume position, its own download state, and removing a
+/// feed must not leave holes in playlists or play counts.
+fn apply_v13(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V13 (waveforms, biographies, podcasts, BPM)");
+    let tx = conn.transaction()?;
+
+    // `ALTER TABLE ADD COLUMN` has no `IF NOT EXISTS`; guard it like V3/V6/V11.
+    let existing: Vec<String> = {
+        let mut stmt = tx.prepare("PRAGMA table_info(tracks);")?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = Vec::new();
+        for name in names {
+            found.push(name?);
+        }
+        found
+    };
+    if !existing.iter().any(|n| n == "bpm") {
+        tx.execute("ALTER TABLE tracks ADD COLUMN bpm INTEGER;", [])?;
+    }
+
+    let statements = [
+        "CREATE INDEX IF NOT EXISTS idx_tracks_bpm ON tracks(bpm);",
+        "CREATE TABLE IF NOT EXISTS track_waveforms (
+            track_id TEXT PRIMARY KEY NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            peaks BLOB NOT NULL,
+            peak_count INTEGER NOT NULL,
+            duration_secs REAL NOT NULL,
+            updated_at INTEGER NOT NULL
+        );",
+        "CREATE TABLE IF NOT EXISTS biographies (
+            entity_kind TEXT NOT NULL,
+            entity_name TEXT NOT NULL,
+            body TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'user',
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (entity_kind, entity_name)
+        );",
+        "CREATE TABLE IF NOT EXISTS podcast_feeds (
+            id TEXT PRIMARY KEY NOT NULL,
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            description TEXT,
+            artwork_url TEXT,
+            last_fetched_at INTEGER,
+            added_at INTEGER NOT NULL
+        );",
+        "CREATE TABLE IF NOT EXISTS podcast_episodes (
+            id TEXT PRIMARY KEY NOT NULL,
+            feed_id TEXT NOT NULL REFERENCES podcast_feeds(id) ON DELETE CASCADE,
+            guid TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            enclosure_url TEXT NOT NULL,
+            published_at INTEGER,
+            duration_secs REAL,
+            local_path TEXT,
+            downloaded_at INTEGER,
+            position_secs REAL NOT NULL DEFAULT 0,
+            completed INTEGER NOT NULL DEFAULT 0,
+            added_at INTEGER NOT NULL,
+            UNIQUE(feed_id, guid)
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_podcast_episodes_feed
+            ON podcast_episodes(feed_id, published_at DESC);",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (13, strftime('%s', 'now'));",
+    ];
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V13 statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }

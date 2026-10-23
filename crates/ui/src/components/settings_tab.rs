@@ -99,7 +99,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 79] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 81] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -135,6 +135,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 79] = [
         card: "Track Transitions & Crossfading",
         label: "Crossfade Curve",
         description: "Constant Power maintains perceived volume energy; Linear creates gradual dip",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Playback,
+        card: "Track Transitions & Crossfading",
+        label: "Audition Transition",
+        description: "Play a three-second local demo through this output device. It does not touch the current song or the playback queue.",
     },
     SettingsEntry {
         category: SettingsCategory::Playback,
@@ -541,6 +547,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 79] = [
     SettingsEntry {
         category: SettingsCategory::Library,
         card: "Music Library Storage & Directories",
+        label: "Biography Source Folder",
+        description: "Folder of artist and album notes read into the biography panes",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Music Library Storage & Directories",
         label: "Or Type a Directory",
         description: "Advanced: index a folder by typing its absolute path",
     },
@@ -877,6 +889,9 @@ pub struct SettingsTabState {
     // Library input
     #[serde(skip)]
     pub new_scan_path: String,
+    /// Folder of `<Artist>.txt` / `<Album>.md` biography files. Empty means
+    /// only user-written biographies are shown.
+    pub biography_source_dir: String,
 
     // Legacy collapsible section flags preserved for compatibility
     pub section_playback: bool,
@@ -968,6 +983,7 @@ impl Default for SettingsTabState {
             loudness_write_tags: false,
 
             new_scan_path: String::new(),
+            biography_source_dir: String::new(),
 
             section_playback: true,
             section_output: false,
@@ -1073,6 +1089,8 @@ pub struct SettingsTabActions {
     pub transition_mode_changed: Option<TransitionMode>,
     pub crossfade_config_changed: bool,
     pub crossfade_curve_changed: Option<CrossfadeCurve>,
+    /// Play or stop the three-second crossfade audition.
+    pub toggle_crossfade_preview: bool,
     pub loudness_mode_changed: Option<LoudnessMode>,
 
     // Output
@@ -1172,8 +1190,22 @@ pub struct SettingsTabActions {
 // Extra Context for rich view
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The crossfade audition's live state, supplied by the app that owns the
+/// preview output stream.
+#[derive(Default, Clone, Copy)]
+pub struct CrossfadePreviewContext<'a> {
+    pub playing: bool,
+    /// Downsampled envelope of the rendered demo, 0.0–1.0.
+    pub peaks: &'a [f32],
+    /// How far through the three-second loop the sound is, 0.0–1.0.
+    pub progress: f32,
+    pub error: Option<&'a str>,
+}
+
 #[derive(Default)]
 pub struct SettingsExtraContext<'a> {
+    /// Live preview state for the Track Transitions card.
+    pub crossfade_preview: CrossfadePreviewContext<'a>,
     pub scan_roots: &'a [ScanRoot],
     pub track_count: usize,
     pub is_scanning: bool,
@@ -1452,7 +1484,7 @@ pub fn show_settings_tab_extended(
 
                 match state.active_category {
                     SettingsCategory::Playback => {
-                        render_playback_category(ui, state, theme, &mut actions);
+                        render_playback_category(ui, state, theme, extra, &mut actions);
                     }
                     SettingsCategory::Output => {
                         render_output_category(ui, state, theme, extra, &mut actions);
@@ -1490,6 +1522,7 @@ fn render_playback_category(
     ui: &mut egui::Ui,
     state: &mut SettingsTabState,
     theme: &Theme,
+    extra: &SettingsExtraContext<'_>,
     actions: &mut SettingsTabActions,
 ) {
     // Card 1: Speed, Pitch & Mode
@@ -1661,6 +1694,92 @@ fn render_playback_category(
                             actions.crossfade_curve_changed = Some(state.crossfade_curve);
                             actions.crossfade_config_changed = true;
                         }
+                    },
+                );
+
+                let preview = extra.crossfade_preview;
+                setting_item(
+                    ui,
+                    &tr!("Audition Transition"),
+                    &tr!("Play a three-second local demo through this output device. It does not touch the current song or the playback queue."),
+                    theme,
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+                            let label = if preview.playing {
+                                tr!("Stop Preview")
+                            } else {
+                                tr!("Play Preview")
+                            };
+                            if ui.add(pill_btn(label, preview.playing, theme)).clicked() {
+                                actions.toggle_crossfade_preview = true;
+                            }
+
+                            // The preview envelope is rendered from the same
+                            // buffer the audition plays, so the picture is
+                            // the sound, not a decorative squiggle.
+                            let width = 176.0;
+                            let height = 34.0;
+                            let (rect, _) = ui.allocate_exact_size(
+                                Vec2::new(width, height),
+                                Sense::hover(),
+                            );
+                            let painter = ui.painter_at(rect);
+                            painter.rect_filled(
+                                rect,
+                                CornerRadius::same(theme.radius_sm),
+                                theme.bg_pill,
+                            );
+                            let peaks = preview.peaks;
+                            if peaks.is_empty() {
+                                painter.text(
+                                    rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    tr!("No preview rendered"),
+                                    crate::theme::font(10.0),
+                                    theme.text_dim,
+                                );
+                            } else {
+                                let mid = rect.center().y;
+                                let bar_w = (rect.width() / peaks.len() as f32).max(1.0);
+                                for (index, peak) in peaks.iter().enumerate() {
+                                    let x = rect.min.x + index as f32 * bar_w;
+                                    let half = (peak.clamp(0.0, 1.0) * (height * 0.42)).max(0.7);
+                                    let played =
+                                        index as f32 / peaks.len().max(1) as f32 <= preview.progress;
+                                    painter.rect_filled(
+                                        Rect::from_min_max(
+                                            Pos2::new(x, mid - half),
+                                            Pos2::new(x + bar_w * 0.7, mid + half),
+                                        ),
+                                        CornerRadius::same(1),
+                                        if played {
+                                            theme.accent_highlight
+                                        } else {
+                                            theme.text_dim.gamma_multiply(0.55)
+                                        },
+                                    );
+                                }
+                                if preview.playing {
+                                    let x = rect.min.x + rect.width() * preview.progress;
+                                    painter.line_segment(
+                                        [
+                                            Pos2::new(x, rect.min.y + 2.0),
+                                            Pos2::new(x, rect.max.y - 2.0),
+                                        ],
+                                        Stroke::new(1.5_f32, theme.accent_warm),
+                                    );
+                                }
+                            }
+
+                            if let Some(error) = preview.error {
+                                ui.label(
+                                    egui::RichText::new(error)
+                                        .font(crate::theme::font(10.5))
+                                        .color(theme.destructive),
+                                );
+                            }
+                        });
                     },
                 );
             });
@@ -3767,6 +3886,20 @@ fn render_library_category(
                         actions.open_artwork_fetch = true;
                     }
                 });
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Biography Source Folder"),
+            &tr!("Folder of artist and album notes. Reads <Artist>.txt/.md and <Artist> - <Album>.txt/.md. The first read is cached; edits in the pane are stored separately."),
+            theme,
+            |ui| {
+                let edit = egui::TextEdit::singleline(&mut state.biography_source_dir)
+                    .hint_text(tr!("/home/user/Music/biographies"))
+                    .desired_width(240.0)
+                    .font(crate::theme::font(12.0));
+                ui.add(edit);
             },
         );
 

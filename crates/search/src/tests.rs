@@ -24,6 +24,7 @@ mod unit {
             track_number: Some(1),
             disc_number: Some(1),
             duration_secs: 180.0,
+            bpm: None,
             sample_rate: 44100,
             channels: 2,
             format: "FLAC".to_string(),

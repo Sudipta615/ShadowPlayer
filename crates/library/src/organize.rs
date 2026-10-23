@@ -477,6 +477,7 @@ mod tests {
             track_number: Some(id_seed as u32),
             disc_number: None,
             duration_secs: 200.0,
+            bpm: None,
             sample_rate: 44100,
             channels: 2,
             format: "FLAC".to_string(),

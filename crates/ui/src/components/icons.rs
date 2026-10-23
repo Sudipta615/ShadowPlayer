@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, Rect, Ui, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Stroke, Ui, Vec2};
 
 #[inline]
 fn fit_square(rect: Rect) -> Rect {
@@ -249,4 +249,80 @@ pub fn draw_headphones(ui: &Ui, rect: Rect, color: Color32) {
     egui::Image::new(egui::include_image!("../../assets/icons/headphones.svg"))
         .tint(color)
         .paint_at(ui, fit_square(rect));
+}
+
+/// A broadcast mast for the local Radio view.
+pub fn draw_radio(ui: &Ui, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) * 0.5;
+    let p = ui.painter();
+    p.circle_filled(c, r * 0.16, color);
+    // Two arcs on each side: the classic broadcast mark.
+    for (index, radius) in [0.34f32, 0.52].into_iter().enumerate() {
+        let width = 1.4 + index as f32 * 0.2;
+        for side in [-1.0f32, 1.0] {
+            let start = if side < 0.0 {
+                std::f32::consts::FRAC_PI_2 + 0.55
+            } else {
+                -std::f32::consts::FRAC_PI_2 - 0.55
+            };
+            p.add(egui::Shape::line(
+                (0..=10)
+                    .map(|step| {
+                        let angle = start + step as f32 * 0.11;
+                        Pos2::new(
+                            c.x + side * radius * r * angle.cos().abs(),
+                            c.y - radius * r * angle.sin(),
+                        )
+                    })
+                    .collect(),
+                Stroke::new(width, color),
+            ));
+        }
+    }
+    p.line_segment(
+        [
+            Pos2::new(c.x, c.y + r * 0.12),
+            Pos2::new(c.x, c.y + r * 0.62),
+        ],
+        Stroke::new(1.5, color),
+    );
+}
+
+/// A microphone for Podcasts.
+pub fn draw_mic(ui: &Ui, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) * 0.5;
+    let p = ui.painter();
+    let capsule = Rect::from_center_size(
+        Pos2::new(c.x, c.y - r * 0.18),
+        Vec2::new(r * 0.58, r * 0.86),
+    );
+    p.rect_filled(capsule, CornerRadius::same((r * 0.29) as u8), color);
+    p.add(egui::Shape::line(
+        (0..=12)
+            .map(|step| {
+                let angle = std::f32::consts::PI * (0.08 + 0.84 * step as f32 / 12.0);
+                Pos2::new(
+                    c.x + (r * 0.52) * angle.cos(),
+                    c.y + r * 0.05 + (r * 0.52) * angle.sin(),
+                )
+            })
+            .collect(),
+        Stroke::new(1.5, color),
+    ));
+    p.line_segment(
+        [
+            Pos2::new(c.x, c.y + r * 0.55),
+            Pos2::new(c.x, c.y + r * 0.78),
+        ],
+        Stroke::new(1.5, color),
+    );
+    p.line_segment(
+        [
+            Pos2::new(c.x - r * 0.22, c.y + r * 0.78),
+            Pos2::new(c.x + r * 0.22, c.y + r * 0.78),
+        ],
+        Stroke::new(1.5, color),
+    );
 }

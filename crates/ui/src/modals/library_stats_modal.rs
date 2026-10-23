@@ -460,6 +460,7 @@ mod tests {
             track_number: Some(1),
             disc_number: None,
             duration_secs: 240.0,
+            bpm: None,
             sample_rate: rate,
             channels: 2,
             format: format.into(),

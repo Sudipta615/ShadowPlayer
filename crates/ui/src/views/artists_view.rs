@@ -4,8 +4,8 @@ use eframe::egui;
 use playback::PlaybackCoordinator;
 
 use crate::components::artists_view::ArtistsView;
-use crate::services::ArtworkService;
-use crate::state::LibraryState;
+use crate::services::{ArtworkService, BiographyService};
+use crate::state::{BiographyEditorState, LibraryState};
 use crate::theme::Theme;
 
 #[allow(clippy::too_many_arguments)]
@@ -14,12 +14,19 @@ pub fn render_artists_view(
     library_state: &mut LibraryState,
     coordinator: &mut PlaybackCoordinator,
     artwork_service: &mut ArtworkService,
+    biography_service: &mut BiographyService,
+    biography_editor: &mut BiographyEditorState,
     current_track: Option<&Track>,
     is_playing: bool,
     theme: &Theme,
     artist_repo: &ArtistRepo,
     favorites_repo: &FavoritesRepo,
 ) {
+    let biography = library_state
+        .selected_artist
+        .clone()
+        .and_then(|name| biography_service.get("artist", &name));
+
     let art_action = ArtistsView {
         artists: &library_state.artists,
         selected_artist: &mut library_state.selected_artist,
@@ -29,9 +36,28 @@ pub fn render_artists_view(
         favorite_track_ids: &library_state.favorite_ids,
         artist_covers: &library_state.artist_cover_tracks,
         artwork: artwork_service,
+        biography: biography.as_ref(),
+        biography_editor,
         theme,
     }
     .show(ui);
+
+    if let Some(request) = art_action.biography_request {
+        match request {
+            crate::components::biography_pane::BiographyPaneRequest::Save { kind, name, text } => {
+                match biography_service.save(&kind, &name, &text) {
+                    Ok(()) => biography_editor.close(),
+                    Err(e) => biography_editor.fail(e),
+                }
+            }
+            crate::components::biography_pane::BiographyPaneRequest::Delete { kind, name } => {
+                match biography_service.save(&kind, &name, "") {
+                    Ok(()) => biography_editor.close(),
+                    Err(e) => biography_editor.fail(e),
+                }
+            }
+        }
+    }
 
     if let Some(artist) = art_action.play_artist {
         let tracks = artist_repo
