@@ -1219,6 +1219,9 @@ impl<'a> SongsTable<'a> {
 
                     let (sort_rect, sort_resp) =
                         ui.allocate_exact_size(Vec2::new(124.0, 30.0), Sense::click());
+                    sort_resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, sort_label.clone())
+                    });
                     let sp = ui.painter_at(sort_rect);
                     let sort_bg = if sort_resp.hovered() {
                         theme.bg_card_hover
@@ -1355,6 +1358,17 @@ impl<'a> SongsTable<'a> {
                             Stroke::new(1.8_f32, arrow_col),
                         ));
                     }
+                    dir_resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            true,
+                            if ascending {
+                                "Sort ascending — activate for descending"
+                            } else {
+                                "Sort descending — activate for ascending"
+                            },
+                        )
+                    });
                     if dir_resp
                         .on_hover_text(if ascending {
                             "Ascending — click for descending"
@@ -1501,16 +1515,25 @@ impl<'a> SongsTable<'a> {
             let hp = ui.painter_at(header_rect);
             let header_y = header_rect.center().y;
 
-            let header_cell = |ui: &mut egui::Ui, salt: &str, x: f32, w: f32| -> egui::Response {
+            let header_cell = |ui: &mut egui::Ui,
+                               salt: &str,
+                               label: &str,
+                               x: f32,
+                               w: f32|
+             -> egui::Response {
                 let rect = Rect::from_min_size(
                     Pos2::new(header_rect.min.x + x, header_rect.min.y),
                     Vec2::new(w, 20.0),
                 );
-                ui.interact(rect, ui.make_persistent_id(salt), Sense::click())
+                let response = ui.interact(rect, ui.make_persistent_id(salt), Sense::click());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, format!("Sort by {label}"))
+                });
+                response
             };
 
             // Column 1: select-all checkbox + the row-number sort target.
-            let num_h_resp = header_cell(ui, "hdr_num", cols.num_x, COL_NUM_W);
+            let num_h_resp = header_cell(ui, "hdr_num", "track number", cols.num_x, COL_NUM_W);
             let all_selected =
                 !tracks.is_empty() && tracks.iter().all(|t| selected_track_ids.contains(&t.id));
             let any_selected = tracks.iter().any(|t| selected_track_ids.contains(&t.id));
@@ -1552,6 +1575,7 @@ impl<'a> SongsTable<'a> {
             let title_h_resp = header_cell(
                 ui,
                 "hdr_title",
+                "title",
                 cols.title_x,
                 cols.title_text_w + cols.art_inset,
             );
@@ -1601,7 +1625,7 @@ impl<'a> SongsTable<'a> {
                     theme.text_muted
                 };
                 let salt = format!("hdr_col_{:?}", span.column);
-                let resp = header_cell(ui, &salt, span.x, span.w);
+                let resp = header_cell(ui, &salt, span.column.label(), span.x, span.w);
                 let label = hp.layout_no_wrap(
                     span.column.label().to_uppercase(),
                     crate::theme::font(11.0),
@@ -1634,7 +1658,8 @@ impl<'a> SongsTable<'a> {
             }
 
             // Column 5: duration.
-            let clock_resp = header_cell(ui, "hdr_duration", cols.duration_x, COL_TIME_W);
+            let clock_resp =
+                header_cell(ui, "hdr_duration", "duration", cols.duration_x, COL_TIME_W);
             let clock_col = if current_sort == SortField::Duration {
                 theme.accent_highlight
             } else {
@@ -1656,7 +1681,8 @@ impl<'a> SongsTable<'a> {
             }
 
             // Column 6: rating.
-            let rating_h_resp = header_cell(ui, "hdr_rating", cols.rating_x, cols.rating_w);
+            let rating_h_resp =
+                header_cell(ui, "hdr_rating", "rating", cols.rating_x, cols.rating_w);
             let rating_col = if current_sort == SortField::Rating {
                 theme.accent_highlight
             } else {
@@ -1681,7 +1707,7 @@ impl<'a> SongsTable<'a> {
             }
 
             // Column 7: favorites.
-            let heart_resp = header_cell(ui, "hdr_fav", cols.favorite_x, COL_FAV_W);
+            let heart_resp = header_cell(ui, "hdr_fav", "favorite", cols.favorite_x, COL_FAV_W);
             let heart_icon_rect = Rect::from_center_size(
                 Pos2::new(
                     header_rect.min.x + cols.favorite_x + COL_FAV_W * 0.5,
@@ -1865,6 +1891,13 @@ impl<'a> SongsTable<'a> {
                             ui.scope_id().with(("row_rating", idx)),
                             Sense::click(),
                         );
+                        rating_resp.widget_info(|| {
+                            egui::WidgetInfo::slider(
+                                true,
+                                f64::from(track.rating) / 5.0,
+                                format!("Rating for {}: {} of 5 stars", track.title, track.rating),
+                            )
+                        });
                         let pointer = ui.input(|i| i.pointer.interact_pos());
                         let hover_star = if rating_resp.hovered() {
                             pointer.and_then(|p| {
@@ -2170,6 +2203,13 @@ impl<'a> SongsTable<'a> {
                             ui.scope_id().with(("row_menu", idx)),
                             Sense::click(),
                         );
+                        menu_resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                true,
+                                format!("Track actions for {}", track.title),
+                            )
+                        });
                         crate::components::icons::draw_more_menu(
                             ui,
                             menu_rect,
@@ -2417,11 +2457,11 @@ fn render_column_preset_menu(
                 }
             });
             if ui.button(tr!("Reset this preset")).clicked() {
-                let reset = ColumnPreset::factory(&column_preset.name).unwrap_or_else(|| {
-                    let mut fallback = ColumnPreset::default();
-                    fallback.name = column_preset.name.clone();
-                    fallback
-                });
+                let reset =
+                    ColumnPreset::factory(&column_preset.name).unwrap_or_else(|| ColumnPreset {
+                        name: column_preset.name.clone(),
+                        ..ColumnPreset::default()
+                    });
                 action.column_preset_changed = Some(reset);
                 ui.close();
             }

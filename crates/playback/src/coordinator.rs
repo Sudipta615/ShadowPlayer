@@ -34,6 +34,33 @@ const RESTART_SEEK_THRESHOLD_SECS: f32 = 3.0;
 /// image itself. These are the two conventions the rippers actually use.
 const SIBLING_CUE_NAMES: [&str; 2] = ["album.cue", "CDImage.cue"];
 
+/// An input endpoint as the measurement wizard sees it, decoupled from the
+/// engine's type so callers of the coordinator do not need the engine crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasurementInputDevice {
+    pub name: String,
+    pub is_default: bool,
+    pub channels: Vec<u16>,
+    pub sample_rates: Vec<u32>,
+    pub measurement_capable: bool,
+}
+
+/// Engine events relevant to the room-correction measurement wizard.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RoomMeasurementEvent {
+    /// Reply to [`PlaybackCoordinator::enumerate_measurement_inputs`].
+    InputDevices(Vec<MeasurementInputDevice>),
+    /// A named stage in the sweep/capture/deconvolution sequence.
+    Progress(String),
+    /// The derived correction is now live.
+    Complete {
+        path: PathBuf,
+        snr_db: f32,
+    },
+    Failed(String),
+    Cancelled,
+}
+
 pub struct PlaybackCoordinator {
     session: Arc<AudioSession>,
     _db: Database,
@@ -60,6 +87,10 @@ pub struct PlaybackCoordinator {
     /// used to be dropped on the floor (`_ => {}`), so a decode failure or a
     /// disconnected DAC was invisible.
     engine_notices: Vec<String>,
+
+    /// Measurement events, kept separate from notices so the wizard can show a
+    /// progress stage without also raising a toast for it.
+    room_measurement_events: Vec<RoomMeasurementEvent>,
 }
 
 impl PlaybackCoordinator {
@@ -89,6 +120,7 @@ impl PlaybackCoordinator {
             last_position: 0.0,
             play_registered: false,
             engine_notices: Vec::new(),
+            room_measurement_events: Vec::new(),
         };
 
         coordinator.restore_saved_queue();
@@ -522,6 +554,39 @@ impl PlaybackCoordinator {
                         path.display()
                     ));
                 }
+                EngineEvent::InputDeviceList { devices } => {
+                    let devices = devices
+                        .into_iter()
+                        .map(|device| {
+                            let measurement_capable = device.is_measurement_capable();
+                            MeasurementInputDevice {
+                                name: device.name,
+                                is_default: device.is_default,
+                                channels: device.channels,
+                                sample_rates: device.sample_rates,
+                                measurement_capable,
+                            }
+                        })
+                        .collect();
+                    self.push_room_event(RoomMeasurementEvent::InputDevices(devices));
+                }
+                EngineEvent::MeasurementProgress { stage } => {
+                    self.push_room_event(RoomMeasurementEvent::Progress(stage));
+                }
+                EngineEvent::MeasurementComplete { path, snr_db } => {
+                    info!(
+                        "room measurement complete: {} (SNR {snr_db:.1} dB)",
+                        path.display()
+                    );
+                    self.push_room_event(RoomMeasurementEvent::Complete { path, snr_db });
+                }
+                EngineEvent::MeasurementFailed(message) => {
+                    warn!("Room measurement failed: {message}");
+                    self.push_room_event(RoomMeasurementEvent::Failed(message));
+                }
+                EngineEvent::MeasurementCancelled => {
+                    self.push_room_event(RoomMeasurementEvent::Cancelled);
+                }
                 // Opened/paused/stopped/seek/format/telemetry events carry no
                 // action for the coordinator.
                 _ => {}
@@ -564,6 +629,40 @@ impl PlaybackCoordinator {
     /// to present (toast, status line).
     pub fn take_engine_notices(&mut self) -> Vec<String> {
         std::mem::take(&mut self.engine_notices)
+    }
+
+    fn push_room_event(&mut self, event: RoomMeasurementEvent) {
+        const MAX_ROOM_EVENTS: usize = 64;
+        if self.room_measurement_events.len() == MAX_ROOM_EVENTS {
+            self.room_measurement_events.remove(0);
+        }
+        self.room_measurement_events.push(event);
+    }
+
+    /// Take measurement events since the last call. The wizard drains this
+    /// every frame; nobody else needs to know about progress stages.
+    pub fn take_room_measurement_events(&mut self) -> Vec<RoomMeasurementEvent> {
+        std::mem::take(&mut self.room_measurement_events)
+    }
+
+    /// Ask the engine for its input endpoints. The reply arrives as
+    /// [`RoomMeasurementEvent::InputDevices`].
+    pub fn enumerate_measurement_inputs(&self) {
+        self.session.enumerate_input_devices();
+    }
+
+    /// Start a measurement through `input_device`, or through the engine's
+    /// preferred system mix/default input when it is `None`.
+    pub fn measure_room(&self, seconds: f32, pre_emphasis: f32, input_device: Option<String>) {
+        self.session
+            .measure_room_with_input(seconds, pre_emphasis, input_device);
+    }
+
+    /// Stop an in-flight measurement. The reply is
+    /// [`RoomMeasurementEvent::Cancelled`] (or `Failed` when nothing was
+    /// running).
+    pub fn cancel_room_measurement(&self) {
+        self.session.cancel_room_measurement();
     }
 
     /// Reset per-track listening accounting.

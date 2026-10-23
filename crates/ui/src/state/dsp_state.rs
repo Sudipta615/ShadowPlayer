@@ -498,6 +498,15 @@ impl DspState {
         if a.refresh {
             session.refresh_clap_plugin();
         }
+        if a.open_gui {
+            session.open_clap_gui();
+        }
+        if a.close_gui {
+            session.close_clap_gui();
+        }
+        if let Some((width, height)) = a.resize_gui {
+            session.resize_clap_gui(width.max(1), height.max(1));
+        }
 
         if a.save_preset {
             let view = session.clap_view();

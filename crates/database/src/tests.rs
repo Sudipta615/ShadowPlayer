@@ -2,7 +2,7 @@
 mod unit {
     use crate::db::Database;
     use crate::repos::*;
-    use domain::ids::{PlaylistId, TrackId};
+    use domain::ids::{AlbumId, PlaylistId, TrackId};
     use domain::models::{AppSettings, SortField, SortOrder, Track, TrackDspProfile};
     use domain::smart::{SmartField, SmartOp, SmartPlaylist, SmartRule};
     use std::path::PathBuf;
@@ -1574,6 +1574,80 @@ mod unit {
             AppSettings::default().sort_field,
             "absent fields fall back to their defaults"
         );
+    }
+
+    /// Liner notes are keyed by the same stable identity the album list uses,
+    /// and they do not disappear when the album's tracks are deleted: notes
+    /// are user writing, not a cache of the library.
+    #[test]
+    fn album_notes_round_trip_and_outlive_their_tracks() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let tracks = TrackRepo::new(db.clone());
+        let notes = AlbumNotesRepo::new(db.clone());
+        let track = sample_track(
+            TrackId::new(),
+            "/music/notes/01.flac",
+            "One",
+            "The Artist",
+            "The Album",
+        );
+        tracks.upsert(&track).unwrap();
+
+        let id = AlbumId::from_identity("The Album", "The Artist");
+        assert!(notes.get(&id).unwrap().is_none());
+        notes
+            .save(
+                &id,
+                "The Album",
+                "The Artist",
+                "# Liner notes\n\nA **quiet** record.",
+            )
+            .unwrap();
+
+        let loaded = notes.get(&id).unwrap().expect("saved note");
+        assert_eq!(loaded.album_id, id);
+        assert_eq!(loaded.title, "The Album");
+        assert_eq!(loaded.artist, "The Artist");
+        assert_eq!(loaded.markdown, "# Liner notes\n\nA **quiet** record.");
+        assert!(loaded.updated_at > 0);
+        assert_eq!(notes.list().unwrap().len(), 1);
+        assert_eq!(notes.ids_with_notes().unwrap(), vec![id]);
+
+        // The same title by another artist is another album, not a collision.
+        let other = AlbumId::from_identity("The Album", "Another Artist");
+        assert!(notes.get(&other).unwrap().is_none());
+
+        tracks.delete(&track.id).unwrap();
+        assert!(
+            notes.get(&id).unwrap().is_some(),
+            "removing a file must not erase the user's writing"
+        );
+
+        assert!(notes.delete(&id).unwrap());
+        assert!(!notes.delete(&id).unwrap(), "deleting twice is harmless");
+        assert!(notes.get(&id).unwrap().is_none());
+    }
+
+    #[test]
+    fn blank_notes_delete_instead_of_storing_an_empty_document() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let notes = AlbumNotesRepo::new(db.clone());
+        let id = AlbumId::from_identity("Album", "Artist");
+        notes.save(&id, "Album", "Artist", "Something").unwrap();
+        notes.save(&id, "Album", "Artist", "  \n\t ").unwrap();
+        assert!(notes.get(&id).unwrap().is_none());
+        assert!(notes.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn absurdly_large_liner_notes_are_refused() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let notes = AlbumNotesRepo::new(db.clone());
+        let id = AlbumId::from_identity("Album", "Artist");
+        let huge = "x".repeat(256 * 1024 + 1);
+        assert!(notes.save(&id, "Album", "Artist", &huge).is_err());
+        assert!(notes.save(&id, "Album", "Artist", "a\0b").is_err());
+        assert!(notes.get(&id).unwrap().is_none());
     }
 
     /// An album's year is a property of the album, not of whichever row SQLite

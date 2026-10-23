@@ -732,6 +732,53 @@ impl AudioEngine {
                     let _ = bytes;
                 }
             }
+            EngineCommand::OpenClapGui => {
+                #[cfg(feature = "clap-host")]
+                {
+                    let opened = self
+                        .graph
+                        .with_graph(|g| g.plugin_mut().clap_node_mut().map(|c| c.open_gui()));
+                    match opened {
+                        Some(Ok(())) => {}
+                        Some(Err(e)) => warn!("CLAP editor: {e}"),
+                        None => warn!("CLAP editor: no plugin is loaded"),
+                    }
+                    // The reason lives in `rack.gui.error`, not in the load
+                    // failure slot; publish the node's report unchanged.
+                    self.publish_clap_view(None);
+                }
+            }
+            EngineCommand::CloseClapGui => {
+                #[cfg(feature = "clap-host")]
+                {
+                    self.graph.with_graph(|g| {
+                        if let Some(node) = g.plugin_mut().clap_node_mut() {
+                            node.close_gui();
+                        }
+                    });
+                    self.publish_clap_view(None);
+                }
+            }
+            EngineCommand::ResizeClapGui { width, height } => {
+                #[cfg(feature = "clap-host")]
+                {
+                    let resized = self.graph.with_graph(|g| {
+                        g.plugin_mut()
+                            .clap_node_mut()
+                            .map(|c| c.resize_gui(width, height))
+                    });
+                    match resized {
+                        Some(Ok(())) => {}
+                        Some(Err(e)) => warn!("CLAP editor resize: {e}"),
+                        None => warn!("CLAP editor resize: no plugin is loaded"),
+                    }
+                    self.publish_clap_view(None);
+                }
+                #[cfg(not(feature = "clap-host"))]
+                {
+                    let _ = (width, height);
+                }
+            }
 
             // ── Spatial master ──
             EngineCommand::SetSpatialQuality(q) => {
@@ -818,7 +865,9 @@ impl AudioEngine {
             EngineCommand::MeasureRoom {
                 seconds,
                 pre_emphasis,
-            } => self.handle_measure_room(seconds, pre_emphasis),
+                input_device,
+            } => self.handle_measure_room(seconds, pre_emphasis, input_device),
+            EngineCommand::CancelRoomMeasurement => self.handle_cancel_room_measurement(),
             EngineCommand::SetSampleRatePolicy(policy) => {
                 self.handle_set_sample_rate_policy(policy)
             }

@@ -138,6 +138,20 @@ pub struct Album {
     pub artwork_path: Option<PathBuf>,
 }
 
+/// User-written Markdown liner notes for one album.
+///
+/// The id is derived from the album's identity, so notes survive a library
+/// rescan. `title` and `artist` are a snapshot for listings and export: the
+/// tracks themselves may later be moved or retagged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlbumNote {
+    pub album_id: AlbumId,
+    pub title: String,
+    pub artist: String,
+    pub markdown: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Artist {
     pub id: ArtistId,

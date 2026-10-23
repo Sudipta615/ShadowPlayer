@@ -130,6 +130,53 @@ fn engine_limitations(text: &str) -> Vec<String> {
 }
 
 #[test]
+fn the_readme_describes_the_tools_and_the_opt_in_network() {
+    let root = repo_root();
+    let readme = read(&root.join("README.md"));
+    let lower = readme.to_lowercase();
+
+    for (needle, why) in [
+        ("cd ripper", "the CD ripper is a shipped feature"),
+        ("transcode export", "FLAC/Opus export is a shipped feature"),
+        (
+            "room-correction",
+            "the measurement wizard is a shipped feature",
+        ),
+        ("liner notes", "Markdown album notes are a shipped feature"),
+        ("headless", "headless mode is a shipped feature"),
+        ("sha-256", "update downloads are checksum-verified"),
+        ("clap.gui", "CLAP editors are passed through"),
+    ] {
+        assert!(
+            lower.contains(needle),
+            "README.md no longer mentions {needle:?}, but {why}; update the README"
+        );
+    }
+
+    for stale in [
+        "no network requests at all",
+        "no cd ripping",
+        "no transcoding",
+        "no auto-update",
+        "no microphone permission",
+        "captures nothing",
+        "omits nsmicrophoneusagedescription",
+        "some icon-only controls are still unnamed",
+    ] {
+        assert!(
+            !lower.contains(stale),
+            "README.md still contains the stale claim {stale:?}; the app changed, so the README must too"
+        );
+    }
+
+    let plist = read(&root.join("crates/app/macos/Info.plist"));
+    assert!(
+        plist.contains("<key>NSMicrophoneUsageDescription</key>"),
+        "the macOS bundle must declare the microphone use required by the measurement wizard"
+    );
+}
+
+#[test]
 fn the_readme_test_commands_are_the_commands_ci_runs() {
     let root = repo_root();
     let readme = read(&root.join("README.md"));

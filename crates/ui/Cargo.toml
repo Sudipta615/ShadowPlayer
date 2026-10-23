@@ -17,6 +17,7 @@ library = { path = "../library" }
 lyrics = { path = "../lyrics" }
 search = { path = "../search" }
 playback = { path = "../playback" }
+media-tools = { path = "../media-tools" }
 config = { package = "config", path = "../engine/crates/config" }
 engine = { package = "audio-engine", path = "../engine", features = ["tag-write"] }
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "wayland", "x11"] }

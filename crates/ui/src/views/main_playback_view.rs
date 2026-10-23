@@ -499,10 +499,9 @@ pub fn render_main_playback_view(
             .min(app_state.column_presets.len().saturating_sub(1));
         if let Some(current) = app_state.column_presets.get(idx) {
             let reset = crate::components::songs_table::ColumnPreset::factory(&current.name)
-                .unwrap_or_else(|| {
-                    let mut fallback = crate::components::songs_table::ColumnPreset::default();
-                    fallback.name = current.name.clone();
-                    fallback
+                .unwrap_or_else(|| crate::components::songs_table::ColumnPreset {
+                    name: current.name.clone(),
+                    ..crate::components::songs_table::ColumnPreset::default()
                 });
             app_state.column_presets[idx] = reset.normalized();
         }

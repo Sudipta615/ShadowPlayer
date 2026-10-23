@@ -173,9 +173,7 @@ impl PodcastService {
     /// Apply a finished job. Returns an event for the UI, or `None` while the
     /// worker is still running.
     pub fn poll(&mut self) -> Option<PodcastEvent> {
-        let Some((_label, rx)) = self.inflight.take() else {
-            return None;
-        };
+        let (_label, rx) = self.inflight.take()?;
         match rx.try_recv() {
             Ok(Job::Refresh {
                 feed_id,
@@ -422,9 +420,7 @@ pub fn parse_feed(xml: &str) -> Result<ParsedFeed, String> {
             .or_else(|| child_text(item, "published"))
             .or_else(|| child_text(item, "updated"))
             .and_then(|d| parse_date(&d));
-        let duration_secs = child_text(item, "duration")
-            .and_then(|d| parse_duration(&d))
-            .or_else(|| Some(0.0).filter(|_| false));
+        let duration_secs = child_text(item, "duration").and_then(|d| parse_duration(&d));
 
         episodes.push(ParsedEpisode {
             guid,

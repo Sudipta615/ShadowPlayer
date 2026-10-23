@@ -2085,6 +2085,140 @@ impl AlbumRepo {
     }
 }
 
+/// The largest liner-notes document the database accepts. The Markdown editor
+/// uses the same ceiling; enforcing it here too means an older or alternative
+/// client cannot fill the settings database with a pasted novel.
+const MAX_ALBUM_NOTES_BYTES: usize = 256 * 1024;
+
+/// Markdown liner notes, one document per album.
+pub struct AlbumNotesRepo {
+    db: Database,
+}
+
+impl AlbumNotesRepo {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    /// Load an album's notes, or `None` when it has not been written yet.
+    pub fn get(&self, album_id: &AlbumId) -> Result<Option<AlbumNote>> {
+        self.db.with_conn(|conn| {
+            conn.query_row(
+                "SELECT album_id, title, artist, notes_markdown, updated_at
+                 FROM album_notes WHERE album_id = ?1;",
+                params![album_id.to_string()],
+                map_album_note,
+            )
+            .optional()
+        })
+    }
+
+    /// Create or replace an album's notes.
+    ///
+    /// Empty notes delete the row rather than storing a blank document: the
+    /// album view can then distinguish "never written" from "written and
+    /// cleared", and an empty note does not shadow a future bundled note.
+    pub fn save(
+        &self,
+        album_id: &AlbumId,
+        title: &str,
+        artist: &str,
+        markdown: &str,
+    ) -> Result<()> {
+        if markdown.len() > MAX_ALBUM_NOTES_BYTES {
+            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "liner notes are {} bytes; the limit is {MAX_ALBUM_NOTES_BYTES}",
+                        markdown.len()
+                    ),
+                ),
+            )));
+        }
+        if markdown.contains('\0') {
+            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "liner notes contain a NUL byte".to_string(),
+                ),
+            )));
+        }
+        if markdown.trim().is_empty() {
+            self.delete(album_id)?;
+            return Ok(());
+        }
+        self.db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO album_notes
+                    (album_id, title, artist, notes_markdown, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(album_id) DO UPDATE SET
+                    title = excluded.title,
+                    artist = excluded.artist,
+                    notes_markdown = excluded.notes_markdown,
+                    updated_at = excluded.updated_at;",
+                params![album_id.to_string(), title, artist, markdown, now_secs()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Remove an album's notes. Returns whether a document existed.
+    pub fn delete(&self, album_id: &AlbumId) -> Result<bool> {
+        self.db.with_conn(|conn| {
+            let removed = conn.execute(
+                "DELETE FROM album_notes WHERE album_id = ?1;",
+                params![album_id.to_string()],
+            )?;
+            Ok(removed > 0)
+        })
+    }
+
+    /// Notes that have been written, newest edit first. This drives export and
+    /// the "albums with notes" view without scanning the whole library.
+    pub fn list(&self) -> Result<Vec<AlbumNote>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT album_id, title, artist, notes_markdown, updated_at
+                 FROM album_notes
+                 ORDER BY updated_at DESC, title COLLATE NOCASE ASC;",
+            )?;
+            let iter = stmt.query_map([], map_album_note)?;
+            let mut notes = Vec::new();
+            for note in iter {
+                notes.push(note?);
+            }
+            Ok(notes)
+        })
+    }
+
+    /// Every album that has notes. Used by the UI to mark which albums in the
+    /// current page have notes without loading every note's text.
+    pub fn ids_with_notes(&self) -> Result<Vec<AlbumId>> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT album_id FROM album_notes;")?;
+            let iter = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            let mut ids = Vec::new();
+            for id in iter {
+                ids.push(parse_id::<AlbumId>(&id?, "album_id")?);
+            }
+            Ok(ids)
+        })
+    }
+}
+
+fn map_album_note(row: &Row<'_>) -> Result<AlbumNote> {
+    let album_id: String = row.get(0)?;
+    Ok(AlbumNote {
+        album_id: parse_id(&album_id, "album_id")?,
+        title: row.get(1)?,
+        artist: row.get(2)?,
+        markdown: row.get(3)?,
+        updated_at: row.get(4)?,
+    })
+}
+
 pub struct ArtistRepo {
     db: Database,
 }

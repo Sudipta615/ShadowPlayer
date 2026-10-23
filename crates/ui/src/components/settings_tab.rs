@@ -99,7 +99,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 81] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 85] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -416,7 +416,7 @@ pub static SETTINGS_INDEX: [SettingsEntry; 81] = [
         category: SettingsCategory::MixBus,
         card: "CLAP Plugin Insert",
         label: "Hosted Plugin",
-        description: "A plugin's own editor is a native window this UI cannot embed, so the rack drives every parameter the plugin publishes instead",
+        description: "A plugin's own editor opens as a floating native window; the rack also exposes every parameter and named presets",
     },
     SettingsEntry {
         category: SettingsCategory::MixBus,
@@ -513,6 +513,30 @@ pub static SETTINGS_INDEX: [SettingsEntry; 81] = [
         card: "Runtime Diagnostics",
         label: "DSP Graph Rebuilds",
         description: "Mean cost of rebuilding the processing graph (codec, sample-rate or routing change)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Room Correction Measurement",
+        label: "Measurement Wizard",
+        description: "Choose the input device and sweep length, watch each stage, and cancel without keeping a partial recording",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "CD Ripper",
+        label: "Disc Extraction",
+        description: "Probe the drive, fetch CDDB metadata when available, pick tracks, and write new files without overwriting",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Transcode Export",
+        label: "Format Export",
+        description: "Batch export selected files to one output folder; existing files are never replaced unless you allow it",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Tools,
+        card: "Automatic Updates",
+        label: "Update Check",
+        description: "Off by default. When enabled, Check contacts GitHub, compares versions, and offers a verified download for this platform",
     },
     SettingsEntry {
         category: SettingsCategory::Library,
@@ -879,6 +903,9 @@ pub struct SettingsTabState {
     // Capture & Tools
     pub capture_path: String,
     pub capture_device: String,
+    /// Opt in to GitHub release checks. Off by default; no check runs until
+    /// the user enables it and presses Check.
+    pub update_check_enabled: bool,
     pub stereo_enhancer_enabled: bool,
     pub loudness_tag_path: String,
     /// When set, the library ReplayGain scan also writes the measured values
@@ -978,6 +1005,7 @@ impl Default for SettingsTabState {
 
             capture_path: String::new(),
             capture_device: String::new(),
+            update_check_enabled: false,
             stereo_enhancer_enabled: false,
             loudness_tag_path: String::new(),
             loudness_write_tags: false,
@@ -1018,6 +1046,13 @@ pub fn dual_tone_slider(
 
     let min = *range.start();
     let max = *range.end();
+    resp.widget_info(|| {
+        egui::WidgetInfo::slider(
+            true,
+            f64::from(((*value - min) / (max - min)).clamp(0.0, 1.0)),
+            format!("Setting slider, {value:.2}"),
+        )
+    });
 
     if resp.dragged() || resp.clicked() {
         if let Some(pos) = resp.interact_pointer_pos() {
@@ -1154,6 +1189,12 @@ pub struct SettingsTabActions {
     // Capture
     pub start_capture: bool,
     pub stop_capture: bool,
+
+    // Tools: the workshop, CD, transcode, and opt-in updates
+    pub open_room_measurement: bool,
+    pub open_cd_ripper: bool,
+    pub open_transcode_export: bool,
+    pub open_update_check: bool,
 
     // Advanced
     pub stereo_enhancer_changed: Option<bool>,
@@ -1403,6 +1444,9 @@ fn render_settings_search_results(ui: &mut egui::Ui, state: &mut SettingsTabStat
                     });
 
                 let response = frame.response.interact(Sense::click());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, entry.label)
+                });
                 if response.hovered() {
                     ui.painter().rect_stroke(
                         frame.response.rect,
@@ -3288,7 +3332,7 @@ fn render_clap_plugin_card(
         setting_item(
             ui,
             &tr!("Hosted Plugin"),
-            &tr!("A plugin's own editor is a native window this UI cannot embed, so the rack drives every parameter the plugin publishes instead"),
+            &tr!("A plugin's own editor opens as a floating native window; the rack also exposes every parameter and named presets"),
             theme,
             |ui| {
                 ui.label(
@@ -3581,6 +3625,111 @@ fn render_tools_category(
                     ),
                     theme,
                 );
+            },
+        );
+    });
+
+    // Card 5: Room-correction measurement
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_bar_chart,
+            "Room Correction Measurement",
+            "Play a sweep, capture it with a microphone, and derive a correction you can audition",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Measurement Wizard",
+            "Choose the input device and sweep length, watch each stage, and cancel without keeping a partial recording",
+            theme,
+            |ui| {
+                if ui
+                    .add(pill_btn("Open Measurement Wizard", true, theme))
+                    .clicked()
+                {
+                    actions.open_room_measurement = true;
+                }
+            },
+        );
+    });
+
+    // Card 6: CD extraction
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_disc,
+            "CD Ripper",
+            "Read audio CDs in paranoia mode and encode straight to FLAC, WAV or Opus",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Disc Extraction",
+            "Probe the drive, fetch CDDB metadata when available, pick tracks, and write new files without overwriting",
+            theme,
+            |ui| {
+                if ui
+                    .add(pill_btn("Open CD Ripper", true, theme))
+                    .clicked()
+                {
+                    actions.open_cd_ripper = true;
+                }
+            },
+        );
+    });
+
+    // Card 7: Transcode export
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_list_icon,
+            "Transcode Export",
+            "Make FLAC 16/24-bit or 48 kHz Opus copies of local audio, with tags copied where possible",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Format Export",
+            "Batch export selected files to one output folder; existing files are never replaced unless you allow it",
+            theme,
+            |ui| {
+                if ui
+                    .add(pill_btn("Open Transcode Export", true, theme))
+                    .clicked()
+                {
+                    actions.open_transcode_export = true;
+                }
+            },
+        );
+    });
+
+    // Card 8: Opt-in updates
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_gear,
+            "Automatic Updates",
+            "Opt-in GitHub release checks with mandatory SHA-256 verification; nothing installs itself",
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            "Update Check",
+            "Off by default. When enabled, Check contacts GitHub, compares versions, and offers a verified download for this platform",
+            theme,
+            |ui| {
+                if ui.add(pill_btn("Open Update Check", false, theme)).clicked() {
+                    actions.open_update_check = true;
+                }
             },
         );
     });
@@ -4290,6 +4439,9 @@ pub fn setting_item_with_info(
 pub fn toggle_switch(ui: &mut egui::Ui, value: &mut bool, theme: &Theme) -> bool {
     let size = Vec2::new(38.0, 20.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::CheckBox, true, *value, "Toggle setting")
+    });
     let mut changed = false;
     if resp.clicked() {
         *value = !*value;

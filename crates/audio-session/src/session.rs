@@ -680,6 +680,45 @@ impl AudioSession {
         self.handle.measure_room(seconds, pre_emphasis);
     }
 
+    /// Run a room measurement through a chosen input device. `None` keeps the
+    /// engine's preferred system-mix/default-input behaviour.
+    pub fn measure_room_with_input(
+        &self,
+        seconds: f32,
+        pre_emphasis: f32,
+        input_device: Option<String>,
+    ) {
+        self.handle
+            .measure_room_with_input(seconds, pre_emphasis, input_device);
+    }
+
+    /// Stop an in-flight room measurement and discard its partial recording.
+    pub fn cancel_room_measurement(&self) {
+        self.handle.cancel_room_measurement();
+    }
+
+    /// Ask the engine to report its input devices via `EngineEvent::InputDeviceList`.
+    pub fn enumerate_input_devices(&self) {
+        self.handle.enumerate_input_devices();
+    }
+
+    // ── CLAP native editor ───────────────────────────────────────────────
+
+    /// Open the loaded CLAP plugin's floating native editor.
+    pub fn open_clap_gui(&self) {
+        self.handle.open_clap_gui();
+    }
+
+    /// Destroy the native editor; the plugin keeps processing.
+    pub fn close_clap_gui(&self) {
+        self.handle.close_clap_gui();
+    }
+
+    /// Ask the plugin to resize its editor.
+    pub fn resize_clap_gui(&self, width: u32, height: u32) {
+        self.handle.resize_clap_gui(width, height);
+    }
+
     // ── Stereo Enhancer ───────────────────────────────────────────────────
 
     /// Enable or disable the stereo enhancer stage.

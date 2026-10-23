@@ -299,6 +299,20 @@ pub fn show_playlist_editor(
                                         .on_hover_text(tr!(Msg::SE38CA9949A0FDDA7));
                                     let del_resp = ui.interact(del_rect, ui.make_persistent_id(format!("del_{}", pl.id)), Sense::click())
                                         .on_hover_text(tr!(Msg::SAD9F16B467D53F18));
+                                    rename_resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            true,
+                                            format!("Rename playlist {}", pl.name),
+                                        )
+                                    });
+                                    del_resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            true,
+                                            format!("Delete playlist {}", pl.name),
+                                        )
+                                    });
 
                                     if del_resp.clicked() {
                                         actions.delete = Some(pl.id);
@@ -567,6 +581,13 @@ pub fn show_playlist_editor(
                                         }
 
                                         let (del_r, del_resp) = ui.allocate_exact_size(Vec2::new(18.0, 18.0), Sense::click());
+                                        del_resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                true,
+                                                format!("Remove {} from the playlist", t.title),
+                                            )
+                                        });
                                         let del_col = if del_resp.hovered() { theme.accent_warm } else { theme.text_muted };
                                         crate::components::icons::draw_window_close(ui, del_r, del_col);
                                         if del_resp.on_hover_text(tr!(Msg::S421807CFDA51587F)).clicked() {

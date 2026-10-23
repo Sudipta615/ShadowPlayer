@@ -73,6 +73,8 @@ pub struct LibraryState {
     pub albums: Vec<Album>,
     pub selected_album: Option<(String, String)>,
     pub album_tracks: Vec<Track>,
+    /// Markdown liner notes for the album open in the detail view.
+    pub album_notes: crate::state::AlbumNotesState,
 
     pub artists: Vec<Artist>,
     pub selected_artist: Option<String>,

@@ -1,3 +1,4 @@
+pub mod album_notes;
 pub mod app_state;
 pub mod biography_editor;
 pub mod chain_override;
@@ -10,6 +11,7 @@ pub mod podcast_state;
 pub mod sleep_timer;
 pub mod telemetry_state;
 
+pub use album_notes::AlbumNotesState;
 pub use app_state::{AppState, VisualizerMode};
 pub use biography_editor::BiographyEditorState;
 pub use chain_preset::{ChainEq, ChainPreset};

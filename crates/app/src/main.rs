@@ -18,6 +18,7 @@ use audio_session::AudioSession;
 use database::{Database, QueueRepo, SettingsRepo, TrackRepo};
 use eframe::egui::Vec2;
 use log::info;
+use ui::services::{ControlService, MprisCommand, MprisSnapshot};
 use ui::ShadowPlayerApp;
 
 /// One-time removal of the development demo library that older builds seeded
@@ -84,6 +85,182 @@ fn window_icon() -> Option<eframe::egui::IconData> {
 /// The log file's path inside the data directory.
 fn log_file_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("shadowplayer.log")
+}
+
+/// Command-line options that do not need a window.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Cli {
+    /// Run the transport and control socket with no window.
+    headless: bool,
+    /// Files to open, in order. The first starts playing; the rest are queued.
+    play: Vec<PathBuf>,
+}
+
+/// Why parsing the command line did not produce a runnable configuration.
+#[derive(Debug)]
+enum CliError {
+    /// `--help` was asked for; this is not an error in the invocation.
+    Help(String),
+    /// The arguments were not understood.
+    Invalid(String),
+}
+
+impl Cli {
+    fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, CliError> {
+        let mut cli = Self::default();
+        let mut args = args.into_iter().peekable();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--headless" => cli.headless = true,
+                "--play" => {
+                    let path = args
+                        .next()
+                        .ok_or_else(|| CliError::Invalid("--play needs a file path".to_string()))?;
+                    cli.play.push(PathBuf::from(path));
+                }
+                "--help" | "-h" => {
+                    return Err(CliError::Help(
+                        "Usage: shadowplayer [--headless] [--play PATH]…\n\
+                         \n\
+                         --headless   run the audio engine and loopback control socket without a window\n\
+                         --play PATH  open PATH; repeat to queue more files\n"
+                            .to_string(),
+                    ));
+                }
+                other if other.starts_with("--play=") => {
+                    let path = &other["--play=".len()..];
+                    if path.is_empty() {
+                        return Err(CliError::Invalid("--play needs a file path".to_string()));
+                    }
+                    cli.play.push(PathBuf::from(path));
+                }
+                other => {
+                    return Err(CliError::Invalid(format!("unknown argument: {other}")));
+                }
+            }
+        }
+        Ok(cli)
+    }
+}
+
+/// Run the transport without creating a window.
+///
+/// The loopback control service, when this process owns it, keeps accepting
+/// `state`, transport, seek and volume commands. `--play` seeds the engine
+/// queue; with no paths the process still runs as a server until a remote
+/// `quit` (or the process is stopped).
+fn run_headless(
+    session: Arc<AudioSession>,
+    db: Database,
+    control_service: Option<ControlService>,
+    play: Vec<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Headless mode: no window will be created");
+    if let Some(first) = play.first() {
+        info!("Opening {}", first.display());
+        session.open_file(first);
+        for path in &play[1..] {
+            info!("Queueing {}", path.display());
+            session.enqueue_file(path);
+        }
+    }
+
+    let tracks = TrackRepo::new(db);
+    let mut last_track: Option<domain::models::Track> = None;
+
+    loop {
+        let mut quit = false;
+        if let Some(control) = &control_service {
+            while let Some(command) = control.try_recv() {
+                match command {
+                    MprisCommand::Play => session.play(),
+                    MprisCommand::Pause => session.pause(),
+                    MprisCommand::PlayPause => {
+                        if session.is_playing() {
+                            session.pause();
+                        } else {
+                            session.play();
+                        }
+                    }
+                    MprisCommand::Stop => session.stop(),
+                    MprisCommand::Next => session.next(),
+                    MprisCommand::Previous => session.previous(),
+                    MprisCommand::SeekRelative(delta) => {
+                        let target = (session.position_secs_compensated() as f64 + delta)
+                            .max(0.0)
+                            .min(session.duration_secs().max(0.0) as f64);
+                        session.seek(target as f32);
+                    }
+                    MprisCommand::SetPosition(position) => {
+                        let target = position
+                            .max(0.0)
+                            .min(session.duration_secs().max(0.0) as f64);
+                        session.seek(target as f32);
+                    }
+                    MprisCommand::SetVolume(volume) => {
+                        session.set_volume(volume.clamp(0.0, 1.0));
+                    }
+                    MprisCommand::Raise => {}
+                    MprisCommand::Quit => {
+                        info!("Headless mode: quit requested");
+                        quit = true;
+                    }
+                }
+            }
+
+            let current_path = match session.current_source() {
+                Some(engine::AudioSource::File(path)) => Some(path),
+                _ => None,
+            };
+            if let Some(path) = current_path.as_ref() {
+                if last_track.as_ref().map(|track| &track.path) != Some(path) {
+                    last_track = tracks.get_by_path(path).ok().flatten();
+                }
+            } else {
+                last_track = None;
+            }
+
+            let snapshot = MprisSnapshot {
+                loaded: current_path.is_some(),
+                playing: session.is_playing(),
+                title: last_track
+                    .as_ref()
+                    .map(|track| track.title.clone())
+                    .or_else(|| {
+                        current_path
+                            .as_ref()
+                            .and_then(|path| path.file_stem())
+                            .map(|stem| stem.to_string_lossy().into_owned())
+                    })
+                    .unwrap_or_default(),
+                artist: last_track
+                    .as_ref()
+                    .map(|track| track.artist.clone())
+                    .unwrap_or_default(),
+                album: last_track
+                    .as_ref()
+                    .map(|track| track.album.clone())
+                    .unwrap_or_default(),
+                length_secs: if session.duration_secs() > 0.0 {
+                    session.duration_secs() as f64
+                } else {
+                    last_track
+                        .as_ref()
+                        .map(|track| track.duration_secs as f64)
+                        .unwrap_or(0.0)
+                },
+                position_secs: session.position_secs_compensated() as f64,
+                volume: session.volume(),
+                art_url: None,
+            };
+            control.publish(snapshot);
+        }
+        if quit {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    Ok(())
 }
 
 /// A writer that sends every log line to stderr *and* to the log file.
@@ -164,6 +341,18 @@ fn show_fatal_error(message: &str) {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = match Cli::parse(std::env::args().skip(1)) {
+        Ok(cli) => cli,
+        Err(CliError::Help(message)) => {
+            println!("{message}");
+            return Ok(());
+        }
+        Err(CliError::Invalid(message)) => {
+            eprintln!("{message}");
+            std::process::exit(2);
+        }
+    };
+
     // Resolve persistent app data directory. The environment override keeps
     // tests and portable runs off the real user profile; both the app and
     // `shadowplayer-remote` honour it.
@@ -286,6 +475,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Apply the persisted profile
     session.apply_profile(saved_settings.audio_profile);
 
+    if cli.headless {
+        return run_headless(session, db, control_service, cli.play);
+    }
+
     // Native window options. Development screenshot runs can choose a size
     // with `SHADOWPLAYER_EVAL_SIZE=640x360`.
     let (start_w, start_h) = {
@@ -347,6 +540,39 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cli_understands_headless_and_repeated_play() {
+        let cli = Cli::parse(
+            [
+                "--headless",
+                "--play",
+                "/music/a.flac",
+                "--play=/music/b.flac",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .unwrap();
+        assert!(cli.headless);
+        assert_eq!(
+            cli.play,
+            vec![
+                PathBuf::from("/music/a.flac"),
+                PathBuf::from("/music/b.flac")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_cli_refuses_a_play_without_a_path() {
+        assert!(Cli::parse(["--play"].into_iter().map(String::from)).is_err());
+    }
+
+    #[test]
+    fn the_cli_refuses_unknown_arguments() {
+        assert!(Cli::parse(["--windowed"].into_iter().map(String::from)).is_err());
+    }
 
     fn sample_track(id: domain::ids::TrackId, path: &std::path::Path) -> domain::models::Track {
         domain::models::Track {

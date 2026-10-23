@@ -75,7 +75,12 @@ impl AudioEngine {
     /// Room measurement orchestration: generate the sweep, play it
     /// On the primary stream, capture it, and schedule the sweep-to-derivation landing
     /// (see [`AudioEngine::check_measurement`]).
-    pub(super) fn handle_measure_room(&mut self, seconds: f32, pre_emphasis: f32) {
+    pub(super) fn handle_measure_room(
+        &mut self,
+        seconds: f32,
+        pre_emphasis: f32,
+        input_device: Option<String>,
+    ) {
         if self.measurement.is_some() {
             self.emit_event(EngineEvent::MeasurementFailed(
                 "a room measurement is already in progress — stop it first".to_string(),
@@ -132,7 +137,8 @@ impl AudioEngine {
         // failure event instead of a noise burst.
         let recording = std::env::temp_dir().join(format!("shadow_measurement_{stamp}.wav"));
         //
-        // Two kinds are tried, in order, and the *first that opens* wins:
+        // With no explicit device, two kinds are tried, in order, and the
+        // *first that opens* wins:
         //
         // 1. `SystemMix` — hears the sweep plus the room with no microphone in
         //    the chain, which is the measurement a correction curve should be
@@ -144,29 +150,49 @@ impl AudioEngine {
         // portable one: on Linux and macOS a user with a measurement mic gets
         // a real integrated measurement rather than "unsupported, load an IR
         // by hand".
-        self.begin_capture(
-            Some(recording.clone()),
-            None,
-            crate::output::capture::CaptureKind::SystemMix,
-        );
-        if !self.capture_active() {
-            // The system mix is unavailable (or already busy). A mic capture is
-            // worse audio but a working measurement, so offer it rather than
-            // failing outright.
-            self.begin_capture(
+        //
+        // An explicitly chosen device is different: the user asked for that
+        // microphone, so try exactly it and never silently substitute the
+        // system mix or another input. A missing named device is a clear
+        // failure, not a measurement through the wrong transducer.
+        match input_device.clone() {
+            Some(device) => self.begin_capture(
                 Some(recording.clone()),
-                None,
+                Some(device),
                 crate::output::capture::CaptureKind::InputDevice,
-            );
+            ),
+            None => {
+                self.begin_capture(
+                    Some(recording.clone()),
+                    None,
+                    crate::output::capture::CaptureKind::SystemMix,
+                );
+                if !self.capture_active() {
+                    // The system mix is unavailable (or already busy). A mic
+                    // capture is worse audio but a working measurement, so
+                    // offer it rather than failing outright.
+                    self.begin_capture(
+                        Some(recording.clone()),
+                        None,
+                        crate::output::capture::CaptureKind::InputDevice,
+                    );
+                }
+            }
         }
         if !self.capture_active() {
-            let _ = std::fs::remove_file(&sweep_wav);
-            self.emit_event(EngineEvent::MeasurementFailed(
-                "no capture backend available — integrated measurement needs a system-mix \
-                 loopback (Windows) or an input device. Load a measured impulse response with \
-                 `LoadCorrectionIr` instead."
+            let message = match input_device {
+                Some(device) => format!(
+                    "could not open the selected input device '{device}'. Choose another \
+                     device in the measurement wizard, or load a measured impulse response \
+                     with `LoadCorrectionIr`."
+                ),
+                None => "no capture backend available — integrated measurement needs a \
+                         system-mix loopback (Windows) or an input device. Load a measured \
+                         impulse response with `LoadCorrectionIr` instead."
                     .to_string(),
-            ));
+            };
+            let _ = std::fs::remove_file(&sweep_wav);
+            self.emit_event(EngineEvent::MeasurementFailed(message));
             return;
         }
         self.emit_event(EngineEvent::MeasurementProgress {
@@ -185,6 +211,27 @@ impl AudioEngine {
             recording,
             stop_at: std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds + 1.5),
         });
+    }
+
+    /// Stop an in-flight measurement and leave the previous correction
+    /// untouched. Both the sweep file and the partial recording are removed:
+    /// a half-swept room is not a usable impulse response, and keeping it
+    /// would only invite someone to load it by hand later.
+    pub(super) fn handle_cancel_room_measurement(&mut self) {
+        let Some(meas) = self.measurement.take() else {
+            self.emit_event(EngineEvent::MeasurementFailed(
+                "no room measurement is in progress".to_string(),
+            ));
+            return;
+        };
+        if self.capture_active() {
+            self.handle_capture_stop();
+        }
+        self.handle_stop();
+        let _ = std::fs::remove_file(&meas.sweep_wav);
+        let _ = std::fs::remove_file(&meas.recording);
+        self.emit_event(EngineEvent::MeasurementCancelled);
+        info!("correction: room measurement cancelled by the user");
     }
 
     /// Tick hook: when the in-flight measurement's sweep has finished (+

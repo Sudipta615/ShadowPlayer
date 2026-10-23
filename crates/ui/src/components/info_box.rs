@@ -225,6 +225,13 @@ pub fn render_info_icon_button(
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let (c_rect, c_resp) =
                                 ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
+                            c_resp.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::Button,
+                                    true,
+                                    format!("Dismiss {}", content.title),
+                                )
+                            });
                             let cp = ui.painter_at(c_rect);
                             let bg = if c_resp.hovered() {
                                 theme.destructive.gamma_multiply(0.2)

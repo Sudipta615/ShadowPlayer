@@ -1,0 +1,16 @@
+[package]
+name = "media-tools"
+version = "0.14.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+engine = { package = "audio-engine", path = "../engine", features = ["tag-write"] }
+libloading = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = "2.0"
+ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
+
+[dev-dependencies]

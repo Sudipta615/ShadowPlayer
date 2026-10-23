@@ -212,6 +212,20 @@ pub enum EngineCommand {
     LoadClapState {
         bytes: Vec<u8>,
     },
+    /// Open the loaded plugin's floating native editor through `clap.gui`.
+    ///
+    /// The editor is deliberately floating (`is_floating = true`), so the
+    /// plugin owns a top-level window; this host does not embed plugin UIs in
+    /// egui. A plugin without a compatible floating editor gets an error in
+    /// [`ClapGuiInfo`](crate::dsp::clap_rack::ClapGuiInfo).
+    OpenClapGui,
+    /// Hide and destroy the plugin's native editor. The plugin keeps running.
+    CloseClapGui,
+    /// Resize the native editor when the plugin allows it.
+    ResizeClapGui {
+        width: u32,
+        height: u32,
+    },
     /// Spatial master: renderer quality tier (spec §86).
     SetSpatialQuality(config::SpatialQuality),
     /// Spatial master: voice budget (spec §76). `enabled == false`
@@ -288,7 +302,16 @@ pub enum EngineCommand {
         /// Pre-emphasis in dB; > 0 flattens the sweep's spectral energy
         /// density for HF SNR.
         pre_emphasis: f32,
+        /// Capture from this input device (name or stable id). `None` prefers
+        /// a system-mix loopback and falls back to the default input; naming a
+        /// device skips the loopback and opens exactly that input, which is
+        /// what a measurement microphone needs.
+        input_device: Option<String>,
     },
+    /// Stop an in-flight room measurement, discard its partial recording and
+    /// emit `MeasurementCancelled`. A no-op failure event when nothing is
+    /// running.
+    CancelRoomMeasurement,
     SetEqEnabled(bool),
     /// Enable or disable automatic EQ headroom. When enabled, the engine
     /// reserves the curve's own peak boost as pre-EQ attenuation and keeps it

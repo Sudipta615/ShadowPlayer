@@ -38,10 +38,10 @@ cp "$here/../assets/icon.icns" "$app/Contents/Resources/icon.icns"
 sed -i.bak "/<key>CFBundleShortVersionString<\\/key>/{n;s|<string>[^<]*</string>|<string>${version}</string>|;}" "$app/Contents/Info.plist"
 rm -f "$app/Contents/Info.plist.bak"
 
-# A bundle without NSMicrophoneUsageDescription is the point: the player must
-# never ask for a microphone it does not use.
-if grep -q "<key>NSMicrophoneUsageDescription</key>" "$app/Contents/Info.plist"; then
-    echo "error: macOS bundle unexpectedly requests microphone access" >&2
+# The room-correction wizard records a sweep, so the bundle must carry the
+# usage description macOS requires before it will show the microphone prompt.
+if ! grep -q "<key>NSMicrophoneUsageDescription</key>" "$app/Contents/Info.plist"; then
+    echo "error: macOS bundle is missing NSMicrophoneUsageDescription" >&2
     exit 1
 fi
 

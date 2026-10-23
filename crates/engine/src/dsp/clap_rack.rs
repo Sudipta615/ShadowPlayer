@@ -83,6 +83,23 @@ impl ClapParamInfo {
     }
 }
 
+/// The plugin's native editor, as the host understands it.
+///
+/// `available` means the plugin implements `clap.gui` *and* accepts a floating
+/// window on one of this platform's display APIs. Embedded editors are not
+/// hosted, so they are not advertised.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClapGuiInfo {
+    pub available: bool,
+    pub open: bool,
+    /// The CLAP window API string (`x11`, `wayland`, `win32`, `cocoa`).
+    pub api: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    /// The last failure, cleared by the next successful open.
+    pub error: Option<String>,
+}
+
 /// Everything a host needs to draw the plugin rack.
 ///
 /// Published by the engine thread through an `ArcSwap`, so a UI can read it on
@@ -104,6 +121,8 @@ pub struct ClapRackReport {
     /// The last load or state failure, kept until the next successful call so a
     /// host can show *why* a plugin did not appear.
     pub error: Option<String>,
+    /// The plugin's floating native editor.
+    pub gui: ClapGuiInfo,
 }
 
 /// The plugins found inside the most recently probed library.

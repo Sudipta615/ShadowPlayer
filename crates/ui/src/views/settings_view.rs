@@ -33,6 +33,11 @@ pub struct SettingsViewActions {
     pub crossfade_config_changed: bool,
     /// The folder biographies are read from changed.
     pub biography_source_dir_changed: Option<String>,
+    /// Open the room-measurement wizard.
+    pub open_room_measurement: bool,
+    pub open_cd_ripper: bool,
+    pub open_transcode_export: bool,
+    pub open_update_check: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -126,6 +131,18 @@ pub fn render_settings_view(
         }
         if s_actions.open_artwork_fetch {
             view_actions.open_artwork_fetch = true;
+        }
+        if s_actions.open_room_measurement {
+            view_actions.open_room_measurement = true;
+        }
+        if s_actions.open_cd_ripper {
+            view_actions.open_cd_ripper = true;
+        }
+        if s_actions.open_transcode_export {
+            view_actions.open_transcode_export = true;
+        }
+        if s_actions.open_update_check {
+            view_actions.open_update_check = true;
         }
         if s_actions.toggle_crossfade_preview {
             view_actions.toggle_crossfade_preview = true;

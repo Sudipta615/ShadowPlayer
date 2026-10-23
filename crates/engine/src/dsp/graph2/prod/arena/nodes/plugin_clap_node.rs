@@ -44,6 +44,11 @@ use clap_sys::ext::audio_ports::{
     clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,
 };
 #[cfg(feature = "clap-host")]
+use clap_sys::ext::gui::{
+    clap_host_gui, clap_plugin_gui, CLAP_EXT_GUI, CLAP_WINDOW_API_COCOA, CLAP_WINDOW_API_WAYLAND,
+    CLAP_WINDOW_API_WIN32, CLAP_WINDOW_API_X11,
+};
+#[cfg(feature = "clap-host")]
 use clap_sys::ext::log::{
     clap_host_log, clap_log_severity, CLAP_EXT_LOG, CLAP_LOG_ERROR, CLAP_LOG_FATAL,
     CLAP_LOG_HOST_MISBEHAVING, CLAP_LOG_INFO, CLAP_LOG_PLUGIN_MISBEHAVING, CLAP_LOG_WARNING,
@@ -76,7 +81,7 @@ use clap_sys::string_sizes::{CLAP_NAME_SIZE, CLAP_PATH_SIZE};
 #[cfg(feature = "clap-host")]
 use clap_sys::version::CLAP_VERSION;
 
-use crate::dsp::clap_rack::{ClapParamInfo, ClapPluginInfo, ClapRackReport};
+use crate::dsp::clap_rack::{ClapGuiInfo, ClapParamInfo, ClapPluginInfo, ClapRackReport};
 
 /// A thread-safe handle keeping the dynamically loaded plugin library in memory.
 #[cfg(feature = "clap-host")]
@@ -131,6 +136,16 @@ struct ClapInstance {
     out_scratch: [Vec<f32>; 2],
     params_ext: *const clap_plugin_params,
     state_ext: *const clap_plugin_state,
+    gui_ext: *const clap_plugin_gui,
+    /// The floating editor has been created (and not yet destroyed) through
+    /// `clap.gui`. Some plugins create their window during `create`; others
+    /// defer until `show`, which is why this is tracked separately from
+    /// [`ClapGuiSignals::open`].
+    gui_created: bool,
+    gui_api: Option<String>,
+    /// The last GUI failure, kept so the rack can explain why the editor
+    /// button did nothing.
+    gui_error: Option<String>,
     pending_param_events: Vec<clap_event_param_value>,
 }
 
@@ -143,6 +158,15 @@ impl Drop for ClapInstance {
         if !self.plugin.is_null() {
             unsafe {
                 let p = &*self.plugin;
+                if self.gui_created && !self.gui_ext.is_null() {
+                    let gui = &*self.gui_ext;
+                    if let Some(hide) = gui.hide {
+                        hide(self.plugin);
+                    }
+                    if let Some(destroy) = gui.destroy {
+                        destroy(self.plugin);
+                    }
+                }
                 if self.processing {
                     if let Some(stop) = p.stop_processing {
                         stop(self.plugin);
@@ -280,6 +304,11 @@ pub struct ClapPluginHostNode {
     /// so).
     #[cfg(feature = "clap-host")]
     _host_context: Option<Box<HostContext>>,
+    /// GUI state shared with the `clap.gui` host callbacks. The plugin may call
+    /// `closed` from its own UI thread, so the flag is atomic rather than a
+    /// field the callback would need a node pointer to update.
+    #[cfg(feature = "clap-host")]
+    gui_signals: Arc<ClapGuiSignals>,
     /// f64 → f32 staging for [`DspNode::process_block_f64`]. Allocated here,
     /// never on the audio thread.
     #[cfg(feature = "clap-host")]
@@ -299,6 +328,17 @@ struct HostContext {
     /// The thread that created the node — the engine's control thread, which
     /// CLAP designates as the host's main thread.
     main_thread: std::thread::ThreadId,
+    gui: Arc<ClapGuiSignals>,
+}
+
+/// GUI state the plugin can change from its own UI thread.
+#[cfg(feature = "clap-host")]
+#[derive(Debug, Default)]
+struct ClapGuiSignals {
+    open: AtomicBool,
+    destroyed: AtomicBool,
+    width: AtomicU32,
+    height: AtomicU32,
 }
 
 // Whether the current thread is inside one of this host's `process` calls.
@@ -335,6 +375,64 @@ static HOST_THREAD_CHECK_EXTENSION: clap_host_thread_check = clap_host_thread_ch
     is_audio_thread: Some(clap_host_is_audio_thread),
 };
 
+/// The `clap.gui` extension table.
+///
+/// The editor this host opens is always floating: `create(api, true)` gives a
+/// plugin its own top-level window, so no parent handle or reparenting is
+/// needed and a plugin cannot be embedded into egui by accident. The callbacks
+/// below keep the host's view of that window in step with the plugin's and log
+/// requests the host cannot fulfil, rather than pretending success.
+#[cfg(feature = "clap-host")]
+static HOST_GUI_EXTENSION: clap_host_gui = clap_host_gui {
+    resize_hints_changed: Some(clap_host_gui_resize_hints_changed),
+    request_resize: Some(clap_host_gui_request_resize),
+    request_show: Some(clap_host_gui_request_show),
+    request_hide: Some(clap_host_gui_request_hide),
+    closed: Some(clap_host_gui_closed),
+};
+
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_gui_resize_hints_changed(_host: *const clap_host) {
+    log::debug!("CLAP plugin changed its GUI resize hints");
+}
+
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_gui_request_resize(
+    host: *const clap_host,
+    width: u32,
+    height: u32,
+) -> bool {
+    if let Some(context) = host_context(host) {
+        context.gui.width.store(width.max(1), Ordering::Relaxed);
+        context.gui.height.store(height.max(1), Ordering::Relaxed);
+    }
+    // A floating editor owns its own window sizing. Remember the request so
+    // the rack can show it, but do not claim the host resized anything.
+    false
+}
+
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_gui_request_show(_host: *const clap_host) -> bool {
+    // The host has no async hand-off back to the engine thread here. Returning
+    // false is the honest answer; the user opens the editor from the rack.
+    false
+}
+
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_gui_request_hide(_host: *const clap_host) -> bool {
+    false
+}
+
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn clap_host_gui_closed(host: *const clap_host, was_destroyed: bool) {
+    if let Some(context) = host_context(host) {
+        context.gui.open.store(false, Ordering::Relaxed);
+        if was_destroyed {
+            context.gui.destroyed.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
 /// The host context a callback was handed, or `None` for a null/foreign host.
 #[cfg(feature = "clap-host")]
 unsafe fn host_context<'a>(host: *const clap_host) -> Option<&'a HostContext> {
@@ -368,6 +466,9 @@ unsafe extern "C" fn clap_host_get_extension(
     }
     if id == CLAP_EXT_THREAD_CHECK {
         return (&HOST_THREAD_CHECK_EXTENSION as *const clap_host_thread_check).cast::<c_void>();
+    }
+    if id == CLAP_EXT_GUI {
+        return (&HOST_GUI_EXTENSION as *const clap_host_gui).cast::<c_void>();
     }
     log::debug!("CLAP plugin asked for host extension {id:?}; this host does not implement it");
     std::ptr::null()
@@ -626,8 +727,10 @@ impl ClapPluginHostNode {
         {
             // The extension callbacks read the node's thread identity through
             // `host_data`; the box's address is what must stay stable.
+            let gui_signals = Arc::new(ClapGuiSignals::default());
             let host_context = Box::new(HostContext {
                 main_thread: std::thread::current().id(),
+                gui: Arc::clone(&gui_signals),
             });
             let host_descriptor = Box::new(clap_host {
                 clap_version: CLAP_VERSION,
@@ -651,6 +754,7 @@ impl ClapPluginHostNode {
                 instance: None,
                 host_descriptor,
                 _host_context: Some(host_context),
+                gui_signals,
                 f64_scratch: [
                     vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
                     vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
@@ -887,6 +991,14 @@ impl ClapPluginHostNode {
             }
         };
 
+        let gui_ext = unsafe {
+            if let Some(get_ext) = plugin.get_extension {
+                get_ext(plugin_ptr, CLAP_EXT_GUI.as_ptr()) as *const clap_plugin_gui
+            } else {
+                std::ptr::null()
+            }
+        };
+
         let lib_arc = Arc::new(ClapLibrary {
             _lib: lib,
             _entry: entry_ptr,
@@ -917,6 +1029,10 @@ impl ClapPluginHostNode {
             },
             params_ext,
             state_ext,
+            gui_ext,
+            gui_created: false,
+            gui_api: None,
+            gui_error: None,
             pending_param_events: Vec::with_capacity(32),
         });
 
@@ -1101,6 +1217,240 @@ impl ClapPluginHostNode {
         }
     }
 
+    /// The window APIs this host can offer a floating CLAP editor, in
+    /// preference order. Wayland first when the session is Wayland; X11
+    /// otherwise (XWayland covers X11-only plugins on most Wayland desktops).
+    #[cfg(feature = "clap-host")]
+    fn gui_api_candidates() -> Vec<&'static CStr> {
+        if cfg!(target_os = "macos") {
+            vec![CLAP_WINDOW_API_COCOA]
+        } else if cfg!(target_os = "windows") {
+            vec![CLAP_WINDOW_API_WIN32]
+        } else if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            vec![CLAP_WINDOW_API_WAYLAND, CLAP_WINDOW_API_X11]
+        } else {
+            vec![CLAP_WINDOW_API_X11, CLAP_WINDOW_API_WAYLAND]
+        }
+    }
+
+    /// The first floating-editor API the plugin accepts, preferring its own
+    /// choice when that choice is one this host can provide.
+    #[cfg(feature = "clap-host")]
+    fn choose_gui_api(&self, inst: &ClapInstance) -> Option<&'static CStr> {
+        if inst.gui_ext.is_null() || inst.plugin.is_null() {
+            return None;
+        }
+        let ext = unsafe { &*inst.gui_ext };
+        let supported = |api: &'static CStr| {
+            ext.is_api_supported.is_some_and(|is_supported| unsafe {
+                is_supported(inst.plugin, api.as_ptr(), true)
+            })
+        };
+        let candidates = Self::gui_api_candidates();
+        if let Some(preferred) = ext.get_preferred_api {
+            let mut api: *const c_char = std::ptr::null();
+            let mut floating = false;
+            if unsafe { preferred(inst.plugin, &mut api, &mut floating) }
+                && floating
+                && !api.is_null()
+            {
+                let chosen = unsafe { CStr::from_ptr(api) };
+                if let Some(candidate) = candidates
+                    .iter()
+                    .find(|candidate| chosen == *candidate && supported(candidate))
+                {
+                    return Some(*candidate);
+                }
+            }
+        }
+        candidates.into_iter().find(|api| supported(api))
+    }
+
+    /// What the rack needs to decide whether to show an editor button.
+    pub fn gui_info(&self) -> ClapGuiInfo {
+        #[cfg(feature = "clap-host")]
+        {
+            let Some(inst) = self.instance.as_ref() else {
+                return ClapGuiInfo::default();
+            };
+            if inst.gui_ext.is_null() {
+                return ClapGuiInfo::default();
+            }
+            let available = self.choose_gui_api(inst).is_some();
+            let destroyed = self.gui_signals.destroyed.load(Ordering::Relaxed);
+            let open =
+                inst.gui_created && !destroyed && self.gui_signals.open.load(Ordering::Relaxed);
+            ClapGuiInfo {
+                available,
+                open,
+                api: inst.gui_api.clone(),
+                width: self.gui_signals.width.load(Ordering::Relaxed),
+                height: self.gui_signals.height.load(Ordering::Relaxed),
+                error: inst.gui_error.clone(),
+            }
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            ClapGuiInfo::default()
+        }
+    }
+
+    /// Create (or re-show) the plugin's floating native editor.
+    ///
+    /// Floating only, deliberately: `create(api, true)` lets the plugin own a
+    /// top-level window, so the host never has to punch a hole in egui or
+    /// hand a plugin an X11/Wayland child it does not understand. A plugin
+    /// that can only render embedded is reported as having no editor rather
+    /// than being silently half-hosted.
+    pub fn open_gui(&mut self) -> Result<(), String> {
+        #[cfg(feature = "clap-host")]
+        {
+            if self.instance.is_none() {
+                return Err("No CLAP plugin is loaded".to_string());
+            }
+            let Some(api) = self.choose_gui_api(self.instance.as_ref().expect("checked above"))
+            else {
+                let message = "The plugin does not provide a floating GUI for this display server"
+                    .to_string();
+                if let Some(inst) = self.instance.as_mut() {
+                    inst.gui_error = Some(message.clone());
+                }
+                return Err(message);
+            };
+
+            let inst = self.instance.as_mut().expect("checked above");
+            if self.gui_signals.destroyed.swap(false, Ordering::Relaxed) {
+                // The plugin destroyed its own window and told the host via
+                // `clap.gui.closed`: the handle is gone, so do not call
+                // `destroy` on it again.
+                inst.gui_created = false;
+                inst.gui_api = None;
+            }
+            let ext = unsafe { &*inst.gui_ext };
+            if inst.gui_created {
+                let shown = ext.show.is_some_and(|show| unsafe { show(inst.plugin) });
+                if !shown {
+                    let message = "The plugin could not show its editor".to_string();
+                    inst.gui_error = Some(message.clone());
+                    return Err(message);
+                }
+                self.gui_signals.open.store(true, Ordering::Relaxed);
+                inst.gui_error = None;
+                return Ok(());
+            }
+
+            let created = ext
+                .create
+                .is_some_and(|create| unsafe { create(inst.plugin, api.as_ptr(), true) });
+            if !created {
+                let message = format!(
+                    "The plugin refused to create its floating editor ({})",
+                    api.to_string_lossy()
+                );
+                inst.gui_error = Some(message.clone());
+                return Err(message);
+            }
+            inst.gui_created = true;
+            inst.gui_api = Some(api.to_string_lossy().into_owned());
+
+            let mut width = 800u32;
+            let mut height = 600u32;
+            if let Some(get_size) = ext.get_size {
+                if !unsafe { get_size(inst.plugin, &mut width, &mut height) }
+                    || width == 0
+                    || height == 0
+                {
+                    width = 800;
+                    height = 600;
+                }
+            }
+            self.gui_signals.width.store(width, Ordering::Relaxed);
+            self.gui_signals.height.store(height, Ordering::Relaxed);
+
+            let shown = ext.show.is_some_and(|show| unsafe { show(inst.plugin) });
+            if !shown {
+                if let Some(destroy) = ext.destroy {
+                    unsafe { destroy(inst.plugin) };
+                }
+                inst.gui_created = false;
+                inst.gui_api = None;
+                let message = "The plugin created its editor but could not show it".to_string();
+                inst.gui_error = Some(message.clone());
+                return Err(message);
+            }
+            self.gui_signals.open.store(true, Ordering::Relaxed);
+            inst.gui_error = None;
+            log::info!("CLAP editor opened ({})", api.to_string_lossy());
+            Ok(())
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            Err("This build was compiled without CLAP host support".to_string())
+        }
+    }
+
+    /// Hide and destroy the plugin's editor. The plugin itself keeps running.
+    pub fn close_gui(&mut self) {
+        #[cfg(feature = "clap-host")]
+        {
+            if let Some(inst) = self.instance.as_mut() {
+                if inst.gui_created && !inst.gui_ext.is_null() {
+                    let ext = unsafe { &*inst.gui_ext };
+                    if let Some(hide) = ext.hide {
+                        unsafe { hide(inst.plugin) };
+                    }
+                    if let Some(destroy) = ext.destroy {
+                        unsafe { destroy(inst.plugin) };
+                    }
+                }
+                inst.gui_created = false;
+                inst.gui_api = None;
+            }
+            self.gui_signals.open.store(false, Ordering::Relaxed);
+            self.gui_signals.destroyed.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Resize the floating editor. Plugins that cannot resize return an error
+    /// instead of silently ignoring the request.
+    pub fn resize_gui(&mut self, width: u32, height: u32) -> Result<(), String> {
+        #[cfg(feature = "clap-host")]
+        {
+            let Some(inst) = self.instance.as_mut() else {
+                return Err("No CLAP plugin is loaded".to_string());
+            };
+            if !inst.gui_created || inst.gui_ext.is_null() {
+                return Err("The plugin editor is not open".to_string());
+            }
+            let ext = unsafe { &*inst.gui_ext };
+            if ext
+                .can_resize
+                .is_some_and(|can_resize| !unsafe { can_resize(inst.plugin) })
+            {
+                return Err("The plugin does not allow its editor to be resized".to_string());
+            }
+            let mut width = width.clamp(64, 8192);
+            let mut height = height.clamp(64, 8192);
+            if let Some(adjust) = ext.adjust_size {
+                unsafe { adjust(inst.plugin, &mut width, &mut height) };
+            }
+            let Some(set_size) = ext.set_size else {
+                return Err("The plugin does not implement editor resizing".to_string());
+            };
+            if !unsafe { set_size(inst.plugin, width, height) } {
+                return Err("The plugin refused the editor size".to_string());
+            }
+            self.gui_signals.width.store(width, Ordering::Relaxed);
+            self.gui_signals.height.store(height, Ordering::Relaxed);
+            Ok(())
+        }
+        #[cfg(not(feature = "clap-host"))]
+        {
+            let _ = (width, height);
+            Err("This build was compiled without CLAP host support".to_string())
+        }
+    }
+
     /// Whether the plugin implements the `state` extension.
     pub fn has_state(&self) -> bool {
         #[cfg(feature = "clap-host")]
@@ -1138,6 +1488,7 @@ impl ClapPluginHostNode {
             } else {
                 None
             },
+            gui: self.gui_info(),
         }
     }
 
@@ -1685,6 +2036,7 @@ mod tests {
         fn the_thread_check_answers_about_the_thread_it_is_asked_from() {
             let context = Box::new(HostContext {
                 main_thread: std::thread::current().id(),
+                gui: Arc::new(ClapGuiSignals::default()),
             });
             let host = clap_host {
                 clap_version: CLAP_VERSION,

@@ -194,8 +194,8 @@ fn the_macos_property_list_describes_a_foreground_music_player() {
     );
     assert_eq!(plist_bool(&plist, "NSHighResolutionCapable"), Some(true));
     assert!(
-        !plist.contains("<key>NSMicrophoneUsageDescription</key>"),
-        "the player has no capture feature and must never ask for a microphone"
+        plist.contains("<key>NSMicrophoneUsageDescription</key>"),
+        "the room-correction wizard records a sweep, so macOS requires a microphone usage description"
     );
     assert!(
         app_dir().join("assets/icon.icns").exists(),

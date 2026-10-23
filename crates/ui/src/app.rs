@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use audio_session::AudioSession;
 use database::{
-    AlbumRepo, ArtistRepo, Database, FavoritesRepo, GenreRepo, HistoryRepo, PlaylistRepo,
-    PodcastRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
+    AlbumNotesRepo, AlbumRepo, ArtistRepo, Database, FavoritesRepo, GenreRepo, HistoryRepo,
+    PlaylistRepo, PodcastRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
 };
 use domain::models::Track;
 use eframe::egui::{self, Margin, Pos2, Rect, Sense, Vec2};
@@ -19,16 +19,17 @@ use crate::components::topbar::{render_action_button, TopbarAction};
 use crate::layout::{render_right_drawer, render_sidebar};
 use crate::modals::{
     show_artwork_fetch_modal, show_autoeq_modal, show_autotag_modal, show_bit_perfect_modal,
-    show_duplicates_modal, show_edit_track_modal, show_eq_panel, show_organize_modal,
-    show_playlist_editor, show_smart_playlist_editor, show_track_properties_modal,
-    ArtworkFetchModalState, AutotagModalState, DuplicateGroup, DuplicatesState, OrganizeState,
-    SmartPlaylistEditorState,
+    show_duplicates_modal, show_edit_track_modal, show_eq_panel, show_media_tools_modal,
+    show_organize_modal, show_playlist_editor, show_room_measurement_modal,
+    show_smart_playlist_editor, show_track_properties_modal, ArtworkFetchModalState,
+    AutotagModalState, DuplicateGroup, DuplicatesState, MediaToolsTab, OrganizeState,
+    RoomMeasurementState, SmartPlaylistEditorState,
 };
 use crate::services::{
     ArtworkFetchService, ArtworkService, AutotagService, BiographyService, ControlService,
     CrossfadePreview, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
-    MprisCommand, MprisService, MprisSnapshot, PodcastEvent, PodcastService, ScannerService,
-    WaveformService,
+    MediaToolEvent, MediaToolsService, MprisCommand, MprisService, MprisSnapshot, PodcastEvent,
+    PodcastService, ScannerService, WaveformService,
 };
 use crate::skin::SkinManager;
 use crate::state::{
@@ -81,6 +82,7 @@ pub struct ShadowPlayerApp {
     history_repo: HistoryRepo,
     scrobble_repo: database::ScrobbleRepo,
     album_repo: AlbumRepo,
+    album_notes_repo: AlbumNotesRepo,
     artist_repo: ArtistRepo,
     genre_repo: GenreRepo,
     scan_roots_repo: ScanRootsRepo,
@@ -129,6 +131,11 @@ pub struct ShadowPlayerApp {
     pub autotag_modal: AutotagModalState,
     pub artwork_fetch_service: ArtworkFetchService,
     pub artwork_fetch_modal: ArtworkFetchModalState,
+    /// Room-correction measurement wizard.
+    pub room_measurement: RoomMeasurementState,
+    /// CD ripping, transcode export, and opt-in update jobs.
+    pub media_tools_service: MediaToolsService,
+    pub media_tools: crate::modals::MediaToolsModalState,
 
     /// Tracks belonging to the playlist currently selected in the manager.
     playlist_editor_tracks: Vec<domain::models::Track>,
@@ -223,6 +230,7 @@ impl ShadowPlayerApp {
         let history_repo = HistoryRepo::new(db.clone());
         let scrobble_repo = database::ScrobbleRepo::new(db.clone());
         let album_repo = AlbumRepo::new(db.clone());
+        let album_notes_repo = AlbumNotesRepo::new(db.clone());
         let artist_repo = ArtistRepo::new(db.clone());
         let genre_repo = GenreRepo::new(db.clone());
         let scan_roots_repo = ScanRootsRepo::new(db.clone());
@@ -267,6 +275,7 @@ impl ShadowPlayerApp {
             history_repo,
             scrobble_repo,
             album_repo,
+            album_notes_repo,
             artist_repo,
             genre_repo,
             scan_roots_repo,
@@ -304,6 +313,9 @@ impl ShadowPlayerApp {
             autotag_modal,
             artwork_fetch_service,
             artwork_fetch_modal,
+            room_measurement: RoomMeasurementState::default(),
+            media_tools_service: MediaToolsService::new(),
+            media_tools: crate::modals::MediaToolsModalState::default(),
 
             playlist_editor_tracks: Vec::new(),
             prev_track_id: None,
@@ -1459,6 +1471,105 @@ impl ShadowPlayerApp {
     fn open_track_dsp(&mut self, track: &Track) {
         self.app_state.track_dsp_modal.track_id = Some(track.id);
         self.app_state.track_dsp_modal.is_open = true;
+    }
+
+    /// Drain background media-tool jobs into the Tools modal.
+    fn poll_media_tools(&mut self) {
+        for event in self.media_tools_service.poll() {
+            match event {
+                MediaToolEvent::DiscProbed(result) => match result {
+                    Ok(disc) => self.media_tools.apply_disc(disc),
+                    Err(error) => {
+                        self.media_tools.cd_error = Some(error);
+                        self.media_tools.disc = None;
+                    }
+                },
+                MediaToolEvent::RipProgress(progress) => {
+                    self.media_tools.cd_progress = Some((
+                        progress.track_number,
+                        progress.track_count,
+                        progress.track_title,
+                    ));
+                }
+                MediaToolEvent::RipFinished(result) => {
+                    self.media_tools.cd_progress = None;
+                    match result {
+                        Ok(report) => {
+                            self.media_tools.cd_message = Some(format!(
+                                "Ripped {} file(s){}",
+                                report.files.len(),
+                                if report.warnings.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" · {} warning(s)", report.warnings.len())
+                                }
+                            ));
+                            self.media_tools.cd_error = None;
+                            if !report.warnings.is_empty() {
+                                self.toasts.warning(report.warnings.join("; "));
+                            } else {
+                                self.toasts.info(format!(
+                                    "Ripped {} track(s) from CD",
+                                    report.files.len()
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            self.media_tools.cd_error = Some(error);
+                        }
+                    }
+                }
+                MediaToolEvent::TranscodeProgress {
+                    done,
+                    total,
+                    current,
+                } => {
+                    self.media_tools.export_progress = Some((done, total, current));
+                }
+                MediaToolEvent::TranscodeFinished(result) => {
+                    self.media_tools.export_progress = None;
+                    match result {
+                        Ok(reports) => {
+                            self.media_tools.export_message = Some(format!(
+                                "Exported {} file(s) to {}",
+                                reports.len(),
+                                self.media_tools.export_output_dir.display()
+                            ));
+                            self.media_tools.export_error = None;
+                            self.toasts
+                                .info(format!("Exported {} file(s)", reports.len()));
+                        }
+                        Err(error) => self.media_tools.export_error = Some(error),
+                    }
+                }
+                MediaToolEvent::UpdateChecked(result) => match result {
+                    Ok(check) => {
+                        self.media_tools.update_message = Some(if check.newer_available {
+                            format!("Version {} is available", check.release.version)
+                        } else {
+                            "You are running the newest release".to_string()
+                        });
+                        self.media_tools.update_error = None;
+                        self.media_tools.update_check = Some(check);
+                    }
+                    Err(error) => {
+                        self.media_tools.update_error = Some(error);
+                        self.media_tools.update_check = None;
+                    }
+                },
+                MediaToolEvent::UpdateDownloaded(result) => match result {
+                    Ok(download) => {
+                        self.media_tools.update_message =
+                            Some(format!("Verified {} · SHA-256 matched", download.version));
+                        self.media_tools.update_error = None;
+                        self.media_tools.update_download = Some(download);
+                    }
+                    Err(error) => self.media_tools.update_error = Some(error),
+                },
+            }
+        }
+        self.media_tools.busy = self.media_tools_service.is_busy();
+        self.media_tools.activity = self.media_tools_service.activity().to_string();
     }
 
     /// Open the import-from-other-players dialog.
@@ -2963,6 +3074,16 @@ impl eframe::App for ShadowPlayerApp {
 
         // 1. Poll Coordinator & Session events
         self.coordinator.poll_events();
+        for event in self.coordinator.take_room_measurement_events() {
+            self.room_measurement.apply_event(event);
+        }
+        if self.room_measurement.needs_devices {
+            self.room_measurement.needs_devices = false;
+            self.coordinator.enumerate_measurement_inputs();
+        }
+        if self.room_measurement.is_running() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         for notice in self.coordinator.take_engine_notices() {
             self.toasts.warning(notice);
         }
@@ -3032,6 +3153,10 @@ impl eframe::App for ShadowPlayerApp {
         self.poll_podcast_playback(&ctx);
         if self.crossfade_preview.is_playing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
+        self.poll_media_tools();
+        if self.media_tools_service.is_busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }
 
         // 2f1. Auto-tag service polling.
@@ -3502,6 +3627,7 @@ impl eframe::App for ShadowPlayerApp {
                 match std::env::var("SHADOWPLAYER_EVAL_MODAL").as_deref() {
                     Ok("bitperfect") => self.app_state.bit_perfect_modal_open = true,
                     Ok("autoeq") => self.dsp_state.autoeq.is_open = true,
+                    Ok("room_measurement") => self.room_measurement.open(),
                     Ok("listening") => self.app_state.listening_modal.open(),
                     Ok("scrobble") => self.app_state.scrobble_log_open = true,
                     Ok("track_dsp") => {
@@ -4253,6 +4379,7 @@ impl eframe::App for ShadowPlayerApp {
                             is_playing,
                             &self.theme,
                             &self.album_repo,
+                            &self.album_notes_repo,
                             &self.favorites_repo,
                         );
                     }
@@ -4429,6 +4556,20 @@ impl eframe::App for ShadowPlayerApp {
                                 .filter(|t| !self.artwork_service.has_artwork(&t.id, &t.path))
                                 .count();
                             self.artwork_fetch_modal.open(missing_count);
+                        }
+                        if sv_actions.open_room_measurement {
+                            self.room_measurement.open();
+                        }
+                        if sv_actions.open_cd_ripper {
+                            self.media_tools.open(MediaToolsTab::Cd);
+                        }
+                        if sv_actions.open_transcode_export {
+                            self.media_tools.open(MediaToolsTab::Export);
+                        }
+                        if sv_actions.open_update_check {
+                            self.media_tools.update_enabled =
+                                self.dsp_state.settings_tab.update_check_enabled;
+                            self.media_tools.open(MediaToolsTab::Update);
                         }
                     }
                     NavItem::Podcasts => {
@@ -4742,6 +4883,187 @@ impl eframe::App for ShadowPlayerApp {
             .handle_clap_rack_actions(&self.session, clap_actions);
         if self.dsp_state.clap_rack.is_open {
             self.settings_dirty = true;
+        }
+
+        // The room-correction measurement wizard. The engine plays the sweep
+        // and publishes progress; the modal only renders the state the app
+        // already drained from the coordinator.
+        let measurement_actions =
+            show_room_measurement_modal(&ctx, &mut self.room_measurement, &self.theme);
+        if measurement_actions.start {
+            self.room_measurement.mark_started();
+            self.coordinator.measure_room(
+                self.room_measurement.seconds,
+                self.room_measurement.pre_emphasis,
+                self.room_measurement.requested_device(),
+            );
+        }
+        if measurement_actions.cancel {
+            self.room_measurement.stage = "Cancelling measurement…".to_string();
+            self.coordinator.cancel_room_measurement();
+        }
+        if measurement_actions.restart {
+            self.room_measurement.phase =
+                crate::modals::room_measurement_modal::MeasurementPhase::Setup;
+            self.room_measurement.stage.clear();
+            self.room_measurement.result = None;
+            self.room_measurement.error = None;
+            self.room_measurement.needs_devices = true;
+        }
+        if measurement_actions.close {
+            self.room_measurement.close();
+        }
+        if measurement_actions.save_ir {
+            if let Some(result) = self.room_measurement.result.as_ref() {
+                let source = result.path.clone();
+                if let Some(dest) = rfd::FileDialog::new()
+                    .set_title("Save Measurement WAV")
+                    .set_file_name("room-measurement.wav")
+                    .add_filter("WAV audio", &["wav"])
+                    .save_file()
+                {
+                    match std::fs::copy(&source, &dest) {
+                        Ok(_) => self
+                            .toasts
+                            .info(format!("Measurement saved to {}", dest.display())),
+                        Err(e) => self
+                            .toasts
+                            .warning(format!("Could not save the measurement: {e}")),
+                    }
+                }
+            }
+        }
+        if measurement_actions.load_ir {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Load Impulse Response")
+                .add_filter("WAV impulse response", &["wav"])
+                .pick_file()
+            {
+                self.session.load_correction_ir(&path);
+                self.room_measurement.close();
+                self.toasts
+                    .info(format!("Loading correction from {}", path.display()));
+            }
+        }
+
+        // The Tools workshop: CD extraction, transcode export and updates.
+        let tool_actions = show_media_tools_modal(&ctx, &mut self.media_tools, &self.theme);
+        if tool_actions.close {
+            self.media_tools.is_open = false;
+        }
+        if tool_actions.cancel {
+            self.media_tools_service.cancel();
+        }
+        if tool_actions.pick_cd_output {
+            if let Some(dir) = rfd::FileDialog::new()
+                .set_title("Choose a folder for ripped tracks")
+                .pick_folder()
+            {
+                self.media_tools.cd_output_dir = dir;
+            }
+        }
+        if tool_actions.pick_export_files {
+            if let Some(files) = rfd::FileDialog::new()
+                .set_title("Choose audio files to export")
+                .add_filter(
+                    "Audio",
+                    &[
+                        "flac", "wav", "aif", "aiff", "mp3", "m4a", "aac", "ogg", "opus", "dsf",
+                        "dff",
+                    ],
+                )
+                .pick_files()
+            {
+                for file in files {
+                    if !self.media_tools.export_inputs.contains(&file) {
+                        self.media_tools.export_inputs.push(file);
+                    }
+                }
+            }
+        }
+        if tool_actions.pick_export_output {
+            if let Some(dir) = rfd::FileDialog::new()
+                .set_title("Choose an export folder")
+                .pick_folder()
+            {
+                self.media_tools.export_output_dir = dir;
+            }
+        }
+        if tool_actions.clear_export_files {
+            self.media_tools.export_inputs.clear();
+            self.media_tools.export_message = None;
+            self.media_tools.export_error = None;
+        }
+        if tool_actions.probe_disc {
+            self.media_tools.cd_error = None;
+            self.media_tools.cd_progress = None;
+            self.media_tools_service.probe_disc(
+                self.media_tools.cd_device.clone(),
+                self.media_tools.cd_fetch_metadata,
+            );
+        }
+        if tool_actions.rip_disc {
+            self.media_tools.cd_error = None;
+            self.media_tools.cd_progress = None;
+            self.media_tools_service.rip_disc(
+                self.media_tools.cd_device.clone(),
+                self.media_tools.cd_output_dir.clone(),
+                self.media_tools.cd_format,
+                self.media_tools.selected_tracks(),
+                self.media_tools.cd_fetch_metadata,
+            );
+        }
+        if tool_actions.start_export {
+            self.media_tools.export_error = None;
+            self.media_tools.export_progress = None;
+            self.media_tools_service.transcode_files(
+                self.media_tools.export_inputs.clone(),
+                self.media_tools.export_output_dir.clone(),
+                self.media_tools.update_format(),
+                self.media_tools.export_copy_tags,
+                self.media_tools.export_overwrite,
+            );
+        }
+        if tool_actions.pick_update_dir {
+            if let Some(dir) = rfd::FileDialog::new()
+                .set_title("Choose a folder for downloaded updates")
+                .pick_folder()
+            {
+                self.media_tools.update_dir = dir;
+            }
+        }
+        if let Some(enabled) = tool_actions.update_enabled_changed {
+            self.dsp_state.settings_tab.update_check_enabled = enabled;
+            self.settings_dirty = true;
+        }
+        if tool_actions.check_update {
+            self.media_tools.update_error = None;
+            self.media_tools.update_check = None;
+            self.media_tools.update_download = None;
+            self.media_tools_service.check_for_update(
+                self.media_tools.update_enabled,
+                env!("CARGO_PKG_VERSION").to_string(),
+            );
+        }
+        if tool_actions.download_update {
+            if let Some(check) = self.media_tools.update_check.clone() {
+                if let Some(asset) = check.recommended_asset.clone() {
+                    self.media_tools.update_error = None;
+                    self.media_tools.update_download = None;
+                    self.media_tools_service.download_update(
+                        self.media_tools.update_enabled,
+                        check.release,
+                        asset,
+                        self.media_tools.update_dir.clone(),
+                        false,
+                    );
+                }
+            }
+        }
+        if tool_actions.open_release_page {
+            if let Some(check) = &self.media_tools.update_check {
+                ctx.open_url(egui::OpenUrl::new_tab(check.release.page_url.clone()));
+            }
         }
 
         show_autoeq_modal(

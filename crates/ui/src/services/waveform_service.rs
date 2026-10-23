@@ -22,6 +22,8 @@ pub const PEAK_COUNT: usize = 1200;
 /// only saves a query when the user skips back and forth.
 const CACHE_LIMIT: usize = 32;
 
+type WaveformJob = (TrackId, Receiver<Result<(Vec<u8>, f32), String>>);
+
 pub struct WaveformService {
     waveforms: WaveformRepo,
     /// A cheap existence check before decoding. `TrackRepo` is kept so a
@@ -32,7 +34,7 @@ pub struct WaveformService {
     /// Tracks whose waveform is known to be unavailable, so a broken file is
     /// not decoded again on every frame.
     unavailable: HashSet<TrackId>,
-    inflight: Option<(TrackId, Receiver<Result<(Vec<u8>, f32), String>>)>,
+    inflight: Option<WaveformJob>,
     pub generated: u32,
 }
 
@@ -167,14 +169,10 @@ pub fn generate_peaks(
 
     let mut peaks = vec![0.0f32; buckets];
     let mut frame_position = 0f64;
-    loop {
-        let chunk = match decoder.decode_next(4096) {
-            Ok(chunk) => chunk,
-            // End of stream is the normal way this loop ends; a codec may
-            // also report a truncated final packet, which must not throw away
-            // the peaks collected so far.
-            Err(_) => break,
-        };
+    // End of stream is the normal way this loop ends; a codec may also report
+    // a truncated final packet, which must not throw away the peaks collected
+    // so far.
+    while let Ok(chunk) = decoder.decode_next(4096) {
         if chunk.frame_count == 0 {
             break;
         }

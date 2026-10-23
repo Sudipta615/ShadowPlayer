@@ -30,8 +30,10 @@
     <true/>
     <key>CFBundleIconFile</key>
     <string>icon.icns</string>
-    <!-- Deliberately absent: NSMicrophoneUsageDescription. ShadowPlayer has
-         no microphone capture path; if one is ever added, this file and the
-         documentation must change together. -->
+    <!-- Room-correction measurement records a sweep from the user's chosen
+         input. The picker appears only when the measurement wizard asks the
+         system for microphone access; playback and library scans never do. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>ShadowPlayer records a short measurement sweep to calibrate room correction.</string>
 </dict>
 </plist>

@@ -388,39 +388,70 @@ impl<'a> RightPanel<'a> {
                                         theme.text_muted,
                                     );
 
-                                    // Queue reordering + remove controls appear on hover.
-                                    if item_resp.hovered() {
-                                        let up_rect = Rect::from_center_size(
-                                            Pos2::new(rect.max.x - 52.0, cy),
-                                            Vec2::new(14.0, 18.0),
-                                        );
-                                        let down_rect = Rect::from_center_size(
-                                            Pos2::new(rect.max.x - 35.0, cy),
-                                            Vec2::new(14.0, 18.0),
-                                        );
-                                        let can_up = orig_idx > start;
-                                        let can_down = orig_idx + 1 < qlen;
-                                        // Real widgets, so the queue controls
-                                        // can be reached by keyboard and
-                                        // announced by a screen reader.
-                                        let up_resp = ui.interact(
-                                            up_rect,
-                                            ui.scope_id().with(("queue_up", orig_idx)),
-                                            Sense::click(),
-                                        );
-                                        let down_resp = ui.interact(
-                                            down_rect,
-                                            ui.scope_id().with(("queue_down", orig_idx)),
-                                            Sense::click(),
-                                        );
-                                        let del_resp = ui.interact(
-                                            Rect::from_center_size(
-                                                Pos2::new(rect.max.x - 12.0, cy),
-                                                Vec2::new(14.0, 14.0),
+                                    // Queue controls are always real widgets, so Tab
+                                    // reaches them; they are painted on hover or
+                                    // keyboard focus and announced by screen readers.
+                                    let up_rect = Rect::from_center_size(
+                                        Pos2::new(rect.max.x - 52.0, cy),
+                                        Vec2::new(14.0, 18.0),
+                                    );
+                                    let down_rect = Rect::from_center_size(
+                                        Pos2::new(rect.max.x - 35.0, cy),
+                                        Vec2::new(14.0, 18.0),
+                                    );
+                                    let can_up = orig_idx > start;
+                                    let can_down = orig_idx + 1 < qlen;
+                                    let up_resp = ui.interact(
+                                        up_rect,
+                                        ui.scope_id().with(("queue_up", orig_idx)),
+                                        Sense::click(),
+                                    );
+                                    let down_resp = ui.interact(
+                                        down_rect,
+                                        ui.scope_id().with(("queue_down", orig_idx)),
+                                        Sense::click(),
+                                    );
+                                    let del_resp = ui.interact(
+                                        Rect::from_center_size(
+                                            Pos2::new(rect.max.x - 12.0, cy),
+                                            Vec2::new(14.0, 14.0),
+                                        ),
+                                        ui.scope_id().with(("queue_del", orig_idx)),
+                                        Sense::click(),
+                                    );
+                                    up_resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            can_up,
+                                            format!(
+                                                "Move {} up in the queue",
+                                                track.title
                                             ),
-                                            ui.scope_id().with(("queue_del", orig_idx)),
-                                            Sense::click(),
-                                        );
+                                        )
+                                    });
+                                    down_resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            can_down,
+                                            format!(
+                                                "Move {} down in the queue",
+                                                track.title
+                                            ),
+                                        )
+                                    });
+                                    del_resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            true,
+                                            format!("Remove {} from the queue", track.title),
+                                        )
+                                    });
+                                    let controls_visible = item_resp.hovered()
+                                        || up_resp.has_focus()
+                                        || down_resp.has_focus()
+                                        || del_resp.has_focus();
+
+                                    if controls_visible {
                                         let up_hov = can_up && up_resp.hovered();
                                         let down_hov = can_down && down_resp.hovered();
                                         let up_col = if up_hov {
@@ -455,28 +486,6 @@ impl<'a> RightPanel<'a> {
                                             action.move_queue = Some((orig_idx, 1));
                                             action.play_queue_index = None;
                                         }
-                                        up_resp.widget_info(|| {
-                                            egui::WidgetInfo::labeled(
-                                                egui::Role::Button,
-                                                can_up,
-                                                "Move up in the queue",
-                                            )
-                                        });
-                                        down_resp.widget_info(|| {
-                                            egui::WidgetInfo::labeled(
-                                                egui::Role::Button,
-                                                can_down,
-                                                "Move down in the queue",
-                                            )
-                                        });
-                                        del_resp.widget_info(|| {
-                                            egui::WidgetInfo::labeled(
-                                                egui::Role::Button,
-                                                true,
-                                                "Remove from the queue",
-                                            )
-                                        });
-
                                         let del_rect = del_resp.rect;
                                         let del_hov = del_resp.hovered();
                                         let del_col = if del_hov {
@@ -513,6 +522,13 @@ impl<'a> RightPanel<'a> {
                                 let clear_w = (ui.available_width() - 4.0).max(160.0);
                                 let (clear_rect, clear_resp) = ui
                                     .allocate_exact_size(Vec2::new(clear_w, 32.0), Sense::click());
+                                clear_resp.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::Role::Button,
+                                        true,
+                                        "Clear queue",
+                                    )
+                                });
                                 let p = ui.painter_at(clear_rect);
                                 let bg = if clear_resp.hovered() {
                                     self.theme.bg_card_hover

@@ -34,6 +34,9 @@ impl<'a> WaveformSeek<'a> {
         } else {
             0.0
         };
+        response.widget_info(|| {
+            egui::WidgetInfo::slider(true, f64::from(fraction), "Playback position")
+        });
 
         // A quiet baseline, so an empty/loading waveform still reads as a
         // control rather than dead space.

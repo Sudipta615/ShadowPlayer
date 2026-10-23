@@ -405,6 +405,12 @@ pub struct ClapRackActions {
     pub save_preset: bool,
     pub apply_preset: Option<usize>,
     pub delete_preset: Option<usize>,
+    /// Open the plugin's floating native editor.
+    pub open_gui: bool,
+    /// Close the plugin's floating native editor.
+    pub close_gui: bool,
+    /// Resize the plugin's floating editor to the requested size.
+    pub resize_gui: Option<(u32, u32)>,
     pub close: bool,
 }
 

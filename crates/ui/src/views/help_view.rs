@@ -489,6 +489,14 @@ fn render_interactive_pipeline_diagram(ui: &mut egui::Ui, state: &mut HelpState,
             };
 
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(135.0, 56.0), Sense::click());
+            resp.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::Role::Button,
+                    true,
+                    is_selected,
+                    format!("{title}: {subtitle}"),
+                )
+            });
             let painter = ui.painter_at(rect);
 
             painter.rect_filled(rect, CornerRadius::same(theme.radius_lg), bg);

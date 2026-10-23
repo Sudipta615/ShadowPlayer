@@ -94,6 +94,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v13(conn)?;
     }
 
+    if current_version < 14 {
+        apply_v14(conn)?;
+    }
+
     Ok(())
 }
 
@@ -1042,6 +1046,40 @@ fn apply_v13(conn: &mut Connection) -> Result<()> {
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
             log::error!("Migration V13 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// V14: Tier 3 — album liner notes.
+///
+/// Notes are keyed by the stable [`domain::ids::AlbumId`] rather than by a row
+/// in the historical `albums` table, which the scanner does not populate. The
+/// title and artist are copied alongside so a note remains identifiable if the
+/// album's tracks disappear from the library, and so notes can be listed
+/// without joining a table that may have no row for an album whose tags
+/// changed.
+fn apply_v14(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V14 (album liner notes)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS album_notes (
+            album_id TEXT PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            artist TEXT NOT NULL,
+            notes_markdown TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_album_notes_updated
+            ON album_notes(updated_at DESC);",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (14, strftime('%s', 'now'));",
+    ];
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V14 statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }

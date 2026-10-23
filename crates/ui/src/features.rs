@@ -110,13 +110,49 @@ pub const FEATURES: &[Feature] = &[
         id: "macos_bundle",
         label: "macOS app bundle",
         platforms: &[Platform::MacOs],
-        note: "The committed package-app.sh wraps the binary in a foreground .app with the icon and no microphone key.",
+        note: "The committed package-app.sh wraps the binary in a foreground .app with the icon and the microphone usage description.",
     },
     Feature {
-        id: "no_microphone_permission",
-        label: "No microphone permission",
+        id: "room_measurement",
+        label: "Room-correction microphone capture",
         platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
-        note: "The app captures nothing, and the macOS bundle omits NSMicrophoneUsageDescription.",
+        note: "Records the measurement sweep from a chosen input; the macOS bundle declares NSMicrophoneUsageDescription.",
+    },
+    Feature {
+        id: "cd_ripping",
+        label: "CD ripping",
+        platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
+        note: "Audio CDs through dynamically loaded libcdio/libcdio-paranoia; CDDB metadata is optional through libcddb.",
+    },
+    Feature {
+        id: "transcode_export",
+        label: "FLAC and Opus export",
+        platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
+        note: "16/24-bit FLAC and 48 kHz Ogg-Opus through dynamically loaded libsndfile.",
+    },
+    Feature {
+        id: "clap_gui",
+        label: "CLAP plugin editor windows",
+        platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
+        note: "A plugin that implements clap.gui opens its own floating native editor from the plugin rack.",
+    },
+    Feature {
+        id: "headless_mode",
+        label: "Headless mode",
+        platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
+        note: "--headless runs the engine and the loopback control socket without opening a window.",
+    },
+    Feature {
+        id: "update_check",
+        label: "Opt-in update check",
+        platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
+        note: "Contacts GitHub only when enabled; a download is SHA-256 verified and is never installed automatically.",
+    },
+    Feature {
+        id: "album_liner_notes",
+        label: "Markdown album liner notes",
+        platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
+        note: "Notes are stored in the library database and rendered in a safe Markdown subset.",
     },
     Feature {
         id: "null_backend",
@@ -211,16 +247,18 @@ mod tests {
                 "macos_bundle" => {
                     assert_eq!(feature.platforms, &[Platform::MacOs]);
                     assert!(macos_plist.contains("<key>LSUIElement</key>"));
-                    assert!(!macos_plist.contains("<key>NSMicrophoneUsageDescription</key>"));
+                }
+                "room_measurement" => {
+                    assert_eq!(feature.platforms, Platform::ALL);
+                    assert!(macos_plist.contains("<key>NSMicrophoneUsageDescription</key>"));
                 }
                 "wayland_portal" | "native_picker" => {
                     // rfd is configured with its XDG portal default on Linux;
                     // the same service is the native dialog elsewhere.
                     assert!(pickers.contains("rfd::FileDialog"));
                 }
-                "exclusive_output"
-                | "system_media"
-                | "no_microphone_permission"
+                "exclusive_output" | "system_media" | "cd_ripping" | "transcode_export"
+                | "clap_gui" | "headless_mode" | "update_check" | "album_liner_notes"
                 | "null_backend" => {
                     assert_eq!(feature.platforms, Platform::ALL);
                 }

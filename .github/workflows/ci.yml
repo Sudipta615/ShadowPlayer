@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           cargo test -p domain -p database -p metadata -p lyrics -p library \
-            -p playback -p search -p audio-session -p ui --lib \
+            -p playback -p search -p audio-session -p media-tools -p ui --lib \
             -- --test-threads=1 2>&1 | tee test.log || {
             echo "::error title=Player Tests Failure::$(grep -E 'FAILED|failures:' -A 5 test.log || tail -n 15 test.log)"
             tail -n 60 test.log

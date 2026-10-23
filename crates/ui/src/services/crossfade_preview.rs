@@ -154,7 +154,7 @@ pub fn render_demo(curve: CrossfadeCurve, duration_secs: f32) -> (Vec<f32>, Vec<
     // One peak per ~4 px at the widest panel.
     let buckets = 160;
     let mut peaks = vec![0.0f32; buckets];
-    for (frame, pair) in samples.chunks_exact(CHANNELS).enumerate() {
+    for (frame, pair) in samples.as_chunks::<CHANNELS>().0.iter().enumerate() {
         let bucket = frame * buckets / total_frames.max(1);
         let amplitude = pair[0].abs().max(pair[1].abs());
         if let Some(slot) = peaks.get_mut(bucket) {

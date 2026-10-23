@@ -861,6 +861,21 @@ impl EngineHandle {
     ///
     /// Read straight out of shared memory rather than asked for, so a UI can
     /// call it on every frame.
+    /// Open the loaded plugin's floating native editor.
+    pub fn open_clap_gui(&self) {
+        let _ = self.send_command(EngineCommand::OpenClapGui);
+    }
+
+    /// Hide and destroy the plugin's native editor.
+    pub fn close_clap_gui(&self) {
+        let _ = self.send_command(EngineCommand::CloseClapGui);
+    }
+
+    /// Resize the native editor when the plugin permits it.
+    pub fn resize_clap_gui(&self, width: u32, height: u32) {
+        let _ = self.send_command(EngineCommand::ResizeClapGui { width, height });
+    }
+
     pub fn clap_view(&self) -> crate::dsp::clap_rack::ClapRackView {
         (**self.clap_view.load()).clone()
     }
@@ -1023,10 +1038,28 @@ impl EngineHandle {
     /// recording into a correction and land it. Progress / completion
     /// surface as `MeasurementProgress` / `MeasurementComplete` events.
     pub fn measure_room(&self, seconds: f32, pre_emphasis: f32) {
+        self.measure_room_with_input(seconds, pre_emphasis, None);
+    }
+
+    /// Run a room measurement through a named input device instead of the
+    /// platform default/system mix. Used by the measurement wizard when the
+    /// user picks a microphone.
+    pub fn measure_room_with_input(
+        &self,
+        seconds: f32,
+        pre_emphasis: f32,
+        input_device: Option<String>,
+    ) {
         let _ = self.send_command(EngineCommand::MeasureRoom {
             seconds,
             pre_emphasis,
+            input_device,
         });
+    }
+
+    /// Stop an in-flight room measurement and discard its recording.
+    pub fn cancel_room_measurement(&self) {
+        let _ = self.send_command(EngineCommand::CancelRoomMeasurement);
     }
 
     /// Replace the configured physical endpoint fan-out list.

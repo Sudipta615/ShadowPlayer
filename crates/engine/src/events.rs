@@ -144,6 +144,9 @@ pub enum EngineEvent {
     /// an unreadable recording, or a derivation failure). The sweep may
     /// still have played; no correction was changed.
     MeasurementFailed(String),
+    /// A room measurement was stopped by the user. The partial recording and
+    /// sweep file have been removed, and no correction was changed.
+    MeasurementCancelled,
 }
 
 /// Hardware output device events.

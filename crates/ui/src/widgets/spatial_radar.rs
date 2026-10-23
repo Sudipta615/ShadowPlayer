@@ -44,6 +44,13 @@ impl<'a> SpatialRadarWidget<'a> {
 
     pub fn show(self, ui: &mut egui::Ui) -> SpatialRadarResponse {
         let (rect, response) = ui.allocate_exact_size(self.size, egui::Sense::click_and_drag());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::Role::Slider,
+                true,
+                "Spatial audio position — drag to move the source",
+            )
+        });
         let painter = ui.painter_at(rect);
         let center = rect.center();
         let mut changed = false;

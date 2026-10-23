@@ -133,6 +133,52 @@ fn the_readme_test_commands_exist() {
 }
 
 #[test]
+fn the_readme_describes_the_tools_and_the_opt_in_network() {
+    let root = repo_root();
+    let lower = read(&root.join("README.md")).to_lowercase();
+
+    for needle in [
+        "cd ripper",
+        "transcode export",
+        "room-correction",
+        "liner notes",
+        "headless",
+        "sha-256",
+        "clap.gui",
+    ] {
+        assert!(
+            lower.contains(needle),
+            "README.md does not mention {needle:?}, which is a shipped feature; \
+             the README must describe the tools the app now has"
+        );
+    }
+
+    for stale in [
+        "no network requests at all",
+        "no cd ripping",
+        "no transcoding",
+        "no auto-update",
+        "no microphone permission",
+        "captures nothing",
+        "omits nsmicrophoneusagedescription",
+        "some icon-only controls are still unnamed",
+    ] {
+        assert!(
+            !lower.contains(stale),
+            "README.md still contains the stale claim {stale:?}; it must \
+             describe the current behaviour instead"
+        );
+    }
+
+    let plist = read(&root.join("crates/app/macos/Info.plist"));
+    assert!(
+        plist.contains("<key>NSMicrophoneUsageDescription</key>"),
+        "the room-correction wizard records a sweep, so the macOS bundle needs \
+         a microphone usage description"
+    );
+}
+
+#[test]
 fn the_readme_known_limitations_cover_the_engines() {
     let root = repo_root();
     let readme = read(&root.join("README.md")).to_lowercase();

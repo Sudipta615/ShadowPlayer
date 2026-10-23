@@ -8,6 +8,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Room correction has a measurement wizard.** The Settings → Tools card opens a guided flow:
+  choose the microphone or interface input, choose the sweep length and pre-emphasis, start the
+  measurement, and watch each engine stage. An explicit input never falls back to the system mix,
+  and cancelling discards the sweep and the partial recording with a distinct cancelled event.
+  A finished sweep can be saved as a WAV or loaded into the room-correction stage as an impulse
+  response.
+- **CD ripping through libcdio-paranoia.** The CD Ripper probes a drive, reads its table of
+  contents, fetches CDDB metadata when `libcddb` is available, and extracts selected tracks to
+  WAV, FLAC 16/24-bit or Opus. Native libraries are loaded at runtime, so the player still builds
+  and runs without them, and the tool names the missing library instead of failing at startup.
+  Existing files are never overwritten silently.
+- **FLAC and Opus export.** A batch exporter decodes with the engine's own decoder and writes
+  native FLAC at 16 or 24 bits, or Ogg-Opus at 48 kHz with a windowed-sinc resampler for other
+  source rates. Output goes to a temporary sibling and is renamed only after the encoder closes
+  successfully, so a failed or cancelled export cannot leave a truncated album file.
+- **Album liner notes in Markdown.** The album detail view has a liner-notes card with an editor
+  and a preview of a safe Markdown subset (headings, emphasis, lists, quotes, code and verified
+  links). Notes are keyed by album identity and stored in the library database (schema V14), not
+  written beside the music.
+- **CLAP plugins can open their own editor.** The plugin rack exposes Open, Close and Fit controls
+  for plugins that implement `clap.gui`; the editor is a floating native window, not an embedded
+  surface. Plugins without a GUI report a clear error in the rack while parameters, bypass and
+  presets stay available.
+- **Headless mode.** `shadowplayer --headless [--play PATH]…` runs the audio engine, queues files,
+  publishes media metadata and serves the same loopback control socket without opening a window.
+  Transport, seek, volume and quit are driven by `shadowplayer-remote`.
+- **An opt-in update check with verified downloads.** Settings → Tools can ask GitHub for the
+  latest release, compare versions, select an asset for this platform, and download it. No
+  checksum means no download; a mismatched SHA-256 is rejected. Nothing is installed or executed,
+  there is no background polling, and the setting is off by default.
+
+### Changed
+- **Accessibility names reached the remaining painted controls.** Sort headers and the sort pill,
+  row rating and overflow menus, playlist rename/delete/remove, album and genre rows, info-box
+  dismiss, help signal cards, settings jumps and toggles, the waveform seek bar, the equalizer
+  canvas and its switches, and the spatial radar now expose accessible names and roles. The
+  equalizer graph also keeps its keyboard band editing.
+- **The platform matrix tells the truth about capture and the network.** It no longer claims the
+  app captures nothing or omits the microphone key; it documents room measurement, CD ripping,
+  export, CLAP editors, headless mode, liner notes and opt-in updates, and the macOS bundle now
+  carries `NSMicrophoneUsageDescription`.
+- **README and Help describe the tools and the opt-in network paths** instead of the old
+  "no CD/no transcoding/no auto-update/no network" list. Native library packages are named, and
+  the limitations state that updates are never installed automatically and liner notes live in
+  the database.
+
+### Testing and release
+- `media-tools` covers the dynamic-library loader, Markdown parsing and safe links, resampling,
+  FLAC/Opus format selection, CDDB response parsing, release-asset selection and checksum
+  rejection. Database tests cover the V14 migration and the album-notes repository. UI tests cover
+  the measurement phases, the tools modal state and the liner-notes editor. Accessibility and
+  documentation claims are checked by source and platform tests; CI now runs the `media-tools`
+  suite with the player suite.
+
 ## [0.14.0] - 2026-10-22
 
 *Released with audio-engine 1.7.0. The player and the engine are versioned separately and released

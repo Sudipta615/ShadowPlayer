@@ -166,6 +166,9 @@ pub struct EqPanelState {
     /// moved into it exactly once, when it opens.
     pub was_open: bool,
     pub active_tab: EqTab,
+    /// The graphic-EQ band the keyboard is currently editing. Not persisted:
+    /// it describes focus, not a preference.
+    pub keyboard_band: usize,
     pub show_more_menu: bool,
     pub selected_preset: EqPreset,
     pub custom_presets: Vec<CustomEqPreset>,
@@ -246,6 +249,7 @@ impl Default for EqPanelState {
             is_open: false,
             was_open: false,
             active_tab: EqTab::Graphic,
+            keyboard_band: 0,
             show_more_menu: false,
             selected_preset: EqPreset::Flat,
             custom_presets: Vec::new(),
@@ -1150,6 +1154,13 @@ fn render_spline_eq_canvas(
 
     let (canvas_rect, canvas_resp) =
         ui.allocate_exact_size(Vec2::new(avail_w, canvas_h), Sense::click_and_drag());
+    canvas_resp.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Slider,
+            true,
+            "Equalizer curve — use the arrow keys to select and adjust bands",
+        )
+    });
     let painter = ui.painter_at(canvas_rect);
 
     // Pill Background & Subtle Border
@@ -1234,6 +1245,52 @@ fn render_spline_eq_canvas(
     let freqs = state.graphic_layout.frequencies();
     let num_bands = freqs.len().clamp(1, 64);
     let col_w = plot_rect.width() / num_bands as f32;
+
+    // Keyboard editing: Tab focuses the graph, Left/Right choose a band,
+    // Up/Down move its gain, Home resets it. Every change goes through the
+    // same action the pointer path uses, so the engine hears it identically.
+    let mut band = state.keyboard_band.min(num_bands.saturating_sub(1));
+    if canvas_resp.has_focus() {
+        let (left, right, up, down, home, fine) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowLeft),
+                i.key_pressed(egui::Key::ArrowRight),
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::Home),
+                i.modifiers.shift,
+            )
+        });
+        if left && band > 0 {
+            band -= 1;
+        }
+        if right && band + 1 < num_bands {
+            band += 1;
+        }
+        let step = if fine { 0.1 } else { 0.5 };
+        let mut gain = state.graphic_gains[band];
+        let mut changed = false;
+        if up {
+            gain = (gain + step).min(max_db);
+            changed = true;
+        }
+        if down {
+            gain = (gain - step).max(-max_db);
+            changed = true;
+        }
+        if home {
+            gain = 0.0;
+            changed = true;
+        }
+        if changed {
+            state.graphic_gains[band] = gain;
+            state.selected_preset = EqPreset::Custom;
+            state.selected_custom_preset_idx = None;
+            actions.graphic_slider_changed = Some(band);
+        }
+        state.keyboard_band = band;
+    }
+    let keyboard_band = band;
 
     let mut node_positions = Vec::with_capacity(num_bands);
     let mut hovered_band: Option<(usize, f32, f32, Pos2)> = None;
@@ -1388,6 +1445,12 @@ fn render_spline_eq_canvas(
         };
         painter.circle_filled(pos, node_r, Color32::WHITE);
         painter.circle_stroke(pos, node_r, Stroke::new(1.6, theme.accent_highlight));
+
+        // The keyboard's current band gets a second ring, so focus is visible
+        // and the arrow keys have an obvious subject.
+        if canvas_resp.has_focus() && i == keyboard_band {
+            painter.circle_stroke(pos, node_r + 5.0, Stroke::new(2.0, theme.accent_highlight));
+        }
     }
 
     // Floating Gain Tooltip on hovered node
@@ -1417,6 +1480,32 @@ fn render_spline_eq_canvas(
             theme.text_primary,
         );
     }
+
+    let band_freq = freqs.get(keyboard_band).copied().unwrap_or(1000.0);
+    let band_gain = state.graphic_gains[keyboard_band];
+    canvas_resp.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Slider,
+            true,
+            format!(
+                "Graphic equalizer, band {} of {}, {}, {:+.1} dB. \
+                 Left and right choose a band; up and down adjust gain; Home resets.",
+                keyboard_band + 1,
+                num_bands,
+                format_exact_frequency(band_freq),
+                band_gain
+            ),
+        )
+    });
+
+    ui.label(
+        egui::RichText::new(
+            "Focus the graph and use ←/→ to choose a band, ↑/↓ to adjust it \
+             (Shift for fine steps), Home to reset.",
+        )
+        .font(crate::theme::font(10.0))
+        .color(theme.text_dim),
+    );
 }
 
 fn format_frequency_label(f: f32) -> String {
@@ -2214,6 +2303,13 @@ fn gradient_horizontal_slider(
 
     let min = *range.start();
     let max = *range.end();
+    resp.widget_info(|| {
+        egui::WidgetInfo::slider(
+            true,
+            f64::from(((*value - min) / (max - min)).clamp(0.0, 1.0)),
+            format!("Setting slider, {value:.2}"),
+        )
+    });
 
     if resp.dragged() || resp.clicked() {
         if let Some(pos) = resp.interact_pointer_pos() {
@@ -2292,6 +2388,7 @@ pub fn custom_toggle_switch(
 ) -> bool {
     let desired_size = Vec2::new(38.0, 20.0);
     let (rect, resp) = ui.allocate_exact_size(desired_size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, *value, tooltip));
     let mut changed = false;
 
     if resp.clicked() {

@@ -170,6 +170,14 @@ impl<'a> ArtistsView<'a> {
 
                         let (row_rect, row_resp) =
                             ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
+                        row_resp.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::Role::Button,
+                                true,
+                                is_cur,
+                                format!("{} by {}", track.title, track.artist),
+                            )
+                        });
                         if row_resp.double_clicked() {
                             action.play_track = Some(track.id);
                         }

@@ -1,4 +1,4 @@
-use database::{AlbumRepo, FavoritesRepo};
+use database::{AlbumNotesRepo, AlbumRepo, FavoritesRepo};
 use domain::models::Track;
 use eframe::egui;
 use playback::PlaybackCoordinator;
@@ -20,6 +20,7 @@ pub fn render_albums_view(
     is_playing: bool,
     theme: &Theme,
     album_repo: &AlbumRepo,
+    album_notes_repo: &AlbumNotesRepo,
     favorites_repo: &FavoritesRepo,
 ) {
     let biography = library_state
@@ -41,6 +42,8 @@ pub fn render_albums_view(
         artwork: artwork_service,
         biography: biography.as_ref(),
         biography_editor,
+        notes: &mut library_state.album_notes,
+        notes_repo: album_notes_repo,
         theme,
     }
     .show(ui);

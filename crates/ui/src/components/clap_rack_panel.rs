@@ -234,6 +234,59 @@ fn render_header(
         }
     });
 
+    // The plugin's editor is a native window the host opens rather than an
+    // embedded pane. Offer it only when the plugin advertises `clap.gui`, and
+    // say why when an open attempt failed instead of silently doing nothing.
+    if view.rack.is_loaded() {
+        ui.add_space(6.0);
+        let gui = &view.rack.gui;
+        if gui.available {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+                if gui.open {
+                    if pill(ui, "Close Plugin Editor", theme, false).clicked() {
+                        actions.close_gui = true;
+                    }
+                    if gui.width > 0
+                        && gui.height > 0
+                        && pill(ui, "Fit Editor to Plugin", theme, false)
+                            .on_hover_text(format!(
+                                "Resize the floating editor to the plugin's {}x{} default",
+                                gui.width, gui.height
+                            ))
+                            .clicked()
+                    {
+                        actions.resize_gui = Some((gui.width, gui.height));
+                    }
+                } else if pill(ui, "Open Plugin Editor", theme, true).clicked() {
+                    actions.open_gui = true;
+                }
+                if let Some(api) = &gui.api {
+                    ui.label(
+                        egui::RichText::new(format!("· {api} window"))
+                            .font(crate::theme::font(10.5))
+                            .color(theme.text_muted),
+                    );
+                }
+            });
+            if let Some(error) = &gui.error {
+                ui.label(
+                    egui::RichText::new(format!("Plugin editor: {error}"))
+                        .font(crate::theme::font(11.0))
+                        .color(theme.destructive),
+                );
+            }
+        } else {
+            ui.label(
+                egui::RichText::new(
+                    "This plugin does not provide a floating editor; use the parameters below.",
+                )
+                .font(crate::theme::font(10.5))
+                .color(theme.text_muted),
+            );
+        }
+    }
+
     if let Some(notice) = &state.notice {
         ui.add_space(6.0);
         ui.label(
@@ -255,7 +308,7 @@ fn render_unloaded(
     ui.add_space(6.0);
     ui.label(
         egui::RichText::new(
-            tr!("Load a CLAP plugin to insert it after the volume stage. A plugin's own \n             editor is a native window, so this rack drives every parameter the \n             plugin publishes instead."),
+            tr!("Load a CLAP plugin to insert it after the volume stage. If the plugin \n             provides a native editor you can open it as a floating window; the rack \n             below also exposes every parameter the plugin publishes."),
         )
         .font(crate::theme::font(11.5))
         .color(theme.text_secondary),

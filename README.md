@@ -2,7 +2,8 @@
 
 A local-first, audiophile desktop music player for Linux, Windows and macOS:
 Rust, [egui](https://github.com/emilk/egui), SQLite, and a real bit-perfect audio
-engine — no accounts, no telemetry, no network.
+engine — no accounts and no telemetry. Network access exists only for features
+you switch on: podcast subscriptions and the opt-in update check.
 
 The player is the `crates/` workspace. The audio engine it is built on
 (`crates/engine`) is a separate, independently versioned workspace with its own
@@ -25,6 +26,8 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
   finder, batch organizer with a reviewable rename plan, M3U import/export.
 - Embedded tag lyrics and `.lrc` sidecars (including ID3v2 `SYLT` timed lyrics
   and non-UTF-8 files), with a synced-lyrics panel.
+- Markdown album liner notes, previewed in the album view and stored in the
+  library database alongside the album identity.
 
 **Playback**
 - Gapless, crossfade, fade and hard-stop transitions; shuffle and repeat with a
@@ -36,14 +39,28 @@ README, test matrix and C ABI; it is consumed here as a path dependency.
 - Full DSP studio: parametric and graphic EQ, dynamics, filters, crossfeed,
   stereo enhancement, spatial/screen audio, room correction, creative effects
   (chorus, flanger, phaser, delay, saturation), CLAP plugin rack and named
-  chain presets.
+  chain presets. Plugins that implement `clap.gui` open their own editor window;
+  the rack keeps parameters and host bypass reachable when they do not.
+
+**Tools**
+- Room-correction measurement wizard: choose the input device and sweep length,
+  watch each stage, audition the result, and cancel without keeping a partial
+  recording.
+- CD ripper: probe a drive, fetch CDDB metadata when available, pick tracks, and
+  extract to WAV, FLAC 16/24-bit or Opus.
+- Transcode export: batch-copy local files to FLAC or 48 kHz Opus, with tags
+  copied where the source and format allow.
+- Opt-in update check against GitHub releases. A download is SHA-256 verified
+  and handed back as a file; ShadowPlayer never installs or runs it.
 
 **Desktop**
 - MPRIS2 on Linux (media keys, shells, `playerctl`), System Media Transport
   Controls on Windows, Now Playing on macOS.
-- Light and dark themes, an interface in English or German, toasts for
-  anything that fails, and a Help view whose shortcut list is generated from
-  the same descriptions the app uses.
+- Headless mode (`--headless`) runs the engine and the loopback control socket
+  without a window, for a server or a minimal listening session.
+- Light and dark themes, custom skins, an interface in English or German,
+  toasts for anything that fails, and a Help view whose shortcut list is
+  generated from the same descriptions the app uses.
 
 ---
 
@@ -80,20 +97,21 @@ A player with a hundred features is not the same as a player that is good at
 one thing. This is what ShadowPlayer deliberately does not do, so that nobody
 has to discover it by disappointment:
 
-- **No streaming services, no internet radio, no accounts, no telemetry.** The
-  app makes no network requests at all. Your library, your listening history
-  and your statistics stay on your machine.
-- **No skins or user themes yet.** There are two themes, light and dark. A
-  theming system is on the way; it is not here yet and the app does not
-  pretend otherwise.
-- **No CD ripping, no video, no transcoding.**
-- **No auto-update.** Updates are manual. This is a consequence of making no
-  network requests, not an oversight.
+- **No streaming services, internet radio, accounts or telemetry.** Podcast
+  subscriptions and the update check contact the network, and only when you
+  ask them to. Your library, listening history and statistics stay on your
+  machine.
+- **No automatic updates.** The update check is opt-in, a download is verified
+  against the release's SHA-256 checksum, and the app never installs or runs
+  the file for you. Installing is a deliberate act.
+- **No video playback.**
 - **One transport owner at a time.** A second launch brings the running
   window forward and exits. Concurrent windows are an explicit opt-in in
   Settings → Library; each has its own playback, while the first window owns
   the remote-control socket.
-- **English only.** There is no localisation layer yet.
+- **English and German, and German is not finished.** The long prose in the
+  Help manual is still English; the German catalogue covers labels, buttons
+  and menus, and falls back to English rather than showing a key.
 
 ---
 
@@ -115,8 +133,14 @@ gates in the code.
 | Native file and folder picker | Yes | Yes | Yes | rfd with the XDG desktop portal on Linux, and the native dialogs on Windows and macOS. |
 | Wayland portal picker | Yes | - | - | The XDG portal backend is used under Wayland; the picker does not depend on an X11 display. |
 | Windows application icon | - | Yes | - | The executable and window carry the committed multi-resolution .ico. |
-| macOS app bundle | - | - | Yes | The committed package-app.sh wraps the binary in a foreground .app with the icon and no microphone key. |
-| No microphone permission | Yes | Yes | Yes | The app captures nothing, and the macOS bundle omits NSMicrophoneUsageDescription. |
+| macOS app bundle | - | - | Yes | The committed package-app.sh wraps the binary in a foreground .app with the icon and the microphone usage description. |
+| Room-correction microphone capture | Yes | Yes | Yes | Records the measurement sweep from a chosen input; the macOS bundle declares NSMicrophoneUsageDescription. |
+| CD ripping | Yes | Yes | Yes | Audio CDs through dynamically loaded libcdio/libcdio-paranoia; CDDB metadata is optional through libcddb. |
+| FLAC and Opus export | Yes | Yes | Yes | 16/24-bit FLAC and 48 kHz Ogg-Opus through dynamically loaded libsndfile. |
+| CLAP plugin editor windows | Yes | Yes | Yes | A plugin that implements clap.gui opens its own floating native editor from the plugin rack. |
+| Headless mode | Yes | Yes | Yes | --headless runs the engine and the loopback control socket without opening a window. |
+| Opt-in update check | Yes | Yes | Yes | Contacts GitHub only when enabled; a download is SHA-256 verified and is never installed automatically. |
+| Markdown album liner notes | Yes | Yes | Yes | Notes are stored in the library database and rendered in a safe Markdown subset. |
 | Null output backend | Yes | Yes | Yes | A platform-independent output used by the bit-identical Pure Direct test. |
 <!-- platform-features:end -->
 
@@ -158,6 +182,12 @@ ALSA exclusive mode needs access to the device: being in the `audio` group is
 usually enough, and the Settings tab's diagnostics card reports the backend that
 was actually negotiated when it is not.
 
+The CD ripper and the FLAC/Opus exporter load their native libraries at runtime,
+so no development headers are needed to build. On Debian/Ubuntu the optional
+runtime packages are `libcdio-cdda2`, `libcdio-paranoia2`, `libcddb2` and
+`libsndfile1`; a machine without them still builds, plays and updates, and the
+Tools card names the missing library if you try to use that tool.
+
 **Windows / macOS.** `cargo build --release` works out of the box. The Windows
 build compiles the engine's native exclusive backends (`wasapi-native` and
 `asio-native`) in, so it negotiates a real exclusive stream rather than the
@@ -175,7 +205,8 @@ diagnostics card reports the backend that was actually negotiated. See
 | Windows | `%LOCALAPPDATA%\shadowplayer\library.db` |
 
 Nothing is ever written next to your music except when you explicitly organize
-files or write ReplayGain tags.
+files, write ReplayGain tags, rip a CD or run a transcode export. Each of those
+actions shows its destination and never silently overwrites an existing file.
 
 ---
 
@@ -225,6 +256,25 @@ shadowplayer-remote quit
 The same socket is what makes a second launch activate the first. There is no
 option to bind a LAN address, so this does not add a network service.
 
+### Headless mode
+
+For a server, a minimal desktop or a scripted listening session, `--headless`
+runs the audio engine and the same loopback control service without creating a
+window:
+
+```bash
+shadowplayer --headless --play /music/album/01.flac --play /music/album/02.flac
+shadowplayer-remote state
+shadowplayer-remote play
+shadowplayer-remote quit
+```
+
+The process queues the files given with `--play` (repeat the flag for more than
+one), opens the output device, and accepts transport, seek, volume and quit
+commands over the loopback socket. It publishes the same media metadata as the
+windowed build, so desktop media integration keeps working. Without `--play` it
+idles until a command arrives.
+
 ---
 
 ## Tests
@@ -232,7 +282,8 @@ option to bind a LAN address, so this does not add a network service.
 ```bash
 # Player workspace (engine excluded: it has its own workspace and suite)
 cargo test -p domain -p database -p metadata -p lyrics -p library \
-           -p playback -p search -p audio-session -p ui --lib -- --test-threads=1
+           -p playback -p search -p audio-session -p media-tools -p ui --lib \
+           -- --test-threads=1
 
 # The version bump is guarded by a test, not by remembering to do it.
 cargo test -p shadowplayer --test version_lockstep
@@ -300,11 +351,12 @@ or if the engine's README quotes a version that is no longer true.
 
 Stated plainly, because the alternative is finding out the hard way:
 
-- **Partial screen-reader support.** egui's accessibility layer (accesskit) *is*
-  enabled, so assistive technology sees the app's control tree rather than a
-  blank window. The labelling is not complete yet — some icon-only controls are
-  still unnamed — and full keyboard operation is the recommended way to drive
-  the app. Every command below works without a mouse.
+- **Accessibility is broad but not certified.** egui's accessibility layer
+  (accesskit) is enabled, icon-only controls carry accessible names, and the
+  main editing surfaces — the equalizer, queue, playlist editor, album view and
+  transport — work from the keyboard. The app has not been through a
+  professional screen-reader audit, so the keyboard remains the most thoroughly
+  exercised path. Every command below works without a mouse.
 - **English and German, and German is not finished.** The interface speaks
   English and German: the catalogue lives in `crates/ui/locales`, the build
   script refuses to compile a string that is not in it, and a missing
@@ -324,6 +376,25 @@ Stated plainly, because the alternative is finding out the hard way:
   access was verified, so "bit-perfect" is never claimed on a shared path.
 - **No automated database backup.** `library.db` is an ordinary SQLite file; copy
   it if it matters. Scans never delete files, only rows whose file is gone.
+  Album liner notes live in that database too; they are not written into the
+  music files.
+- **CD ripping and FLAC/Opus export need their native libraries at runtime.**
+  The app loads them dynamically, so the build succeeds without them, but the
+  tool reports `libcdio-paranoia`, `libcddb` or `libsndfile` as missing until
+  the platform package is installed. CDDB lookups are best-effort; a lookup
+  failure never loses audio, it only leaves the track titles as numbers.
+- **The update check is opt-in and never installs anything.** It contacts
+  GitHub, chooses an asset for this platform, requires a published SHA-256
+  checksum, verifies the bytes, and returns the verified path. Applying the
+  update is the user's next step, not the app's. There is no background poll.
+- **Room correction needs a microphone and a quiet room.** The wizard records a
+  sweep from the input you choose and never falls back silently to the system
+  mixer. On macOS the microphone prompt is declared in the app bundle; if
+  permission is denied, measurement fails with an error instead of capturing
+  something else.
+- **Headless mode has no window.** It exposes the loopback control socket and
+  media integration, not the full UI; library management, CD ripping and the
+  DSP studio are windowed features.
 - **MPRIS2 is Linux-only**; Windows and macOS use SMTC and Now Playing
   respectively, which are not configurable in the same way.
 - **Pre-1.0.** `0.x` versions may change settings formats or the database schema

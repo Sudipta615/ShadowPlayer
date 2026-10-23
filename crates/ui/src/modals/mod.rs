@@ -8,8 +8,10 @@ pub mod import_playlists_modal;
 pub mod library_stats_modal;
 pub mod listening_modal;
 pub mod loudness_modal;
+pub mod media_tools_modal;
 pub mod organize_modal;
 pub mod playlist_editor_modal;
+pub mod room_measurement_modal;
 pub mod scrobble_log_modal;
 pub mod smart_playlist_modal;
 pub mod track_dsp_modal;
@@ -26,8 +28,15 @@ pub use duplicates_modal::{
     show_duplicates_modal, DuplicateGroup, DuplicatesActions, DuplicatesState,
 };
 pub use edit_track_modal::{show_edit_track_modal, EditTrackActions, EditTrackState};
+pub use media_tools_modal::{
+    show_media_tools_modal, MediaToolsActions, MediaToolsModalState, MediaToolsTab,
+};
 pub use organize_modal::{show_organize_modal, OrganizeActions, OrganizePrefs, OrganizeState};
 pub use playlist_editor_modal::{show_playlist_editor, PlaylistEditorActions, PlaylistEditorState};
+pub use room_measurement_modal::{
+    show_room_measurement_modal, MeasurementPhase, MeasurementResult, RoomMeasurementActions,
+    RoomMeasurementState,
+};
 pub use smart_playlist_modal::{
     show_smart_playlist_editor, SmartPlaylistActions, SmartPlaylistEditorState,
 };
