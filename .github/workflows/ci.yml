@@ -39,10 +39,15 @@ jobs:
         run: cargo clippy --workspace --bins --lib --all-targets -- -D warnings
 
       - name: Tests
-        run: >
-          cargo test -p domain -p database -p metadata -p lyrics -p library
-          -p playback -p search -p audio-session -p ui --lib
-          -- --test-threads=1
+        shell: bash
+        run: |
+          cargo test -p domain -p database -p metadata -p lyrics -p library \
+            -p playback -p search -p audio-session -p ui --lib \
+            -- --test-threads=1 2>&1 | tee test.log || {
+            echo "::error title=Player Tests Failure::$(grep -E 'FAILED|failures:' -A 5 test.log || tail -n 15 test.log)"
+            tail -n 60 test.log
+            exit 1
+          }
 
       # A real session bus, not a mock: the service registers its well-known
       # name and accepts the same PlayPause method playerctl calls.
@@ -106,7 +111,13 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test
+        shell: bash
+        run: |
+          cargo test 2>&1 | tee test.log || {
+            echo "::error title=Engine Tests Failure::$(grep -E 'FAILED|failures:' -A 5 test.log || tail -n 15 test.log)"
+            tail -n 60 test.log
+            exit 1
+          }
 
       # The optional features are compiled on every push, so a feature-gated
       # module cannot rot behind the default set.
@@ -207,7 +218,13 @@ jobs:
 
       # The engine's suites are cross-platform tested here.
       - name: Engine tests
-        run: cargo test
+        shell: bash
+        run: |
+          cargo test 2>&1 | tee test.log || {
+            echo "::error title=Cross Engine Tests Failure::$(grep -E 'FAILED|failures:' -A 5 test.log || tail -n 15 test.log)"
+            tail -n 60 test.log
+            exit 1
+          }
 
   wayland-smoke:
     name: Wayland GUI smoke
