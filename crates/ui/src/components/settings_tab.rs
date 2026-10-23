@@ -104,7 +104,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 85] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 86] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -554,6 +554,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 85] = [
         card: "Theme & Visual Aesthetics",
         label: "Signature Palette",
         description: "Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Appearance,
+        card: "Theme & Visual Aesthetics",
+        label: "Custom Themes Directory",
+        description: "Place .shadowtheme files here or use Import Theme to copy from anywhere on disk",
     },
     SettingsEntry {
         category: SettingsCategory::Library,
@@ -1241,6 +1247,8 @@ pub struct SettingsTabActions {
     pub apply_theme: Option<String>,
     pub cancel_theme_preview: bool,
     pub reload_themes: bool,
+    pub import_theme: bool,
+    pub open_custom_themes_folder: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4281,6 +4289,44 @@ fn render_appearance_category(
                 color_dot(ui, theme.bit_perfect_green, "Bit-Perfect");
             },
         );
+
+        setting_item(
+            ui,
+            "Custom Themes Directory",
+            &format!("Place .shadowtheme files in {}", manager.custom_themes_dir.display()),
+            theme,
+            |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Import Theme…")
+                                    .font(crate::theme::font(12.0))
+                                    .color(Color32::WHITE),
+                            )
+                            .fill(theme.accent)
+                            .corner_radius(CornerRadius::same(theme.radius_sm)),
+                        )
+                        .on_hover_text("Open file chooser to import .shadowtheme files")
+                        .clicked()
+                    {
+                        actions.import_theme = true;
+                    }
+
+                    if ui
+                        .button(
+                            egui::RichText::new("Open Folder")
+                                .font(crate::theme::font(12.0))
+                                .color(theme.text_secondary),
+                        )
+                        .on_hover_text("Open custom-theme directory in your system file manager")
+                        .clicked()
+                    {
+                        actions.open_custom_themes_folder = true;
+                    }
+                });
+            },
+        );
     });
 
     // Card 2: Staged Live Preview Sandbox
@@ -4358,6 +4404,12 @@ fn render_appearance_category(
         }
         if g_actions.reload_themes {
             actions.reload_themes = true;
+        }
+        if g_actions.import_theme {
+            actions.import_theme = true;
+        }
+        if g_actions.open_custom_themes_folder {
+            actions.open_custom_themes_folder = true;
         }
 
         if has_errs {

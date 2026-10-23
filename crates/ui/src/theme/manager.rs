@@ -11,6 +11,7 @@ pub struct ThemeCardInfo {
     pub name: String,
     pub author: String,
     pub description: String,
+    pub version: String,
     pub tags: Vec<String>,
     pub is_light: bool,
     pub is_system: bool,
@@ -23,6 +24,8 @@ pub struct ThemeCardInfo {
 pub struct ThemeManager {
     /// Directory scanned for `.shadowtheme` files.
     pub themes_dir: PathBuf,
+    /// Dedicated directory for custom user themes (`themes/custom-theme`).
+    pub custom_themes_dir: PathBuf,
     /// Loaded user themes.
     pub loaded_themes: Vec<LoadedTheme>,
     /// Sorted names of available custom themes.
@@ -35,33 +38,65 @@ pub struct ThemeManager {
     pub staged_id: Option<String>,
     /// Favorite theme IDs.
     pub favorites: Vec<String>,
+    /// Whether loaded themes are potentially dirty and need a filesystem rescan.
+    pub is_dirty: bool,
+    /// Timestamp of last successful directory scan.
+    pub last_loaded: Option<std::time::Instant>,
 }
 
 impl ThemeManager {
     /// Create a new manager for the given application data directory.
     pub fn new(data_dir: &Path) -> Self {
-        Self {
+        let themes_dir = data_dir.join("themes");
+        let source_custom_dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/theme/custom-theme");
+        let custom_themes_dir = if source_custom_dir.is_dir() {
+            source_custom_dir
+        } else {
+            themes_dir.join("custom-theme")
+        };
+        Self::new_with_custom_dir(data_dir, custom_themes_dir)
+    }
+
+    /// Create a new manager with an explicit custom themes directory.
+    pub fn new_with_custom_dir(data_dir: &Path, custom_themes_dir: PathBuf) -> Self {
+        let mut manager = Self {
             themes_dir: data_dir.join("themes"),
+            custom_themes_dir,
             loaded_themes: Vec::new(),
             theme_names: Vec::new(),
             errors: Vec::new(),
             active_id: "system:dark".to_string(),
             staged_id: None,
             favorites: Vec::new(),
-        }
+            is_dirty: false,
+            last_loaded: None,
+        };
+        manager.load_saved_active_id();
+        manager
     }
 
-    /// Scan `themes/` directory and load all `.shadowtheme` files.
+    /// Scan `themes/` and `custom-theme/` directories and load all `.shadowtheme` files.
     pub fn load_all(&mut self) {
         self.loaded_themes.clear();
         self.errors.clear();
         self.theme_names.clear();
 
-        // Ensure themes directory exists
+        // Ensure both base themes directory and custom-theme subdirectory exist
         let _ = std::fs::create_dir_all(&self.themes_dir);
+        let _ = std::fs::create_dir_all(&self.custom_themes_dir);
 
-        // Scan themes directory
+        // Also scan src/theme/custom-theme if it is not already our custom_themes_dir
+        let source_custom_dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/theme/custom-theme");
+        if source_custom_dir.is_dir() && source_custom_dir != self.custom_themes_dir {
+            self.scan_directory(&source_custom_dir, &["shadowtheme", "json"]);
+        }
+
+        // Scan themes directory (recursively scanning custom-theme/ and subfolders)
         self.scan_directory(&self.themes_dir.clone(), &["shadowtheme", "json"]);
+        // Explicitly scan custom_themes_dir
+        self.scan_directory(&self.custom_themes_dir.clone(), &["shadowtheme", "json"]);
 
         // Deduplicate loaded themes by ID/name
         let mut seen = std::collections::HashSet::new();
@@ -74,6 +109,8 @@ impl ThemeManager {
             .iter()
             .map(|t| t.metadata.name.clone())
             .collect();
+        self.is_dirty = false;
+        self.last_loaded = Some(std::time::Instant::now());
     }
 
     fn scan_directory(&mut self, dir: &Path, extensions: &[&str]) {
@@ -87,6 +124,11 @@ impl ThemeManager {
 
         for entry in entries.flatten() {
             let path = entry.path();
+            if path.is_dir() {
+                self.scan_directory(&path, extensions);
+                continue;
+            }
+
             let matches_ext = path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -124,6 +166,7 @@ impl ThemeManager {
                 name: sys.name.to_string(),
                 author: sys.author.to_string(),
                 description: sys.description.to_string(),
+                version: "built-in".to_string(),
                 tags: sys.tags.iter().map(|&s| s.to_string()).collect(),
                 is_light: sys.is_light,
                 is_system: true,
@@ -146,6 +189,7 @@ impl ThemeManager {
                 name: user.metadata.name.clone(),
                 author: user.metadata.author.clone(),
                 description: user.metadata.description.clone(),
+                version: user.metadata.version.clone(),
                 tags: user.metadata.tags.clone(),
                 is_light: user.metadata.is_light,
                 is_system: false,
@@ -194,13 +238,29 @@ impl ThemeManager {
 
     /// Return the concrete Theme for the active committed ID.
     pub fn active_theme(&self) -> Theme {
-        self.resolve_theme(&self.active_id, false)
+        // Peek at the active theme's light/dark flag to guide fallback resolution.
+        // This prevents a custom light theme that fails to resolve from silently
+        // falling back to dark mode.
+        let is_light = self
+            .loaded_themes
+            .iter()
+            .find(|t| t.metadata.id == self.active_id || t.metadata.name == self.active_id)
+            .map(|t| t.metadata.is_light)
+            .unwrap_or_else(|| self.active_id == "system:light");
+        self.resolve_theme(&self.active_id, is_light)
     }
 
     /// Return the concrete Theme currently effective (staged if in preview, otherwise active).
     pub fn effective_theme(&self) -> Theme {
         if let Some(ref staged) = self.staged_id {
-            self.resolve_theme(staged, false)
+            // Infer the light/dark fallback from the staged theme's own metadata.
+            let is_light = self
+                .loaded_themes
+                .iter()
+                .find(|t| t.metadata.id == *staged || t.metadata.name == *staged)
+                .map(|t| t.metadata.is_light)
+                .unwrap_or_else(|| staged == "system:light");
+            self.resolve_theme(staged, is_light)
         } else {
             self.active_theme()
         }
@@ -216,10 +276,11 @@ impl ThemeManager {
         self.staged_id = None;
     }
 
-    /// Commit the currently staged theme as the active theme.
+    /// Commit the currently staged theme as the active theme and persist it.
     pub fn commit_staged(&mut self) -> Option<String> {
         if let Some(staged) = self.staged_id.take() {
             self.active_id = staged.clone();
+            self.save_active_id();
             Some(staged)
         } else {
             None
@@ -231,9 +292,109 @@ impl ThemeManager {
         self.staged_id.is_some()
     }
 
-    /// Write an example theme file to `themes/example_ocean_night.shadowtheme`.
+    /// Path to the file where active theme ID is persisted.
+    pub fn active_theme_path(&self) -> PathBuf {
+        self.themes_dir.join("active_theme.txt")
+    }
+
+    /// Persist the currently active theme ID to disk.
+    pub fn save_active_id(&self) {
+        let _ = std::fs::create_dir_all(&self.themes_dir);
+        let _ = std::fs::write(self.active_theme_path(), &self.active_id);
+    }
+
+    /// Load the saved active theme ID from disk if it exists.
+    pub fn load_saved_active_id(&mut self) -> Option<String> {
+        let path = self.active_theme_path();
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let id = content.trim().to_string();
+            if !id.is_empty() {
+                self.active_id = id.clone();
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// Explicitly set the active theme ID and save it to disk.
+    pub fn set_active_id(&mut self, id: impl Into<String>) {
+        self.active_id = id.into();
+        self.save_active_id();
+    }
+
+    /// Mark the manager as dirty, indicating the filesystem cache may be stale.
+    pub fn mark_dirty(&mut self) {
+        self.is_dirty = true;
+    }
+
+    /// Reload themes from disk only if marked dirty.
+    pub fn reload_if_dirty(&mut self) {
+        if self.is_dirty {
+            self.load_all();
+        }
+    }
+
+    /// Import a theme file from any storage path into the `custom-theme/` directory.
+    pub fn import_theme_from_path(&mut self, src_path: &Path) -> Result<String, String> {
+        if !src_path.is_file() {
+            return Err("Selected path is not a file".to_string());
+        }
+
+        // Validate theme format first
+        let loaded = LoadedTheme::from_file(src_path)
+            .map_err(|e| format!("{e}"))?;
+
+        // Ensure custom-theme directory exists
+        let _ = std::fs::create_dir_all(&self.custom_themes_dir);
+
+        let file_name = src_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("imported_theme.shadowtheme");
+
+        let dest_path = self.custom_themes_dir.join(file_name);
+
+        if let Err(e) = std::fs::copy(src_path, &dest_path) {
+            return Err(format!("Could not copy file: {e}"));
+        }
+
+        let theme_id = if !loaded.metadata.id.is_empty() {
+            loaded.metadata.id.clone()
+        } else {
+            loaded.metadata.name.clone()
+        };
+
+        // Directly insert or update in memory to avoid redundant full-disk traversal
+        self.loaded_themes.retain(|t| {
+            t.metadata.id != loaded.metadata.id && t.metadata.name != loaded.metadata.name
+        });
+        self.loaded_themes.push(loaded);
+        self.loaded_themes.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
+        self.theme_names = self
+            .loaded_themes
+            .iter()
+            .map(|t| t.metadata.name.clone())
+            .collect();
+        self.is_dirty = false;
+
+        Ok(theme_id)
+    }
+
+    /// Open the `custom-theme/` folder in the system file manager.
+    pub fn open_custom_themes_folder(&self) {
+        let _ = std::fs::create_dir_all(&self.custom_themes_dir);
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(&self.custom_themes_dir).spawn();
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(&self.custom_themes_dir).spawn();
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("explorer").arg(&self.custom_themes_dir).spawn();
+    }
+
+    /// Write an example theme file to `themes/custom-theme/example_ocean_night.shadowtheme`.
     pub fn write_example_theme(&self) -> std::io::Result<PathBuf> {
-        let path = self.themes_dir.join("example_ocean_night.shadowtheme");
+        let _ = std::fs::create_dir_all(&self.custom_themes_dir);
+        let path = self.custom_themes_dir.join("example_ocean_night.shadowtheme");
         if path.exists() {
             return Ok(path);
         }
@@ -257,3 +418,130 @@ impl ThemeManager {
         &self.active_id
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manager_initializes_custom_themes_dir() {
+        let temp_dir = std::env::temp_dir().join("shadowplayer_test_themes_init");
+        let manager = ThemeManager::new(&temp_dir);
+        let expected_source =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/theme/custom-theme");
+        assert_eq!(manager.custom_themes_dir, expected_source);
+
+        let isolated =
+            ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("themes/custom-theme"));
+        assert_eq!(
+            isolated.custom_themes_dir,
+            temp_dir.join("themes/custom-theme")
+        );
+    }
+
+    #[test]
+    fn manager_writes_example_theme_and_loads_it() {
+        let temp_dir = std::env::temp_dir().join("shadowplayer_test_example_theme");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let mut manager =
+            ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("custom-theme"));
+        let path = manager.write_example_theme().expect("write example theme");
+        assert!(path.exists());
+        assert_eq!(path.parent().unwrap(), manager.custom_themes_dir);
+
+        manager.load_all();
+        assert!(!manager.loaded_themes.is_empty());
+        assert!(manager.theme_for("Ocean Night").is_some());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn manager_imports_theme_from_external_path() {
+        let src_dir = std::env::temp_dir().join("shadowplayer_test_src");
+        let target_dir = std::env::temp_dir().join("shadowplayer_test_target");
+        let _ = std::fs::remove_dir_all(&src_dir);
+        let _ = std::fs::remove_dir_all(&target_dir);
+
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let external_file = src_dir.join("imported_sample.shadowtheme");
+        let example = include_str!("../../../../docs/themes/example_ocean_night.shadowtheme");
+        std::fs::write(&external_file, example).unwrap();
+
+        let mut manager =
+            ThemeManager::new_with_custom_dir(&target_dir, target_dir.join("custom-theme"));
+        let imported_id = manager.import_theme_from_path(&external_file).expect("import theme");
+        assert_eq!(imported_id, "ocean-night");
+        assert!(manager
+            .custom_themes_dir
+            .join("imported_sample.shadowtheme")
+            .exists());
+        assert!(manager.theme_for("Ocean Night").is_some());
+
+        let _ = std::fs::remove_dir_all(&src_dir);
+        let _ = std::fs::remove_dir_all(&target_dir);
+    }
+
+    #[test]
+    fn manager_rejects_invalid_theme_import() {
+        let temp_dir = std::env::temp_dir().join("shadowplayer_test_invalid_import");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let bad_file = temp_dir.join("invalid.shadowtheme");
+        std::fs::write(&bad_file, "this is not valid json").unwrap();
+
+        let mut manager =
+            ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("custom-theme"));
+        let res = manager.import_theme_from_path(&bad_file);
+        assert!(res.is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn manager_persists_and_restores_active_id() {
+        let temp_dir = std::env::temp_dir().join("shadowplayer_test_active_id_persist");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut manager =
+            ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("custom-theme"));
+        assert_eq!(manager.active_id, "system:dark");
+
+        // Staging and committing should persist
+        manager.stage_theme("system:oled");
+        let committed = manager.commit_staged();
+        assert_eq!(committed.as_deref(), Some("system:oled"));
+        assert_eq!(manager.active_id, "system:oled");
+        assert!(manager.active_theme_path().exists());
+
+        // A freshly created manager should restore the persisted active_id
+        let restored =
+            ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("custom-theme"));
+        assert_eq!(restored.active_id, "system:oled");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn manager_dirty_flag_invalidation() {
+        let temp_dir = std::env::temp_dir().join("shadowplayer_test_dirty_flag");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut manager =
+            ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("custom-theme"));
+        assert!(!manager.is_dirty);
+
+        manager.mark_dirty();
+        assert!(manager.is_dirty);
+
+        manager.reload_if_dirty();
+        assert!(!manager.is_dirty);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+}
+

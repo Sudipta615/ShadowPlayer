@@ -6,7 +6,7 @@ use eframe::egui::{
 
 use super::contrast::{auto_adjust_contrast, validate_contrast};
 use super::manager::ThemeManager;
-use super::schema::ThemeFile;
+use super::schema::{for_each_required_color_token, ThemeFile};
 use super::tokens::{format_hex_color, Theme};
 
 /// State for the in-app Theme Editor.
@@ -46,41 +46,15 @@ impl ThemeEditorState {
     pub fn populate_from_theme(&mut self, theme: &Theme) {
         self.is_light = theme.is_light;
 
-        macro_rules! set_c {
-            ($field:ident) => {
-                self.colors.insert(stringify!($field).to_string(), theme.$field);
+        macro_rules! set_editor_color {
+            ($($field:ident),* $(,)?) => {
+                $(
+                    self.colors.insert(stringify!($field).to_string(), theme.$field);
+                )*
             };
         }
 
-        set_c!(bg_app);
-        set_c!(bg_sidebar);
-        set_c!(bg_card);
-        set_c!(bg_card_hover);
-        set_c!(bg_card_active);
-        set_c!(bg_pill);
-        set_c!(bg_pill_hover);
-        set_c!(bg_input);
-        set_c!(border_subtle);
-        set_c!(border_card);
-        set_c!(border_input);
-        set_c!(slider_track);
-        set_c!(accent);
-        set_c!(accent_highlight);
-        set_c!(accent_warm);
-        set_c!(info);
-        set_c!(text_primary);
-        set_c!(text_secondary);
-        set_c!(text_muted);
-        set_c!(text_dim);
-        set_c!(bit_perfect_green);
-        set_c!(warning_yellow);
-        set_c!(bg_active_row);
-        set_c!(border_active_row);
-        set_c!(artwork_placeholder);
-        set_c!(destructive);
-        set_c!(meter_bg);
-        set_c!(meter_gutter);
-        set_c!(scan_banner_bg);
+        for_each_required_color_token!(set_editor_color);
 
         self.radii.insert("radius_xs".into(), theme.radius_xs);
         self.radii.insert("radius_sm".into(), theme.radius_sm);
@@ -345,7 +319,8 @@ pub fn render_theme_editor(
                         } else {
                             // Serialize to ThemeFile
                             let filename = format!("{}.shadowtheme", state.id.trim());
-                            let target_path = manager.themes_dir.join(&filename);
+                            let _ = std::fs::create_dir_all(&manager.custom_themes_dir);
+                            let target_path = manager.custom_themes_dir.join(&filename);
 
                             let hex_colors: HashMap<String, String> = state
                                 .colors
@@ -354,6 +329,7 @@ pub fn render_theme_editor(
                                 .collect();
 
                             let theme_file = ThemeFile {
+                                schema_version: 2,
                                 metadata: Some(super::schema::ThemeMetadata {
                                     id: state.id.trim().to_string(),
                                     name: state.name.trim().to_string(),
@@ -363,8 +339,10 @@ pub fn render_theme_editor(
                                     is_light: state.is_light,
                                     tags: vec!["custom".to_string()],
                                 }),
+                                id: Some(state.id.trim().to_string()),
                                 name: Some(state.name.clone()),
                                 author: Some(state.author.clone()),
+                                description: Some(state.description.clone()),
                                 is_light: Some(state.is_light),
                                 colors: hex_colors,
                                 radii: state.radii.clone(),

@@ -24,6 +24,8 @@ pub struct SettingsViewActions {
     pub apply_theme: Option<String>,
     pub cancel_theme_preview: bool,
     pub reload_themes: bool,
+    pub import_theme: bool,
+    pub open_custom_themes_folder: bool,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
     /// Play or stop the crossfade audition.
@@ -132,6 +134,12 @@ pub fn render_settings_view(
         }
         if s_actions.reload_themes {
             view_actions.reload_themes = true;
+        }
+        if s_actions.import_theme {
+            view_actions.import_theme = true;
+        }
+        if s_actions.open_custom_themes_folder {
+            view_actions.open_custom_themes_folder = true;
         }
         if s_actions.open_artwork_fetch {
             view_actions.open_artwork_fetch = true;

@@ -49,6 +49,8 @@ pub struct GalleryActions {
     pub preview_theme: Option<String>,
     pub apply_theme: Option<String>,
     pub reload_themes: bool,
+    pub import_theme: bool,
+    pub open_custom_themes_folder: bool,
     pub open_editor: Option<String>,
 }
 
@@ -62,7 +64,7 @@ pub fn render_theme_gallery(
     let mut actions = GalleryActions::default();
 
     ui.vertical(|ui| {
-        // 1. Controls bar: Search + Category filter chips + Reload button
+        // 1. Controls bar: Search + Category filter chips + Action buttons
         ui.horizontal(|ui| {
             // Search input
             ui.add(
@@ -103,14 +105,43 @@ pub fn render_theme_gallery(
                 }
             }
 
-            // Reload button on the right
+            // Action buttons on the right: Import Theme, Open Folder, Reload
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Import Theme…")
+                                .font(crate::theme::font(11.5))
+                                .color(Color32::WHITE),
+                        )
+                        .fill(theme.accent)
+                        .corner_radius(CornerRadius::same(theme.radius_sm)),
+                    )
+                    .on_hover_text("Open native file chooser to pick and import .shadowtheme files")
+                    .clicked()
+                {
+                    actions.import_theme = true;
+                }
+
+                if ui
                     .button(
-                        egui::RichText::new("Reload Themes")
+                        egui::RichText::new("Open Folder")
+                            .font(crate::theme::font(11.5))
+                            .color(theme.text_secondary),
+                    )
+                    .on_hover_text("Open custom-theme directory in your system file manager")
+                    .clicked()
+                {
+                    actions.open_custom_themes_folder = true;
+                }
+
+                if ui
+                    .button(
+                        egui::RichText::new("Reload")
                             .font(crate::theme::font(11.5))
                             .color(theme.info),
                     )
+                    .on_hover_text("Rescan themes directory")
                     .clicked()
                 {
                     actions.reload_themes = true;
@@ -153,11 +184,24 @@ pub fn render_theme_gallery(
 
         if filtered_cards.is_empty() {
             ui.add_space(theme.space_lg);
-            ui.label(
-                egui::RichText::new("No themes match the selected filter.")
-                    .font(crate::theme::font(12.0))
-                    .color(theme.text_muted),
-            );
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("No themes match the selected filter.")
+                        .font(crate::theme::font(12.0))
+                        .color(theme.text_muted),
+                );
+                if state.filter == ThemeFilter::Custom
+                    && ui
+                        .button(
+                            egui::RichText::new("Import a .shadowtheme file…")
+                                .font(crate::theme::font(12.0))
+                                .color(theme.accent),
+                        )
+                        .clicked()
+                {
+                    actions.import_theme = true;
+                }
+            });
             return;
         }
 
@@ -256,10 +300,27 @@ fn render_theme_card(
                     });
                 });
 
-                // Author
+                // Author & Version
+                let mut meta_text = String::new();
                 if !card.author.is_empty() {
+                    meta_text.push_str(&format!("by {}", card.author));
+                }
+                if !card.version.is_empty() {
+                    let v_str = if card.version == "built-in" {
+                        "built-in".to_string()
+                    } else if card.version.starts_with('v') {
+                        card.version.clone()
+                    } else {
+                        format!("v{}", card.version)
+                    };
+                    if !meta_text.is_empty() {
+                        meta_text.push_str(" • ");
+                    }
+                    meta_text.push_str(&v_str);
+                }
+                if !meta_text.is_empty() {
                     ui.label(
-                        egui::RichText::new(format!("by {}", card.author))
+                        egui::RichText::new(meta_text)
                             .font(crate::theme::font(10.5))
                             .color(theme.text_dim),
                     );
@@ -294,6 +355,30 @@ fn render_theme_card(
                         )
                         .truncate(),
                     );
+                }
+
+                // Tags
+                if !card.tags.is_empty() {
+                    ui.add_space(theme.space_xxs);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, theme.space_xxs);
+                        for tag in card.tags.iter().take(3) {
+                            let badge = egui::Frame::NONE
+                                .fill(theme.bg_pill)
+                                .corner_radius(CornerRadius::same(theme.radius_pill))
+                                .inner_margin(Margin::symmetric(
+                                    theme.space_xs as i8,
+                                    theme.space_xxs as i8,
+                                ));
+                            badge.show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("#{tag}"))
+                                        .font(crate::theme::mono_font(9.0))
+                                        .color(theme.text_muted),
+                                );
+                            });
+                        }
+                    });
                 }
 
                 ui.add_space(theme.space_sm);

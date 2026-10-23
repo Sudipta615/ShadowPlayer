@@ -110,13 +110,33 @@ All themes are strictly validated against WCAG 2.1 AA standards:
 * Every text token (`text_primary`, `text_secondary`, `text_muted`, `text_dim`) must achieve at least **4.5:1** contrast against `bg_app`, `bg_sidebar`, `bg_card`, `bg_card_hover`, `bg_card_active`, `bg_pill`, and `bg_input`.
 * `border_input` must reach at least **3.0:1** contrast against `bg_input` (WCAG 1.4.11 non-text contrast).
 
-The Theme Editor provides live validation and an **Auto-Fix Contrast** algorithm that steps relative luminance toward passing contrast without altering hue.
+### Contrast API
+
+| Function | Returns | Use |
+| :--- | :--- | :--- |
+| `contrast_ratio(a, b)` | `f32` (1.0 – 21.0) | Raw ratio query. |
+| `validate_contrast(map)` | `Result<(), ContrastError>` | Pass/fail for file loading; short-circuits on first failure. |
+| `validate_contrast_all(map)` | `Vec<ContrastError>` | All failing pairs; used by the in-app editor to show every issue at once. |
+| `auto_adjust_contrast(fg, bg, ratio)` | `Color32` | HSL lightness-only rescue: hue and saturation are preserved. |
+
+The **Auto-Fix Contrast** button in the Theme Editor calls `auto_adjust_contrast` for every text token.  The algorithm walks the HSL `L` channel in 0.5 % steps, keeping hue and saturation fixed, so warm amber stays amber and cool mint stays mint.
 
 ---
 
 ## 4. Theme File Format (`.shadowtheme`)
 
 Themes are stored in JSON files under the `themes/` directory:
+
+| Field | Required | Description |
+| :--- | :---: | :--- |
+| `schema_version` | No | Integer. Omitting it means v1 (legacy). Current version is **2**. |
+| `id` | No | Unique slug (e.g. `nord-aurora`). Falls back to filename stem. |
+| `name` | No | Human-readable display name. Falls back to `id`. |
+| `author` | No | Author credit string. |
+| `description` | No | Short one-line summary. |
+| `is_light` | No | `true` for a light-background theme; defaults to `false`. |
+| `colors` | Yes | Flat map of `token_name → "#RRGGBB"` or `"#RRGGBBAA"` strings. |
+| `radii` | No | Optional radius overrides (`radius_xs`, `radius_sm`, …). |
 
 ```json
 {
@@ -166,13 +186,27 @@ Themes are stored in JSON files under the `themes/` directory:
 
 ---
 
-## 5. UI Integration & Live Staged Previews
+### Schema Version Migration (v1 → v2)
 
-ShadowPlayer features a dedicated **Themes & Appearance** tab in Settings:
-* **Gallery**: Filter and search through installed and system themes. Selecting a card stages it for preview.
+ShadowPlayer includes an automated migration pipeline (`schema::migrate_theme_file`):
+* **Backward Compatibility**: Files lacking a `schema_version` field or declaring `schema_version: 1` (including legacy `.shadowskin` formats) are automatically migrated in-memory to schema version 2 upon load.
+* **Token Synthesis**: Any newly mandated v2 tokens (e.g., `scan_banner_bg`, `meter_bg`, `meter_gutter`, `bg_active_row`, `border_active_row`, `artwork_placeholder`, `destructive`) missing from a legacy file are intelligently synthesized from existing palette tokens (`bg_card_hover`, `bg_pill`, `accent`, etc.) to guarantee validation success and visual consistency.
+* **Metadata Structuring**: Root-level metadata fields are migrated into a structured `ThemeMetadata` block.
+
+---
+
+## 5. UI Integration, Custom Themes & Live Staged Previews
+
+ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
+* **Custom Themes Folder (`themes/custom-theme/`)**: Custom user themes reside inside `<data_dir>/themes/custom-theme/`. The theme manager monitors this directory and loads all `.shadowtheme` and `.json` files.
+* **Active Theme Persistence**: When a theme is committed or applied, its identifier is persisted to `<data_dir>/themes/active_theme.txt` so the selected theme survives application restarts seamlessly.
+* **Optimized Import & Invalidation**: Importing a `.shadowtheme` file immediately registers and stages the theme in-memory without expensive full-disk rescans, with dirty-flag cache invalidation (`reload_if_dirty`) managing cache freshness.
+* **Import Theme Button**: In Settings → Appearance, clicking **Import Theme…** opens the system's native file picker (`rfd`, XDG portal / native OS dialog) allowing users to select `.shadowtheme` files from anywhere on their storage. Imported themes are validated, copied into `themes/custom-theme/`, and immediately staged or applied.
+* **Open Folder Button**: Directly opens `<data_dir>/themes/custom-theme/` in the OS file manager (Nautilus, Dolphin, Finder, Explorer) with a single click.
+* **Gallery**: Filter and search through installed and system themes. Each card displays author, theme version (or `built-in`), color swatches, description, and tag chips (`#dark`, `#oled`, etc.). Selecting a card stages it for live preview.
 * **Sandbox Preview**: Real-time rendering of mini transport controls, volume slider, VU meter, and track listing.
 * **Apply / Revert**: Staged themes are visually previewed instantly and only persist when applied. Reverting restores the active theme.
-* **Theme Editor**: Direct parameter tuning and JSON export.
+* **Theme Editor**: Direct parameter tuning and instant saving into `themes/custom-theme/`. Uses `for_each_required_color_token` macro as the single source of truth for color token definitions.
 
 ---
 

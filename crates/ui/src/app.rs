@@ -4560,6 +4560,51 @@ impl eframe::App for ShadowPlayerApp {
                             self.applied_theme = None;
                             self.toasts.info("Themes reloaded");
                         }
+                        if sv_actions.import_theme {
+                            if let Some(paths) = rfd::FileDialog::new()
+                                .set_title("Import ShadowPlayer Theme")
+                                .add_filter(
+                                    "ShadowPlayer Theme (*.shadowtheme, *.json)",
+                                    &["shadowtheme", "json"],
+                                )
+                                .pick_files()
+                            {
+                                let mut imported_count = 0;
+                                let mut last_theme_id = None;
+                                for path in paths {
+                                    match self.theme_manager.import_theme_from_path(&path) {
+                                        Ok(theme_id) => {
+                                            imported_count += 1;
+                                            last_theme_id = Some(theme_id);
+                                        }
+                                        Err(err) => {
+                                            self.toasts.warning(format!(
+                                                "Failed to import {}: {err}",
+                                                path.display()
+                                            ));
+                                        }
+                                    }
+                                }
+                                if let Some(theme_id) = last_theme_id {
+                                    self.theme_manager.stage_theme(&theme_id);
+                                    if let Some(committed) = self.theme_manager.commit_staged() {
+                                        self.theme = self
+                                            .theme_manager
+                                            .resolve_theme(&committed, self.theme.is_light);
+                                        let _ = self.settings_repo.set_value("active_theme", &committed);
+                                    }
+                                    self.applied_theme = None;
+                                    self.settings_dirty = true;
+                                    self.toasts.success(format!(
+                                        "Imported {imported_count} theme(s) into custom-theme/"
+                                    ));
+                                }
+                            }
+                        }
+                        if sv_actions.open_custom_themes_folder {
+                            self.theme_manager.open_custom_themes_folder();
+                            self.toasts.info("Opened custom-theme folder");
+                        }
                         if sv_actions.open_artwork_fetch {
                             let missing_count = self
                                 .library_state
