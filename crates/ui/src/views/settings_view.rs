@@ -24,6 +24,10 @@ pub struct SettingsViewActions {
     pub skin_changed: Option<String>,
     /// User pressed "Reload Skins".
     pub reload_skins: bool,
+    pub preview_theme: Option<String>,
+    pub apply_theme: Option<String>,
+    pub cancel_theme_preview: bool,
+    pub reload_themes: bool,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
     /// Play or stop the crossfade audition.
@@ -94,6 +98,7 @@ pub fn render_settings_view(
             available_skins: skin_manager.available_skins(),
             active_skin: skin_manager.active_skin_name(),
             skin_errors: skin_manager.errors(),
+            theme_manager: Some(skin_manager),
             import_active,
             imported_dirs,
             loudness_running: loudness.running,
@@ -128,6 +133,18 @@ pub fn render_settings_view(
         }
         if s_actions.reload_skins {
             view_actions.reload_skins = true;
+        }
+        if let Some(ref prev) = s_actions.preview_theme {
+            view_actions.preview_theme = Some(prev.clone());
+        }
+        if let Some(ref app_id) = s_actions.apply_theme {
+            view_actions.apply_theme = Some(app_id.clone());
+        }
+        if s_actions.cancel_theme_preview {
+            view_actions.cancel_theme_preview = true;
+        }
+        if s_actions.reload_themes {
+            view_actions.reload_themes = true;
         }
         if s_actions.open_artwork_fetch {
             view_actions.open_artwork_fetch = true;

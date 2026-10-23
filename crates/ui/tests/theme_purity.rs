@@ -32,8 +32,9 @@ fn no_colour_literal_exists_outside_the_theme() {
     let root = repo_root();
     let mut offenders = Vec::new();
 
+    let theme_dir = root.join("crates/ui/src/theme");
     for path in rust_sources(&root.join("crates/ui/src")) {
-        if path.file_name().is_some_and(|name| name == "theme.rs") {
+        if path.starts_with(&theme_dir) || path.file_name().is_some_and(|name| name == "theme.rs") {
             continue;
         }
         let source = read(&path);

@@ -123,7 +123,7 @@ pub struct ShadowPlayerApp {
     /// The theme variant currently installed in the egui context. `None` means
     /// no style has been applied yet; the app only rebuilds egui's style when
     /// this differs from `theme.is_light`.
-    applied_theme: Option<bool>,
+    applied_theme: Option<Theme>,
     settings_dirty: bool,
 
     pub skin_manager: SkinManager,
@@ -1626,13 +1626,26 @@ impl ShadowPlayerApp {
             } else {
                 Theme::light()
             };
-            if let Ok(Some(skin_name)) = self.settings_repo.get_value("active_skin") {
-                if !skin_name.is_empty() {
-                    self.skin_manager.active = Some(skin_name.clone());
-                    self.theme = self
-                        .skin_manager
-                        .resolve_theme(&skin_name, !app_settings.theme_dark);
-                }
+            let active_theme_pref = self
+                .settings_repo
+                .get_value("active_theme")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    self.settings_repo
+                        .get_value("active_skin")
+                        .ok()
+                        .flatten()
+                        .filter(|s| !s.is_empty())
+                });
+
+            if let Some(theme_name) = active_theme_pref {
+                self.skin_manager.active_id = theme_name.clone();
+                self.skin_manager.active = Some(theme_name.clone());
+                self.theme = self
+                    .skin_manager
+                    .resolve_theme(&theme_name, !app_settings.theme_dark);
             }
             self.app_state.volume = app_settings.volume;
             self.app_state.is_muted = app_settings.is_muted;
@@ -3036,9 +3049,9 @@ impl eframe::App for ShadowPlayerApp {
         // (or NSWindow) on the first frame; Linux's MPRIS backend is already
         // running from `new()`.
         self.mpris_service.attach_window(frame);
-        if self.applied_theme != Some(self.theme.is_light) {
+        if self.applied_theme != Some(self.theme) {
             self.theme.apply(&ctx);
-            self.applied_theme = Some(self.theme.is_light);
+            self.applied_theme = Some(self.theme);
         }
 
         // Remember the live window size: this is what the next launch restores.
@@ -3312,6 +3325,10 @@ impl eframe::App for ShadowPlayerApp {
                         "tools" => {
                             self.dsp_state.settings_tab.active_category =
                                 crate::components::settings_tab::SettingsCategory::Tools
+                        }
+                        "appearance" | "theme" | "themes" => {
+                            self.dsp_state.settings_tab.active_category =
+                                crate::components::settings_tab::SettingsCategory::Appearance
                         }
                         _ => {}
                     }
@@ -4521,6 +4538,29 @@ impl eframe::App for ShadowPlayerApp {
                         if let Some(locale) = sv_actions.locale_changed {
                             self.set_locale(locale);
                         }
+                        if let Some(preview_id) = sv_actions.preview_theme {
+                            self.skin_manager.stage_theme(&preview_id);
+                            self.theme = self.skin_manager.effective_theme();
+                            self.applied_theme = None;
+                        }
+                        if let Some(apply_id) = sv_actions.apply_theme {
+                            self.skin_manager.stage_theme(&apply_id);
+                            if let Some(committed) = self.skin_manager.commit_staged() {
+                                self.theme = self
+                                    .skin_manager
+                                    .resolve_theme(&committed, self.theme.is_light);
+                                let _ = self.settings_repo.set_value("active_theme", &committed);
+                                let _ = self.settings_repo.set_value("active_skin", &committed);
+                            }
+                            self.applied_theme = None;
+                            self.settings_dirty = true;
+                            self.toasts.success("Theme applied");
+                        }
+                        if sv_actions.cancel_theme_preview {
+                            self.skin_manager.unstage_theme();
+                            self.theme = self.skin_manager.effective_theme();
+                            self.applied_theme = None;
+                        }
                         if let Some(skin) = sv_actions.skin_changed {
                             if skin.is_empty() {
                                 self.skin_manager.active = None;
@@ -4530,23 +4570,25 @@ impl eframe::App for ShadowPlayerApp {
                                     Theme::light()
                                 };
                                 let _ = self.settings_repo.set_value("active_skin", "");
+                                let _ = self.settings_repo.set_value("active_theme", "");
                             } else {
                                 self.skin_manager.active = Some(skin.clone());
                                 self.theme =
                                     self.skin_manager.resolve_theme(&skin, self.theme.is_light);
                                 let _ = self.settings_repo.set_value("active_skin", &skin);
+                                let _ = self.settings_repo.set_value("active_theme", &skin);
                             }
                             self.applied_theme = None;
                             self.settings_dirty = true;
                         }
-                        if sv_actions.reload_skins {
+                        if sv_actions.reload_skins || sv_actions.reload_themes {
                             self.skin_manager.load_all();
                             if let Some(active) = &self.skin_manager.active {
                                 self.theme =
                                     self.skin_manager.resolve_theme(active, self.theme.is_light);
                                 self.applied_theme = None;
                             }
-                            self.toasts.info("Skins reloaded");
+                            self.toasts.info("Themes reloaded");
                         }
                         if sv_actions.open_artwork_fetch {
                             let missing_count = self

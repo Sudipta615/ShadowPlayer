@@ -22,8 +22,9 @@ fn every_radius_and_margin_comes_from_the_theme_scale() {
     let root = repo_root();
     let mut offenders = Vec::new();
 
+    let theme_dir = root.join("crates/ui/src/theme");
     for path in rust_sources(&root.join("crates/ui/src")) {
-        if path.file_name().is_some_and(|name| name == "theme.rs") {
+        if path.starts_with(&theme_dir) || path.file_name().is_some_and(|name| name == "theme.rs") {
             continue;
         }
         let source = read(&path);

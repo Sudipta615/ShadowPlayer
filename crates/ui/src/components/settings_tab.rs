@@ -26,16 +26,18 @@ pub enum SettingsCategory {
     MixBus,
     Tools,
     Library,
+    Appearance,
 }
 
 impl SettingsCategory {
-    pub const ALL: [SettingsCategory; 6] = [
+    pub const ALL: [SettingsCategory; 7] = [
         SettingsCategory::Playback,
         SettingsCategory::Output,
         SettingsCategory::Spatial,
         SettingsCategory::MixBus,
         SettingsCategory::Tools,
         SettingsCategory::Library,
+        SettingsCategory::Appearance,
     ];
 
     pub fn title(&self) -> &'static str {
@@ -46,6 +48,7 @@ impl SettingsCategory {
             Self::MixBus => "Mix Bus",
             Self::Tools => "Tools",
             Self::Library => "Library & App",
+            Self::Appearance => "Themes & Appearance",
         }
     }
 
@@ -58,6 +61,7 @@ impl SettingsCategory {
             Self::MixBus => crate::components::icons::draw_equalizer_sliders,
             Self::Tools => crate::components::icons::draw_gear,
             Self::Library => crate::components::icons::draw_folder,
+            Self::Appearance => crate::components::icons::draw_moon,
         }
     }
 
@@ -69,6 +73,7 @@ impl SettingsCategory {
             Self::MixBus => crate::components::icons::draw_equalizer_sliders(ui, rect, color),
             Self::Tools => crate::components::icons::draw_gear(ui, rect, color),
             Self::Library => crate::components::icons::draw_folder(ui, rect, color),
+            Self::Appearance => crate::components::icons::draw_moon(ui, rect, color),
         }
     }
 }
@@ -539,13 +544,13 @@ pub static SETTINGS_INDEX: [SettingsEntry; 85] = [
         description: "Off by default. When enabled, Check contacts GitHub, compares versions, and offers a verified download for this platform",
     },
     SettingsEntry {
-        category: SettingsCategory::Library,
+        category: SettingsCategory::Appearance,
         card: "Theme & Visual Aesthetics",
         label: "Theme Palette",
         description: "Switch between Obsidian dark and Jade light mode",
     },
     SettingsEntry {
-        category: SettingsCategory::Library,
+        category: SettingsCategory::Appearance,
         card: "Theme & Visual Aesthetics",
         label: "Signature Palette",
         description: "Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)",
@@ -920,6 +925,12 @@ pub struct SettingsTabState {
     /// only user-written biographies are shown.
     pub biography_source_dir: String,
 
+    // Themes & Appearance state
+    #[serde(skip)]
+    pub theme_gallery: crate::theme::ThemeGalleryState,
+    #[serde(skip)]
+    pub theme_editor: crate::theme::ThemeEditorState,
+
     // Legacy collapsible section flags preserved for compatibility
     pub section_playback: bool,
     pub section_output: bool,
@@ -1012,6 +1023,9 @@ impl Default for SettingsTabState {
 
             new_scan_path: String::new(),
             biography_source_dir: String::new(),
+
+            theme_gallery: crate::theme::ThemeGalleryState::default(),
+            theme_editor: crate::theme::ThemeEditorState::default(),
 
             section_playback: true,
             section_output: false,
@@ -1225,6 +1239,12 @@ pub struct SettingsTabActions {
     pub reload_skins: bool,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
+
+    // Themes & Gallery actions
+    pub preview_theme: Option<String>,
+    pub apply_theme: Option<String>,
+    pub cancel_theme_preview: bool,
+    pub reload_themes: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1254,6 +1274,7 @@ pub struct SettingsExtraContext<'a> {
     pub available_skins: &'a [String],
     pub active_skin: Option<&'a str>,
     pub skin_errors: &'a [(PathBuf, crate::skin::SkinError)],
+    pub theme_manager: Option<&'a crate::theme::ThemeManager>,
     /// A native import picker is currently open (disables the import buttons).
     pub import_active: bool,
     /// Directories that individual songs were imported from, newest first.
@@ -1545,6 +1566,9 @@ pub fn show_settings_tab_extended(
                     SettingsCategory::Library => {
                         render_library_category(ui, state, theme, extra, &mut actions);
                     }
+                    SettingsCategory::Appearance => {
+                        render_appearance_category(ui, state, theme, extra, &mut actions);
+                    }
                 }
 
                 ui.add_space(32.0);
@@ -1796,7 +1820,7 @@ fn render_playback_category(
                                             Pos2::new(x, mid - half),
                                             Pos2::new(x + bar_w * 0.7, mid + half),
                                         ),
-                                        CornerRadius::same(1),
+                                        CornerRadius::same(theme.radius_xs),
                                         if played {
                                             theme.accent_highlight
                                         } else {
@@ -3856,92 +3880,41 @@ fn render_library_category(
             theme,
         );
 
-        setting_item(
-            ui,
-            &tr!("Theme Palette"),
-            &tr!("Switch between Obsidian dark and Jade light mode"),
-            theme,
-            |ui| {
-                let lbl = if extra.is_dark_theme {
-                    "Dark Theme Active (Switch to Light)"
-                } else {
-                    "Light Theme Active (Switch to Dark)"
-                };
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(lbl)
-                                .font(crate::theme::font(12.5))
-                                .strong()
-                                .color(Color32::WHITE),
-                        )
-                        .fill(theme.accent)
-                        .corner_radius(CornerRadius::same(theme.radius_md))
-                        .min_size(Vec2::new(160.0, 30.0)),
-                    )
-                    .clicked()
-                {
-                    actions.toggle_theme = true;
-                }
-
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Skin:")
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Open Themes & Appearance →")
                             .font(crate::theme::font(12.0))
-                            .color(theme.text_secondary),
-                    );
-                    let current = extra.active_skin.unwrap_or("Built-in Theme");
-                    egui::ComboBox::from_id_salt("settings_skin_picker")
-                        .selected_text(current)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(extra.active_skin.is_none(), "Built-in Theme")
-                                .clicked()
-                            {
-                                actions.skin_changed = Some(String::new());
-                            }
-                            for skin in extra.available_skins {
-                                let is_active = extra.active_skin == Some(skin.as_str());
-                                if ui.selectable_label(is_active, skin).clicked() {
-                                    actions.skin_changed = Some(skin.clone());
-                                }
-                            }
-                        });
-                    if ui
-                        .small_button(egui::RichText::new("Reload").color(theme.info))
-                        .clicked()
-                    {
-                        actions.reload_skins = true;
-                    }
-                });
+                            .strong()
+                            .color(Color32::WHITE),
+                    )
+                    .fill(theme.accent)
+                    .corner_radius(CornerRadius::same(theme.radius_md))
+                    .min_size(Vec2::new(180.0, 30.0)),
+                )
+                .clicked()
+            {
+                state.active_category = SettingsCategory::Appearance;
+            }
 
-                if !extra.skin_errors.is_empty() {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "Warning: {} skin(s) failed validation",
-                            extra.skin_errors.len()
-                        ))
-                        .font(crate::theme::font(11.0))
-                        .color(theme.warning_yellow),
-                    );
-                }
-            },
-        );
-
-        setting_item(
-            ui,
-            &tr!("Signature Palette"),
-            &tr!("Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)"),
-            theme,
-            |ui| {
-                color_dot(ui, theme.accent, "Jade");
-                color_dot(ui, theme.accent_highlight, "Mint");
-                color_dot(ui, theme.accent_warm, "Amber");
-                color_dot(ui, theme.bit_perfect_green, "Emerald");
-            },
-        );
+            let lbl = if extra.is_dark_theme {
+                "Switch to Light Mode"
+            } else {
+                "Switch to Dark Mode"
+            };
+            if ui
+                .button(
+                    egui::RichText::new(lbl)
+                        .font(crate::theme::font(12.0))
+                        .color(theme.accent_highlight),
+                )
+                .clicked()
+            {
+                actions.toggle_theme = true;
+            }
+        });
     });
 
     // Card 4: Music Library & Monitored Directories
@@ -4242,6 +4215,184 @@ fn render_library_category(
             });
         });
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Category 7: Themes & Appearance
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn render_appearance_category(
+    ui: &mut egui::Ui,
+    state: &mut SettingsTabState,
+    theme: &Theme,
+    extra: &SettingsExtraContext<'_>,
+    actions: &mut SettingsTabActions,
+) {
+    let Some(manager) = extra.theme_manager else {
+        return;
+    };
+
+    // Card 1: Active Theme & Quick Preset Switch
+    setting_card(ui, theme, |ui| {
+        let badge_name = if theme.is_light {
+            "STUDIO MINT"
+        } else if theme.is_oled() {
+            "OLED MIDNIGHT"
+        } else {
+            "OBSIDIAN JADE"
+        };
+
+        card_header(
+            ui,
+            crate::components::icons::draw_moon,
+            &tr!("Theme & Visual Aesthetics"),
+            &tr!("Obsidian surfaces, jade highlights, and typography for the player shell"),
+            Some((badge_name, theme.bg_pill, theme.accent)),
+            theme,
+        );
+
+        setting_item(
+            ui,
+            &tr!("Theme Palette"),
+            &tr!("Switch between Obsidian dark and Jade light mode"),
+            theme,
+            |ui| {
+                ui.horizontal(|ui| {
+                    let is_obsidian = theme.is_obsidian();
+                    let is_light = theme.is_light;
+                    let is_oled = theme.is_oled();
+
+                    if ui.selectable_label(is_obsidian, "Obsidian Dark").clicked() {
+                        actions.apply_theme = Some("system:dark".to_string());
+                    }
+                    if ui.selectable_label(is_light, "Studio Light").clicked() {
+                        actions.apply_theme = Some("system:light".to_string());
+                    }
+                    if ui.selectable_label(is_oled, "OLED True Black").clicked() {
+                        actions.apply_theme = Some("system:oled".to_string());
+                    }
+                });
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Signature Palette"),
+            &tr!("Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)"),
+            theme,
+            |ui| {
+                color_dot(ui, theme.bg_app, "App Surface");
+                color_dot(ui, theme.accent, "Primary Accent");
+                color_dot(ui, theme.accent_highlight, "Highlight Mint");
+                color_dot(ui, theme.accent_warm, "Warm Amber");
+                color_dot(ui, theme.bit_perfect_green, "Bit-Perfect");
+            },
+        );
+    });
+
+    // Card 2: Staged Live Preview Sandbox
+    let staged_id = manager.staged_id.as_deref();
+    let preview_id = staged_id.unwrap_or_else(|| manager.active_skin_name().unwrap_or("system:dark"));
+    let preview_theme = manager.resolve_theme(preview_id, theme.is_light);
+    let preview_name = match preview_id {
+        "system:dark" => "Obsidian Jade",
+        "system:light" => "Studio Mint",
+        "system:oled" => "OLED Midnight",
+        other => other,
+    };
+
+    let p_actions = crate::theme::preview::render_theme_preview(
+        ui,
+        theme,
+        &preview_theme,
+        preview_id,
+        preview_name,
+        manager.is_staged(),
+    );
+
+    if let Some(apply_id) = p_actions.apply_theme {
+        actions.apply_theme = Some(apply_id);
+    }
+    if p_actions.cancel_preview {
+        actions.cancel_theme_preview = true;
+    }
+    if let Some(edit_id) = p_actions.open_editor {
+        state.theme_editor.is_open = true;
+        let t = manager.resolve_theme(&edit_id, theme.is_light);
+        state.theme_editor.populate_from_theme(&t);
+        state.theme_editor.name = format!("{edit_id} Custom");
+        state.theme_editor.id = format!("{edit_id}_custom").to_lowercase().replace(':', "_");
+    }
+
+    ui.add_space(theme.space_md);
+
+    // Card 3: Theme Gallery & Browser
+    setting_card(ui, theme, |ui| {
+        let has_errs = !manager.errors().is_empty();
+        card_header(
+            ui,
+            crate::components::icons::draw_grid_icon,
+            "Theme Gallery",
+            "Browse curated and user-defined themes with category filters and search",
+            Some((
+                if has_errs {
+                    "ERRORS DETECTED"
+                } else {
+                    "CATALOG READY"
+                },
+                theme.bg_pill,
+                if has_errs {
+                    theme.warning_yellow
+                } else {
+                    theme.bit_perfect_green
+                },
+            )),
+            theme,
+        );
+
+        let g_actions = crate::theme::gallery::render_theme_gallery(
+            ui,
+            &mut state.theme_gallery,
+            manager,
+            theme,
+        );
+
+        if let Some(prev_id) = g_actions.preview_theme {
+            actions.preview_theme = Some(prev_id);
+        }
+        if let Some(app_id) = g_actions.apply_theme {
+            actions.apply_theme = Some(app_id);
+        }
+        if g_actions.reload_themes {
+            actions.reload_themes = true;
+        }
+
+        if has_errs {
+            ui.add_space(theme.space_sm);
+            ui.label(
+                egui::RichText::new(format!(
+                    "Warning: {} theme file(s) failed WCAG or JSON validation",
+                    manager.errors().len()
+                ))
+                .font(crate::theme::font(11.0))
+                .color(theme.warning_yellow),
+            );
+        }
+    });
+
+    ui.add_space(theme.space_md);
+
+    // Card 4: In-App Theme Editor
+    let e_actions = crate::theme::editor::render_theme_editor(
+        ui,
+        &mut state.theme_editor,
+        manager,
+        theme,
+    );
+    if let Some(saved_id) = e_actions.theme_saved {
+        actions.reload_themes = true;
+        actions.apply_theme = Some(saved_id);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4751,6 +4902,7 @@ mod search_tests {
             ("fn render_mixbus_category(", SettingsCategory::MixBus),
             ("fn render_tools_category(", SettingsCategory::Tools),
             ("fn render_library_category(", SettingsCategory::Library),
+            ("fn render_appearance_category(", SettingsCategory::Appearance),
         ] {
             if let Some(found) = source[..at].rfind(name) {
                 if current.as_ref().is_none_or(|(best, _)| found > *best) {

@@ -160,7 +160,10 @@ impl<'a> PodcastsView<'a> {
                                 egui::Frame::NONE
                                     .fill(fill)
                                     .corner_radius(CornerRadius::same(theme.radius_md))
-                                    .inner_margin(egui::Margin::symmetric(6, 5))
+                                    .inner_margin(egui::Margin::symmetric(
+                                        theme.space_sm as i8,
+                                        theme.space_xs as i8,
+                                    ))
                                     .show(ui, |ui| {
                                         ui.set_width(ui.available_width());
                                         let resp = ui.add(
@@ -271,7 +274,10 @@ impl<'a> PodcastsView<'a> {
                             .fill(theme.bg_card)
                             .stroke(Stroke::new(1.0_f32, theme.accent))
                             .corner_radius(CornerRadius::same(theme.radius_md))
-                            .inner_margin(egui::Margin::symmetric(10, 6))
+                            .inner_margin(egui::Margin::symmetric(
+                                theme.space_lg as i8,
+                                theme.space_sm as i8,
+                            ))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(
@@ -373,7 +379,10 @@ impl<'a> PodcastsView<'a> {
                                     },
                                 ))
                                 .corner_radius(CornerRadius::same(theme.radius_md))
-                                .inner_margin(egui::Margin::symmetric(10, 7))
+                                .inner_margin(egui::Margin::symmetric(
+                                    theme.space_lg as i8,
+                                    theme.space_sm as i8,
+                                ))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.vertical(|ui| {
@@ -451,7 +460,7 @@ impl<'a> PodcastsView<'a> {
                                         let p = ui.painter_at(bar_rect);
                                         p.rect_filled(
                                             bar_rect,
-                                            CornerRadius::same(2),
+                                            CornerRadius::same(theme.radius_xs),
                                             theme.bg_pill,
                                         );
                                         p.rect_filled(
@@ -462,7 +471,7 @@ impl<'a> PodcastsView<'a> {
                                                     bar_rect.max.y,
                                                 ),
                                             ),
-                                            CornerRadius::same(2),
+                                            CornerRadius::same(theme.radius_xs),
                                             if is_current {
                                                 theme.accent_highlight
                                             } else {

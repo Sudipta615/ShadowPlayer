@@ -45,7 +45,7 @@ impl<'a> WaveformSeek<'a> {
                 Pos2::new(rect.min.x, mid - 1.0),
                 Pos2::new(rect.max.x, mid + 1.0),
             ),
-            CornerRadius::same(1),
+            CornerRadius::same(self.theme.radius_xs),
             self.theme.slider_track,
         );
 
@@ -75,7 +75,7 @@ impl<'a> WaveformSeek<'a> {
                         Pos2::new(x, mid - half),
                         Pos2::new(x + (bar_w - 1.0).max(1.0), mid + half),
                     ),
-                    CornerRadius::same(1),
+                    CornerRadius::same(self.theme.radius_xs),
                     colour,
                 );
             }
@@ -96,7 +96,7 @@ impl<'a> WaveformSeek<'a> {
                     Pos2::new(rect.min.x, mid - 2.0),
                     Pos2::new(progress_x, mid + 2.0),
                 ),
-                CornerRadius::same(2),
+                CornerRadius::same(self.theme.radius_xs),
                 self.theme.accent_highlight,
             );
         }
@@ -152,7 +152,7 @@ pub fn paint_peaks(painter: &egui::Painter, rect: Rect, peaks: &[f32], played: f
                 Pos2::new(x, mid - half),
                 Pos2::new(x + (bar_w - 1.0).max(1.0), mid + half),
             ),
-            CornerRadius::same(1),
+            CornerRadius::same(theme.radius_xs),
             colour,
         );
     }
