@@ -116,11 +116,11 @@ fn an_entry_written_below_the_output_directory_is_written_relative() {
         .expect("the playlist must be writable");
     let text = std::fs::read_to_string(&path).expect("the playlist must be readable");
     assert!(
-        text.contains("music/one.flac"),
+        text.contains("music/one.flac") || text.contains(r"music\one.flac"),
         "a path under the output directory must be written relative, got:\n{text}"
     );
     assert!(
-        text.contains("/elsewhere/two.flac"),
+        text.contains("/elsewhere/two.flac") || text.contains(r"\elsewhere\two.flac"),
         "a path outside the output directory must stay absolute, got:\n{text}"
     );
 }
