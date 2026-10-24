@@ -381,11 +381,6 @@ impl PlaylistRepo {
     }
 }
 
-/// Per-track DSP profiles.
-///
-/// A profile is a track's own graphic EQ and preamp, applied when that track
-/// plays. The global chain is untouched.
-
 fn map_smart_playlist(row: &Row<'_>) -> Result<SmartPlaylist> {
     let id_str: String = row.get("id")?;
     let rules_json: String = row.get("rules_json")?;

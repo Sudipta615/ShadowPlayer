@@ -641,6 +641,10 @@ impl TrackRepo {
     }
 }
 
+/// Per-track DSP profiles.
+///
+/// A profile is a track's own graphic EQ and preamp, applied when that track
+/// plays. The global chain is untouched.
 pub struct TrackDspRepo {
     db: Database,
 }
