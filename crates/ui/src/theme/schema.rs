@@ -217,7 +217,13 @@ pub fn migrate_theme_file(theme_file: &mut ThemeFile, fallback_id: &str) {
             .colors
             .get("bg_card")
             .cloned()
-            .unwrap_or_else(|| if is_light { "#f0f0f0".into() } else { "#181818".into() });
+            .unwrap_or_else(|| {
+                if is_light {
+                    "#f0f0f0".into()
+                } else {
+                    "#181818".into()
+                }
+            });
         let bg_card_hover = theme_file
             .colors
             .get("bg_card_hover")
@@ -238,7 +244,13 @@ pub fn migrate_theme_file(theme_file: &mut ThemeFile, fallback_id: &str) {
             .colors
             .get("bg_input")
             .cloned()
-            .unwrap_or_else(|| if is_light { "#e0e0e0".into() } else { "#111111".into() });
+            .unwrap_or_else(|| {
+                if is_light {
+                    "#e0e0e0".into()
+                } else {
+                    "#111111".into()
+                }
+            });
         let scan_banner_bg = theme_file
             .colors
             .get("bg_pill")

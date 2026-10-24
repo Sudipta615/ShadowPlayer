@@ -18,8 +18,8 @@ pub use tokens::*;
 
 #[cfg(test)]
 mod tests {
-    use super::tokens::Theme;
     use super::contrast::contrast_ratio;
+    use super::tokens::Theme;
     use eframe::egui::Color32;
 
     #[test]

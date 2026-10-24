@@ -100,10 +100,12 @@ impl ThemeManager {
 
         // Deduplicate loaded themes by ID/name
         let mut seen = std::collections::HashSet::new();
-        self.loaded_themes.retain(|t| seen.insert(t.metadata.id.clone()));
+        self.loaded_themes
+            .retain(|t| seen.insert(t.metadata.id.clone()));
 
         // Sort by name for stable gallery presentation
-        self.loaded_themes.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
+        self.loaded_themes
+            .sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
         self.theme_names = self
             .loaded_themes
             .iter()
@@ -179,8 +181,8 @@ impl ThemeManager {
         // 2. User loaded themes
         for user in &self.loaded_themes {
             let t = user.into_theme();
-            let is_active = self.active_id == user.metadata.id
-                || self.active_id == user.metadata.name;
+            let is_active =
+                self.active_id == user.metadata.id || self.active_id == user.metadata.name;
             let is_staged = self.staged_id.as_deref() == Some(&user.metadata.id)
                 || self.staged_id.as_deref() == Some(&user.metadata.name);
 
@@ -341,8 +343,7 @@ impl ThemeManager {
         }
 
         // Validate theme format first
-        let loaded = LoadedTheme::from_file(src_path)
-            .map_err(|e| format!("{e}"))?;
+        let loaded = LoadedTheme::from_file(src_path).map_err(|e| format!("{e}"))?;
 
         // Ensure custom-theme directory exists
         let _ = std::fs::create_dir_all(&self.custom_themes_dir);
@@ -369,7 +370,8 @@ impl ThemeManager {
             t.metadata.id != loaded.metadata.id && t.metadata.name != loaded.metadata.name
         });
         self.loaded_themes.push(loaded);
-        self.loaded_themes.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
+        self.loaded_themes
+            .sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
         self.theme_names = self
             .loaded_themes
             .iter()
@@ -384,17 +386,25 @@ impl ThemeManager {
     pub fn open_custom_themes_folder(&self) {
         let _ = std::fs::create_dir_all(&self.custom_themes_dir);
         #[cfg(target_os = "linux")]
-        let _ = std::process::Command::new("xdg-open").arg(&self.custom_themes_dir).spawn();
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&self.custom_themes_dir)
+            .spawn();
         #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(&self.custom_themes_dir).spawn();
+        let _ = std::process::Command::new("open")
+            .arg(&self.custom_themes_dir)
+            .spawn();
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("explorer").arg(&self.custom_themes_dir).spawn();
+        let _ = std::process::Command::new("explorer")
+            .arg(&self.custom_themes_dir)
+            .spawn();
     }
 
     /// Write an example theme file to `themes/custom-theme/example_ocean_night.shadowtheme`.
     pub fn write_example_theme(&self) -> std::io::Result<PathBuf> {
         let _ = std::fs::create_dir_all(&self.custom_themes_dir);
-        let path = self.custom_themes_dir.join("example_ocean_night.shadowtheme");
+        let path = self
+            .custom_themes_dir
+            .join("example_ocean_night.shadowtheme");
         if path.exists() {
             return Ok(path);
         }
@@ -471,7 +481,9 @@ mod tests {
 
         let mut manager =
             ThemeManager::new_with_custom_dir(&target_dir, target_dir.join("custom-theme"));
-        let imported_id = manager.import_theme_from_path(&external_file).expect("import theme");
+        let imported_id = manager
+            .import_theme_from_path(&external_file)
+            .expect("import theme");
         assert_eq!(imported_id, "ocean-night");
         assert!(manager
             .custom_themes_dir
@@ -518,8 +530,7 @@ mod tests {
         assert!(manager.active_theme_path().exists());
 
         // A freshly created manager should restore the persisted active_id
-        let restored =
-            ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("custom-theme"));
+        let restored = ThemeManager::new_with_custom_dir(&temp_dir, temp_dir.join("custom-theme"));
         assert_eq!(restored.active_id, "system:oled");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -544,4 +555,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-

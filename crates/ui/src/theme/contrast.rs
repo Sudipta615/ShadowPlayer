@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use eframe::egui::Color32;
+use std::collections::HashMap;
 
 /// Errors that can occur when validating or calculating contrast.
 #[derive(Debug, Clone, PartialEq)]
@@ -198,8 +198,7 @@ pub fn auto_adjust_contrast(fg: Color32, bg: Color32, target_ratio: f32) -> Colo
                 g = (g - 1.0).max(0.0);
                 b_ch = (b_ch - 1.0).max(0.0);
             }
-            let candidate =
-                Color32::from_rgba_unmultiplied(r as u8, g as u8, b_ch as u8, fg.a());
+            let candidate = Color32::from_rgba_unmultiplied(r as u8, g as u8, b_ch as u8, fg.a());
             if contrast_ratio(candidate, bg) >= target_ratio {
                 return candidate;
             }

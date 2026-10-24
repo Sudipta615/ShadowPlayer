@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use eframe::egui::{
-    self, Align, Color32, CornerRadius, Layout, Margin, Stroke, Vec2,
-};
+use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Margin, Stroke, Vec2};
 
 use super::contrast::{auto_adjust_contrast, validate_contrast};
 use super::manager::ThemeManager;
@@ -67,8 +65,16 @@ impl ThemeEditorState {
     /// Automatically adjust all text tokens so they satisfy WCAG 2.1 AA against host surfaces.
     pub fn auto_fix_contrast(&mut self) {
         let bg_app = self.colors.get("bg_app").copied().unwrap_or(Color32::BLACK);
-        let bg_card = self.colors.get("bg_card").copied().unwrap_or(Color32::BLACK);
-        let bg_input = self.colors.get("bg_input").copied().unwrap_or(Color32::BLACK);
+        let bg_card = self
+            .colors
+            .get("bg_card")
+            .copied()
+            .unwrap_or(Color32::BLACK);
+        let bg_input = self
+            .colors
+            .get("bg_input")
+            .copied()
+            .unwrap_or(Color32::BLACK);
 
         let text_tokens = [
             "text_primary",
@@ -92,7 +98,10 @@ impl ThemeEditorState {
             self.colors.insert("border_input".to_string(), adjusted);
         }
 
-        self.status_message = Some(("All contrast values successfully auto-adjusted!".into(), false));
+        self.status_message = Some((
+            "All contrast values successfully auto-adjusted!".into(),
+            false,
+        ));
     }
 }
 
@@ -386,7 +395,10 @@ fn color_picker_row(
     if let Some(color) = state.colors.get_mut(token) {
         ui.horizontal(|ui| {
             let mut srgba = [color.r(), color.g(), color.b(), color.a()];
-            if ui.color_edit_button_srgba_unmultiplied(&mut srgba).changed() {
+            if ui
+                .color_edit_button_srgba_unmultiplied(&mut srgba)
+                .changed()
+            {
                 *color = Color32::from_rgba_unmultiplied(srgba[0], srgba[1], srgba[2], srgba[3]);
             }
             ui.label(

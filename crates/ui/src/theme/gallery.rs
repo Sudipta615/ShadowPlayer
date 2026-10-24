@@ -1,6 +1,4 @@
-use eframe::egui::{
-    self, Align, Color32, CornerRadius, Layout, Margin, Sense, Stroke, Vec2,
-};
+use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Margin, Sense, Stroke, Vec2};
 
 use super::manager::{ThemeCardInfo, ThemeManager};
 use super::tokens::Theme;

@@ -1,6 +1,5 @@
 use eframe::egui::{
-    self, Align, Color32, CornerRadius, Layout, Margin, Pos2, Rect, Sense, Stroke, StrokeKind,
-    Vec2,
+    self, Align, Color32, CornerRadius, Layout, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
 };
 
 use super::tokens::Theme;
@@ -92,21 +91,13 @@ pub fn render_theme_preview(
                                 StrokeKind::Inside,
                             );
                             let center = art_rect.center();
-                            painter.circle_filled(
-                                center,
-                                20.0,
-                                preview_theme.bg_card_active,
-                            );
+                            painter.circle_filled(center, 20.0, preview_theme.bg_card_active);
                             painter.circle_stroke(
                                 center,
                                 20.0,
                                 Stroke::new(1.5, preview_theme.accent_highlight),
                             );
-                            painter.circle_filled(
-                                center,
-                                6.0,
-                                preview_theme.accent,
-                            );
+                            painter.circle_filled(center, 6.0, preview_theme.accent);
 
                             ui.add_space(preview_theme.space_md);
 
@@ -192,7 +183,9 @@ pub fn render_theme_preview(
                                     // Mini play button
                                     let btn_frame = egui::Frame::NONE
                                         .fill(preview_theme.accent)
-                                        .corner_radius(CornerRadius::same(preview_theme.radius_pill))
+                                        .corner_radius(CornerRadius::same(
+                                            preview_theme.radius_pill,
+                                        ))
                                         .inner_margin(Margin::symmetric(
                                             preview_theme.space_md as i8,
                                             preview_theme.space_xs as i8,
@@ -244,10 +237,8 @@ pub fn render_theme_preview(
                                     );
 
                                     // Mini VU meter bars
-                                    let (meter_rect, _) = ui.allocate_exact_size(
-                                        Vec2::new(70.0, 14.0),
-                                        Sense::hover(),
-                                    );
+                                    let (meter_rect, _) = ui
+                                        .allocate_exact_size(Vec2::new(70.0, 14.0), Sense::hover());
                                     let mp = ui.painter_at(meter_rect);
                                     mp.rect_filled(
                                         meter_rect,
@@ -258,16 +249,28 @@ pub fn render_theme_preview(
                                     let r_val = meter_rect.width() * 0.65;
                                     mp.rect_filled(
                                         Rect::from_min_max(
-                                            Pos2::new(meter_rect.min.x + 2.0, meter_rect.min.y + 2.0),
-                                            Pos2::new(meter_rect.min.x + l_val, meter_rect.min.y + 6.0),
+                                            Pos2::new(
+                                                meter_rect.min.x + 2.0,
+                                                meter_rect.min.y + 2.0,
+                                            ),
+                                            Pos2::new(
+                                                meter_rect.min.x + l_val,
+                                                meter_rect.min.y + 6.0,
+                                            ),
                                         ),
                                         CornerRadius::same(preview_theme.radius_xs),
                                         preview_theme.bit_perfect_green,
                                     );
                                     mp.rect_filled(
                                         Rect::from_min_max(
-                                            Pos2::new(meter_rect.min.x + 2.0, meter_rect.min.y + 8.0),
-                                            Pos2::new(meter_rect.min.x + r_val, meter_rect.min.y + 12.0),
+                                            Pos2::new(
+                                                meter_rect.min.x + 2.0,
+                                                meter_rect.min.y + 8.0,
+                                            ),
+                                            Pos2::new(
+                                                meter_rect.min.x + r_val,
+                                                meter_rect.min.y + 12.0,
+                                            ),
                                         ),
                                         CornerRadius::same(preview_theme.radius_xs),
                                         preview_theme.accent_highlight,
