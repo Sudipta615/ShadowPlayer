@@ -1,9 +1,6 @@
-use std::sync::{Arc, OnceLock};
+use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, TextStyle, Vec2};
 
-use eframe::egui::{
-    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Stroke,
-    TextStyle, Vec2,
-};
+use super::fonts::{font, mono_font};
 
 /// Blend two colours, for animated state changes.
 pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
@@ -20,74 +17,6 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 /// The same colour with a different alpha.
 pub fn with_alpha(color: Color32, alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
-}
-
-/// The one knob that controls the UI type scale.
-pub const TEXT_SCALE: f32 = 1.08;
-pub const TEXT_MIN: f32 = 10.0;
-
-/// Font family used for headings and other display-sized text.
-fn display_family() -> FontFamily {
-    static DISPLAY: OnceLock<FontFamily> = OnceLock::new();
-    DISPLAY
-        .get_or_init(|| FontFamily::Name(Arc::from("inter-display")))
-        .clone()
-}
-
-/// The UI's proportional font at `size`, scaled and floored by the global
-/// typography tokens. Sizes at or above display scale use Inter Medium.
-pub fn font(size: f32) -> FontId {
-    let size = (size.max(TEXT_MIN) * TEXT_SCALE).max(11.0);
-    let family = if size >= 20.0 {
-        display_family()
-    } else {
-        FontFamily::Proportional
-    };
-    FontId::new(size, family)
-}
-
-/// Monospace text (track numbers, technical values, diagnostics).
-pub fn mono_font(size: f32) -> FontId {
-    FontId::new(
-        (size.max(9.0) * TEXT_SCALE).max(10.5),
-        FontFamily::Monospace,
-    )
-}
-
-/// Install the bundled Inter family. Called once, before the first frame.
-pub fn install_fonts(ctx: &egui::Context) {
-    let mut fonts = FontDefinitions::default();
-
-    fonts.font_data.insert(
-        "inter-regular".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
-            "../../assets/fonts/Inter-Regular.ttf"
-        ))),
-    );
-    fonts.font_data.insert(
-        "inter-medium".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
-            "../../assets/fonts/Inter-Medium.ttf"
-        ))),
-    );
-
-    let fallback = fonts
-        .families
-        .get(&FontFamily::Proportional)
-        .cloned()
-        .unwrap_or_default();
-
-    let mut proportional = vec!["inter-regular".to_owned()];
-    proportional.extend(fallback.iter().cloned());
-    fonts
-        .families
-        .insert(FontFamily::Proportional, proportional);
-
-    let mut display = vec!["inter-medium".to_owned(), "inter-regular".to_owned()];
-    display.extend(fallback);
-    fonts.families.insert(display_family(), display);
-
-    ctx.set_fonts(fonts);
 }
 
 /// Parse a `#RRGGBB` or `#RRGGBBAA` hex colour string.

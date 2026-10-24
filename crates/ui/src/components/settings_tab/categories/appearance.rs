@@ -145,6 +145,7 @@ pub(in crate::components::settings_tab) fn render_appearance_category(
         state.theme_editor.is_open = true;
         let t = manager.resolve_theme(&edit_id, theme.is_light);
         state.theme_editor.populate_from_theme(&t);
+        state.theme_editor.fonts = manager.resolve_fonts(&edit_id);
         state.theme_editor.name = format!("{edit_id} Custom");
         state.theme_editor.id = format!("{edit_id}_custom").to_lowercase().replace(':', "_");
     }

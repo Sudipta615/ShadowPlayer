@@ -1,5 +1,6 @@
 pub mod contrast;
 pub mod editor;
+pub mod fonts;
 pub mod gallery;
 pub mod manager;
 pub mod preview;
@@ -9,6 +10,7 @@ pub mod tokens;
 
 pub use contrast::*;
 pub use editor::*;
+pub use fonts::*;
 pub use gallery::*;
 pub use manager::*;
 pub use preview::*;

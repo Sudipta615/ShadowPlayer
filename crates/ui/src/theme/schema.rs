@@ -5,6 +5,7 @@ use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
 
 use super::contrast::{validate_contrast, ContrastError};
+use super::fonts::ThemeFonts;
 use super::tokens::{parse_hex_color, Theme};
 
 /// Macro iterating over every required colour token.
@@ -191,6 +192,10 @@ pub struct ThemeFile {
     /// Optional radius overrides.
     #[serde(default)]
     pub radii: HashMap<String, u8>,
+
+    /// Optional per-role font-family declarations (`display`, `body`, `mono`).
+    #[serde(default, skip_serializing_if = "ThemeFonts::is_empty")]
+    pub fonts: ThemeFonts,
 }
 
 fn default_schema_version() -> u32 {
@@ -356,6 +361,8 @@ pub struct LoadedTheme {
     pub metadata: ThemeMetadata,
     pub colors: HashMap<String, Color32>,
     pub radii: HashMap<String, u8>,
+    /// Optional typeface roles requested by this theme.
+    pub fonts: ThemeFonts,
     /// The schema version declared in the source file.  1 = legacy, 2 = current.
     pub schema_version: u32,
 }
@@ -405,6 +412,7 @@ impl LoadedTheme {
             metadata,
             colors,
             radii: theme_file.radii,
+            fonts: theme_file.fonts,
             schema_version: theme_file.schema_version,
         })
     }
@@ -519,5 +527,91 @@ mod tests {
         let concrete = loaded.into_theme();
         assert_eq!(concrete.bg_app, parse_hex_color("#121212").unwrap());
         assert_eq!(concrete.accent, parse_hex_color("#4ade80").unwrap());
+        assert!(loaded.fonts.is_empty());
+    }
+
+    #[test]
+    fn theme_fonts_parse_and_round_trip() {
+        let json = r##"{
+            "schema_version": 2,
+            "metadata": { "name": "Typed" },
+            "colors": {},
+            "fonts": {
+                "display": "Instrument Serif",
+                "body": "DM Sans",
+                "mono": "JetBrains Mono"
+            }
+        }"##;
+        let theme_file: ThemeFile = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            theme_file.fonts.display.as_deref(),
+            Some("Instrument Serif")
+        );
+        assert_eq!(theme_file.fonts.body.as_deref(), Some("DM Sans"));
+        assert_eq!(theme_file.fonts.mono.as_deref(), Some("JetBrains Mono"));
+
+        let serialized = serde_json::to_string(&theme_file).unwrap();
+        let round_tripped: ThemeFile = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(round_tripped.fonts, theme_file.fonts);
+    }
+
+    #[test]
+    fn every_bundled_custom_theme_loads_and_is_distinct() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/theme/custom-theme");
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("could not read {}: {e}", dir.display()))
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "shadowtheme"))
+            .collect();
+        paths.sort();
+
+        assert!(
+            paths.len() >= 32,
+            "expected at least 32 bundled custom themes, found {}",
+            paths.len()
+        );
+
+        let mut ids = std::collections::HashSet::new();
+        let mut names = std::collections::HashSet::new();
+        for path in paths {
+            let theme = LoadedTheme::from_file(&path)
+                .unwrap_or_else(|e| panic!("could not load {}: {e}", path.display()));
+
+            assert_eq!(
+                theme.schema_version,
+                2,
+                "{} is not schema v2",
+                path.display()
+            );
+            assert!(
+                theme.colors.len() >= REQUIRED_TOKENS.len(),
+                "{} is missing tokens",
+                path.display()
+            );
+            assert!(!theme.metadata.name.trim().is_empty());
+            assert!(!theme.metadata.tags.is_empty());
+            assert!(
+                theme.fonts.missing_fonts().is_empty(),
+                "{} requests an unbundled font: {:?}",
+                path.display(),
+                theme.fonts.missing_fonts()
+            );
+            assert!(
+                ids.insert(theme.metadata.id.clone()),
+                "duplicate theme id '{}' in {}",
+                theme.metadata.id,
+                path.display()
+            );
+            assert!(
+                names.insert(theme.metadata.name.clone()),
+                "duplicate theme name '{}' in {}",
+                theme.metadata.name,
+                path.display()
+            );
+
+            let concrete = theme.into_theme();
+            assert_eq!(concrete.is_light, theme.metadata.is_light);
+        }
     }
 }

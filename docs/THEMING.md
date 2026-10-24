@@ -1,9 +1,10 @@
 # ShadowPlayer Theme System Contract & Architecture
 
 ShadowPlayer provides a unified, high-performance theming architecture.
-The UI reads every colour, radius, and spacing step from [`ui::theme::Theme`].
-Themes can be system presets (Obsidian Jade, Studio Mint, OLED Midnight) or custom
-user themes loaded from `.shadowtheme` files.
+The UI reads every colour, radius, and spacing step from [`ui::theme::Theme`],
+and its three typeface roles (`display`, `body`, `mono`) from the active theme's
+font declaration. Themes can be system presets (Obsidian Jade, Studio Mint, OLED
+Midnight) or custom user themes loaded from `.shadowtheme` files.
 
 ---
 
@@ -11,7 +12,8 @@ user themes loaded from `.shadowtheme` files.
 
 The theming engine is organized into modular components under `crates/ui/src/theme/`:
 
-* **`tokens.rs`**: Defines the `Theme` value as a plain, `Copy` data struct without heap allocations in the rendering loop. Provides font scaling (`TEXT_SCALE`), alpha blending (`with_alpha`), and color utilities.
+* **`tokens.rs`**: Defines the `Theme` value as a plain, `Copy` data struct without heap allocations in the rendering loop. Provides alpha blending (`with_alpha`) and color utilities.
+* **`fonts.rs`**: Theme typeface declarations, the bundled OFL font registry, role resolution with an always-available Inter fallback, and egui font-atlas installation.
 * **`system.rs`**: Built-in system theme presets:
   - `dark()` — *Obsidian Jade*: Deep obsidian surfaces with jade (#0F766E) and mint (#5EEAD4) highlights.
   - `light()` — *Studio Mint*: Crisp studio-light surfaces with teal accents.
@@ -137,6 +139,7 @@ Themes are stored in JSON files under the `themes/` directory:
 | `is_light` | No | `true` for a light-background theme; defaults to `false`. |
 | `colors` | Yes | Flat map of `token_name → "#RRGGBB"` or `"#RRGGBBAA"` strings. |
 | `radii` | No | Optional radius overrides (`radius_xs`, `radius_sm`, …). |
+| `fonts` | No | Optional role → family map. Roles are `display`, `body`, and `mono`; omitted text roles use Inter, omitted `mono` uses JetBrains Mono. |
 
 ```json
 {
@@ -146,6 +149,11 @@ Themes are stored in JSON files under the `themes/` directory:
   "author": "Community",
   "description": "Arctic, north-bluish clean aesthetic",
   "is_light": false,
+  "fonts": {
+    "display": "Fraunces",
+    "body": "DM Sans",
+    "mono": "JetBrains Mono"
+  },
   "colors": {
     "bg_app": "#2E3440",
     "bg_sidebar": "#242933",
@@ -184,6 +192,41 @@ Themes are stored in JSON files under the `themes/` directory:
 }
 ```
 
+### Per-Theme Fonts
+
+A theme may assign a typeface to each of three roles:
+
+| Role | Applied to | Default |
+| :--- | :--- | :--- |
+| `display` | Headings and large display text (20 pt and above). | Inter Medium |
+| `body` | Normal interface copy, labels, tables, and controls. | Inter Regular |
+| `mono` | Track numbers, durations, diagnostics, and technical values. | JetBrains Mono Regular |
+
+Families are matched by name, trimmed and case-insensitively. These families
+are bundled, so they are always available:
+
+| Family | Character | Bundled weights |
+| :--- | :--- | :--- |
+| Inter | Neutral UI sans (fallback) | Regular, Medium |
+| Fraunces | Warm editorial serif | Regular, Medium |
+| Instrument Serif | High-contrast display serif | Regular |
+| Space Grotesk | Geometric neo-grotesk | Regular, Medium |
+| DM Sans | Friendly, low-contrast sans | Regular, Medium |
+| Bricolage Grotesque | Expressive retro grotesque | Regular, Medium |
+| JetBrains Mono | Technical monospace | Regular, Medium |
+
+If a theme names anything else, that role falls back to Inter. The Theme
+Gallery shows a `Font unavailable: … · using Inter` warning on the affected
+theme card, and the rest of the theme still applies normally. An omitted
+`mono` role uses JetBrains Mono by default so numeric columns keep their fixed
+advance; an explicitly missing `mono` family still falls back to Inter. This is
+deliberate: a third-party theme can never leave the interface without a
+usable font, and the fallback chain keeps egui's default faces for emoji and
+uncommon glyphs.
+
+Font files are licensed under the SIL Open Font License 1.1 and live in
+`crates/ui/assets/fonts/`; per-family licences are in `assets/fonts/licenses/`.
+
 ---
 
 ### Schema Version Migration (v1 → v2)
@@ -199,14 +242,55 @@ ShadowPlayer includes an automated migration pipeline (`schema::migrate_theme_fi
 
 ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
 * **Custom Themes Folder (`themes/custom-theme/`)**: Custom user themes reside inside `<data_dir>/themes/custom-theme/`. The theme manager monitors this directory and loads all `.shadowtheme` and `.json` files.
+* **Bundled Custom Themes**: Thirty-two schema-v2 themes ship in `crates/ui/src/theme/custom-theme/`. They are embedded in the binary and written into `<data_dir>/themes/custom-theme/` on first launch, so a packaged build shows the same gallery as a source checkout. Existing files are never overwritten.
+
+| Theme | Mood | Mode | Typefaces |
+| :--- | :--- | :--- | :--- |
+| Midnight Vinyl | Charcoal listening room, brass and champagne | Dark | Fraunces / DM Sans |
+| Polar Drift | Arctic blue, snow, and frost | Dark | Space Grotesk / Inter |
+| Mocha Muse | Mocha, lavender, and soft pastels | Dark | Fraunces / DM Sans |
+| Neon Tokyo | Indigo streets and electric neon | Dark | Space Grotesk |
+| Rosewood Smoke | Muted rosewood, iris, and gilded edge | Dark | Instrument Serif / DM Sans |
+| Retro Groove | Seventies hi-fi browns and tangerine | Dark | Bricolage / DM Sans |
+| Ink & Wave | Sumi ink, indigo, and wave blue | Dark | Instrument Serif / Inter |
+| Forest Hymn | Evergreen, moss, and morning light | Dark | Fraunces / DM Sans |
+| Synthwave Sunset | Violet dusk and hot-pink neon | Dark | Space Grotesk |
+| Neon Grid | Brutalist black, acid yellow, cyan | Dark | Space Grotesk / Inter |
+| Black Tie | True-black OLED, champagne gold, ivory | OLED | Instrument Serif / Inter |
+| Café Nocturne | Espresso, steamed milk, caramel | Dark | Fraunces / DM Sans |
+| Amber Terminal | Monochrome amber phosphor | Dark | JetBrains Mono / Inter |
+| Crimson Velvet | Black velvet, crimson, rose gold | Dark | Instrument Serif / DM Sans |
+| Oat Latte | Oat cream and mauve | Light | Fraunces / DM Sans |
+| Sunlit Studio | Solarized cream and ink teal | Light | Instrument Serif / DM Sans |
+| Paper & Ink | Warm paper, black ink, vermillion | Light | Instrument Serif / Inter |
+| Sage & Clay | Sage, earthen clay, linen | Light | Fraunces / DM Sans |
+| Lilac Air | Weightless lilac and periwinkle | Light | Space Grotesk / DM Sans |
+| Arctic Frost | Glacier white and fjord blue | Light | Space Grotesk / Inter |
+| Blueprint | Drafting-table navy, cyan linework, amber notes | Dark | Space Grotesk / Inter |
+| Blue Hour | Slate twilight, coral, and a last band of gold | Dark | Instrument Serif / Inter |
+| Cherry Cola | Fountain-shop brown, cherry red, vanilla cream | Dark | Bricolage / DM Sans |
+| Plum Circuit | Aubergine circuitry, electric violet, acid lime | Dark | Space Grotesk |
+| Copper Patina | Verdigris, warm copper, weathered observatory rail | Dark | Fraunces / DM Sans |
+| Peach Fuzz | Cocoa velvet, ripe peach, powdered rose | Dark | Fraunces / DM Sans |
+| Night Swim | Midnight pool teal, chlorine aqua, coral | Dark | Instrument Serif / Inter |
+| Highlighter | Warm paper, ink-black type, marker lime | Light | Bricolage / Inter |
+| Sea Glass | Frosted seafoam, pale aqua, beach coral | Light | Fraunces / DM Sans |
+| Citrus Press | Lemon cream, burnt-orange ink, squeeze of green | Light | Bricolage / DM Sans |
+| Adobe Rose | Sun-baked clay, dusty rose, turquoise window | Light | Fraunces / DM Sans |
+| Silverprint | Cool silver, graphite type, signal-red mark | Light | Space Grotesk / Inter |
+
+All thirty-two declare the full 29 required colour tokens plus the 11 optional
+tokens, and override every radius step. The theme-level radius scale is what
+distinguishes an angular editorial theme such as *Paper & Ink* from a soft,
+pill-shaped theme such as *Lilac Air*.
 * **Active Theme Persistence**: When a theme is committed or applied, its identifier is persisted to `<data_dir>/themes/active_theme.txt` so the selected theme survives application restarts seamlessly.
 * **Optimized Import & Invalidation**: Importing a `.shadowtheme` file immediately registers and stages the theme in-memory without expensive full-disk rescans, with dirty-flag cache invalidation (`reload_if_dirty`) managing cache freshness.
 * **Import Theme Button**: In Settings → Appearance, clicking **Import Theme…** opens the system's native file picker (`rfd`, XDG portal / native OS dialog) allowing users to select `.shadowtheme` files from anywhere on their storage. Imported themes are validated, copied into `themes/custom-theme/`, and immediately staged or applied.
 * **Open Folder Button**: Directly opens `<data_dir>/themes/custom-theme/` in the OS file manager (Nautilus, Dolphin, Finder, Explorer) with a single click.
-* **Gallery**: Filter and search through installed and system themes. Each card displays author, theme version (or `built-in`), color swatches, description, and tag chips (`#dark`, `#oled`, etc.). Selecting a card stages it for live preview.
-* **Sandbox Preview**: Real-time rendering of mini transport controls, volume slider, VU meter, and track listing.
-* **Apply / Revert**: Staged themes are visually previewed instantly and only persist when applied. Reverting restores the active theme.
-* **Theme Editor**: Direct parameter tuning and instant saving into `themes/custom-theme/`. Uses `for_each_required_color_token` macro as the single source of truth for color token definitions.
+* **Gallery**: Filter and search through installed and system themes. Each card displays author, theme version (or `built-in`), color swatches, description, and tag chips (`#dark`, `#oled`, etc.). Cards for themes with unbundled typefaces show a font-fallback warning below the tags. Selecting a card stages it for live preview.
+* **Sandbox Preview**: Real-time rendering of mini transport controls, volume slider, VU meter, and track listing, including the candidate theme's typefaces once staged.
+* **Apply / Revert**: Staged themes are visually previewed instantly and only persist when applied. Reverting restores the active theme's colors and fonts.
+* **Theme Editor**: Direct parameter tuning — colors, radii, and the three font roles — with instant saving into `themes/custom-theme/`. Uses `for_each_required_color_token` as the single source of truth for color token definitions.
 
 ---
 
@@ -214,6 +298,7 @@ ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
 
 A theme supplies values, not arbitrary UI code or behavior:
 * It may not paint colours outside the token set (enforced by `theme_purity.rs`).
+* It may not embed font files, change the global type scale, or bypass the bundled-family registry. It may name any family; unknown families fall back to Inter and are flagged in the gallery.
 * It may not choose arbitrary numeric margins or radii outside the spacing scale (`spacing_scale.rs`).
 * It may not bypass WCAG AA contrast standards.
 * It may not alter playback or audio processing pipelines.

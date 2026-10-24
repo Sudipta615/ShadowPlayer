@@ -11,6 +11,16 @@ impl ShadowPlayerApp {
             self.applied_theme = Some(self.theme);
         }
 
+        // Theme fonts are separate from the Copy colour/layout Theme because
+        // family names are heap strings. Only rebuild egui's font atlas when
+        // the effective role mapping actually changes (apply, preview, revert,
+        // reload, or import).
+        let effective_fonts = self.theme_manager.effective_fonts();
+        if self.applied_fonts.as_ref() != Some(&effective_fonts) {
+            crate::theme::apply_theme_fonts(ctx, &effective_fonts);
+            self.applied_fonts = Some(effective_fonts);
+        }
+
         // Remember the live window size: this is what the next launch restores.
         let size = ctx.content_rect().size();
         if size.x > 0.0 && size.y > 0.0 {

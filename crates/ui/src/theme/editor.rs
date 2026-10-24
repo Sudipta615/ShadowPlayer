@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Margin, Stroke, Vec2};
 
 use super::contrast::{auto_adjust_contrast, validate_contrast};
+use super::fonts::{bundled_font_family_names, ThemeFonts};
 use super::manager::ThemeManager;
 use super::schema::{for_each_required_color_token, ThemeFile};
 use super::tokens::{format_hex_color, Theme};
@@ -18,6 +19,7 @@ pub struct ThemeEditorState {
     pub is_light: bool,
     pub colors: HashMap<String, Color32>,
     pub radii: HashMap<String, u8>,
+    pub fonts: ThemeFonts,
     pub status_message: Option<(String, bool)>, // (message, is_error)
 }
 
@@ -32,6 +34,7 @@ impl Default for ThemeEditorState {
             is_light: false,
             colors: HashMap::new(),
             radii: HashMap::new(),
+            fonts: ThemeFonts::default(),
             status_message: None,
         };
         state.populate_from_theme(&Theme::dark());
@@ -198,6 +201,46 @@ pub fn render_theme_editor(
 
                 ui.add_space(theme.space_md);
 
+                // Per-role typefaces. An empty field means Inter for that role.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new("Fonts:")
+                            .font(crate::theme::font(12.0))
+                            .color(theme.text_secondary),
+                    );
+                    font_role_input(ui, &mut state.fonts.display, "Display", "Inter", theme);
+                    font_role_input(ui, &mut state.fonts.body, "Body", "Inter", theme);
+                    font_role_input(
+                        ui,
+                        &mut state.fonts.mono,
+                        "Mono",
+                        "JetBrains Mono",
+                        theme,
+                    );
+                });
+                ui.horizontal(|ui| {
+                    let bundled = bundled_font_family_names().collect::<Vec<_>>().join(", ");
+                    ui.label(
+                        egui::RichText::new("Bundled families")
+                            .font(crate::theme::font(10.0))
+                            .color(theme.text_dim),
+                    )
+                    .on_hover_text(bundled);
+                    let missing = state.fonts.missing_fonts();
+                    if !missing.is_empty() {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} unavailable · using Inter",
+                                missing.join(", ")
+                            ))
+                            .font(crate::theme::font(10.0))
+                            .color(theme.warning_yellow),
+                        );
+                    }
+                });
+
+                ui.add_space(theme.space_md);
+
                 // Quick Preset Base Loader
                 ui.horizontal(|ui| {
                     ui.label(
@@ -355,6 +398,7 @@ pub fn render_theme_editor(
                                 is_light: Some(state.is_light),
                                 colors: hex_colors,
                                 radii: state.radii.clone(),
+                                fonts: state.fonts.clone(),
                             };
 
                             match serde_json::to_string_pretty(&theme_file) {
@@ -383,6 +427,30 @@ pub fn render_theme_editor(
         });
 
     actions
+}
+
+fn font_role_input(
+    ui: &mut egui::Ui,
+    value: &mut Option<String>,
+    label: &str,
+    hint: &str,
+    theme: &Theme,
+) {
+    ui.add_space(theme.space_sm);
+    ui.label(
+        egui::RichText::new(label)
+            .font(crate::theme::font(10.5))
+            .color(theme.text_muted),
+    );
+    let mut text = value.clone().unwrap_or_default();
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .hint_text(hint)
+            .desired_width(112.0),
+    );
+    if response.changed() {
+        *value = (!text.trim().is_empty()).then(|| text.trim().to_string());
+    }
 }
 
 fn color_picker_row(

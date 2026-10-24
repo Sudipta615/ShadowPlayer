@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::fonts::ThemeFonts;
 use super::schema::{LoadedTheme, ThemeError};
 use super::system::system_theme_catalog;
 use super::tokens::Theme;
@@ -18,7 +19,142 @@ pub struct ThemeCardInfo {
     pub is_active: bool,
     pub is_staged: bool,
     pub preview_colors: [eframe::egui::Color32; 4],
+    /// Requested font families that are not bundled; those roles use Inter.
+    pub missing_fonts: Vec<String>,
 }
+
+/// Custom themes shipped with the player, embedded so packaged builds can
+/// write them into the user's `themes/custom-theme/` folder on first launch.
+const BUNDLED_THEMES: &[(&str, &str)] = &[
+    (
+        "midnight-vinyl.shadowtheme",
+        include_str!("custom-theme/midnight-vinyl.shadowtheme"),
+    ),
+    (
+        "polar-drift.shadowtheme",
+        include_str!("custom-theme/polar-drift.shadowtheme"),
+    ),
+    (
+        "mocha-muse.shadowtheme",
+        include_str!("custom-theme/mocha-muse.shadowtheme"),
+    ),
+    (
+        "neon-tokyo.shadowtheme",
+        include_str!("custom-theme/neon-tokyo.shadowtheme"),
+    ),
+    (
+        "rosewood-smoke.shadowtheme",
+        include_str!("custom-theme/rosewood-smoke.shadowtheme"),
+    ),
+    (
+        "retro-groove.shadowtheme",
+        include_str!("custom-theme/retro-groove.shadowtheme"),
+    ),
+    (
+        "ink-and-wave.shadowtheme",
+        include_str!("custom-theme/ink-and-wave.shadowtheme"),
+    ),
+    (
+        "forest-hymn.shadowtheme",
+        include_str!("custom-theme/forest-hymn.shadowtheme"),
+    ),
+    (
+        "synthwave-sunset.shadowtheme",
+        include_str!("custom-theme/synthwave-sunset.shadowtheme"),
+    ),
+    (
+        "neon-grid.shadowtheme",
+        include_str!("custom-theme/neon-grid.shadowtheme"),
+    ),
+    (
+        "black-tie.shadowtheme",
+        include_str!("custom-theme/black-tie.shadowtheme"),
+    ),
+    (
+        "cafe-nocturne.shadowtheme",
+        include_str!("custom-theme/cafe-nocturne.shadowtheme"),
+    ),
+    (
+        "amber-terminal.shadowtheme",
+        include_str!("custom-theme/amber-terminal.shadowtheme"),
+    ),
+    (
+        "crimson-velvet.shadowtheme",
+        include_str!("custom-theme/crimson-velvet.shadowtheme"),
+    ),
+    (
+        "oat-latte.shadowtheme",
+        include_str!("custom-theme/oat-latte.shadowtheme"),
+    ),
+    (
+        "sunlit-studio.shadowtheme",
+        include_str!("custom-theme/sunlit-studio.shadowtheme"),
+    ),
+    (
+        "paper-and-ink.shadowtheme",
+        include_str!("custom-theme/paper-and-ink.shadowtheme"),
+    ),
+    (
+        "sage-and-clay.shadowtheme",
+        include_str!("custom-theme/sage-and-clay.shadowtheme"),
+    ),
+    (
+        "lilac-air.shadowtheme",
+        include_str!("custom-theme/lilac-air.shadowtheme"),
+    ),
+    (
+        "arctic-frost.shadowtheme",
+        include_str!("custom-theme/arctic-frost.shadowtheme"),
+    ),
+    (
+        "blueprint.shadowtheme",
+        include_str!("custom-theme/blueprint.shadowtheme"),
+    ),
+    (
+        "blue-hour.shadowtheme",
+        include_str!("custom-theme/blue-hour.shadowtheme"),
+    ),
+    (
+        "cherry-cola.shadowtheme",
+        include_str!("custom-theme/cherry-cola.shadowtheme"),
+    ),
+    (
+        "plum-circuit.shadowtheme",
+        include_str!("custom-theme/plum-circuit.shadowtheme"),
+    ),
+    (
+        "copper-patina.shadowtheme",
+        include_str!("custom-theme/copper-patina.shadowtheme"),
+    ),
+    (
+        "peach-fuzz.shadowtheme",
+        include_str!("custom-theme/peach-fuzz.shadowtheme"),
+    ),
+    (
+        "night-swim.shadowtheme",
+        include_str!("custom-theme/night-swim.shadowtheme"),
+    ),
+    (
+        "highlighter.shadowtheme",
+        include_str!("custom-theme/highlighter.shadowtheme"),
+    ),
+    (
+        "sea-glass.shadowtheme",
+        include_str!("custom-theme/sea-glass.shadowtheme"),
+    ),
+    (
+        "citrus-press.shadowtheme",
+        include_str!("custom-theme/citrus-press.shadowtheme"),
+    ),
+    (
+        "adobe-rose.shadowtheme",
+        include_str!("custom-theme/adobe-rose.shadowtheme"),
+    ),
+    (
+        "silverprint.shadowtheme",
+        include_str!("custom-theme/silverprint.shadowtheme"),
+    ),
+];
 
 /// Manages system and user themes, filesystem discovery, staging, and activation.
 pub struct ThemeManager {
@@ -175,6 +311,7 @@ impl ThemeManager {
                 is_active,
                 is_staged,
                 preview_colors: [t.bg_app, t.accent, t.accent_highlight, t.accent_warm],
+                missing_fonts: Vec::new(),
             });
         }
 
@@ -198,6 +335,7 @@ impl ThemeManager {
                 is_active,
                 is_staged,
                 preview_colors: [t.bg_app, t.accent, t.accent_highlight, t.accent_warm],
+                missing_fonts: user.fonts.missing_fonts(),
             });
         }
 
@@ -236,6 +374,31 @@ impl ThemeManager {
         } else {
             Theme::dark()
         }
+    }
+
+    /// Resolve the typeface declarations for an identifier or name.
+    ///
+    /// System themes and unknown IDs get the default role mapping: Inter for
+    /// display/body text and JetBrains Mono for technical text.
+    pub fn resolve_fonts(&self, id_or_name: &str) -> ThemeFonts {
+        self.loaded_themes
+            .iter()
+            .find(|t| t.metadata.id == id_or_name || t.metadata.name == id_or_name)
+            .map(|t| t.fonts.clone())
+            .unwrap_or_default()
+    }
+
+    /// Typefaces requested by the active committed theme.
+    pub fn active_fonts(&self) -> ThemeFonts {
+        self.resolve_fonts(&self.active_id)
+    }
+
+    /// Typefaces currently effective (staged preview wins over the active theme).
+    pub fn effective_fonts(&self) -> ThemeFonts {
+        self.staged_id
+            .as_deref()
+            .map(|staged| self.resolve_fonts(staged))
+            .unwrap_or_else(|| self.active_fonts())
     }
 
     /// Return the concrete Theme for the active committed ID.
@@ -413,6 +576,33 @@ impl ThemeManager {
         Ok(path)
     }
 
+    /// Copy the themes bundled with the player into the custom-theme folder.
+    ///
+    /// A source checkout already has these files next to the theme module, but
+    /// a packaged build does not: its `CARGO_MANIFEST_DIR` is a build-machine
+    /// path. Writing them once into the user's data directory keeps the gallery
+    /// identical in both cases. Existing files are never overwritten, so a user
+    /// edit survives an upgrade.
+    pub fn write_bundled_themes(&self) {
+        if let Err(e) = std::fs::create_dir_all(&self.custom_themes_dir) {
+            log::warn!(
+                "Could not create custom theme directory {:?}: {e}",
+                self.custom_themes_dir
+            );
+            return;
+        }
+
+        for (file_name, contents) in BUNDLED_THEMES {
+            let path = self.custom_themes_dir.join(file_name);
+            if path.exists() {
+                continue;
+            }
+            if let Err(e) = std::fs::write(&path, contents) {
+                log::warn!("Could not write bundled theme {:?}: {e}", path);
+            }
+        }
+    }
+
     pub fn errors(&self) -> &[(PathBuf, ThemeError)] {
         &self.errors
     }
@@ -463,6 +653,78 @@ mod tests {
         manager.load_all();
         assert!(!manager.loaded_themes.is_empty());
         assert!(manager.theme_for("Ocean Night").is_some());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn manager_writes_every_bundled_theme() {
+        let temp_dir = std::env::temp_dir().join("shadowplayer_test_bundled_themes");
+        let custom_dir = temp_dir.join("custom-theme");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let mut manager = ThemeManager::new_with_custom_dir(&temp_dir, custom_dir.clone());
+        manager.write_bundled_themes();
+
+        assert!(BUNDLED_THEMES.len() >= 32);
+        for (file_name, _) in BUNDLED_THEMES {
+            let path = custom_dir.join(file_name);
+            assert!(path.is_file(), "missing bundled theme {}", path.display());
+        }
+
+        manager.load_all();
+        assert!(manager.loaded_themes.len() >= BUNDLED_THEMES.len());
+        assert!(manager.theme_for("Midnight Vinyl").is_some());
+        assert!(manager.theme_for("Oat Latte").is_some());
+
+        // A second write must not overwrite a user's edit.
+        let first = custom_dir.join("midnight-vinyl.shadowtheme");
+        std::fs::write(&first, "{}\n").unwrap();
+        manager.write_bundled_themes();
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "{}\n");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn manager_reports_unbundled_fonts_and_resolves_fallbacks() {
+        let temp_dir = std::env::temp_dir().join("shadowplayer_test_font_cards");
+        let custom_dir = temp_dir.join("custom-theme");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&custom_dir).unwrap();
+
+        let mut theme_file: super::super::schema::ThemeFile =
+            serde_json::from_str(include_str!("custom-theme/midnight-vinyl.shadowtheme")).unwrap();
+        let metadata = theme_file.metadata.as_mut().unwrap();
+        metadata.id = "missing-font-demo".into();
+        metadata.name = "Missing Font Demo".into();
+        theme_file.id = Some(metadata.id.clone());
+        theme_file.name = Some(metadata.name.clone());
+        theme_file.fonts.display = Some("Unavailable Display".into());
+        theme_file.fonts.body = Some("DM Sans".into());
+        theme_file.fonts.mono = Some("Unavailable Mono".into());
+        std::fs::write(
+            custom_dir.join("missing-font-demo.shadowtheme"),
+            serde_json::to_string(&theme_file).unwrap(),
+        )
+        .unwrap();
+
+        let mut manager = ThemeManager::new_with_custom_dir(&temp_dir, custom_dir);
+        manager.load_all();
+
+        let card = manager
+            .all_theme_cards()
+            .into_iter()
+            .find(|card| card.id == "missing-font-demo")
+            .expect("fixture theme should load");
+        assert_eq!(
+            card.missing_fonts,
+            vec!["Unavailable Display", "Unavailable Mono"]
+        );
+
+        let fonts = manager.resolve_fonts("missing-font-demo");
+        assert_eq!(fonts.body.as_deref(), Some("DM Sans"));
+        assert_eq!(manager.active_fonts(), ThemeFonts::default());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

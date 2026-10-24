@@ -5,6 +5,11 @@
   "author": "ShadowPlayer Community",
   "description": "Deep ocean blue night aesthetic",
   "is_light": false,
+  "fonts": {
+    "display": "Space Grotesk",
+    "body": "Inter",
+    "mono": "JetBrains Mono"
+  },
   "colors": {
     "bg_app":            "#070F1A",
     "bg_sidebar":        "#091520",

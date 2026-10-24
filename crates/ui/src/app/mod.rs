@@ -34,8 +34,7 @@ use crate::services::{
 use crate::state::{
     AppState, DspState, LibraryState, PodcastState, SleepTimerMode, TelemetryState,
 };
-use crate::theme::Theme;
-use crate::theme::ThemeManager;
+use crate::theme::{Theme, ThemeFonts, ThemeManager};
 use crate::views::{
     render_albums_view, render_artists_view, render_folders_view, render_genres_view,
     render_help_view, render_main_playback_view, render_settings_view, HelpState,
@@ -124,6 +123,9 @@ pub struct ShadowPlayerApp {
     /// no style has been applied yet; the app only rebuilds egui's style when
     /// this differs from `theme.is_light`.
     applied_theme: Option<Theme>,
+    /// Typeface roles currently installed in the egui context. A change means
+    /// egui's font atlas must be rebuilt before the next frame is drawn.
+    applied_fonts: Option<ThemeFonts>,
     settings_dirty: bool,
 
     pub theme_manager: ThemeManager,
@@ -236,6 +238,7 @@ impl ShadowPlayerApp {
 
         let mut theme_manager = ThemeManager::new(&data_dir);
         let _ = theme_manager.write_example_theme();
+        theme_manager.write_bundled_themes();
         theme_manager.load_all();
 
         let autotag_service = AutotagService::new();
@@ -288,6 +291,7 @@ impl ShadowPlayerApp {
             smart_playlist_editor: SmartPlaylistEditorState::default(),
             theme: Theme::default(),
             applied_theme: None,
+            applied_fonts: None,
             settings_dirty: false,
 
             theme_manager,

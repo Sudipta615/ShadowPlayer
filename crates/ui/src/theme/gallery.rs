@@ -379,6 +379,20 @@ fn render_theme_card(
                     });
                 }
 
+                if !card.missing_fonts.is_empty() {
+                    ui.add_space(theme.space_xs);
+                    let names = card.missing_fonts.join(", ");
+                    ui.label(
+                        egui::RichText::new(format!("Font unavailable: {names} · using Inter"))
+                            .font(crate::theme::mono_font(9.0))
+                            .color(theme.warning_yellow),
+                    )
+                    .on_hover_text(
+                        "This theme requests typefaces that are not bundled with ShadowPlayer. \
+                         Those roles fall back to Inter so the interface stays readable.",
+                    );
+                }
+
                 ui.add_space(theme.space_sm);
 
                 // Action buttons: Preview, Apply
