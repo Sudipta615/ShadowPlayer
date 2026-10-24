@@ -8,6 +8,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-24
+
+*Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **An engineering contract at the repository root.** `AGENTS.md` defines the
+  dependency topology, the audio-truth rules, the performance guarantees, and
+  the decomposition protocol that guards against new god files and god objects.
+
+### Changed
+- **The application shell is now a set of focused modules.** `crates/ui/src/app.rs`
+  (5,814 lines) became an `app/` facade with modules for service polling,
+  settings I/O, shortcuts, the command palette, eval hooks, imports, library
+  actions, desktop integration, modals, and frame rendering. `app/mod.rs` is
+  428 lines and every new module is under 800 lines.
+- **The remaining god files were decomposed without changing their public
+  APIs.** `database::repos`, `audio-session::session`, `help_view`,
+  `songs_table`, `eq_panel`, and `settings_tab` now live in domain- or
+  view-specific module trees. Their facades preserve the existing import paths
+  and behaviour.
+- **Source-reflection tests inspect every split source file** instead of the
+  deleted monoliths, so documentation and capability drift checks still cover
+  the entire surface rather than only a facade.
+
+### Documentation
+- **README rewritten around the product.** It leads with verified bit-perfect
+  output, local-first operation, the DSP studio, library scale, first-run steps,
+  and measured performance instead of a flat feature inventory.
+- **Limitations are smaller and more accurate.** True boundaries are now
+  separated from deliberate product choices in "What ShadowPlayer is not":
+  no streaming or telemetry, no video, no background updater, no LAN control
+  server, and no GUI-less library manager are choices, not missing features.
+
+### Testing and release
+- Workspace tests, documentation-truth checks, source-reflection checks,
+  platform parity, version lockstep, clippy with warnings denied, and the
+  release library budget all pass. No user-facing behaviour was intended to
+  change in this release.
+
 ## [0.16.0] - 2026-10-24
 
 *Released with audio-engine 1.8.0. The player and the engine are versioned separately and released

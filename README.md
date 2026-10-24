@@ -8,7 +8,7 @@ A local-first desktop music player built in Rust: bit-perfect output, a
 studio-grade DSP chain, a 100,000-track library that stays fast, and no
 accounts, cloud, or telemetry.
 
-[![Version](https://img.shields.io/badge/version-0.16.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.17.0-blue?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)](#platform-support)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org/)
@@ -436,7 +436,8 @@ but they are released together. To cut a release:
 1. Bump `version` in `crates/*/Cargo.toml` (the player workspace) and, when the
    engine changed, `crates/engine/Cargo.toml` and its subcrates too.
 2. Move the `[Unreleased]` section of `CHANGELOG.md` under the new version and
-   date, and check the version badge in `crates/engine/README.md`.
+   date, and check the version badges in `README.md` and
+   `crates/engine/README.md`.
 3. Run the app once: startup prints both versions from `engine::VERSION` and
    `engine::NAME`, which is the source of truth if a build ever reports the
    wrong pair.
