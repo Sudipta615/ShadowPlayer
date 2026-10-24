@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-24
+
+*Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **The bundled gallery now ships thirty-two themes.** Twelve new schema-v2
+  themes join the collection: Blueprint, Blue Hour, Cherry Cola, Plum Circuit,
+  Copper Patina, Peach Fuzz, Night Swim, Highlighter, Sea Glass, Citrus Press,
+  Adobe Rose, and Silverprint. The set now has 21 dark/OLED and 11 light
+  themes, each with a full palette, independent radius scale, and
+  contrast-checked text tokens.
+- **Themes can carry their own typography.** Schema-v2 `fonts` declares
+  independent display, body, and mono families. The gallery warns when a
+  requested family is unavailable, the editor exposes all three roles, and the
+  selection persists and applies across the app.
+- **Six OFL families ship with the player.** Fraunces, Instrument Serif,
+  Space Grotesk, DM Sans, Bricolage Grotesque, and JetBrains Mono are embedded
+  alongside Inter, with licences and a font README, so themes do not depend on
+  host-installed fonts.
+
+### Changed
+- Theme font roles fall back deterministically: missing text families use
+  Inter, an omitted mono role uses JetBrains Mono, and an explicitly missing
+  mono family falls back to Inter.
+- Amber Terminal uses Inter for body copy to keep monospaced labels from
+  clipping while retaining JetBrains Mono for display and diagnostics.
+- `docs/THEMING.md` documents all thirty-two bundled themes and their
+  typography.
+
+### Testing and release
+- Theme validation covers every bundled file, unique IDs and names, strict
+  ten-surface WCAG AA contrast, border contrast, and font availability.
+- Workspace tests, integration guards, formatting, and clippy with warnings
+  denied pass.
+
 ## [0.17.0] - 2026-10-24
 
 *Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
