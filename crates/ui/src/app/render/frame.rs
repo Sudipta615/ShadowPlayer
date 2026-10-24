@@ -30,8 +30,10 @@ impl ShadowPlayerApp {
         // Mini-player viewport transition. The normal geometry is kept aside so
         // restoring never lands at the mini player's 320x110 floor.
         if self.app_state.mini_player && !self.mini_applied {
-            self.normal_window_size =
-                (self.window_size.0.max(640.0), self.window_size.1.max(360.0));
+            self.normal_window_size = (
+                self.window_size.0.max(1080.0),
+                self.window_size.1.max(640.0),
+            );
             self.mini_applied = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(320.0, 110.0)));
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(320.0, 110.0)));
@@ -41,10 +43,12 @@ impl ShadowPlayerApp {
         } else if !self.app_state.mini_player && self.mini_applied {
             self.mini_applied = false;
             let (w, h) = self.normal_window_size;
-            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(640.0, 360.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(Vec2::new(
+                1080.0, 640.0,
+            )));
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
-                w.max(640.0),
-                h.max(360.0),
+                w.max(1080.0),
+                h.max(640.0),
             )));
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
                 egui::WindowLevel::Normal,

@@ -195,16 +195,43 @@ pub fn render_action_button(
         }
         TopbarAction::MiniPlayer => {
             let p = ui.painter_at(rect);
-            let outer = Rect::from_center_size(rect.center(), Vec2::new(18.0, 13.0));
+            let outer = Rect::from_center_size(rect.center(), Vec2::new(20.0, 14.0));
             p.rect_stroke(
                 outer,
                 CornerRadius::same(theme.radius_xs),
-                Stroke::new(1.4_f32, color),
+                Stroke::new(1.3_f32, color),
                 StrokeKind::Inside,
             );
-            let inner =
-                Rect::from_center_size(outer.center() + Vec2::new(1.0, 1.0), Vec2::new(9.0, 6.0));
-            p.rect_filled(inner, CornerRadius::same(theme.radius_xs), color);
+            // Play triangle on left
+            let play_left = outer.min.x + 3.5;
+            let play_top = outer.center().y - 3.5;
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    Pos2::new(play_left, play_top),
+                    Pos2::new(play_left + 4.5, outer.center().y),
+                    Pos2::new(play_left, play_top + 7.0),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+            // Mini track seek/waveform lines on right
+            let line_left = play_left + 7.0;
+            let line_right = outer.max.x - 3.5;
+            let cy = outer.center().y;
+            p.line_segment(
+                [
+                    Pos2::new(line_left, cy - 2.0),
+                    Pos2::new(line_right, cy - 2.0),
+                ],
+                Stroke::new(1.3_f32, color),
+            );
+            p.line_segment(
+                [
+                    Pos2::new(line_left, cy + 2.0),
+                    Pos2::new(line_right - 3.0, cy + 2.0),
+                ],
+                Stroke::new(1.2_f32, color.gamma_multiply(0.6)),
+            );
         }
     }
 

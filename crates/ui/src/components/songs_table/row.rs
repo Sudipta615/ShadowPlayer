@@ -197,7 +197,7 @@ pub(super) fn render_list(
                 // Interaction zones that must NOT trigger playback.
                 let fav_rect = Rect::from_center_size(
                     Pos2::new(vis_rect.min.x + cols.favorite_x + COL_FAV_W * 0.5, cy),
-                    Vec2::new(24.0, 24.0),
+                    Vec2::new(18.0, 18.0),
                 );
                 let menu_rect = Rect::from_center_size(
                     Pos2::new(vis_rect.min.x + cols.menu_x + COL_MENU_W * 0.5, cy),

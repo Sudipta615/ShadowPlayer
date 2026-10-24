@@ -63,6 +63,93 @@ impl SettingsCategory {
             Self::Appearance => crate::components::icons::draw_moon(ui, rect, color),
         }
     }
+
+    /// Sub-heading cards rendered in this category
+    pub fn cards(&self) -> &'static [&'static str] {
+        match self {
+            Self::Playback => &[
+                "Playback Speed & Pitch Transposition",
+                "Track Transitions & Crossfading",
+                "Loudness Normalization (ReplayGain & EBU R128)",
+            ],
+            Self::Output => &[
+                "Audio Driver Backend & Hardware Device",
+                "Sample Rate Policies & Resampling Precision",
+            ],
+            Self::Spatial => &[
+                "3D Soundstage & Spatial Radar (Interactive)",
+                "Binaural HRTF & Head Tracking",
+                "Virtual Room Acoustics Simulation",
+                "Chain Presets",
+            ],
+            Self::MixBus => &[
+                "Multitrack Lane Mixer",
+                "Sidechain Ducking Compressor",
+                "Auxiliary Bus & Psychoacoustic Enhancer",
+                "Bass Management & Subwoofer Integration",
+                "LFE Channel",
+                "Up / Down Mixing",
+                "CLAP Plugin Insert",
+            ],
+            Self::Tools => &[
+                "High-Resolution Stream Capture",
+                "ReplayGain & Loudness Tagging Tool",
+                "Audio Engine Stream Recovery",
+                "Runtime Diagnostics",
+                "Room Correction Measurement",
+                "CD Ripper",
+                "Transcode Export",
+                "Automatic Updates",
+            ],
+            Self::Library => &[
+                "Interface & Language",
+                "Smart Playlists",
+                "Music Library Storage & Directories",
+                "Organize Files",
+                "Application Instances",
+                "About ShadowPlayer",
+            ],
+            Self::Appearance => &["Theme Gallery"],
+        }
+    }
+}
+
+/// Shorter, clean display names for sub-headings in the vertical sidebar
+pub fn card_display_name(card: &str) -> &str {
+    match card {
+        "Playback Speed & Pitch Transposition" => "Playback Speed & Pitch",
+        "Track Transitions & Crossfading" => "Track Transitions",
+        "Loudness Normalization (ReplayGain & EBU R128)" => "Loudness Normalization",
+        "Audio Driver Backend & Hardware Device" => "Audio Hardware & Driver",
+        "Sample Rate Policies & Resampling Precision" => "Sample Rate & Resampling",
+        "3D Soundstage & Spatial Radar (Interactive)" => "3D Soundstage & Radar",
+        "Binaural HRTF & Head Tracking" => "Binaural HRTF",
+        "Virtual Room Acoustics Simulation" => "Room Acoustics",
+        "Chain Presets" => "DSP Chain Presets",
+        "Multitrack Lane Mixer" => "Multitrack Mixer",
+        "Sidechain Ducking Compressor" => "Sidechain Ducking",
+        "Auxiliary Bus & Psychoacoustic Enhancer" => "Aux Bus & Enhancer",
+        "Bass Management & Subwoofer Integration" => "Bass Management",
+        "LFE Channel" => "LFE Channel",
+        "Up / Down Mixing" => "Up / Down Mixing",
+        "CLAP Plugin Insert" => "CLAP Plugins",
+        "High-Resolution Stream Capture" => "Stream Capture",
+        "ReplayGain & Loudness Tagging Tool" => "Loudness Tagging",
+        "Audio Engine Stream Recovery" => "Stream Recovery",
+        "Runtime Diagnostics" => "Diagnostics",
+        "Room Correction Measurement" => "Room Measurement",
+        "CD Ripper" => "CD Ripper",
+        "Transcode Export" => "Transcode Export",
+        "Automatic Updates" => "Automatic Updates",
+        "Interface & Language" => "Interface & Language",
+        "Smart Playlists" => "Smart Playlists",
+        "Music Library Storage & Directories" => "Library Storage",
+        "Organize Files" => "Organize Files",
+        "Application Instances" => "App Instances",
+        "About ShadowPlayer" => "About ShadowPlayer",
+        "Theme Gallery" => "Theme Gallery",
+        other => other,
+    }
 }
 
 /// The speaker icon, adapted to the tab strip's plain-function signature.
@@ -91,7 +178,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 86] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 83] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -529,24 +616,6 @@ pub static SETTINGS_INDEX: [SettingsEntry; 86] = [
         card: "Automatic Updates",
         label: "Update Check",
         description: "Off by default. When enabled, Check contacts GitHub, compares versions, and offers a verified download for this platform",
-    },
-    SettingsEntry {
-        category: SettingsCategory::Appearance,
-        card: "Theme & Visual Aesthetics",
-        label: "Theme Palette",
-        description: "Switch between Obsidian dark and Jade light mode",
-    },
-    SettingsEntry {
-        category: SettingsCategory::Appearance,
-        card: "Theme & Visual Aesthetics",
-        label: "Signature Palette",
-        description: "Obsidian & Jade: Jade (#0F766E), Mint (#5EEAD4), Amber (#F59E0B), Emerald (#34D399)",
-    },
-    SettingsEntry {
-        category: SettingsCategory::Appearance,
-        card: "Theme & Visual Aesthetics",
-        label: "Custom Themes Directory",
-        description: "Place .shadowtheme files here or use Import Theme to copy from anywhere on disk",
     },
     SettingsEntry {
         category: SettingsCategory::Library,

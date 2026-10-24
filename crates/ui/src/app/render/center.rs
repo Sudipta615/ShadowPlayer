@@ -67,20 +67,45 @@ impl ShadowPlayerApp {
                     let mut search_buf = self.app_state.search_query.clone();
                     let mut search_changed = false;
                     ui.horizontal(|ui| {
-                        let actions_w = 34.0 * 3.0 + 12.0;
-                        let search_w = (ui.available_width() - actions_w - 8.0).max(160.0);
-                        ui.allocate_ui_with_layout(
-                            Vec2::new(search_w, 38.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                search_changed = crate::components::topbar::render_search_input(
-                                    ui,
-                                    &mut search_buf,
-                                    &self.theme,
-                                );
-                            },
-                        );
-                        self.render_topbar_actions(ui, window_w);
+                        let total_w = ui.available_width();
+                        let search_w = total_w.min(500.0);
+
+                        if !show_right_panel {
+                            let actions_w = 34.0 * 2.0 + 8.0;
+                            let search_pad = ((total_w - actions_w - search_w) * 0.5).max(0.0);
+                            ui.add_space(search_pad);
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(search_w, 38.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    search_changed = crate::components::topbar::render_search_input(
+                                        ui,
+                                        &mut search_buf,
+                                        &self.theme,
+                                    );
+                                },
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    self.render_topbar_actions(ui, window_w);
+                                },
+                            );
+                        } else {
+                            let pad = ((total_w - search_w) * 0.5).max(0.0);
+                            ui.add_space(pad);
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(search_w, 38.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    search_changed = crate::components::topbar::render_search_input(
+                                        ui,
+                                        &mut search_buf,
+                                        &self.theme,
+                                    );
+                                },
+                            );
+                        }
                     });
                     if search_changed {
                         self.app_state.search_query = search_buf;

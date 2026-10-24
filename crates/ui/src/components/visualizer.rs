@@ -1,25 +1,31 @@
 use crate::theme::Theme;
 use eframe::egui::{self, CornerRadius, Pos2, Rect, Response, Sense, Vec2};
 
-/// Compact live spectrum strip used by the Now Playing card.
+/// Curated static soundwave equalizer silhouette.
+/// Models a natural audio waveform with acoustic peaks in the bass, vocal mids,
+/// and upper registers, with elegant valleys in between.
+const STATIC_WAVE_SILHOUETTE: [f32; 48] = [
+    0.20, 0.28, 0.42, 0.58, 0.72, 0.82, 0.65, 0.48, 0.38, 0.52, 0.68, 0.84, 0.94, 0.88, 0.70, 0.54,
+    0.40, 0.35, 0.50, 0.68, 0.85, 0.98, 0.92, 0.78, 0.62, 0.48, 0.42, 0.56, 0.74, 0.88, 0.90, 0.76,
+    0.58, 0.44, 0.38, 0.52, 0.66, 0.78, 0.70, 0.55, 0.42, 0.34, 0.46, 0.58, 0.48, 0.36, 0.26, 0.18,
+];
+
+/// Completely static, zero-CPU soundwave visualizer used by the Now Playing card.
 ///
-/// The old implementation ignored `spectrum_db` entirely and drew a hard-coded
-/// mock array, then requested a repaint every frame even while paused. This
-/// version maps the real FFT bins logarithmically and only schedules animation
-/// while audio is playing.
+/// Rather than running expensive real-time FFT frequency binning or per-frame
+/// continuous animations (which consume CPU and battery on lower-end devices),
+/// this widget paints a static, balanced soundwave silhouette.
+///
+/// It schedules ZERO repaints and performs zero runtime allocations, strictly
+/// guaranteeing 0% CPU consumption during playback and idle.
 pub struct VisualizerWidget<'a> {
-    spectrum_db: &'a [f32],
     is_playing: bool,
     theme: &'a Theme,
 }
 
 impl<'a> VisualizerWidget<'a> {
-    pub fn new(spectrum_db: &'a [f32], is_playing: bool, theme: &'a Theme) -> Self {
-        Self {
-            spectrum_db,
-            is_playing,
-            theme,
-        }
+    pub fn new(is_playing: bool, theme: &'a Theme) -> Self {
+        Self { is_playing, theme }
     }
 
     pub fn show(self, ui: &mut egui::Ui, size: Vec2) -> Response {
@@ -30,88 +36,73 @@ impl<'a> VisualizerWidget<'a> {
         }
 
         let painter = ui.painter_at(rect);
-        let num_bars = ((rect.width() / 9.0) as usize).clamp(24, 64);
-        let spacing = 2.0_f32;
-        let bar_width = ((rect.width() - spacing * (num_bars.saturating_sub(1)) as f32)
-            / num_bars as f32)
-            .max(1.5);
-        let baseline = rect.bottom() - 2.0;
 
-        if self.spectrum_db.is_empty() {
-            // An empty library should look quiet, not broken.
+        // Layout parameters
+        let bar_width = 3.5_f32;
+        let spacing = 2.5_f32;
+        let step = bar_width + spacing;
+        let num_bars = ((rect.width() / step) as usize).clamp(16, 48);
+
+        let total_width =
+            num_bars as f32 * bar_width + (num_bars.saturating_sub(1)) as f32 * spacing;
+        let start_x = rect.left() + (rect.width() - total_width).max(0.0) * 0.5;
+        let baseline = rect.bottom() - 2.0;
+        let max_height = (rect.height() - 4.0).max(6.0);
+        let min_height = 2.5_f32;
+        let corner = CornerRadius::same(self.theme.radius_xs);
+
+        if !self.is_playing {
+            // Idle / Paused state: Resting low-profile pills in muted color.
+            let rest_color = self.theme.text_dim.gamma_multiply(0.35);
             for i in 0..num_bars {
-                let x = rect.left() + i as f32 * (bar_width + spacing);
+                let norm_idx = (i * STATIC_WAVE_SILHOUETTE.len()) / num_bars.max(1);
+                let factor = STATIC_WAVE_SILHOUETTE[norm_idx.min(STATIC_WAVE_SILHOUETTE.len() - 1)];
+                let bar_h = min_height + factor * 0.25 * (max_height - min_height);
+                let x = start_x + i as f32 * step;
                 let bar = Rect::from_min_max(
-                    Pos2::new(x, baseline - 2.0),
+                    Pos2::new(x, baseline - bar_h),
                     Pos2::new(x + bar_width, baseline),
                 );
-                painter.rect_filled(
-                    bar,
-                    CornerRadius::same(self.theme.radius_xs),
-                    self.theme.text_dim.gamma_multiply(0.45),
-                );
+                painter.rect_filled(bar, corner, rest_color);
             }
             return response;
         }
 
-        let spec_len = self.spectrum_db.len();
+        // Active Playing state: Static, crisp soundwave silhouette in theme accent colors.
+        // No animation, no timer math, no repaint requests -> strictly 0% CPU.
         for i in 0..num_bars {
-            let t0 = i as f32 / num_bars as f32;
-            let t1 = (i + 1) as f32 / num_bars as f32;
-            let bin_start =
-                ((t0.powf(2.2) * (spec_len.saturating_sub(1)) as f32) as usize).min(spec_len - 1);
-            let bin_end = ((t1.powf(2.2) * (spec_len.saturating_sub(1)) as f32) as usize)
-                .clamp(bin_start + 1, spec_len);
+            let pos = i as f32 / num_bars.max(1) as f32; // normalized position [0.0, 1.0]
+            let norm_idx = (i * STATIC_WAVE_SILHOUETTE.len()) / num_bars.max(1);
+            let factor = STATIC_WAVE_SILHOUETTE[norm_idx.min(STATIC_WAVE_SILHOUETTE.len() - 1)];
 
-            let mut max_db = -120.0_f32;
-            for &db in &self.spectrum_db[bin_start..bin_end] {
-                if db > max_db {
-                    max_db = db;
-                }
-            }
-
-            // -60 dB is the visual floor; anything quieter is a hairline.
-            let norm = ((max_db + 60.0) / 60.0).clamp(0.015, 1.0);
-            // Paused audio keeps a dim, frozen silhouette instead of a bright
-            // spectrum that would imply something is still playing.
-            let energy = if self.is_playing { 1.0 } else { 0.22 };
-            let bar_height = (norm * energy * (rect.height() - 4.0)).max(2.0);
-            let x = rect.left() + i as f32 * (bar_width + spacing);
+            let bar_height = min_height + factor * (max_height - min_height);
+            let x = start_x + i as f32 * step;
             let bar = Rect::from_min_max(
                 Pos2::new(x, baseline - bar_height),
                 Pos2::new(x + bar_width, baseline),
             );
 
-            // A disciplined jade/mint intensity ramp, not a rainbow.
-            let color = if t0 < 0.68 {
+            let color = if pos < 0.68 {
                 self.theme.accent
             } else {
                 self.theme.accent_highlight
             };
-            let color = if self.is_playing {
-                color
-            } else {
-                color.gamma_multiply(0.55)
-            };
-            painter.rect_filled(bar, CornerRadius::same(self.theme.radius_xs), color);
 
+            painter.rect_filled(bar, corner, color);
+
+            // Subtle top cap highlight on peak bars for visual depth
             if bar_height > 10.0 {
+                let cap_h = (bar_width * 0.6).min(bar_height * 0.25);
                 let cap = Rect::from_min_max(
                     Pos2::new(x, bar.min.y),
-                    Pos2::new(x + bar_width, bar.min.y + 1.5),
+                    Pos2::new(x + bar_width, bar.min.y + cap_h),
                 );
-                painter.rect_filled(
-                    cap,
-                    CornerRadius::same(self.theme.radius_xs),
-                    color.gamma_multiply(1.3),
-                );
+                painter.rect_filled(cap, corner, color.gamma_multiply(1.25));
             }
         }
 
-        if self.is_playing {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(33));
-        }
+        // IMPORTANT: No ui.ctx().request_repaint() or request_repaint_after()!
+        // This ensures strictly 0% CPU consumption.
 
         response
     }

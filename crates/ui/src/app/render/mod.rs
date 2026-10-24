@@ -32,25 +32,6 @@ impl ShadowPlayerApp {
                 self.app_state.right_overlay_open = !self.app_state.right_overlay_open;
             }
         }
-        // The right drawer already carries the sun/moon pill when it is a
-        // column. Only duplicate it in the top bar for the narrow layout,
-        // where the drawer is an overlay.
-        if !wide
-            && render_action_button(
-                ui,
-                TopbarAction::Theme,
-                false,
-                &self.theme,
-                if self.theme.is_light {
-                    "Switch to dark theme"
-                } else {
-                    "Switch to light theme"
-                },
-            )
-        {
-            self.theme.toggle();
-            self.settings_dirty = true;
-        }
         if render_action_button(
             ui,
             TopbarAction::MiniPlayer,

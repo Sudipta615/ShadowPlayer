@@ -285,6 +285,9 @@ impl AudioEngine {
         }
         if needs_start {
             new_output.start()?;
+            if self.current_state() != PlaybackState::Playing {
+                new_output.pause();
+            }
         }
 
         self.audio_output = Some(new_output);

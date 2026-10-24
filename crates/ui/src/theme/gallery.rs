@@ -82,6 +82,7 @@ pub fn render_theme_gallery(
             ui.add_space(theme.space_md);
 
             // Filter chips
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
             for category in ThemeFilter::ALL {
                 let selected = state.filter == category;
                 let text = egui::RichText::new(category.label()).font(crate::theme::font(11.5));
@@ -89,13 +90,14 @@ pub fn render_theme_gallery(
                     ui.add(
                         egui::Button::new(text.color(Color32::WHITE))
                             .fill(theme.accent)
-                            .corner_radius(CornerRadius::same(theme.radius_pill)),
+                            .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
                 } else {
                     ui.add(
                         egui::Button::new(text.color(theme.text_secondary))
                             .fill(theme.bg_pill)
-                            .corner_radius(CornerRadius::same(theme.radius_pill)),
+                            .stroke(Stroke::new(1.0, theme.border_subtle))
+                            .corner_radius(CornerRadius::same(theme.radius_md)),
                     )
                 };
                 if resp.clicked() {
@@ -103,8 +105,10 @@ pub fn render_theme_gallery(
                 }
             }
 
-            // Action buttons on the right: Import Theme, Open Folder, Reload
+            // Action buttons on the right: Import Theme, Reload
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+
                 if ui
                     .add(
                         egui::Button::new(
@@ -119,18 +123,6 @@ pub fn render_theme_gallery(
                     .clicked()
                 {
                     actions.import_theme = true;
-                }
-
-                if ui
-                    .button(
-                        egui::RichText::new("Open Folder")
-                            .font(crate::theme::font(11.5))
-                            .color(theme.text_secondary),
-                    )
-                    .on_hover_text("Open custom-theme directory in your system file manager")
-                    .clicked()
-                {
-                    actions.open_custom_themes_folder = true;
                 }
 
                 if ui
@@ -363,7 +355,8 @@ fn render_theme_card(
                         for tag in card.tags.iter().take(3) {
                             let badge = egui::Frame::NONE
                                 .fill(theme.bg_pill)
-                                .corner_radius(CornerRadius::same(theme.radius_pill))
+                                .stroke(Stroke::new(1.0, theme.border_subtle))
+                                .corner_radius(CornerRadius::same(theme.radius_sm))
                                 .inner_margin(Margin::symmetric(
                                     theme.space_xs as i8,
                                     theme.space_xxs as i8,

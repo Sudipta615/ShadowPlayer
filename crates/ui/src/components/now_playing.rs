@@ -304,7 +304,7 @@ impl<'a> NowPlayingCard<'a> {
                     if !compact {
                         ui.horizontal(|ui| {
                             ui.add_space(time_label_w + time_gap);
-                            VisualizerWidget::new(self.spectrum_db, self.is_playing, self.theme)
+                            VisualizerWidget::new(self.is_playing, self.theme)
                                 .show(ui, Vec2::new(bar_width, 42.0));
                         });
 
@@ -333,7 +333,7 @@ impl<'a> NowPlayingCard<'a> {
                         // Waveform scrubber. Falls back to the plain line
                         // while the first decode is still running.
                         let (_bar_resp, seek) = crate::components::waveform_seek::WaveformSeek {
-                            peaks: self.waveform,
+                            peaks: None,
                             position_secs: self.position_secs,
                             duration_secs: self.duration_secs,
                             height: if dense { 12.0 } else { 16.0 },

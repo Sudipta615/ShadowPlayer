@@ -63,14 +63,18 @@ pub fn available_devices(backend: AudioBackend) -> Vec<OutputDeviceInfo> {
 
 /// The devices a cpal-backed backend offers.
 fn cpal_devices(backend: AudioBackend) -> Vec<OutputDeviceInfo> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let default_name = cpal::default_host()
+        .default_output_device()
+        .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
     super::cpal_devices::enumerate_devices(backend)
         .into_iter()
         .map(|name| OutputDeviceInfo {
             backend,
             // The cpal backends are selected by name, so the name is the id.
             id: name.clone(),
+            is_default: default_name.as_deref() == Some(name.as_str()),
             name,
-            is_default: false,
         })
         .collect()
 }

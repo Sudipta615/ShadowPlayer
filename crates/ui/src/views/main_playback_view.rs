@@ -684,6 +684,9 @@ fn handle_songs_table_action(
             let _ = playlist_repo.add_track(&pl_id, &track.id);
         }
     }
+    if let Some(fav_id) = action.toggle_favorite {
+        library_state.toggle_favorite(favorites_repo, fav_id);
+    }
     if action.favorite_selected {
         let selected = library_state.selected_tracks_in_order();
         for track in selected {
@@ -692,7 +695,10 @@ fn handle_songs_table_action(
     }
     if let Some((track_id, rating)) = action.set_rating {
         match track_repo.set_rating(&track_id, rating) {
-            Ok(()) => coordinator.update_track_rating(track_id, rating.min(5)),
+            Ok(()) => {
+                coordinator.update_track_rating(track_id, rating.min(5));
+                library_state.update_track_rating(track_id, rating.min(5));
+            }
             Err(e) => log::warn!("Could not save the rating for {track_id}: {e}"),
         }
     }
@@ -706,6 +712,7 @@ fn handle_songs_table_action(
             Ok(()) => {
                 for id in ids {
                     coordinator.update_track_rating(id, rating.min(5));
+                    library_state.update_track_rating(id, rating.min(5));
                 }
             }
             Err(e) => log::warn!("Could not save the selected ratings: {e}"),

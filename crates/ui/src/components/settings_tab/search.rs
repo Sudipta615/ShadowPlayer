@@ -10,63 +10,79 @@ use eframe::egui::{self, CornerRadius, Sense, Stroke, Vec2};
 // Search
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The Settings search field: one line, the same shape as the Help manual's.
+/// The Settings search field: one line, slimmed down and centered.
 pub(super) fn render_settings_search(
     ui: &mut egui::Ui,
     state: &mut SettingsTabState,
     theme: &Theme,
 ) {
-    egui::Frame::NONE
-        .fill(theme.bg_input)
-        .stroke(Stroke::new(1.0, theme.border_input))
-        .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(
-            theme.space_xl as i8,
-            theme.space_md as i8,
-        ))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+    let avail_w = ui.available_width();
+    let search_w = 460.0f32.min(avail_w);
+    let pad = ((avail_w - search_w) * 0.5).max(0.0);
 
-                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
-                crate::components::icons::draw_search(ui, icon_rect, theme.text_muted);
+    ui.horizontal(|ui| {
+        if pad > 0.0 {
+            ui.add_space(pad);
+        }
+        ui.allocate_ui_with_layout(
+            Vec2::new(search_w, 36.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                egui::Frame::NONE
+                    .fill(theme.bg_input)
+                    .stroke(Stroke::new(1.0, theme.border_input))
+                    .corner_radius(CornerRadius::same(theme.radius_md))
+                    .inner_margin(egui::Margin::symmetric(
+                        theme.space_md as i8,
+                        theme.space_sm as i8,
+                    ))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
 
-                let has_query = !state.search_query.is_empty();
-                let clear_w = if has_query { 28.0 } else { 0.0 };
-                let input_w = (ui.available_width() - clear_w - 6.0).max(80.0);
+                            let (icon_rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                            crate::components::icons::draw_search(ui, icon_rect, theme.text_muted);
 
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.search_query)
-                        .hint_text(
-                            egui::RichText::new(tr!(
-                                "Search settings — try “subwoofer” or “latency”"
-                            ))
-                            .color(theme.text_muted)
-                            .font(crate::theme::font(12.5)),
-                        )
-                        .desired_width(input_w)
-                        .frame(egui::Frame::NONE)
-                        .font(crate::theme::font(13.0))
-                        .text_color(theme.text_primary),
-                );
+                            let has_query = !state.search_query.is_empty();
+                            let clear_w = if has_query { 28.0 } else { 0.0 };
+                            let input_w = (ui.available_width() - clear_w - 6.0).max(80.0);
 
-                if has_query
-                    && ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(tr!("×"))
-                                    .font(crate::theme::font(14.0))
-                                    .color(theme.text_muted),
-                            )
-                            .frame(false),
-                        )
-                        .on_hover_text(tr!(Msg::S5D7548BE29B19777))
-                        .clicked()
-                {
-                    state.search_query.clear();
-                }
-            });
-        });
+                            ui.add(
+                                egui::TextEdit::singleline(&mut state.search_query)
+                                    .hint_text(
+                                        egui::RichText::new(tr!(
+                                            "Search settings — try “subwoofer” or “latency”"
+                                        ))
+                                        .color(theme.text_muted)
+                                        .font(crate::theme::font(12.5)),
+                                    )
+                                    .desired_width(input_w)
+                                    .frame(egui::Frame::NONE)
+                                    .font(crate::theme::font(13.0))
+                                    .text_color(theme.text_primary),
+                            );
+
+                            if has_query
+                                && ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(tr!("×"))
+                                                .font(crate::theme::font(14.0))
+                                                .color(theme.text_muted),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text(tr!(Msg::S5D7548BE29B19777))
+                                    .clicked()
+                            {
+                                state.search_query.clear();
+                            }
+                        });
+                    });
+            },
+        );
+    });
 }
 
 /// Search-as-jump: the results are a route to the real row, not a filtered

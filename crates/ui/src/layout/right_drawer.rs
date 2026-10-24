@@ -12,7 +12,7 @@ use crate::theme::Theme;
 #[allow(clippy::too_many_arguments)]
 pub fn render_right_drawer(
     ui: &mut egui::Ui,
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
     right_w: f32,
     avail_h: f32,
     app_state: &mut AppState,
@@ -26,33 +26,13 @@ pub fn render_right_drawer(
     lyrics_source: Option<crate::services::LyricsSource>,
     active_lyric_idx: Option<usize>,
     theme: &mut Theme,
-    show_theme_toggle: bool,
+    _show_theme_toggle: bool,
 ) {
     ui.allocate_ui_with_layout(
         Vec2::new(right_w, avail_h),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
-
-            // 1. Theme Toggle (wide drawer only). In narrow layouts the
-            // top bar owns this control, so the overlay must not render a
-            // second one behind it.
-            if show_theme_toggle {
-                let win_resp = crate::components::topbar::render_window_controls(ui, theme);
-                if win_resp.close_requested {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                if win_resp.maximize_requested {
-                    let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!is_max));
-                }
-                if win_resp.minimize_requested {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                }
-                if win_resp.theme_toggle_requested {
-                    theme.toggle();
-                }
-            }
 
             // 2. Right Panel (Queue / Lyrics / Volume)
             // Borrow the queue directly instead of cloning it every frame.

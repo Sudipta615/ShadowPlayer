@@ -33,8 +33,8 @@ impl ShadowPlayerApp {
             self.app_state.current_sort_order = app_settings.sort_order;
             self.app_state.is_grid_view = app_settings.view_mode == domain::models::ViewMode::Grid;
             self.window_size = (
-                app_settings.window_width.max(640.0),
-                app_settings.window_height.max(360.0),
+                app_settings.window_width.max(1080.0),
+                app_settings.window_height.max(640.0),
             );
             self.coordinator.set_shuffle(app_settings.shuffle);
             self.coordinator.set_repeat_mode(app_settings.repeat_mode);

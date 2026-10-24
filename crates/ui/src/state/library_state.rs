@@ -531,6 +531,20 @@ impl LibraryState {
         }
     }
 
+    /// Update a track's rating in memory across all_tracks and displayed_tracks.
+    pub fn update_track_rating(&mut self, track_id: TrackId, rating: u8) {
+        let clamped = rating.min(5);
+        if let Some(track) = self.all_tracks.iter_mut().find(|t| t.id == track_id) {
+            track.rating = clamped;
+        }
+        if let Some(track) = self.displayed_tracks.iter_mut().find(|t| t.id == track_id) {
+            track.rating = clamped;
+        }
+        if self.quick_filter == crate::components::songs_table::QuickFilter::Rating {
+            self.displayed_key = None;
+        }
+    }
+
     pub fn clear_selection(&mut self) {
         self.selected_track_ids.clear();
         self.last_clicked_index = None;

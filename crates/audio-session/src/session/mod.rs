@@ -56,9 +56,14 @@ impl AudioSession {
     }
 
     /// Construct a new hardware audio session with specific configuration.
-    pub fn with_config(config: EngineConfig) -> Result<Self, SessionError> {
+    pub fn with_config(mut config: EngineConfig) -> Result<Self, SessionError> {
+        config.loudness.background_scan_enabled = false;
         let mut engine = AudioEngine::new(config)?;
+        if let Err(e) = engine.start() {
+            log::warn!("Audio Engine failed to start output hardware: {e}");
+        }
         let handle = engine.handle();
+        handle.analyzer().set_enabled(false);
 
         let engine_event_rx = handle.clone_event_receiver();
         let output_event_rx = handle.clone_output_event_receiver();
@@ -71,7 +76,7 @@ impl AudioSession {
             .spawn(move || {
                 info!("Audio Engine worker thread started");
                 while worker_running.load(Ordering::Relaxed) {
-                    engine.tick_blocking(Duration::from_millis(5));
+                    engine.tick_blocking_adaptive();
                 }
                 info!("Audio Engine worker thread terminating");
             })?;

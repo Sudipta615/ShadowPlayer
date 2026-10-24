@@ -144,8 +144,6 @@ impl<'a> SideBar<'a> {
             self.render_nav_item(ui, NavItem::Albums, "Albums");
             self.render_nav_item(ui, NavItem::Artists, "Artists");
             self.render_nav_item(ui, NavItem::Genres, "Genres");
-            self.render_nav_item(ui, NavItem::Radio, "Radio");
-            self.render_nav_item(ui, NavItem::Podcasts, "Podcasts");
             self.render_nav_item(ui, NavItem::Folders, "Folders");
 
             // Collections section removed per user request

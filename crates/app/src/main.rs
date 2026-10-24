@@ -57,11 +57,11 @@ fn purge_legacy_demo_data(db: &Database, data_dir: &std::path::Path) {
     }
 }
 
-/// The smallest normal window. The responsive shell collapses the sidebar to
-/// an icon rail and turns the queue drawer into an overlay before this point;
+/// The smallest normal window. The responsive shell keeps all three primary
+/// columns (Sidebar, Content, Queue Drawer) visible at this size;
 /// the mini player has its own smaller floor.
-const MIN_WINDOW_WIDTH: f32 = 640.0;
-const MIN_WINDOW_HEIGHT: f32 = 360.0;
+const MIN_WINDOW_WIDTH: f32 = 1080.0;
+const MIN_WINDOW_HEIGHT: f32 = 640.0;
 
 /// The application's own icon, in the form the window manager asks for.
 ///

@@ -129,68 +129,72 @@ pub fn card_header_with_info(
     info: Option<&crate::components::info_box::InfoBoxContent>,
     theme: &Theme,
 ) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
+    let header_resp = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
-        let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(32.0, 32.0), Sense::hover());
-        ui.painter_at(icon_rect).rect_filled(
-            icon_rect,
-            CornerRadius::same(theme.radius_md),
-            theme.bg_pill,
-        );
-        icon_fn(
-            ui,
-            icon_rect.shrink2(Vec2::splat(7.0)),
-            theme.accent_highlight,
-        );
+            let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(32.0, 32.0), Sense::hover());
+            ui.painter_at(icon_rect).rect_filled(
+                icon_rect,
+                CornerRadius::same(theme.radius_md),
+                theme.bg_pill,
+            );
+            icon_fn(
+                ui,
+                icon_rect.shrink2(Vec2::splat(7.0)),
+                theme.accent_highlight,
+            );
 
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
-                ui.label(
-                    egui::RichText::new(title)
-                        .font(crate::theme::font(14.5))
-                        .strong()
-                        .color(theme.text_primary),
-                );
-                if let Some(info_content) = info {
-                    let id_str = format!("card_header_info_{}", title);
-                    crate::components::info_box::render_info_icon_button(
-                        ui,
-                        id_str,
-                        info_content,
-                        theme,
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+                    ui.label(
+                        egui::RichText::new(title)
+                            .font(crate::theme::font(14.5))
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    if let Some(info_content) = info {
+                        let id_str = format!("card_header_info_{}", title);
+                        crate::components::info_box::render_info_icon_button(
+                            ui,
+                            id_str,
+                            info_content,
+                            theme,
+                        );
+                    }
+                    if let Some((badge_text, bg, fg)) = status_badge {
+                        egui::Frame::NONE
+                            .fill(bg)
+                            .stroke(Stroke::new(1.0, fg.linear_multiply(0.4)))
+                            .corner_radius(CornerRadius::same(theme.radius_sm))
+                            .inner_margin(egui::Margin::symmetric(
+                                theme.space_md as i8,
+                                theme.space_xxs as i8,
+                            ))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(badge_text)
+                                        .font(crate::theme::font(10.5))
+                                        .strong()
+                                        .color(fg),
+                                );
+                            });
+                    }
+                });
+                if !subtitle.is_empty() {
+                    ui.label(
+                        egui::RichText::new(subtitle)
+                            .font(crate::theme::font(11.5))
+                            .color(theme.text_muted),
                     );
                 }
-                if let Some((badge_text, bg, fg)) = status_badge {
-                    egui::Frame::NONE
-                        .fill(bg)
-                        .stroke(Stroke::new(1.0, fg.linear_multiply(0.4)))
-                        .corner_radius(CornerRadius::same(theme.radius_sm))
-                        .inner_margin(egui::Margin::symmetric(
-                            theme.space_md as i8,
-                            theme.space_xxs as i8,
-                        ))
-                        .show(ui, |ui| {
-                            ui.label(
-                                egui::RichText::new(badge_text)
-                                    .font(crate::theme::font(10.5))
-                                    .strong()
-                                    .color(fg),
-                            );
-                        });
-                }
             });
-            if !subtitle.is_empty() {
-                ui.label(
-                    egui::RichText::new(subtitle)
-                        .font(crate::theme::font(11.5))
-                        .color(theme.text_muted),
-                );
-            }
-        });
-    });
+        })
+        .response;
+
+    apply_setting_jump(title, &header_resp, header_resp.rect, ui, theme);
 
     ui.add_space(2.0);
     ui.separator();
@@ -439,12 +443,6 @@ pub(super) fn badge_label(ui: &mut egui::Ui, text: impl Into<String>, theme: &Th
                     .color(theme.text_primary),
             );
         });
-}
-
-pub(super) fn color_dot(ui: &mut egui::Ui, color: Color32, tooltip: &str) {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::hover());
-    ui.painter_at(rect).circle_filled(rect.center(), 7.0, color);
-    resp.on_hover_text(tooltip);
 }
 
 /// The name of a language choice, in the language it names.

@@ -272,9 +272,11 @@ impl<'a> RightPanel<'a> {
                         let queue_tracks = self.queue_tracks;
                         let theme = self.theme;
                         let artwork = &mut *self.artwork;
+                        // Reserve space for Clear Queue button (40px) and bottom volume bar (36px)
+                        let queue_max_h = (ui.available_height() - 84.0).clamp(80.0, 520.0);
                         egui::ScrollArea::vertical()
                             .id_salt("queue_items_scroll")
-                            .max_height((ui.available_height() - 40.0).clamp(120.0, 520.0))
+                            .max_height(queue_max_h)
                             .auto_shrink([false, false])
                             .show_rows(ui, item_height, display_len, |ui, row_range| {
                                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
@@ -755,8 +757,10 @@ impl<'a> RightPanel<'a> {
             // Pinned to the bottom of the drawer. It used to be pushed down
             // by whatever height the queue happened to have, so it drifted
             // around as the queue grew and shrank.
-            let space_to_bottom = (ui.available_height() - 24.0).max(8.0);
-            ui.add_space(space_to_bottom);
+            let space_to_bottom = (ui.available_height() - 28.0).clamp(0.0, 16.0);
+            if space_to_bottom > 0.0 {
+                ui.add_space(space_to_bottom);
+            }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
 

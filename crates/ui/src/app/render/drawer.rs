@@ -37,6 +37,14 @@ impl ShadowPlayerApp {
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
             right_ui.set_clip_rect(right_rect);
+            right_ui.allocate_ui_with_layout(
+                Vec2::new(right_w, 38.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    self.render_topbar_actions(ui, window_w);
+                },
+            );
+            right_ui.add_space(self.theme.space_sm);
             let prev_light = self.theme.is_light;
             let prev_vol = self.app_state.volume;
             let prev_muted = self.app_state.is_muted;

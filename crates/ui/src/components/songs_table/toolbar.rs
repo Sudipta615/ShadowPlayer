@@ -488,108 +488,121 @@ fn render_column_preset_menu(
     theme: &Theme,
     action: &mut SongsTableAction,
 ) {
-    ui.menu_button(
-        egui::RichText::new(tr_args!(
-            "Columns · {name}",
-            "name" => &column_preset.name
-        ))
-        .font(crate::theme::font(11.0))
-        .color(theme.text_secondary),
-        |ui| {
-            ui.set_min_width(240.0);
-            for (idx, name) in column_preset_names.iter().enumerate() {
-                if ui.selectable_label(idx == active_preset, name).clicked() {
-                    action.select_column_preset = Some(idx);
-                    ui.close();
+    ui.scope(|ui| {
+        ui.visuals_mut().widgets.inactive.weak_bg_fill = theme.bg_pill;
+        ui.visuals_mut().widgets.inactive.bg_fill = theme.bg_pill;
+        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::new(1.0, theme.border_subtle);
+        ui.visuals_mut().widgets.inactive.corner_radius = CornerRadius::same(theme.radius_md);
+        ui.visuals_mut().widgets.hovered.weak_bg_fill = theme.bg_card_hover;
+        ui.visuals_mut().widgets.hovered.bg_fill = theme.bg_card_hover;
+        ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::new(1.0, theme.border_subtle);
+        ui.visuals_mut().widgets.hovered.corner_radius = CornerRadius::same(theme.radius_md);
+        ui.visuals_mut().widgets.open.weak_bg_fill = theme.bg_card_active;
+        ui.visuals_mut().widgets.open.bg_fill = theme.bg_card_active;
+        ui.visuals_mut().widgets.open.bg_stroke = egui::Stroke::new(1.0, theme.accent);
+        ui.visuals_mut().widgets.open.corner_radius = CornerRadius::same(theme.radius_md);
+
+        ui.menu_button(
+            egui::RichText::new(tr!("Columns"))
+                .font(crate::theme::font(11.5))
+                .color(theme.text_secondary),
+            |ui| {
+                ui.set_min_width(240.0);
+                for (idx, name) in column_preset_names.iter().enumerate() {
+                    if ui.selectable_label(idx == active_preset, name).clicked() {
+                        action.select_column_preset = Some(idx);
+                        ui.close();
+                    }
                 }
-            }
 
-            ui.separator();
-            ui.label(
-                egui::RichText::new(tr!("Column order"))
-                    .font(crate::theme::font(11.0))
-                    .strong()
-                    .color(theme.text_muted),
-            );
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(tr!("Column order"))
+                        .font(crate::theme::font(11.0))
+                        .strong()
+                        .color(theme.text_muted),
+                );
 
-            let mut edited = column_preset.clone();
-            let mut changed = false;
-            let count = edited.columns.len();
-            for (idx, column) in edited.columns.clone().iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(column.label())
-                            .font(crate::theme::font(11.5))
-                            .color(theme.text_primary),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if idx > 0 && ui.small_button("×").clicked() {
-                            edited.columns.remove(idx);
-                            edited.weights.remove(idx);
-                            changed = true;
-                        }
-                        if idx + 1 < count && ui.small_button("↓").clicked() {
-                            edited.move_column(idx, idx + 1);
-                            changed = true;
-                        }
-                        if idx > 0 && ui.small_button("↑").clicked() {
-                            edited.move_column(idx, idx - 1);
-                            changed = true;
+                let mut edited = column_preset.clone();
+                let mut changed = false;
+                let count = edited.columns.len();
+                for (idx, column) in edited.columns.clone().iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(column.label())
+                                .font(crate::theme::font(11.5))
+                                .color(theme.text_primary),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if idx > 0 && ui.small_button("×").clicked() {
+                                edited.columns.remove(idx);
+                                edited.weights.remove(idx);
+                                changed = true;
+                            }
+                            if idx + 1 < count && ui.small_button("↓").clicked() {
+                                edited.move_column(idx, idx + 1);
+                                changed = true;
+                            }
+                            if idx > 0 && ui.small_button("↑").clicked() {
+                                edited.move_column(idx, idx - 1);
+                                changed = true;
+                            }
+                        });
+                    });
+                }
+
+                let missing: Vec<SongColumn> = SongColumn::OPTIONAL
+                    .iter()
+                    .copied()
+                    .filter(|column| !edited.columns.contains(column))
+                    .collect();
+                if !missing.is_empty() {
+                    ui.menu_button(tr!("Add column"), |ui| {
+                        for column in missing {
+                            if ui.button(column.label()).clicked() {
+                                edited.columns.push(column);
+                                edited.weights.push(column.default_weight());
+                                changed = true;
+                                ui.close();
+                            }
                         }
                     });
-                });
-            }
+                }
 
-            let missing: Vec<SongColumn> = SongColumn::OPTIONAL
-                .iter()
-                .copied()
-                .filter(|column| !edited.columns.contains(column))
-                .collect();
-            if !missing.is_empty() {
-                ui.menu_button(tr!("Add column"), |ui| {
-                    for column in missing {
-                        if ui.button(column.label()).clicked() {
-                            edited.columns.push(column);
-                            edited.weights.push(column.default_weight());
-                            changed = true;
-                            ui.close();
-                        }
+                if changed {
+                    action.column_preset_changed = Some(edited.clone().normalized());
+                    action.column_preset_edited = true;
+                }
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(preset_name_draft)
+                            .hint_text(tr!("Preset name"))
+                            .desired_width(130.0),
+                    );
+                    if ui.button(tr!("Save as preset")).clicked() {
+                        action.save_column_preset = Some(edited.clone().normalized());
+                        ui.close();
                     }
                 });
-            }
-
-            if changed {
-                action.column_preset_changed = Some(edited.clone().normalized());
-                action.column_preset_edited = true;
-            }
-
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(preset_name_draft)
-                        .hint_text(tr!("Preset name"))
-                        .desired_width(130.0),
-                );
-                if ui.button(tr!("Save as preset")).clicked() {
-                    action.save_column_preset = Some(edited.clone().normalized());
+                if ui.button(tr!("Reset this preset")).clicked() {
+                    let reset = ColumnPreset::factory(&column_preset.name).unwrap_or_else(|| {
+                        ColumnPreset {
+                            name: column_preset.name.clone(),
+                            ..ColumnPreset::default()
+                        }
+                    });
+                    action.column_preset_changed = Some(reset);
                     ui.close();
                 }
-            });
-            if ui.button(tr!("Reset this preset")).clicked() {
-                let reset =
-                    ColumnPreset::factory(&column_preset.name).unwrap_or_else(|| ColumnPreset {
-                        name: column_preset.name.clone(),
-                        ..ColumnPreset::default()
-                    });
-                action.column_preset_changed = Some(reset);
-                ui.close();
-            }
-            if column_preset_names.len() > 1 && ui.button(tr!("Delete preset")).clicked() {
-                action.delete_column_preset = true;
-                ui.close();
-            }
-        },
-    );
+                if column_preset_names.len() > 1 && ui.button(tr!("Delete preset")).clicked() {
+                    action.delete_column_preset = true;
+                    ui.close();
+                }
+            },
+        );
+    });
 }
 
 /// The context-sensitive action strip shown while tracks are multi-selected.

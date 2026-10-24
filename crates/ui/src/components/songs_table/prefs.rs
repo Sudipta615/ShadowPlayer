@@ -20,12 +20,10 @@ pub enum QuickFilter {
 }
 
 impl QuickFilter {
-    pub const ALL: [QuickFilter; 6] = [
+    pub const ALL: [QuickFilter; 4] = [
         QuickFilter::All,
         QuickFilter::Lossless,
         QuickFilter::HiRes,
-        QuickFilter::Favorites,
-        QuickFilter::Played,
         QuickFilter::Rating,
     ];
 
@@ -169,14 +167,17 @@ impl RowDensity {
     /// The height of one row's slot, including its 2 px gap.
     pub fn row_height(self) -> f32 {
         match self {
-            Self::Comfortable => 36.0,
+            Self::Comfortable => 44.0,
             Self::Compact => 26.0,
         }
     }
 
     /// The side of the artwork thumbnail.
     pub fn thumb_size(self) -> f32 {
-        (self.row_height() - 12.0).clamp(14.0, 26.0)
+        match self {
+            Self::Comfortable => 34.0,
+            Self::Compact => 14.0,
+        }
     }
 
     pub fn toggled(self) -> Self {
@@ -242,7 +243,7 @@ mod tests {
 
     #[test]
     fn density_moves_between_the_two_documented_heights() {
-        assert_eq!(RowDensity::Comfortable.row_height(), 36.0);
+        assert_eq!(RowDensity::Comfortable.row_height(), 44.0);
         assert_eq!(RowDensity::Compact.row_height(), 26.0);
         assert_eq!(RowDensity::Comfortable.toggled(), RowDensity::Compact);
         assert!(RowDensity::Compact.thumb_size() < RowDensity::Comfortable.thumb_size());

@@ -80,7 +80,19 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
             (sample_rate * channels as u32 * bits) / 1000
         }
     });
-    let embedded_artwork = artwork;
+    let embedded_artwork = artwork.or_else(|| {
+        use lofty::prelude::*;
+        let tagged_file = lofty::read_from_path(path).ok()?;
+        let tag = tagged_file
+            .primary_tag()
+            .or_else(|| tagged_file.first_tag())?;
+        let picture = tag.pictures().first()?;
+        let mime = picture
+            .mime_type()
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_else(|| "image/jpeg".to_string());
+        Some((picture.data().to_vec(), mime))
+    });
 
     // Index the lyric flag alongside the tags. The lyrics panel reads the same
     // two sources, so "Has Lyrics" and the panel agree.

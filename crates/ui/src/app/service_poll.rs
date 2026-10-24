@@ -575,10 +575,10 @@ impl ShadowPlayerApp {
             self.toasts.info(msg);
         }
 
-        // 3. Reactive Repaints (capped at 60fps during playback/scan; 0% idle when paused)
+        // 3. Reactive Repaints (capped at 30fps during playback for low CPU; 0% idle when paused)
         let is_playing = self.session.is_playing();
         if is_playing || self.scanner_service.is_scanning() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         } else if self.loudness_service.is_running() {
             // Progress bar only needs a couple of updates per second.
             ctx.request_repaint_after(std::time::Duration::from_millis(250));

@@ -136,27 +136,28 @@ impl ArtworkService {
         }
 
         let cached_thumb = self.manager.get_cached_thumbnail_path(&id);
-        let png_path = path.with_extension("png");
-        let jpg_path = path.with_extension("jpg");
-        let cover_path = path
-            .parent()
-            .map(|p| p.join("cover.png"))
-            .unwrap_or_default();
-        let cover_jpg = path
-            .parent()
-            .map(|p| p.join("cover.jpg"))
-            .unwrap_or_default();
-
         let candidate = if cached_thumb.exists() {
             Some(cached_thumb)
-        } else if png_path.exists() {
-            Some(png_path)
-        } else if jpg_path.exists() {
-            Some(jpg_path)
-        } else if cover_path.exists() {
-            Some(cover_path)
-        } else if cover_jpg.exists() {
-            Some(cover_jpg)
+        } else if let Some(folder_art) = self.manager.find_folder_artwork(path) {
+            Some(folder_art)
+        } else if let Some(art) = path.extension().and_then(|_| {
+            let png = path.with_extension("png");
+            if png.exists() {
+                return Some(png);
+            }
+            let jpg = path.with_extension("jpg");
+            if jpg.exists() {
+                return Some(jpg);
+            }
+            None
+        }) {
+            Some(art)
+        } else if let Ok(extracted) = metadata::extract_metadata(path) {
+            if let Some((bytes, _)) = extracted.embedded_artwork {
+                self.manager.save_thumbnail(&id, &bytes)
+            } else {
+                None
+            }
         } else {
             None
         };

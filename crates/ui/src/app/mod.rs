@@ -374,7 +374,7 @@ impl eframe::App for ShadowPlayerApp {
             is_playing,
             bit_perfect: self.session.bit_perfect(),
             bit_perfect_cause: self.session.bit_perfect_cause().map(|c| format!("{:?}", c)),
-            spectrum: self.session.analyzer_snapshot(),
+            spectrum: engine::dsp::AnalyzerSnapshot::default(),
             meters: Some(self.session.meters_snapshot()),
         };
 
@@ -383,9 +383,6 @@ impl eframe::App for ShadowPlayerApp {
         if let Some(ref t) = current_track {
             self.lyrics_service.ensure_loaded(t);
             self.artwork_service.ensure_loaded(&ctx, t);
-            // First play decodes the file once and caches the peaks in the
-            // library database; later plays are a cache hit.
-            self.waveform_service.ensure_loaded(t);
         }
 
         let (active_lyrics, plain_lyrics) = current_track

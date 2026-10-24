@@ -174,7 +174,7 @@ impl<'a> NowPlayingFull<'a> {
                             ui.add_space(theme.space_lg);
                             let used = ui.min_rect().height();
                             let vis_h = (body_h - used - theme.space_lg).clamp(72.0, 260.0);
-                            VisualizerWidget::new(self.spectrum_db, self.is_playing, theme)
+                            VisualizerWidget::new(self.is_playing, theme)
                                 .show(ui, Vec2::new(details_w, vis_h));
                         },
                     );
@@ -292,7 +292,7 @@ impl<'a> NowPlayingFull<'a> {
                             },
                         );
                         let (_resp, seek) = crate::components::waveform_seek::WaveformSeek {
-                            peaks: self.waveform,
+                            peaks: None,
                             position_secs: pos,
                             duration_secs: dur,
                             height: 20.0,

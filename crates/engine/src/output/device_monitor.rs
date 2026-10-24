@@ -31,7 +31,7 @@ pub struct DeviceMonitor {
 
 impl Default for DeviceMonitor {
     fn default() -> Self {
-        Self::new(AudioBackend::default(), Duration::from_millis(1500))
+        Self::new(AudioBackend::default(), Duration::from_secs(10))
     }
 }
 

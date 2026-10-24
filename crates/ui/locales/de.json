@@ -38,7 +38,6 @@
   "S1AA9D22FA6623457": "Ansteuerung",
   "S1B036335ADC7CC5E": "Kettenpresets",
   "S1B86961DF3B23C6E": "Kreative Effekte",
-  "S1BE15CE33ED39E2E": "Signaturfarben",
   "S1C832B74701D793B": "Bibliotheksstatistik",
   "S1D45DD9F445ECA8C": "Nach Titel sortieren",
   "S1DFD7119B50F64A1": "Mix",
@@ -221,7 +220,6 @@
   "SB148EE754F728BAD": "Simulator",
   "SB375F67BE016E239": "Raumakustik aktivieren",
   "SB3E7BEC8F0D2408D": "Alben",
-  "SB43D8718256DF1F1": "Farbschema",
   "SB4ECD1805373188F": "Equalizer",
   "SB4F1DFFBB6BE6302": "Leeren",
   "SB58DAA5568D1666F": "Lege eine .lrc- oder .txt-Datei neben den Titel,",
@@ -321,5 +319,6 @@
   "SFDD01DCC755519DD": "Links eine Playlist wählen oder oben eine neue anlegen, um Titel hinzuzufügen.",
   "SFFCE72DBF9B56B3F": "Stereo-Klangfeld-Veredler",
   "SFFDF8E71C18FAB23": "Abtastraten-Richtlinien & Resampling-Präzision",
-  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche"
+  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche",
+  "SB0F3327210FE18FC": "Spalten"
 }

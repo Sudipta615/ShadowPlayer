@@ -14,24 +14,27 @@ pub fn show_track_properties_modal(
 
     let track = track.unwrap();
 
-    let closed = crate::dialog::show_modal(
+    let closed = crate::dialog::show_modal_scrollable(
         ctx,
         "track_properties",
         "Track Properties & Audio Details",
-        520.0,
+        460.0,
         theme,
         |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
 
             let card_frame = egui::Frame::NONE
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
-                .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(egui::Margin::same(theme.space_2xl as i8));
+                .corner_radius(CornerRadius::same(theme.radius_md))
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_lg as i8,
+                    theme.space_md as i8,
+                ));
 
             card_frame.show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 6.0);
 
                     render_property_row(ui, "Title", &track.title, theme);
                     render_property_row(ui, "Artist", &track.artist, theme);
