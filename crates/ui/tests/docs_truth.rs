@@ -23,6 +23,37 @@ fn read(path: &Path) -> String {
         .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()))
 }
 
+/// Read every source file of the in-app manual.
+///
+/// The manual used to live in one `help_view.rs`; splitting it into submodules
+/// must not make these drift checks inspect only the facade.
+fn read_help_sources(root: &Path) -> String {
+    let dir = root.join("crates/ui/src/views/help_view");
+    let mut paths = Vec::new();
+    collect_rust_sources(&dir, &mut paths);
+    paths.sort();
+    assert!(!paths.is_empty(), "the in-app manual has source files");
+    let mut source = String::new();
+    for path in paths {
+        source.push_str(&read(&path));
+        source.push('\n');
+    }
+    source
+}
+
+fn collect_rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in
+        std::fs::read_dir(dir).unwrap_or_else(|e| panic!("could not read {}: {e}", dir.display()))
+    {
+        let path = entry.expect("readable directory entry").path();
+        if path.is_dir() {
+            collect_rust_sources(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+}
+
 /// The rows of a markdown table under a level-two heading.
 fn table_rows(text: &str, heading: &str) -> Vec<(String, String)> {
     let mut rows = Vec::new();
@@ -278,7 +309,7 @@ fn first_version(manifest: &str) -> &str {
 #[test]
 fn the_manual_reads_capabilities_from_the_live_engine() {
     let root = repo_root();
-    let help = read(&root.join("crates/ui/src/views/help_view.rs"));
+    let help = read_help_sources(&root);
 
     // The manual must not hard-code these lists. A build capability is a fact
     // about the binary, not a sentence in the source.
@@ -298,7 +329,7 @@ fn the_manual_reads_capabilities_from_the_live_engine() {
     ] {
         assert!(
             help.contains(needle),
-            "help_view.rs must contain `{needle}`: {why}"
+            "the in-app manual must contain `{needle}`: {why}"
         );
     }
 
