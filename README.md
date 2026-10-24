@@ -1,85 +1,171 @@
+<div align="center">
+
 # ShadowPlayer
 
-A local-first, audiophile desktop music player for Linux, Windows and macOS:
-Rust, [egui](https://github.com/emilk/egui), SQLite, and a real bit-perfect audio
-engine — no accounts and no telemetry. Network access exists only for features
-you switch on: auto-tagging, cover-art lookup, podcast subscriptions, and the
-opt-in update check.
+**Audiophile playback for the music you already own.**
 
-The player is the `crates/` workspace. The audio engine it is built on
-(`crates/engine`) is a separate, independently versioned workspace with its own
-README, test matrix and C ABI; it is consumed here as a path dependency.
+A local-first desktop music player built in Rust: bit-perfect output, a
+studio-grade DSP chain, a 100,000-track library that stays fast, and no
+accounts, cloud, or telemetry.
+
+[![Version](https://img.shields.io/badge/version-0.16.0-blue?style=flat-square)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)](#platform-support)
+[![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org/)
+
+[Why ShadowPlayer](#why-shadowplayer) ·
+[Features](#feature-tour) ·
+[Install](#installing) ·
+[Build](#building-from-source) ·
+[Shortcuts](#keyboard-shortcuts) ·
+[Limitations](#known-limitations)
+
+</div>
+
+> **Bit-perfect is a verified state, not a marketing checkbox.** ShadowPlayer
+> shows the backend, sample rate, bit depth, and access mode the engine actually
+> negotiated. If exclusive output is refused, it says so and falls back to
+> shared mode instead of keeping the claim.
 
 ---
 
-## What it does
+## Why ShadowPlayer
 
-**Library**
-- Folder scans and single-file imports, with a filesystem watcher per root and
-  deletion reconciliation, so the library tracks the disk without a manual
-  rescan.
-- Stable track identity: a file that is moved or renamed keeps its play count,
-  favorites, playlist membership and lyrics.
-- Songs table with sortable, re-orderable columns, saved column presets,
-  quick-filter chips, multi-select and bulk actions; Albums, Artists, Genres and
-  Folders views.
-- Auto-tagging through AcoustID fingerprints and MusicBrainz, with a
-  field-by-field review before any tag is written; bulk cover-art lookup from
-  the Cover Art Archive with a local cache.
-- Artist and album biographies from text you write or `.txt`/`.md` files you
-  point at, cached in the library database.
-- Podcast subscriptions (RSS/Atom) with per-episode downloads and resume, plus
-  local smart radio seeded from a track's genre, BPM and rating.
-- Standard playlists, smart (rule-based) playlists with a stated refresh
-  policy — after every scan, on a timer, or only when you ask — duplicate
-  finder, batch organizer with a reviewable rename plan, M3U import/export.
-- Embedded tag lyrics and `.lrc` sidecars (including ID3v2 `SYLT` timed lyrics
-  and non-UTF-8 files), with a synced-lyrics panel and an inline `.lrc` editor.
-- Markdown album liner notes, previewed in the album view and stored in the
-  library database alongside the album identity.
+Most players ask you to choose between convenience and fidelity. ShadowPlayer
+is built on the belief that you should not have to.
 
-**Playback**
-- Gapless, crossfade, fade and hard-stop transitions; shuffle and repeat with a
-  queue that survives a restart. Waveform seek bars share a cached peak table,
-  and a crossfade can be auditioned locally before it is used.
-- Bit-perfect "Pure Direct" mode that bypasses the whole DSP chain, with a
-  modal that says exactly which stages are bypassed and why.
-- CUE sheets, DSD, all codecs the engine ships; ReplayGain / EBU R128 (from
-  tags, from an on-disk loudness cache, or from a library-wide scan).
-- Full DSP studio: parametric and graphic EQ, dynamics, filters, crossfeed,
-  stereo enhancement, spatial/screen audio, room correction, creative effects
-  (chorus, flanger, phaser, delay, saturation), CLAP plugin rack and named
-  chain presets. Plugins that implement `clap.gui` open their own editor window;
-  the rack keeps parameters and host bypass reachable when they do not.
+| | |
+| :--- | :--- |
+| **Honest audio** | Every output claim comes from the live engine. Pure Direct bypasses the entire DSP chain, and the app names the stages it skipped. |
+| **Local by default** | Your library, play history, ratings, playlists, and settings live in one SQLite database on your machine. Network features are explicit, opt-in actions. |
+| **Built for real libraries** | The songs table is virtualized. A 100,000-track library draws in roughly **0.23 ms per frame**, and sorting re-orders the visible list instead of rebuilding the library. |
+| **A serious DSP studio** | Parametric and graphic EQ, room correction, crossfeed, spatial audio, creative effects, CLAP plugins, and named chain presets — with a one-click path back to untouched audio. |
 
-**Tools**
-- Room-correction measurement wizard: choose the input device and sweep length,
-  watch each stage, audition the result, and cancel without keeping a partial
-  recording.
-- CD ripper: probe a drive, fetch CDDB metadata when available, pick tracks, and
-  extract to WAV, FLAC 16/24-bit or Opus.
-- Transcode export: batch-copy local files to FLAC or 48 kHz Opus, with tags
-  copied where the source and format allow.
-- Opt-in update check against GitHub releases. A download is SHA-256 verified
-  and handed back as a file; ShadowPlayer never installs or runs it.
+ShadowPlayer is the desktop player in this repository. The audio engine
+(`crates/engine`) is a separate, independently versioned Rust workspace with
+its own README, test matrix, and C ABI.
 
-**Desktop**
-- MPRIS2 on Linux (media keys, shells, `playerctl`), System Media Transport
-  Controls on Windows, Now Playing on macOS.
-- Headless mode (`--headless`) runs the engine and the loopback control socket
-  without a window, for a server or a minimal listening session.
-- Light, dark, and OLED themes, custom `.shadowtheme` themes, an interface in English,
-  German, French, Spanish, Japanese or Chinese, toasts for anything that fails,
-  and a Help view whose shortcut list is generated from the same descriptions
-  the app uses.
+---
+
+## Feature tour
+
+### Library
+
+- **Scans that follow the disk.** Recursive folder roots, per-root filesystem
+  watchers, explicit re-scans, single-file import, and deletion reconciliation.
+- **Identity that survives a move.** A renamed or relocated file keeps its play
+  count, favorites, ratings, playlist membership, and lyrics.
+- **Views for the way you listen.** Songs, Albums, Artists, Genres, and
+  Folders; sortable and re-orderable columns; saved column presets; quick-filter
+  chips; multi-select and bulk actions.
+- **Metadata you approve.** AcoustID + MusicBrainz auto-tagging with a
+  field-by-field review before anything is written, and bulk cover-art lookup
+  from the Cover Art Archive with a local cache.
+- **Notes and biographies.** Markdown album liner notes stored in the library,
+  plus artist and album biographies from text you write or `.txt`/`.md` files
+  you point at.
+- **Playlists that fit the job.** Standard playlists; smart rule-based
+  playlists with a stated refresh policy; duplicate finding; a batch organizer
+  with a reviewable rename plan; M3U import and export.
+- **Podcasts and local radio.** RSS/Atom subscriptions with per-episode
+  downloads and resume, plus smart radio seeded from a track's genre, BPM, and
+  rating.
+- **Lyrics where you expect them.** Embedded tags, `.lrc` sidecars, ID3v2
+  `SYLT` timed lyrics, non-UTF-8 files, a synced-lyrics panel, and an inline
+  `.lrc` editor.
+
+### Playback
+
+- **Gapless, crossfade, fade, and hard-stop transitions.** Shuffle and repeat
+  work with a queue that survives a restart.
+- **Pure Direct.** A one-switch path that bypasses the entire DSP chain, with a
+  modal that names exactly which stages are out of the signal path and why.
+- **Format coverage from the engine.** FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg
+  Vorbis, Opus, WavPack, DSD, CUE sheets, and the rest of the engine's decoders.
+- **ReplayGain and EBU R128.** Read from tags, from the on-disk loudness cache,
+  or from a library-wide scan.
+- **Waveform seek bars.** Peaks are computed once in the background and shared
+  by the now-playing bar and the full-screen view.
+- **Audition before commit.** A crossfade can be rendered locally and heard
+  against the current queue without changing it.
+
+### DSP studio
+
+- Parametric and graphic EQ, dynamics, filters, crossfeed, stereo enhancement,
+  spatial and screen audio, room correction, and creative effects including
+  chorus, flanger, phaser, delay, and saturation.
+- A CLAP plugin rack with host bypass, parameter access, and native editor
+  windows for plugins that implement `clap.gui`.
+- Named chain presets, per-track DSP profiles, and a global chain that can be
+  restored in one action.
+- A room-correction measurement wizard that records a sweep from the input you
+  choose, shows each engine stage, auditions the result, and cancels cleanly.
+
+### Tools
+
+- **CD ripper.** Probe a drive, fetch CDDB metadata when available, select
+  tracks, and extract to WAV, FLAC 16/24-bit, or Opus.
+- **Transcode export.** Batch-copy local files to FLAC or 48 kHz Opus, carrying
+  tags where the source and target formats allow.
+- **Opt-in update check.** Contacts GitHub only when asked, selects the right
+  asset, requires a published SHA-256 checksum, verifies the bytes, and hands
+  back a file. It never installs or runs the download.
+- **Loudness inspector, scrobble log, listening history, and library
+  statistics** for the questions a music collection inevitably raises.
+
+### Desktop integration
+
+- MPRIS2 on Linux, System Media Transport Controls on Windows, and Now Playing
+  on macOS, including artwork and media-key transport.
+- Native file and folder pickers, including the XDG portal under Wayland.
+- Six interface languages: English, German, French, Spanish, Japanese, and
+  Chinese.
+- Headless mode for servers and scripted listening sessions.
+- Light, dark, and OLED themes, plus custom `.shadowtheme` files with a live
+  editor and WCAG AA contrast validation.
+
+---
+
+## The signal path
+
+```text
+  your files
+      │
+      ▼
+  scanner / library ──────► SQLite (tracks, playlists, history, settings)
+      │
+      ▼
+  queue + playback policy
+      │
+      ▼
+  audio-session ──► engine ──► DSP chain ──► exclusive output ──► DAC
+                       │            │
+                       │            └── Pure Direct bypasses this
+                       └── verified backend, rate, depth, and access mode
+```
+
+The important part is the feedback loop: the UI never guesses what the engine
+did. It reads the negotiated output state and renders that, including the reason
+when a request could not be honoured.
+
+### Engineering promises
+
+- **0% CPU when idle.** Repaints are event-driven; playback and animation ask
+  for frames, an idle app does not.
+- **No I/O on the UI thread.** Scans, tag reads and writes, artwork, waveform
+  decoding, network requests, and CD extraction run on workers.
+- **Virtualized lists.** The drawing cost is proportional to visible rows, not
+  library size.
+- **A tested performance budget.** CI keeps a 100,000-track library inside the
+  numbers published in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ---
 
 ## Installing
 
-Releases are published as GitHub artefacts and as native packages. The
-release workflow builds six targets and attaches the installers to a draft
-GitHub Release.
+Releases are published as GitHub artefacts and native packages. The release
+workflow builds six targets and attaches the installers to a draft GitHub
+Release.
 
 | Platform | What you get |
 | :--- | :--- |
@@ -88,9 +174,9 @@ GitHub Release.
 | macOS x86-64 / arm64 | `.dmg` and a `.tar.gz` |
 
 Download the artefact for your platform from the
-[releases page](https://github.com/Sudipta615/audio_engine/releases) and run
-it. Nothing is installed outside your user account except by the `.deb`,
-`.rpm` and `.msi` packages, which install the binary and the icon.
+[releases page](https://github.com/Sudipta615/audio_engine/releases) and run it.
+Nothing is installed outside your user account except by the `.deb`, `.rpm`,
+and `.msi` packages, which install the binary and the icon.
 
 **From source**
 
@@ -100,31 +186,18 @@ cargo build --release
 cargo run --release -p shadowplayer
 ```
 
----
+### First run
 
-## What ShadowPlayer is not
+1. Open **Folders & library manager** and add the folders that hold your music.
+2. Open **Settings → Output** and choose the device you want. The diagnostics
+   card shows the backend and access mode that were actually negotiated.
+3. Press **Space** and listen. If you want the shortest possible path to the
+   DAC, enable **Pure Direct** with `Ctrl + B`.
 
-A player with a hundred features is not the same as a player that is good at
-one thing. This is what ShadowPlayer deliberately does not do, so that nobody
-has to discover it by disappointment:
-
-- **No streaming services, internet radio, accounts or telemetry.** Auto-tagging,
-  cover-art lookup, podcast subscriptions and the update check contact the network
-  only when you ask them to. Your library, listening history and statistics stay
-  on your machine.
-- **No automatic updates.** The update check is opt-in, a download is verified
-  against the release's SHA-256 checksum, and the app never installs or runs
-  the file for you. Installing is a deliberate act.
-- **No video playback.**
-- **One transport owner at a time.** A second launch brings the running
-  window forward and exits. Concurrent windows are an explicit opt-in in
-  Settings → Library; each has its own playback, while the first window owns
-  the remote-control socket.
-- **Six interface languages, and the long prose is not fully translated.**
-  English, German, French, Spanish, Japanese and Chinese catalogues cover
-  labels, buttons and menus; the long prose in the Help manual is still
-  English, and a missing string falls back to English rather than showing a
-  key.
+Nothing is written next to your music unless you explicitly organize files,
+write ReplayGain tags, rip a CD, or run a transcode export. Each of those
+actions shows its destination and refuses to overwrite an existing file
+silently.
 
 ---
 
@@ -168,61 +241,6 @@ diagnostics card and the Bit-Perfect Signal Path Inspector both show it.
 
 ---
 
-## Building and running
-
-```bash
-git clone <this repo> && cd shadowplayer
-
-cargo build --release          # workspace: player + crates
-cargo run --release -p shadowplayer
-```
-
-The engine is a path dependency outside the workspace, so it builds with the
-player in one command — no extra step.
-
-**Toolchain.** Current stable Rust. The engine declares `rust-version = "1.98"`
-and one of its subcrates uses edition 2024; if your toolchain is older you will
-get a clear version error from the engine, not from the app.
-
-**Linux system packages** (Debian/Ubuntu names):
-
-```bash
-sudo apt install build-essential pkg-config libasound2-dev \
-                 libxkbcommon-dev libwayland-dev libx11-dev
-```
-
-ALSA exclusive mode needs access to the device: being in the `audio` group is
-usually enough, and the Settings tab's diagnostics card reports the backend that
-was actually negotiated when it is not.
-
-The CD ripper and the FLAC/Opus exporter load their native libraries at runtime,
-so no development headers are needed to build. On Debian/Ubuntu the optional
-runtime packages are `libcdio-cdda2`, `libcdio-paranoia2`, `libcddb2` and
-`libsndfile1`; a machine without them still builds, plays and updates, and the
-Tools card names the missing library if you try to use that tool.
-
-**Windows / macOS.** `cargo build --release` works out of the box. The Windows
-build compiles the engine's native exclusive backends (`wasapi-native` and
-`asio-native`) in, so it negotiates a real exclusive stream rather than the
-OS mixer; the macOS build uses CoreAudio hog mode. If the native path is
-unavailable, the app falls back to shared mode **and says so** — the Settings
-diagnostics card reports the backend that was actually negotiated. See
-`crates/engine/README.md` for the backends in detail.
-
-**Where your data lives**
-
-| Platform | Database |
-| :--- | :--- |
-| Linux | `~/.local/share/shadowplayer/library.db` |
-| macOS | `~/Library/Application Support/shadowplayer/library.db` |
-| Windows | `%LOCALAPPDATA%\shadowplayer\library.db` |
-
-Nothing is ever written next to your music except when you explicitly organize
-files, write ReplayGain tags, rip a CD or run a transcode export. Each of those
-actions shows its destination and never silently overwrites an existing file.
-
----
-
 ## Keyboard shortcuts
 
 | Key | Action |
@@ -251,7 +269,12 @@ actions shows its destination and never silently overwrites an existing file.
 | Ctrl + Alt + Up / Down | Step the selection's rating up or down |
 | Escape | Close the open dialog (one layer per press), or clear the search |
 
-### Remote control
+Every shortcut is registered in `crates/ui/src/shortcuts.rs`; the in-app Help
+view and this table are checked against that file.
+
+---
+
+## Remote control
 
 `shadowplayer-remote` drives the running window over its loopback socket. It
 never opens the library or the audio device, and the socket listens only on
@@ -266,12 +289,14 @@ shadowplayer-remote state
 shadowplayer-remote quit
 ```
 
-The same socket is what makes a second launch activate the first. There is no
+The same socket makes a second launch activate the first window. There is no
 option to bind a LAN address, so this does not add a network service.
 
-### Headless mode
+---
 
-For a server, a minimal desktop or a scripted listening session, `--headless`
+## Headless mode
+
+For a server, a minimal desktop, or a scripted listening session, `--headless`
 runs the audio engine and the same loopback control service without creating a
 window:
 
@@ -282,11 +307,85 @@ shadowplayer-remote play
 shadowplayer-remote quit
 ```
 
-The process queues the files given with `--play` (repeat the flag for more than
-one), opens the output device, and accepts transport, seek, volume and quit
-commands over the loopback socket. It publishes the same media metadata as the
-windowed build, so desktop media integration keeps working. Without `--play` it
-idles until a command arrives.
+The process queues every file passed with `--play`, opens the output device,
+and accepts transport, seek, volume, and quit commands. It publishes the same
+media metadata as the windowed build, so desktop media integration keeps
+working. Without `--play` it idles until a command arrives.
+
+---
+
+## Building from source
+
+```bash
+git clone <this repo> && cd shadowplayer
+
+cargo build --release          # the player and its path dependencies
+cargo run --release -p shadowplayer
+```
+
+The engine is a path dependency outside the player workspace, so it builds with
+the player in one command — no extra step.
+
+**Toolchain.** Current stable Rust. The engine declares `rust-version = "1.98"`
+and one of its subcrates uses edition 2024; an older toolchain fails with a
+clear version error from the engine, not from the app.
+
+**Linux system packages** (Debian/Ubuntu names):
+
+```bash
+sudo apt install build-essential pkg-config libasound2-dev \
+                 libxkbcommon-dev libwayland-dev libx11-dev
+```
+
+ALSA exclusive mode needs access to the device: being in the `audio` group is
+usually enough, and the Settings diagnostics card reports the backend that was
+actually negotiated when it is not.
+
+The CD ripper and the FLAC/Opus exporter load their native libraries at runtime,
+so no development headers are needed to build. On Debian/Ubuntu the optional
+runtime packages are `libcdio-cdda2`, `libcdio-paranoia2`, `libcddb2`, and
+`libsndfile1`; a machine without them still builds, plays, and updates, and the
+Tools card names the missing library when you try to use that tool.
+
+**Windows / macOS.** `cargo build --release` works out of the box. The Windows
+build compiles the engine's native exclusive backends (`wasapi-native` and
+`asio-native`) in, so it negotiates a real exclusive stream rather than the OS
+mixer; the macOS build uses CoreAudio hog mode. If the native path is
+unavailable, the app falls back to shared mode **and says so**. See
+`crates/engine/README.md` for the backend details.
+
+### Where your data lives
+
+| Platform | Database |
+| :--- | :--- |
+| Linux | `~/.local/share/shadowplayer/library.db` |
+| macOS | `~/Library/Application Support/shadowplayer/library.db` |
+| Windows | `%LOCALAPPDATA%\shadowplayer\library.db` |
+
+The database is an ordinary SQLite file. There is no automatic backup: copy it
+if it matters to you. Scans never delete audio files, only rows whose file is
+gone. Album liner notes live in the same database, not beside the music.
+
+---
+
+## Performance
+
+The numbers below are measured on production code paths with a **100,000-track**
+library in a **release** build. They are budgets, not anecdotes: CI asserts them.
+
+| Operation | Cost | Budget |
+| :--- | ---: | ---: |
+| Frame with a 100,000-track library | 0.23 ms (worst 0.29 ms) | 16 ms |
+| Rebuild of the visible list | 131 ms | 250 ms |
+| Sort of 100,000 tracks by title | 73 ms | 250 ms |
+| Copy of 100,000 tracks | 64 ms | 250 ms |
+| A view that did not change | 0 ms | — |
+
+A 60 fps frame is 16.7 ms. The frame itself stays well under a millisecond
+regardless of library size because the songs table only builds the rows on
+screen. Rebuilds happen when the view changes — a tab, filter, or search — not
+every frame. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the methodology
+and the alternatives that were measured and rejected.
 
 ---
 
@@ -314,113 +413,101 @@ cd crates/engine && cargo test
 cd crates/engine && cargo bench
 ```
 
-CI runs `cargo fmt --check`, `clippy -D warnings`, the test suite above, the
-engine's suite, the engine's suite **on Windows and macOS as well as Linux**,
-the benchmark suite's compile, the library budget, and the
-documentation-truth checks, on every push; see `.github/workflows/ci.yml`.
-
-### A big library
-
-The player is built for libraries that are larger than a demo: the songs
-table is virtualised, so the frame cost does not grow with the library, and
-changing the sort re-orders the list that is already on screen instead of
-copying the library again. The numbers are published in
-[docs/PERFORMANCE.md](docs/PERFORMANCE.md), and CI asserts them.
+CI runs `cargo fmt --check`, `clippy -D warnings`, the player suite, the
+engine's suite on Linux, Windows, and macOS, the benchmark compile, the library
+budget, and the documentation-truth checks on every push. See
+`.github/workflows/ci.yml` for the exact commands.
 
 ### Development-only automation
 
 `cargo run -p shadowplayer --features eval-tools` compiles the
 `SHADOWPLAYER_EVAL*` hooks: they drive the UI to a chosen state, take a
-screenshot and exit. The feature is off by default, so those hooks — and the
+screenshot, and exit. The feature is off by default, so those hooks — and the
 `process::exit` they can reach from an environment variable — are not part of a
-normal build, and neither are the CLAP eval script or the ~500 lines of
-scaffolding behind them.
+normal build, and neither are the CLAP eval script or the scaffolding behind
+them.
 
 ### Releasing
 
 The player and the engine are versioned separately — the engine carries its own
-version (`crates/engine`) because it is a standalone library with its own
-workspace and tests — but they are released together. To cut a release:
+version because it is a standalone library with its own workspace and tests —
+but they are released together. To cut a release:
 
 1. Bump `version` in `crates/*/Cargo.toml` (the player workspace) and, when the
-   engine changed, `crates/engine/Cargo.toml` and its sub-crates too.
+   engine changed, `crates/engine/Cargo.toml` and its subcrates too.
 2. Move the `[Unreleased]` section of `CHANGELOG.md` under the new version and
    date, and check the version badge in `crates/engine/README.md`.
-3. `cargo run` prints both versions at startup from `engine::VERSION` and
-   `engine::NAME`; the log is the source of truth if a build ever reports the
+3. Run the app once: startup prints both versions from `engine::VERSION` and
+   `engine::NAME`, which is the source of truth if a build ever reports the
    wrong pair.
 4. Tag the commit `v<version>` and push the tag. The release workflow checks
    that the tag matches the workspace version, builds the artefacts, and opens
    a **draft** release.
 
-Step 1 is guarded by a test: `crates/app/tests/version_lockstep.rs` fails the
-build if the player crates disagree about their version, if the engine's
-sub-crates do, if the CHANGELOG names a different version than the manifests,
-or if the engine's README quotes a version that is no longer true.
+Step 1 is guarded by `crates/app/tests/version_lockstep.rs`, which fails if the
+player crates disagree, if the engine's subcrates disagree, if the CHANGELOG
+names a different version than the manifests, or if the engine README quotes a
+version that is no longer true.
 
 ---
 
 ## Known limitations
 
-Stated plainly, because the alternative is finding out the hard way:
+These are boundaries we cannot honestly remove with a documentation edit.
+Deliberate product choices live in
+[What ShadowPlayer is not](#what-shadowplayer-is-not).
 
-- **Accessibility is broad but not certified.** egui's accessibility layer
-  (accesskit) is enabled, icon-only controls carry accessible names, and the
-  main editing surfaces — the equalizer, queue, playlist editor, album view and
-  transport — work from the keyboard. The app has not been through a
-  professional screen-reader audit, so the keyboard remains the most thoroughly
-  exercised path. Every command below works without a mouse.
-- **English and German, and German is not finished.** The interface speaks
-  English and German: the catalogue lives in `crates/ui/locales`, the build
-  script refuses to compile a string that is not in it, and a missing
-  translation falls back to English rather than showing a key. The German
-  catalogue currently covers the labels, buttons and menus; the long prose in
-  the Help manual is still English. Pick a language in Settings → *Library &
-  App*, or leave it on *Auto* and let `LC_ALL`, `LC_MESSAGES` or `LANG`
-  decide.
-- **Exclusive output needs the operating system's permission.** The app
-  negotiates genuine exclusive output on all three platforms — ALSA on Linux,
-  WASAPI Exclusive and ASIO on Windows, CoreAudio hog mode on macOS — but each
-  of them can be refused: the Linux device must be openable directly (being in
-  the `audio` group usually is enough), the Windows endpoint must not be held
-  by another application, and the macOS device must be claimable. When it is
-  refused, the app falls back to shared mode **and says so**; the Settings
-  diagnostics card always shows which backend was negotiated and whether the
-  access was verified, so "bit-perfect" is never claimed on a shared path.
-- **No automated database backup.** `library.db` is an ordinary SQLite file; copy
-  it if it matters. Scans never delete files, only rows whose file is gone.
-  Album liner notes live in that database too; they are not written into the
-  music files.
-- **CD ripping and FLAC/Opus export need their native libraries at runtime.**
-  The app loads them dynamically, so the build succeeds without them, but the
-  tool reports `libcdio-paranoia`, `libcddb` or `libsndfile` as missing until
-  the platform package is installed. CDDB lookups are best-effort; a lookup
-  failure never loses audio, it only leaves the track titles as numbers.
-- **The update check is opt-in and never installs anything.** It contacts
-  GitHub, chooses an asset for this platform, requires a published SHA-256
-  checksum, verifies the bytes, and returns the verified path. Applying the
-  update is the user's next step, not the app's. There is no background poll.
-- **Room correction needs a microphone and a quiet room.** The wizard records a
-  sweep from the input you choose and never falls back silently to the system
-  mixer. On macOS the microphone prompt is declared in the app bundle; if
-  permission is denied, measurement fails with an error instead of capturing
-  something else.
-- **Headless mode has no window.** It exposes the loopback control socket and
-  media integration, not the full UI; library management, CD ripping and the
-  DSP studio are windowed features.
-- **MPRIS2 is Linux-only**; Windows and macOS use SMTC and Now Playing
-  respectively, which are not configurable in the same way.
-- **Pre-1.0.** `0.x` versions may change settings formats or the database schema
-  between releases; migrations run automatically and are one-way.
-- **Two formats are named but not decoded.** Musepack (`.mpc`) and TAK (`.tak`)
-  have no pure-Rust decoder in this tree, and the project does not take an FFI
-  dependency on one. Opening such a file fails with an error that names the
-  format; it is never mis-parsed as something else.
-- **The engine's own limitations are the engine's.** The engine README lists
-  them precisely — talkback and duplex monitoring, order-4+ ambisonic rotation,
-  the N-input mix bus's automatic summation headroom, physical-DAC validation,
-  in-process plugin sandboxing, and the rest. Where the engine is honest about
-  a boundary, the player inherits that boundary rather than papering over it.
+- **Pre-1.0 formats can change.** Database schemas and settings formats may
+  migrate between releases. Migrations run automatically and are one-way.
+- **Exclusive output can be refused by the operating system.** ALSA, WASAPI
+  Exclusive, ASIO, and CoreAudio hog mode all depend on device access that
+  another application, a driver, or a permission prompt can deny. ShadowPlayer
+  falls back to shared mode and reports the backend it actually got.
+- **Some format and tooling boundaries are inherited.** Musepack (`.mpc`) and
+  TAK (`.tak`) have no validated pure-Rust decoder in this tree and fail with a
+  named error. CD ripping and FLAC/Opus export load `libcdio`/`libcdio-paranoia`,
+  optionally `libcddb`, and `libsndfile` at runtime; the build succeeds without
+  them and the Tools card names anything missing.
+- **Accessibility is broad, not certified.** AccessKit is enabled, icon-only
+  controls carry accessible names, and the main editing surfaces work from the
+  keyboard. The app has not had a professional screen-reader audit, so the
+  keyboard remains the most thoroughly exercised path.
+- **The long-form manual is English.** The interface catalogues cover English,
+  German, French, Spanish, Japanese, and Chinese; the Help manual's prose is
+  still English. Missing strings fall back to English instead of showing a key.
+- **Engine-level boundaries are inherited in full.** There is no talkback or
+  duplex monitoring. Ambisonic bus rotation is exact only for orders 1–3. The
+  N-input mix bus has no automatic summation headroom. `plugin-dylib` plugins
+  run in-process without a sandbox, so only load plugins you trust. CI
+  validates the output path through a null backend rather than a physical DAC;
+  real driver negotiation and hardware clocks remain environment-dependent.
+  See the [engine limitations](crates/engine/README.md#-known-limitations) for
+  the precise contracts.
+
+---
+
+## What ShadowPlayer is not
+
+These are deliberate omissions, not missing features. They keep the app small,
+predictable, and focused on the music you own.
+
+- **Not a streaming client, account system, or telemetry product.** No cloud
+  library, no recommendation feed, no usage reporting. Auto-tagging, cover-art
+  lookup, podcast subscriptions, and the update check contact the network only
+  when you invoke them.
+- **Not a video player.** Audio is the product.
+- **Not a background updater.** The update check is opt-in, downloads are
+  SHA-256 verified, and installing is a deliberate act you perform.
+- **Not a LAN remote-control server.** The control socket binds only to
+  `127.0.0.1` and uses a fresh per-launch token.
+- **Not a multi-window free-for-all.** A second launch activates the running
+  window by default. Concurrent transports are an explicit Settings opt-in;
+  the first window owns the remote-control socket.
+- **Not a GUI-less library manager.** Headless mode deliberately exposes
+  transport, seek, volume, metadata, and quit over the loopback socket. Library
+  management, CD ripping, and the DSP studio are windowed features.
+- **Not an installer for your operating system.** It produces native packages
+  and verified downloads; applying them is your decision.
 
 ---
 
