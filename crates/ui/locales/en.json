@@ -697,5 +697,9 @@
   "SFFE6E788D7AF4B82": "3. Interface Elements & Layout Walkthrough",
   "SB661AB0779891A0D": "Spatial Audio Master",
   "S7E0CAFF158F7B655": "One bypass for HRTF, room, listener and head-tracking settings",
-  "S3AB4093BD68C5813": "{count} bands in the active parametric curve"
+  "S3AB4093BD68C5813": "{count} bands in the active parametric curve",
+  "S3914CB410FCA44D4": "Import",
+  "SAC3FBF0EE461E3D2": "AutoEQ, Equalizer APO, REW, and GraphicEQ text",
+  "SEDAF244DC52FF447": "Imported a {kind} {points}-point curve from {file}",
+  "S4B0696AD8EF65E3B": "Exported the EQ curve to {file}"
 }

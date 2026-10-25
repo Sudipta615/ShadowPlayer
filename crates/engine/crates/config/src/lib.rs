@@ -8,6 +8,7 @@ mod config_file;
 mod dsp_config;
 mod engine_config;
 mod enums;
+mod eq_text;
 mod fx_config;
 mod rate_policy;
 mod scene_config;
@@ -35,6 +36,10 @@ pub use enums::{
     OutputAccessState, PerformanceMode, PrecisionMode, QualityLatencyProfile, RateFallbackPolicy,
     ResamplerQuality, ResamplerQualityInfo, SpeedMode, TimeStretchQuality, TransitionMode,
     VolumeMode,
+};
+pub use eq_text::{
+    parse_curve, write_graphic, write_parametric, EqTextError, ImportedCurve, MAX_FREQ_HZ,
+    MAX_GAIN_DB, MAX_Q, MIN_FREQ_HZ, MIN_Q,
 };
 pub use fx_config::{
     ChorusConfig, DelayConfig, DistortionConfig, DistortionShape, EffectSettings, FlangerConfig,

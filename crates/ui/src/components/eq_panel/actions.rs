@@ -33,6 +33,10 @@ pub struct EqPanelActions {
 
     // External Modals & Presets
     pub open_autoeq_dialog: bool,
+    /// Read a text curve (AutoEQ / APO / REW / GraphicEQ) from disk.
+    pub import_curve: bool,
+    /// Write the active curve as text.
+    pub export_curve: bool,
 
     // Dynamics (limiter/comp)
     pub limiter_enabled_changed: Option<bool>,

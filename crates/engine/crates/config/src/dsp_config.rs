@@ -179,46 +179,21 @@ pub struct EqPreset {
 }
 
 impl EqPreset {
-    /// Parse an AutoEQ `ParametricEQ.txt` CSV line-format into an `EqPreset`.
-    /// Format: `Filter N: ON PK Fc X Hz Gain Y dB Q Z`
+    /// Parse an AutoEQ `ParametricEQ.txt` file into an `EqPreset`.
+    ///
+    /// This is a compatibility wrapper over [`crate::parse_curve`], which owns
+    /// the grammar and also accepts Equalizer APO and REW spellings. It stays
+    /// infallible for callers that only need a best-effort preset: an
+    /// unreadable file yields a preset with no bands rather than a panic.
     pub fn from_autoeq(name: &str, text: &str) -> Self {
-        let mut bands = Vec::new();
-        for line in text.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            // AutoEQ format: Filter N: ON PK/LSC/HSC Fc Hz Gain dB Q
-            // Token layout (split_whitespace):
-            //   0:"Filter" 1:"N:" 2:"ON" 3:"PK" 4:"Fc" 5:"<freq>" 6:"Hz"
-            //   7:"Gain" 8:"<gain>" 9:"dB" 10:"Q" 11:"<q>"
-            if parts.len() < 12 {
-                continue;
-            }
-            if parts.get(2) != Some(&"ON") {
-                continue;
-            }
-            let filter_type = match parts.get(3) {
-                Some(&"PK") => FilterType::Peaking,
-                Some(&"LSC") => FilterType::LowShelf,
-                Some(&"HSC") => FilterType::HighShelf,
-                Some(&"LP") => FilterType::LowPass,
-                Some(&"HP") => FilterType::HighPass,
-                _ => continue,
-            };
-            let freq: f32 = parts.get(5).and_then(|s| s.parse().ok()).unwrap_or(1000.0);
-            let gain: f32 = parts.get(8).and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            let q: f32 = parts.get(11).and_then(|s| s.parse().ok()).unwrap_or(1.0);
-            bands.push(EqBandConfig {
-                enabled: true,
-                filter_type,
-                frequency: freq,
-                gain_db: gain,
-                q,
-            });
-        }
-        EqPreset {
-            name: name.to_string(),
-            output_device_pattern: None,
-            preamp_db: 0.0,
-            bands,
+        match crate::parse_curve(name, text) {
+            Ok(curve) => curve.into_preset(),
+            Err(_) => Self {
+                name: name.to_string(),
+                output_device_pattern: None,
+                preamp_db: 0.0,
+                bands: Vec::new(),
+            },
         }
     }
 }

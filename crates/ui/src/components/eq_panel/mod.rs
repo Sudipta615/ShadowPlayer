@@ -296,6 +296,96 @@ impl EqPanelState {
                 .iter()
                 .any(|gain| gain.abs() > 12.0)
     }
+
+    /// Install a curve read from a text file.
+    ///
+    /// Returns the mode the curve installed: `true` for parametric, `false`
+    /// for graphic. A parametric file replaces the whole band bank (never a
+    /// prefix), and a graphic file is interpolated onto the ladder the user is
+    /// currently looking at, so an AutoEQ `GraphicEQ.txt` does not move every
+    /// slider when the layout is 31 or 64 bands.
+    ///
+    /// The preamp travels with the curve: it is what keeps the imported shape
+    /// from clipping, and dropping it made an imported +6 dB bass shelf play
+    /// 6 dB louder than the file asked for. Static auto-headroom is switched
+    /// off for the same reason the AutoEQ dialog does it — the curve already
+    /// carries its own level, and attenuating it twice is not "safer", it is
+    /// quieter than intended.
+    pub fn apply_imported_curve(&mut self, curve: &config::ImportedCurve) -> bool {
+        self.eq_enabled = true;
+        if curve.is_graphic() {
+            self.eq_mode = EqMode::Graphic;
+            self.graphic_enabled = true;
+            let freqs = self.graphic_layout.frequencies();
+            let (source_freqs, source_gains): (Vec<f32>, Vec<f32>) =
+                curve.graphic.iter().copied().unzip();
+            for (index, freq) in freqs.iter().enumerate().take(64) {
+                self.graphic_gains[index] =
+                    presets::interpolate_curve_gain(*freq, &source_freqs, &source_gains);
+            }
+            self.graphic_gains[freqs.len().min(64)..].fill(0.0);
+            self.set_preamp(curve.preamp_db);
+            self.selected_preset = EqPreset::Custom;
+            self.selected_custom_preset_idx = None;
+            if self.needs_extended_range() {
+                self.extended_range = true;
+            }
+            false
+        } else {
+            self.eq_mode = EqMode::Parametric;
+            self.graphic_enabled = false;
+            self.bands = curve
+                .bands
+                .iter()
+                .map(|band| ParametricBand {
+                    freq: band.frequency,
+                    gain_db: band.gain_db,
+                    q: band.q,
+                    filter_type: band.filter_type.into(),
+                    enabled: band.enabled,
+                })
+                .collect();
+            self.set_preamp(curve.preamp_db);
+            self.auto_headroom = false;
+            true
+        }
+    }
+
+    /// Snapshot the audible curve as text and a suggested filename.
+    ///
+    /// Parametric mode exports every band; graphic mode exports the active
+    /// ladder so the file reproduces exactly what the engine is playing.
+    pub fn export_curve_text(&self) -> (String, String) {
+        if self.eq_mode == EqMode::Parametric && !self.bands.is_empty() {
+            let preset = config::EqPreset {
+                name: "ShadowPlayer parametric EQ".to_string(),
+                output_device_pattern: None,
+                preamp_db: self.preamp_db,
+                bands: self
+                    .bands
+                    .iter()
+                    .map(|band| config::EqBandConfig {
+                        enabled: band.enabled,
+                        filter_type: band.filter_type.into(),
+                        frequency: band.freq,
+                        gain_db: band.gain_db,
+                        q: band.q,
+                    })
+                    .collect(),
+            };
+            (
+                "shadowplayer-parametric.txt".to_string(),
+                config::write_parametric(&preset),
+            )
+        } else {
+            let freqs = self.graphic_layout.frequencies();
+            let count = freqs.len().min(self.graphic_gains.len());
+            (
+                "shadowplayer-graphic.txt".to_string(),
+                config::write_graphic(&freqs[..count], &self.graphic_gains[..count]),
+            )
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -634,6 +724,7 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::dsp::equalizer::EqFilterType;
 
     #[test]
     fn layout_change_interpolates_the_visible_curve_and_clears_stale_bands() {
@@ -784,5 +875,71 @@ mod tests {
         assert_eq!(state.preamp_db, -30.0);
         state.set_preamp(f32::NAN);
         assert_eq!(state.preamp_db, -30.0);
+    }
+
+    #[test]
+    fn parametric_import_installs_every_band_its_preamp_and_the_mode() {
+        let text = "\
+Preamp: -5.0 dB
+Filter 1: ON LSC Fc 105 Hz Gain 4.0 dB Q 0.70
+Filter 2: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.20
+Filter 3: ON HSC Fc 10000 Hz Gain 2.0 dB Q 0.70
+";
+        let curve = config::parse_curve("imported", text).unwrap();
+        let mut state = EqPanelState {
+            eq_enabled: false,
+            auto_headroom: true,
+            ..Default::default()
+        };
+
+        assert!(state.apply_imported_curve(&curve));
+
+        assert!(state.eq_enabled);
+        assert_eq!(state.eq_mode, EqMode::Parametric);
+        assert!(!state.graphic_enabled);
+        assert_eq!(state.bands.len(), 3);
+        assert_eq!(state.bands[0].filter_type, EqFilterType::LowShelf);
+        assert!((state.preamp_db + 5.0).abs() < 1e-6);
+        assert!(
+            !state.auto_headroom,
+            "an imported curve carries its own level; attenuating it twice is wrong"
+        );
+    }
+
+    #[test]
+    fn graphic_import_lands_on_the_active_ladder_without_dropping_points() {
+        let text = "GraphicEQ: 31.5 4.0; 1000 -2.0; 16000 3.0";
+        let curve = config::parse_curve("graphic", text).unwrap();
+        let mut state = EqPanelState {
+            graphic_layout: GraphicEqLayout::ThirtyOneBand,
+            ..Default::default()
+        };
+
+        assert!(!state.apply_imported_curve(&curve));
+
+        assert_eq!(state.eq_mode, EqMode::Graphic);
+        let freqs = state.graphic_layout.frequencies();
+        let low = freqs.iter().position(|f| (*f - 31.5).abs() < 0.01).unwrap();
+        let mid = freqs
+            .iter()
+            .position(|f| (*f - 1000.0).abs() < 0.01)
+            .unwrap();
+        assert!((state.graphic_gains[low] - 4.0).abs() < 0.1);
+        assert!((state.graphic_gains[mid] + 2.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn exported_parametric_text_reimports_to_the_same_curve() {
+        let text = "Preamp: -2.0 dB\nFilter 1: ON PK Fc 500 Hz Gain -4.0 dB Q 1.00";
+        let curve = config::parse_curve("exported", text).unwrap();
+        let mut state = EqPanelState::default();
+        state.apply_imported_curve(&curve);
+
+        let (name, exported) = state.export_curve_text();
+        assert!(name.ends_with(".txt"));
+        let reparsed = config::parse_curve("reimported", &exported).unwrap();
+        assert_eq!(reparsed.bands.len(), 1);
+        assert!((reparsed.preamp_db + 2.0).abs() < 1e-6);
+        assert!((reparsed.bands[0].gain_db + 4.0).abs() < 1e-6);
     }
 }

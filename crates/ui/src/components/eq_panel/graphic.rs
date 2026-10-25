@@ -266,6 +266,25 @@ pub(super) fn render_graphic_eq_tab(
                 &crate::components::info_box::INFO_EQ_PRESETS,
                 theme,
             );
+
+            for (label, import) in [(tr!("Export"), false), (tr!("Import"), true)] {
+                let button = egui::Button::new(
+                    egui::RichText::new(label)
+                        .font(crate::theme::font(11.0))
+                        .color(theme.text_secondary),
+                )
+                .fill(theme.bg_pill)
+                .stroke(Stroke::NONE)
+                .corner_radius(CornerRadius::same(theme.radius_sm))
+                .min_size(Vec2::new(52.0, 24.0));
+                if ui.add(button).clicked() {
+                    if import {
+                        actions.import_curve = true;
+                    } else {
+                        actions.export_curve = true;
+                    }
+                }
+            }
         });
     });
 
@@ -376,6 +395,36 @@ fn render_parametric_curve_summary(
                 if ui.add(button).clicked() {
                     actions.open_autoeq_dialog = true;
                 }
+
+                ui.add_space(theme.space_sm);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+                    for (label, import) in [(tr!("Import"), true), (tr!("Export"), false)] {
+                        let button = egui::Button::new(
+                            egui::RichText::new(label)
+                                .font(crate::theme::font(11.0))
+                                .color(theme.text_secondary),
+                        )
+                        .fill(theme.bg_pill)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::same(theme.radius_sm))
+                        .min_size(Vec2::new(64.0, 24.0));
+                        if ui.add(button).clicked() {
+                            if import {
+                                actions.import_curve = true;
+                            } else {
+                                actions.export_curve = true;
+                            }
+                        }
+                    }
+                    ui.label(
+                        egui::RichText::new(tr!(
+                            "AutoEQ, Equalizer APO, REW, and GraphicEQ text"
+                        ))
+                        .font(crate::theme::font(10.0))
+                        .color(theme.text_muted),
+                    );
+                });
             });
         });
 }

@@ -72,6 +72,47 @@ impl ShadowPlayerApp {
             }
         }
     }
+
+    /// Runs on the UI thread when the EQ curve worker returns.
+    ///
+    /// The curve is installed into the panel first and pushed to the engine
+    /// with the targeted `push_imported_eq`, not `sync_chain_to_session`: an
+    /// import must not reopen the output device or renegotiate the resampler.
+    /// A failed parse leaves the previously active curve untouched and says
+    /// why in a warning toast.
+    pub(super) fn handle_preset_io_result(&mut self, event: PresetIoEvent) {
+        match event {
+            PresetIoEvent::Imported { path, curve } => {
+                let graphic = curve.is_graphic();
+                let points = curve.point_count();
+                self.dsp_state.eq_panel.apply_imported_curve(&curve);
+                self.dsp_state.push_imported_eq(&self.session);
+                self.settings_dirty = true;
+                let file = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("the selected file");
+                self.toasts.success(tr_args!(
+                    "Imported a {kind} {points}-point curve from {file}",
+                    "kind" => if graphic { "graphic" } else { "parametric" },
+                    "points" => points,
+                    "file" => file
+                ));
+            }
+            PresetIoEvent::Exported(path) => {
+                self.toasts.success(tr_args!(
+                    "Exported the EQ curve to {file}",
+                    "file" => path.display().to_string()
+                ));
+            }
+            PresetIoEvent::Cancelled => {}
+            PresetIoEvent::Error(message) => {
+                log::warn!("EQ curve import/export failed: {message}");
+                self.toasts.warning(message);
+            }
+        }
+    }
+
     /// Import one audio file into the library, resolving stable identity so a
     /// moved-but-already-known file keeps its id, play counts and favorites.
     /// Returns the track id on success.

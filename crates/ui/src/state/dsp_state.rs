@@ -136,6 +136,40 @@ impl DspState {
         );
     }
 
+    /// Push a curve that was just imported from a text file.
+    ///
+    /// Kept separate from [`Self::sync_chain_to_session`]: that function also
+    /// re-asserts the output device and resampler policy, and reopening the
+    /// device because somebody imported an EQ curve would glitch playback for
+    /// no reason.
+    pub fn push_imported_eq(&self, session: &AudioSession) {
+        let eq = &self.eq_panel;
+        if eq.eq_mode == config::EqMode::Graphic {
+            session.set_eq_mode(config::EqMode::Graphic);
+            self.push_graphic_eq_state(session);
+            return;
+        }
+
+        session.set_eq_mode(config::EqMode::Parametric);
+        session.set_eq_enabled(eq.eq_enabled);
+        let bands: Vec<config::EqBandConfig> = eq
+            .bands
+            .iter()
+            .map(|band| config::EqBandConfig {
+                enabled: band.enabled,
+                filter_type: band.filter_type.into(),
+                frequency: band.freq,
+                gain_db: band.gain_db,
+                q: band.q,
+            })
+            .collect();
+        session.set_eq_bands(bands);
+        session.set_preamp(eq.preamp_db);
+        // A text curve carries its own preamp. Static auto-headroom would
+        // attenuate it a second time; the AutoEQ dialog makes the same call.
+        session.set_eq_auto_headroom(false);
+    }
+
     /// Refresh the cached device list for the selected backend.
     ///
     /// A no-op when the list is already for the current backend, so it is safe

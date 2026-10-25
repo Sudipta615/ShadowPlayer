@@ -10,6 +10,7 @@ pub mod lyrics_service;
 pub mod media_tools_service;
 pub mod mpris_service;
 pub mod podcast_service;
+pub mod preset_io_service;
 pub mod scanner_service;
 pub mod waveform_service;
 
@@ -30,5 +31,6 @@ pub use lyrics_service::{LyricsService, LyricsSource};
 pub use media_tools_service::{MediaToolEvent, MediaToolsService};
 pub use mpris_service::{MprisCommand, MprisService, MprisSnapshot};
 pub use podcast_service::{PodcastEvent, PodcastService};
+pub use preset_io_service::{PresetIoEvent, PresetIoService};
 pub use scanner_service::ScannerService;
 pub use waveform_service::WaveformService;

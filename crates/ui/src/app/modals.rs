@@ -17,8 +17,17 @@ impl ShadowPlayerApp {
         current_track: Option<&Track>,
     ) {
         let eq_actions = show_eq_panel(ctx, &mut self.dsp_state.eq_panel, &self.theme);
+        let want_import = eq_actions.import_curve;
+        let want_export = eq_actions.export_curve;
         self.dsp_state
             .handle_eq_panel_actions(&self.session, eq_actions);
+        if want_import {
+            self.preset_io.request_import();
+        }
+        if want_export {
+            let (name, text) = self.dsp_state.eq_panel.export_curve_text();
+            self.preset_io.request_export(name, text);
+        }
         if self.dsp_state.eq_panel.is_open {
             self.settings_dirty = true;
         }

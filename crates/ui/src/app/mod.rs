@@ -29,7 +29,7 @@ use crate::services::{
     ArtworkFetchService, ArtworkService, AutotagService, BiographyService, ControlService,
     CrossfadePreview, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
     MediaToolEvent, MediaToolsService, MprisCommand, MprisService, MprisSnapshot, PodcastEvent,
-    PodcastService, ScannerService, WaveformService,
+    PodcastService, PresetIoEvent, PresetIoService, ScannerService, WaveformService,
 };
 use crate::state::{
     AppState, DspState, LibraryState, PodcastState, SleepTimerMode, TelemetryState,
@@ -98,6 +98,8 @@ pub struct ShadowPlayerApp {
     podcast_state: PodcastState,
     scanner_service: ScannerService,
     import_service: ImportService,
+    /// Text EQ-curve import/export. Owns its own worker; the UI only polls.
+    preset_io: PresetIoService,
     mpris_service: MprisService,
     /// Loopback control for `shadowplayer-remote` and second-launch
     /// activation. `None` in a multi-instance process, which owns no
@@ -233,6 +235,7 @@ impl ShadowPlayerApp {
         let loudness_service = LoudnessService::new(db.clone());
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
+        let preset_io = PresetIoService::new();
         let mpris_service = MprisService::start();
         let (watch_tx, watch_rx) = crossbeam::channel::unbounded::<PathBuf>();
 
@@ -277,6 +280,7 @@ impl ShadowPlayerApp {
             podcast_state,
             scanner_service,
             import_service,
+            preset_io,
             mpris_service,
             control_service,
             loudness_service,

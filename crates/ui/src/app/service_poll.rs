@@ -460,6 +460,11 @@ impl ShadowPlayerApp {
             self.handle_import_result(result);
         }
 
+        // 2b2. Poll the EQ curve worker (file dialogs and parsing off-thread).
+        if let Some(event) = self.preset_io.poll() {
+            self.handle_preset_io_result(event);
+        }
+
         // 2c. Sleep timer (countdown or end-of-track).
         self.update_sleep_timer(ctx);
 

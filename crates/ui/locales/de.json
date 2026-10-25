@@ -377,5 +377,9 @@
   "SF78186CBEE50C68C": "Korrekturtiefe",
   "SB661AB0779891A0D": "Raumklang-Master",
   "S7E0CAFF158F7B655": "Eine Umgehung für HRTF, Raum, Hörer und Kopftracking",
-  "S3AB4093BD68C5813": "{count} Bänder in der aktiven parametrischen Kurve"
+  "S3AB4093BD68C5813": "{count} Bänder in der aktiven parametrischen Kurve",
+  "S3914CB410FCA44D4": "Importieren",
+  "SAC3FBF0EE461E3D2": "AutoEQ-, Equalizer-APO-, REW- und GraphicEQ-Text",
+  "SEDAF244DC52FF447": "Kurve mit {points} Punkten aus {file} importiert ({kind})",
+  "S4B0696AD8EF65E3B": "EQ-Kurve nach {file} exportiert"
 }
