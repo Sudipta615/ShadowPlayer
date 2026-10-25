@@ -769,11 +769,30 @@ impl AudioEngine {
     /// replaced — applying them before the swap would write into a generation
     /// that is about to be retired.
     pub(crate) fn apply_config_tail(&mut self, config: &config::EngineConfig) {
-        // Graphic EQ layer (§9.1): when enabled in config it is the
-        // authoritative source for the pipeline's EQ bands and preamp (see
-        // the precedence rule on `GraphicEqConfig`).
-        if config.graphic_eq.enabled {
-            self.graphic_eq = crate::dsp::GraphicEq::from_config(&config.graphic_eq);
+        // Graphic EQ layer (§9.1): the explicit mode selects which curve owns
+        // the stage. The model is refreshed either way so switching back to
+        // Graphic restores the curve that was persisted, not a default one.
+        //
+        // Configs written before `EqConfig::mode` existed have no mode field,
+        // so serde gives them Parametric. A graphic layer that was explicitly
+        // enabled in such a file is the only evidence of intent we have; honour
+        // it instead of silently restoring a different EQ on upgrade.
+        let legacy_graphic =
+            config.eq.mode == config::EqMode::Parametric && config.graphic_eq.enabled;
+        if legacy_graphic {
+            self.config.eq.mode = config::EqMode::Graphic;
+        }
+        self.graphic_eq = crate::dsp::GraphicEq::from_config(&config.graphic_eq);
+        if config.eq.mode == config::EqMode::Graphic {
+            // In an explicit mode the master `EqConfig` fields are the
+            // authority. `graphic_eq.enabled`/`preamp_db` are mirrors kept for
+            // older configs; letting a stale mirror win would load a config
+            // that says "EQ on, -3 dB preamp, graphic mode" and silently play
+            // a disabled stage or the wrong level.
+            self.graphic_eq.set_enabled(config.eq.enabled);
+            self.graphic_eq.set_preamp_db(config.eq.preamp_db);
+            self.sync_graphic_eq();
+        } else if legacy_graphic {
             self.sync_graphic_eq();
         }
 
@@ -814,6 +833,29 @@ impl AudioEngine {
         }
 
         self.config = config.clone();
+        if legacy_graphic {
+            self.config.eq.mode = config::EqMode::Graphic;
+            // The old format could have a disabled parametric master and an
+            // active graphic layer. The unified format has one master, so the
+            // migrated config must say enabled or the next load would silence
+            // the very curve this migration just restored. The graphic preamp
+            // is the only level the old file carried; copy it into the shared
+            // field or the first save would reset it to the parametric value.
+            self.config.eq.enabled = true;
+            self.config.eq.preamp_db = self.graphic_eq.preamp_db();
+            self.config.graphic_eq.enabled = true;
+            self.config.graphic_eq.preamp_db = self.config.eq.preamp_db;
+        } else if self.config.eq.mode == config::EqMode::Graphic {
+            // Keep the persisted mirror equal to the master that just drove
+            // the live stage, so a later load cannot disagree with this one.
+            self.config.graphic_eq.enabled = self.config.eq.enabled;
+            self.config.graphic_eq.preamp_db = self.config.eq.preamp_db;
+        } else {
+            // Explicit parametric mode: the graphic layer is inactive even if
+            // an older file left its mirror enabled. Persisting that stale bit
+            // would make the next load take the legacy-graphic migration path.
+            self.config.graphic_eq.enabled = false;
+        }
 
         if backend_changed {
             info!("Output backend or target device changed, triggering stream recovery to apply settings.");

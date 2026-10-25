@@ -61,15 +61,33 @@ impl GraphicEq {
     }
 
     /// Build a graphic EQ model from its persisted configuration.
+    ///
+    /// The config is untrusted input: a hand-edited or older file can carry a
+    /// non-finite slider or a preamp outside the range the biquads accept.
+    /// Sanitising here keeps the model, the stage and the next save in
+    /// agreement instead of letting the live gain silently differ from the
+    /// persisted one.
     pub fn from_config(cfg: &config::GraphicEqConfig) -> Self {
         let n = cfg.layout.num_bands();
-        let mut gains = cfg.gains_db.clone();
-        gains.truncate(n);
-        gains.resize(n, 0.0);
+        let mut gains = Vec::with_capacity(n);
+        for index in 0..n {
+            let gain = cfg
+                .gains_db
+                .get(index)
+                .copied()
+                .filter(|gain| gain.is_finite())
+                .unwrap_or(0.0);
+            gains.push(gain.clamp(-GRAPHIC_EQ_MAX_GAIN_DB, GRAPHIC_EQ_MAX_GAIN_DB));
+        }
+        let preamp_db = if cfg.preamp_db.is_finite() {
+            cfg.preamp_db.clamp(-30.0, 30.0)
+        } else {
+            0.0
+        };
         Self {
             layout: cfg.layout.clone(),
             gains_db: gains,
-            preamp_db: cfg.preamp_db,
+            preamp_db,
             enabled: cfg.enabled,
         }
     }
@@ -116,10 +134,44 @@ impl GraphicEq {
 
     /// Replace the layout, resetting every slider to 0 dB. Band count
     /// changes take effect here (the model owns the slider vector).
+    ///
+    /// Prefer [`Self::set_state`] for a live layout change: it carries the
+    /// interpolated gains the UI computed, so shrinking 64 → 10 bands cannot
+    /// leave the tail of the old curve running as stale filters.
     pub fn set_layout(&mut self, layout: GraphicEqLayout) {
         let n = layout.num_bands();
         self.layout = layout;
         self.gains_db = vec![0.0; n];
+    }
+
+    /// Replace every field of the model in one call.
+    ///
+    /// This is the atomic counterpart to the individual setters. The UI sends
+    /// one of these per edit, so a preset cannot lose all but its last band to
+    /// a command queue, and a layout change cannot leave the old band count's
+    /// filters active.
+    pub fn set_state(
+        &mut self,
+        layout: GraphicEqLayout,
+        gains_db: &[f32],
+        preamp_db: f32,
+        enabled: bool,
+    ) {
+        let n = layout.num_bands();
+        self.layout = layout;
+        self.gains_db.clear();
+        self.gains_db.reserve(n);
+        for index in 0..n {
+            let gain = gains_db
+                .get(index)
+                .copied()
+                .filter(|g| g.is_finite())
+                .unwrap_or(0.0);
+            self.gains_db
+                .push(gain.clamp(-GRAPHIC_EQ_MAX_GAIN_DB, GRAPHIC_EQ_MAX_GAIN_DB));
+        }
+        self.set_preamp_db(preamp_db);
+        self.enabled = enabled;
     }
 
     /// Set one slider gain in dB, clamped to ±[`GRAPHIC_EQ_MAX_GAIN_DB`].
@@ -165,26 +217,31 @@ impl GraphicEq {
         let freqs = self.frequencies();
         let q = self.band_q();
         let last = freqs.len().saturating_sub(1);
-        for (i, freq) in freqs.iter().enumerate() {
-            let gain = self.gains_db.get(i).copied().unwrap_or(0.0);
-            let filter_type = if i == 0 {
-                EqFilterType::LowShelf
-            } else if i == last {
-                EqFilterType::HighShelf
-            } else {
-                EqFilterType::Peaking
-            };
-            eq.set_band(
-                i,
+        let params: Vec<EqBandParams> = freqs
+            .iter()
+            .enumerate()
+            .map(|(i, freq)| {
+                let gain = self.gains_db.get(i).copied().unwrap_or(0.0);
+                let filter_type = if i == 0 {
+                    EqFilterType::LowShelf
+                } else if i == last {
+                    EqFilterType::HighShelf
+                } else {
+                    EqFilterType::Peaking
+                };
                 EqBandParams {
                     frequency: *freq,
                     gain_db: gain,
                     q,
                     filter_type,
                     enabled: gain.abs() > GRAPHIC_EQ_SLIDER_EPSILON_DB,
-                },
-            );
-        }
+                }
+            })
+            .collect();
+        // One atomic install: the headroom sweep runs once for the whole curve,
+        // not once per slider. This is also what makes a preset change apply
+        // every band instead of only the last command that survived a queue.
+        eq.set_band_layout(&params);
         eq.set_enabled(self.enabled);
     }
 
@@ -244,6 +301,22 @@ mod tests {
         assert!((q13 - 4.31).abs() < 0.05, "1/3-octave Q ≈ 4.31, got {q13}");
         let q16 = GraphicEqLayout::SixtyFourBand.q();
         assert!((q16 - 8.65).abs() < 0.1, "1/6-octave Q ≈ 8.65, got {q16}");
+    }
+
+    #[test]
+    fn loading_a_config_sanitizes_values_the_engine_cannot_represent() {
+        let cfg = config::GraphicEqConfig {
+            enabled: true,
+            layout: GraphicEqLayout::TenBand,
+            gains_db: vec![f32::NAN, 100.0, -100.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            preamp_db: 99.0,
+        };
+        let g = GraphicEq::from_config(&cfg);
+        assert_eq!(g.slider_gain(0), 0.0);
+        assert_eq!(g.slider_gain(1), GRAPHIC_EQ_MAX_GAIN_DB);
+        assert_eq!(g.slider_gain(2), -GRAPHIC_EQ_MAX_GAIN_DB);
+        assert_eq!(g.slider_gain(3), 3.0);
+        assert_eq!(g.preamp_db(), 30.0);
     }
 
     #[test]

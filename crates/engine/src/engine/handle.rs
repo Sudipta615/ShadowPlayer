@@ -504,6 +504,11 @@ impl EngineHandle {
         let _ = self.send_command(EngineCommand::SetEqEnabled(enabled));
     }
 
+    /// Select which curve source owns the EQ stage.
+    pub fn set_eq_mode(&self, mode: config::EqMode) {
+        let _ = self.send_command(EngineCommand::SetEqMode(mode));
+    }
+
     /// Transactionally reconfigure the whole engine from a complete config.
     ///
     /// The one-shot counterpart to the per-stage setters, and the right tool
@@ -583,6 +588,11 @@ impl EngineHandle {
         });
     }
 
+    /// Replace the complete parametric band bank atomically.
+    pub fn set_eq_bands(&self, bands: Vec<config::EqBandConfig>) {
+        let _ = self.send_command(EngineCommand::SetEqBands(bands));
+    }
+
     /// Load a complete EQ preset (e.g. AutoEQ).
     pub fn set_eq_preset(&self, preset: config::EqPreset) {
         let _ = self.send_command(EngineCommand::SetEqPreset(preset));
@@ -617,6 +627,28 @@ impl EngineHandle {
     /// Set the Graphic EQ preamp in dB.
     pub fn set_graphic_eq_preamp(&self, db: f32) {
         let _ = self.send_command(EngineCommand::SetGraphicEqPreamp(db));
+    }
+
+    /// Apply the complete graphic-EQ state atomically.
+    ///
+    /// Hosts should prefer this over the per-band setters: one command carries
+    /// the layout, all gains, preamp, master enable and headroom preference, so
+    /// a preset cannot be truncated by the engine's per-tick command budget.
+    pub fn set_graphic_eq_state(
+        &self,
+        layout: config::GraphicEqLayout,
+        gains_db: Vec<f32>,
+        preamp_db: f32,
+        enabled: bool,
+        auto_headroom: bool,
+    ) {
+        let _ = self.send_command(EngineCommand::SetGraphicEqState {
+            layout,
+            gains_db,
+            preamp_db,
+            enabled,
+            auto_headroom,
+        });
     }
 
     /// Set the dedicated bass shelf gain in dB (clamped to ±30 by the EQ).

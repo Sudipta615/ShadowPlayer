@@ -768,41 +768,50 @@ impl ParametricEq {
         let Some(band) = self.bands.get_mut(index) else {
             return;
         };
-        // Per-field, not whole-struct: a non-finite gain should not also throw
-        // away a perfectly good frequency change in the same command.
-        if params.gain_db.is_finite() {
-            band.params.gain_db = params.gain_db.clamp(-MAX_BAND_GAIN_DB, MAX_BAND_GAIN_DB);
-        } else {
-            log::warn!(
-                "ParametricEq::set_band: band {} non-finite gain {}; keeping {}",
-                index,
-                params.gain_db,
-                band.params.gain_db
-            );
-        }
-        if params.frequency.is_finite() {
-            band.params.frequency = params.frequency;
-        } else {
-            log::warn!(
-                "ParametricEq::set_band: band {} non-finite frequency {}; keeping {}",
-                index,
-                params.frequency,
-                band.params.frequency
-            );
-        }
-        if params.q.is_finite() {
-            band.params.q = params.q;
-        } else {
-            log::warn!(
-                "ParametricEq::set_band: band {} non-finite Q {}; keeping {}",
-                index,
-                params.q,
-                band.params.q
-            );
-        }
-        band.params.filter_type = params.filter_type;
-        band.params.enabled = params.enabled;
+        apply_band_params(band, index, params);
         band.update_coefficients(self.sample_rate);
+        self.refresh_auto_headroom();
+    }
+
+    /// Replace the complete band layout in one atomic update.
+    ///
+    /// This is the path every multi-band edit must take. Calling [`Self::set_band`]
+    /// once per slider works, but each call re-runs the auto-headroom
+    /// `combined_max_gain_db` sweep — O(bands²) work for a preset load, and a
+    /// second source of truth (the final per-band refresh wins while the
+    /// intermediate ones were wasted). Here the coefficients are installed for
+    /// every band first and the headroom is recomputed exactly once.
+    ///
+    /// A band-count change resets the biquad state because the frequencies
+    /// moved; a same-count update leaves the filters' history intact so slider
+    /// drags keep riding the existing click-free parameter smoothing.
+    pub fn set_band_layout(&mut self, params: &[EqBandParams]) {
+        let n = params.len().min(MAX_EQ_BANDS);
+        if self.bands.len() != n {
+            self.bands.clear();
+            self.bands.reserve(n);
+            self.bands.extend((0..n).map(|_| EqBand::new()));
+        }
+        for (index, params) in params.iter().copied().take(n).enumerate() {
+            let band = &mut self.bands[index];
+            apply_band_params(band, index, params);
+            band.update_coefficients(self.sample_rate);
+        }
+        self.refresh_auto_headroom();
+    }
+
+    /// Grow or shrink the band bank while preserving the bands that remain.
+    ///
+    /// Used when a live parametric edit addresses a band beyond the current
+    /// count. New bands start disabled at unity; shrinking drops the tail so
+    /// stale filters cannot keep processing. The headroom is refreshed once
+    /// for the whole resize.
+    pub fn set_band_count(&mut self, count: usize) {
+        let n = count.clamp(1, MAX_EQ_BANDS);
+        if self.bands.len() == n {
+            return;
+        }
+        self.bands.resize_with(n, EqBand::new);
         self.refresh_auto_headroom();
     }
 
@@ -885,6 +894,48 @@ impl ParametricEq {
         // runtime state — no reset needed. Downstream LookaheadLimiter owns overshoot
         // protection.
     }
+}
+
+/// Install one band's parameters with the same per-field validation used by
+/// [`ParametricEq::set_band`].
+///
+/// Kept separate so the single-band and whole-layout paths cannot drift on
+/// which non-finite values they reject.
+fn apply_band_params(band: &mut EqBand, index: usize, params: EqBandParams) {
+    // Per-field, not whole-struct: a non-finite gain should not also throw
+    // away a perfectly good frequency change in the same command.
+    if params.gain_db.is_finite() {
+        band.params.gain_db = params.gain_db.clamp(-MAX_BAND_GAIN_DB, MAX_BAND_GAIN_DB);
+    } else {
+        log::warn!(
+            "ParametricEq::set_band: band {} non-finite gain {}; keeping {}",
+            index,
+            params.gain_db,
+            band.params.gain_db
+        );
+    }
+    if params.frequency.is_finite() {
+        band.params.frequency = params.frequency;
+    } else {
+        log::warn!(
+            "ParametricEq::set_band: band {} non-finite frequency {}; keeping {}",
+            index,
+            params.frequency,
+            band.params.frequency
+        );
+    }
+    if params.q.is_finite() {
+        band.params.q = params.q;
+    } else {
+        log::warn!(
+            "ParametricEq::set_band: band {} non-finite Q {}; keeping {}",
+            index,
+            params.q,
+            band.params.q
+        );
+    }
+    band.params.filter_type = params.filter_type;
+    band.params.enabled = params.enabled;
 }
 
 /// Product of the magnitude responses of `coeffs` at `freq_hz` (linear).

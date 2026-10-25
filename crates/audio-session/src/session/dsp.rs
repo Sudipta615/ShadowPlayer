@@ -34,6 +34,11 @@ impl AudioSession {
         self.handle.set_eq_enabled(enabled);
     }
 
+    /// Select which curve source owns the single EQ stage.
+    pub fn set_eq_mode(&self, mode: config::EqMode) {
+        self.handle.set_eq_mode(mode);
+    }
+
     pub fn set_eq_band(&self, index: usize, freq: f32, gain_db: f32, q: f32, enabled: bool) {
         self.handle.set_eq_band(index, freq, gain_db, q, enabled);
     }
@@ -52,6 +57,20 @@ impl AudioSession {
 
     pub fn set_graphic_eq_enabled(&self, enabled: bool) {
         self.handle.set_graphic_eq_enabled(enabled);
+    }
+
+    /// Push the complete graphic-EQ state in one engine command.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_graphic_eq_state(
+        &self,
+        layout: config::GraphicEqLayout,
+        gains_db: Vec<f32>,
+        preamp_db: f32,
+        enabled: bool,
+        auto_headroom: bool,
+    ) {
+        self.handle
+            .set_graphic_eq_state(layout, gains_db, preamp_db, enabled, auto_headroom);
     }
 
     pub fn set_preamp(&self, db: f32) {
@@ -311,6 +330,11 @@ impl AudioSession {
             filter_type,
             enabled,
         });
+    }
+
+    /// Replace the complete parametric band bank atomically.
+    pub fn set_eq_bands(&self, bands: Vec<config::EqBandConfig>) {
+        self.send(EngineCommand::SetEqBands(bands));
     }
 
     /// Enable or disable automatic EQ headroom management.

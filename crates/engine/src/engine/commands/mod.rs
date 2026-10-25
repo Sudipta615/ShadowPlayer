@@ -266,16 +266,19 @@ impl AudioEngine {
     }
 
     /// Compile the graphic EQ model into the pipeline's parametric stage.
+    ///
+    /// The stage is resized in place through `set_band_layout`, which keeps the
+    /// tone shelves, preamp, headroom and post-gain intact and recomputes the
+    /// auto-headroom exactly once. Replacing the whole `ParametricEq` here used
+    /// to drop those settings and, when shrinking the layout, left the tail of
+    /// the previous layout running with stale frequencies.
     pub(super) fn sync_graphic_eq(&mut self) {
         self.config.graphic_eq.layout = self.graphic_eq.layout().clone();
         self.config.graphic_eq.gains_db = self.graphic_eq.gains().to_vec();
         self.config.graphic_eq.preamp_db = self.graphic_eq.preamp_db();
         self.config.graphic_eq.enabled = self.graphic_eq.enabled();
-        let n = self.graphic_eq.num_bands();
-        if self.graph.eq_num_bands() < n {
-            let sr = self.output_sample_rate as f32;
-            self.graph
-                .with_graph(|g| g.eq_mut().eq = crate::dsp::equalizer::ParametricEq::new(n, sr));
+        if self.config.eq.mode != config::EqMode::Graphic {
+            return;
         }
         self.graph
             .with_graph(|g| self.graphic_eq.sync_into(&mut g.eq_mut().eq));
@@ -424,6 +427,7 @@ impl AudioEngine {
 
             // ── EQ ──
             EngineCommand::SetEqEnabled(enabled) => self.handle_set_eq_enabled(enabled),
+            EngineCommand::SetEqMode(mode) => self.handle_set_eq_mode(mode),
             EngineCommand::SetEqAutoHeadroom(enabled) => self.handle_set_eq_auto_headroom(enabled),
             EngineCommand::SetDynamicEqEnabled(enabled) => {
                 self.handle_set_dynamic_eq_enabled(enabled);
@@ -446,12 +450,26 @@ impl AudioEngine {
                 filter_type,
                 enabled,
             } => self.handle_set_eq_band_params(index, frequency, gain_db, q, filter_type, enabled),
+            EngineCommand::SetEqBands(bands) => self.handle_set_eq_bands(bands),
             EngineCommand::SetEqPreset(preset) => self.handle_set_eq_preset(preset),
             EngineCommand::SetGraphicEqLayout(layout) => self.handle_set_graphic_eq_layout(layout),
             EngineCommand::SetGraphicEqSlider { band, gain_db } => {
                 self.handle_set_graphic_eq_slider(band, gain_db)
             }
             EngineCommand::SetGraphicEqPreamp(db) => self.handle_set_graphic_eq_preamp(db),
+            EngineCommand::SetGraphicEqState {
+                layout,
+                gains_db,
+                preamp_db,
+                enabled,
+                auto_headroom,
+            } => self.handle_set_graphic_eq_state(
+                layout,
+                gains_db,
+                preamp_db,
+                enabled,
+                auto_headroom,
+            ),
             EngineCommand::SetGraphicEqEnabled(enabled) => {
                 self.handle_set_graphic_eq_enabled(enabled)
             }

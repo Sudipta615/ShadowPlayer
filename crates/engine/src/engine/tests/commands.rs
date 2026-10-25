@@ -461,28 +461,35 @@ fn test_tick_populates_engine_stats_diagnostics() {
 #[test]
 fn test_graphic_eq_slider_syncs_into_pipeline() {
     let mut engine = AudioEngine::new_default().unwrap();
+    let mut gains = vec![0.0; 31];
+    gains[17] = 6.0;
 
-    engine.send_command(EngineCommand::SetGraphicEqLayout(
-        config::GraphicEqLayout::ThirtyOneBand,
-    ));
+    // The application selects the mode first, then sends the whole curve as
+    // one atomic state. A lone slider command still works for a direct host,
+    // but the app path is what guarantees that a layout change and every band
+    // land together.
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::ThirtyOneBand,
+        gains_db: gains,
+        preamp_db: 0.0,
+        enabled: true,
+        auto_headroom: false,
+    });
     engine.tick();
     assert!(
         engine.pipeline().eq().eq.is_enabled(),
-        "activating a layout enables the EQ"
+        "the atomic snapshot carries the master enable"
     );
     assert_eq!(engine.pipeline().eq().eq.num_bands(), 31);
 
-    engine.send_command(EngineCommand::SetGraphicEqSlider {
-        band: 17,
-        gain_db: 6.0,
-    });
-    engine.tick();
     let band = engine.pipeline().eq().eq.band_params(17).unwrap();
     assert!((band.frequency - 1000.0).abs() < 1e-3);
     assert!((band.gain_db - 6.0).abs() < 1e-4);
     assert!(band.enabled);
     assert!(engine.config.graphic_eq.enabled);
     assert_eq!(engine.config.graphic_eq.gains_db[17], 6.0);
+    assert_eq!(engine.config.eq.mode, config::EqMode::Graphic);
 }
 
 #[test]
@@ -574,9 +581,447 @@ fn test_graphic_eq_from_config_applies_on_set_config() {
     engine.set_config(config);
     assert!(engine.pipeline().eq().eq.is_enabled());
     assert_eq!(engine.pipeline().eq().eq.num_bands(), 32);
+    assert_eq!(engine.config.eq.mode, config::EqMode::Graphic);
+    assert!(engine.config.eq.enabled);
+    assert!(engine.config.graphic_eq.enabled);
+    assert!((engine.config.eq.preamp_db - (-1.0)).abs() < 1e-4);
     let band = engine.pipeline().eq().eq.band_params(5).unwrap();
     assert!((band.gain_db - 2.5).abs() < 1e-4);
     assert!((engine.pipeline().eq().eq.preamp_db() - (-1.0)).abs() < 1e-4);
+
+    // The migrated config must survive a save/load round trip.
+    let migrated = engine.config.clone();
+    engine.set_config(migrated);
+    assert!(engine.pipeline().eq().eq.is_enabled());
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 32);
+    assert!((engine.pipeline().eq().eq.preamp_db() - (-1.0)).abs() < 1e-4);
+}
+
+#[test]
+fn test_graphic_eq_snapshot_installs_every_band_and_shrinks_cleanly() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+
+    let mut gains = vec![0.0; 64];
+    gains[0] = 3.0;
+    gains[31] = -5.5;
+    gains[63] = 8.0;
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::SixtyFourBand,
+        gains_db: gains,
+        preamp_db: -2.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 64);
+    assert_eq!(engine.config.graphic_eq.gains_db.len(), 64);
+    assert_eq!(engine.config.graphic_eq.gains_db[0], 3.0);
+    assert_eq!(engine.config.graphic_eq.gains_db[31], -5.5);
+    assert_eq!(engine.config.graphic_eq.gains_db[63], 8.0);
+    assert!((engine.pipeline().eq().eq.preamp_db() - (-2.0)).abs() < 1e-4);
+
+    // Shrinking must rebuild the live bank, not leave the old tail (and its
+    // filters) processing behind a shorter layout.
+    let mut ten = vec![0.0; 10];
+    ten[5] = 4.0;
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::TenBand,
+        gains_db: ten,
+        preamp_db: -1.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 10);
+    assert_eq!(engine.config.graphic_eq.gains_db.len(), 10);
+    assert!(engine.pipeline().eq().eq.band_params(10).is_none());
+    let band = engine.pipeline().eq().eq.band_params(5).unwrap();
+    assert!((band.frequency - 1000.0).abs() < 1e-3);
+    assert!((band.gain_db - 4.0).abs() < 1e-4);
+    assert!((engine.pipeline().eq().eq.preamp_db() - (-1.0)).abs() < 1e-4);
+}
+
+/// Steady-state sine gain through the live EQ, measured after the coefficient
+/// and gain ramps have settled.
+fn measured_eq_gain_db(engine: &mut AudioEngine, freq_hz: f32) -> f32 {
+    let sample_rate = engine.pipeline().sample_rate();
+    let settle = (sample_rate * 0.25) as usize;
+    let period = (sample_rate / freq_hz).ceil() as usize;
+    let mut peak = 0.0f32;
+    engine.pipeline_mut().with_graph(|graph| {
+        let eq = &mut graph.eq_mut().eq;
+        let mut phase = 0.0f32;
+        for i in 0..settle + period * 2 {
+            let sample = (phase * std::f32::consts::TAU).sin();
+            phase += freq_hz / sample_rate;
+            let (left, _) = eq.process(sample, sample);
+            if i >= settle {
+                peak = peak.max(left.abs());
+            }
+        }
+    });
+    20.0 * peak.max(1e-9).log10()
+}
+
+#[test]
+fn test_set_preamp_clamps_to_the_dsp_range_and_ignores_non_finite_values() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqEnabled(true));
+    engine.send_command(EngineCommand::SetPreamp(100.0));
+    engine.tick();
+    assert!((engine.config.eq.preamp_db - 30.0).abs() < 1e-4);
+    assert!((engine.pipeline().eq().eq.preamp_db() - 30.0).abs() < 1e-4);
+
+    engine.send_command(EngineCommand::SetPreamp(f32::NAN));
+    engine.tick();
+    assert!(engine.config.eq.preamp_db.is_finite());
+    assert!((engine.config.eq.preamp_db - 30.0).abs() < 1e-4);
+    assert!((engine.pipeline().eq().eq.preamp_db() - 30.0).abs() < 1e-4);
+}
+
+#[test]
+fn test_graphic_snapshot_carries_the_shared_master_and_preamp_in_parametric_mode() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Parametric));
+    engine.send_command(EngineCommand::SetEqEnabled(true));
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::TenBand,
+        gains_db: vec![0.0; 10],
+        preamp_db: -8.0,
+        enabled: false,
+        auto_headroom: false,
+    });
+    engine.tick();
+
+    assert_eq!(engine.config.eq.mode, config::EqMode::Parametric);
+    assert!(!engine.config.eq.enabled);
+    assert!(!engine.pipeline().eq().eq.is_enabled());
+    assert!((engine.config.eq.preamp_db - (-8.0)).abs() < 1e-4);
+    assert!((engine.pipeline().eq().eq.preamp_db() - (-8.0)).abs() < 1e-4);
+
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::TenBand,
+        gains_db: vec![0.0; 10],
+        preamp_db: -8.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+    assert_eq!(engine.config.eq.mode, config::EqMode::Parametric);
+    assert!(engine.pipeline().eq().eq.is_enabled());
+}
+
+#[test]
+fn test_eq_preset_clamps_and_sanitizes_its_preamp() {
+    fn preset(preamp_db: f32) -> config::EqPreset {
+        config::EqPreset {
+            name: "preamp-test".into(),
+            output_device_pattern: None,
+            preamp_db,
+            bands: vec![config::EqBandConfig {
+                enabled: true,
+                filter_type: config::FilterType::Peaking,
+                frequency: 1000.0,
+                gain_db: 1.0,
+                q: 1.0,
+            }],
+        }
+    }
+
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqPreset(preset(100.0)));
+    engine.tick();
+    assert!((engine.config.eq.preamp_db - 30.0).abs() < 1e-4);
+    assert!((engine.pipeline().eq().eq.preamp_db() - 30.0).abs() < 1e-4);
+
+    engine.send_command(EngineCommand::SetEqPreset(preset(f32::NAN)));
+    engine.tick();
+    assert!(engine.config.eq.preamp_db.is_finite());
+    assert_eq!(engine.config.eq.preamp_db, 0.0);
+    assert_eq!(engine.pipeline().eq().eq.preamp_db(), 0.0);
+}
+
+#[test]
+fn test_graphic_eq_snapshot_boost_is_audible_at_center() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+
+    let mut gains = vec![0.0; 31];
+    let center = config::GraphicEqLayout::ThirtyOneBand
+        .frequencies()
+        .iter()
+        .position(|f| (*f - 1000.0).abs() < 1.0)
+        .unwrap();
+    gains[center] = 12.0;
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::ThirtyOneBand,
+        gains_db: gains,
+        preamp_db: 0.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+
+    let gain_db = measured_eq_gain_db(&mut engine, 1000.0);
+    assert!(
+        (gain_db - 12.0).abs() < 0.6,
+        "+12 dB slider should measure at the center, got {gain_db:.2} dB"
+    );
+}
+
+#[test]
+fn test_graphic_eq_extreme_boost_and_preamp_compose_without_a_hidden_cap() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+
+    let flat = vec![0.0; 31];
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::ThirtyOneBand,
+        gains_db: flat,
+        preamp_db: -18.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+    let preamp_db = measured_eq_gain_db(&mut engine, 1000.0);
+    assert!(
+        (preamp_db + 18.0).abs() < 0.6,
+        "the preamp should apply in full, got {preamp_db:.2} dB"
+    );
+
+    let mut gains = vec![0.0; 31];
+    gains[17] = 24.0;
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::ThirtyOneBand,
+        gains_db: gains,
+        preamp_db: -18.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+    let extreme_db = measured_eq_gain_db(&mut engine, 1000.0);
+    assert!(
+        (extreme_db - 6.0).abs() < 0.6,
+        "+24 dB minus an 18 dB preamp should measure +6 dB, got {extreme_db:.2} dB"
+    );
+}
+
+#[test]
+fn test_graphic_eq_auto_headroom_is_static_and_predictable() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+
+    let mut gains = vec![0.0; 31];
+    let center = config::GraphicEqLayout::ThirtyOneBand
+        .frequencies()
+        .iter()
+        .position(|f| (*f - 1000.0).abs() < 1.0)
+        .unwrap();
+    gains[center] = 12.0;
+
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::ThirtyOneBand,
+        gains_db: gains.clone(),
+        preamp_db: 0.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+    assert!((engine.pipeline().eq().eq.headroom_db() - 0.0).abs() < 1e-4);
+
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::ThirtyOneBand,
+        gains_db: gains,
+        preamp_db: 0.0,
+        enabled: true,
+        auto_headroom: true,
+    });
+    engine.tick();
+
+    let headroom = engine.pipeline().eq().eq.headroom_db();
+    assert!(
+        (headroom + 12.0).abs() < 0.6,
+        "auto headroom should reserve the +12 dB boost, got {headroom:.2} dB"
+    );
+    let gain_db = measured_eq_gain_db(&mut engine, 1000.0);
+    assert!(
+        gain_db.abs() < 0.6,
+        "static headroom should cancel the boost instead of relying on the limiter, got {gain_db:.2} dB"
+    );
+}
+
+#[test]
+fn test_parametric_mode_survives_graphic_snapshots_and_round_trips() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    let preset = config::EqPreset {
+        name: "test-autoeq".into(),
+        output_device_pattern: None,
+        preamp_db: -4.0,
+        bands: vec![
+            config::EqBandConfig {
+                enabled: true,
+                filter_type: config::FilterType::LowShelf,
+                frequency: 105.0,
+                gain_db: 5.5,
+                q: 0.71,
+            },
+            config::EqBandConfig {
+                enabled: true,
+                filter_type: config::FilterType::Peaking,
+                frequency: 4650.0,
+                gain_db: 1.5,
+                q: 2.5,
+            },
+        ],
+    };
+    engine.send_command(EngineCommand::SetEqPreset(preset));
+    engine.tick();
+    assert_eq!(engine.config.eq.mode, config::EqMode::Parametric);
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 2);
+
+    // The UI mirrors its shared preamp and graphic model on every sync. That
+    // must not silently replace an AutoEQ curve with a flat graphic bank.
+    let mut gains = vec![0.0; 31];
+    gains[17] = 9.0;
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::ThirtyOneBand,
+        gains_db: gains,
+        preamp_db: -4.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+    assert_eq!(engine.config.eq.mode, config::EqMode::Parametric);
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 2);
+    assert!((engine.pipeline().eq().eq.band_params(0).unwrap().frequency - 105.0).abs() < 1e-3);
+    assert!(!engine.config.graphic_eq.enabled);
+    assert_eq!(engine.config.graphic_eq.gains_db[17], 9.0);
+
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+    engine.tick();
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 31);
+    assert!((engine.pipeline().eq().eq.band_params(17).unwrap().gain_db - 9.0).abs() < 1e-4);
+
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Parametric));
+    engine.tick();
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 2);
+    assert!((engine.pipeline().eq().eq.band_params(0).unwrap().frequency - 105.0).abs() < 1e-3);
+    assert_eq!(engine.config.graphic_eq.gains_db[17], 9.0);
+}
+
+#[test]
+fn test_set_eq_bands_replaces_a_64_band_autoeq_curve_atomically() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    let preset = config::EqPreset {
+        name: "autoeq-64".into(),
+        output_device_pattern: None,
+        preamp_db: -4.0,
+        bands: (0..64)
+            .map(|i| config::EqBandConfig {
+                enabled: true,
+                filter_type: config::FilterType::Peaking,
+                frequency: 20.0 * 2.0f32.powf(i as f32 / 6.0),
+                gain_db: 3.0,
+                q: 4.0,
+            })
+            .collect(),
+    };
+    engine.send_command(EngineCommand::SetEqPreset(preset));
+    engine.tick();
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 64);
+    assert!(engine.pipeline().eq().eq.is_enabled());
+
+    let flat: Vec<config::EqBandConfig> = (0..10)
+        .map(|i| config::EqBandConfig {
+            enabled: true,
+            frequency: 31.5 * 2.0f32.powi(i),
+            gain_db: 0.0,
+            ..Default::default()
+        })
+        .collect();
+    engine.send_command(EngineCommand::SetEqBands(flat));
+    engine.tick();
+
+    assert_eq!(engine.config.eq.mode, config::EqMode::Parametric);
+    assert!(engine.pipeline().eq().eq.is_enabled());
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 10);
+    for i in 0..10 {
+        assert!(
+            engine
+                .pipeline()
+                .eq()
+                .eq
+                .band_params(i)
+                .unwrap()
+                .gain_db
+                .abs()
+                < 1e-6
+        );
+    }
+    assert!((engine.pipeline().eq().eq.preamp_db() - (-4.0)).abs() < 1e-4);
+}
+
+#[test]
+fn test_set_eq_bands_does_not_steal_graphic_mode() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::TenBand,
+        gains_db: vec![4.0; 10],
+        preamp_db: 0.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+    assert!((engine.pipeline().eq().eq.band_params(0).unwrap().gain_db - 4.0).abs() < 1e-4);
+
+    let flat: Vec<config::EqBandConfig> = (0..10)
+        .map(|i| config::EqBandConfig {
+            enabled: true,
+            frequency: 31.5 * 2.0f32.powi(i),
+            gain_db: 0.0,
+            ..Default::default()
+        })
+        .collect();
+    engine.send_command(EngineCommand::SetEqBands(flat));
+    engine.tick();
+
+    assert_eq!(engine.config.eq.mode, config::EqMode::Graphic);
+    assert!((engine.config.eq.bands[0].gain_db).abs() < 1e-6);
+    assert!(
+        (engine.pipeline().eq().eq.band_params(0).unwrap().gain_db - 4.0).abs() < 1e-4,
+        "storing the parametric source must not overwrite the audible graphic curve"
+    );
+}
+
+#[test]
+fn test_explicit_graphic_mode_follows_the_master_enable() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    let mut config = EngineConfig::default();
+    config.eq.mode = config::EqMode::Graphic;
+    config.eq.enabled = true;
+    config.eq.preamp_db = -3.0;
+    // Stale mirrors from an old save: the mode and masters say audible and
+    // -3 dB, so the engine must not load a silent or wrongly-levelled stage.
+    config.graphic_eq.enabled = false;
+    config.graphic_eq.preamp_db = 0.0;
+    config.graphic_eq.gains_db = vec![2.0; 10];
+    engine.set_config(config);
+
+    assert!(engine.pipeline().eq().eq.is_enabled());
+    assert!(engine.config.graphic_eq.enabled);
+    assert!((engine.pipeline().eq().eq.preamp_db() - (-3.0)).abs() < 1e-4);
+    assert!((engine.config.graphic_eq.preamp_db - (-3.0)).abs() < 1e-4);
+    assert_eq!(engine.pipeline().eq().eq.num_bands(), 10);
+
+    let mut config = engine.config.clone();
+    config.eq.enabled = false;
+    engine.set_config(config);
+    assert!(!engine.pipeline().eq().eq.is_enabled());
+    assert!(!engine.config.graphic_eq.enabled);
 }
 
 #[test]

@@ -313,6 +313,12 @@ pub enum EngineCommand {
     /// running.
     CancelRoomMeasurement,
     SetEqEnabled(bool),
+    /// Select which curve source owns the EQ stage.
+    ///
+    /// The graphic model and the serialized parametric bands are both kept
+    /// intact while the other mode runs, so switching back restores the curve
+    /// the user last edited instead of a default one.
+    SetEqMode(config::EqMode),
     /// Enable or disable automatic EQ headroom. When enabled, the engine
     /// reserves the curve's own peak boost as pre-EQ attenuation and keeps it
     /// updated as bands change; disabling restores the manual headroom.
@@ -346,6 +352,13 @@ pub enum EngineCommand {
         filter_type: crate::dsp::equalizer::EqFilterType,
         enabled: bool,
     },
+    /// Replace the complete parametric band bank in one atomic update.
+    ///
+    /// A reset or a curve generated outside the AutoEQ modal must not leave
+    /// the tail of a previous 64-band AutoEQ curve running behind a shorter
+    /// UI list. This replaces the bank without changing the master enable,
+    /// preamp, or auto-headroom state.
+    SetEqBands(Vec<config::EqBandConfig>),
     SetResamplerQuality(config::types::enums::ResamplerQuality),
     /// Apply a complete EQ preset (e.g. an AutoEQ result). Replaces the
     /// pipeline's bands and preamp with the preset's; enables the EQ.
@@ -360,7 +373,23 @@ pub enum EngineCommand {
     },
     /// Set the graphic EQ preamp in dB.
     SetGraphicEqPreamp(f32),
+    /// Apply the complete graphic-EQ state in one command.
+    ///
+    /// Carries the layout, every slider, the preamp, master enable and the
+    /// headroom preference together. One command means a 64-band preset is
+    /// installed atomically and cannot be truncated by the per-tick command
+    /// budget or reordered against a layout change.
+    SetGraphicEqState {
+        layout: config::GraphicEqLayout,
+        gains_db: Vec<f32>,
+        preamp_db: f32,
+        enabled: bool,
+        auto_headroom: bool,
+    },
     /// Enable or disable the graphic EQ layer.
+    ///
+    /// Kept for direct hosts. The app uses [`Self::SetGraphicEqState`] so the
+    /// layer's enable state cannot diverge from its curve.
     SetGraphicEqEnabled(bool),
     /// Install a per-output profile and apply it to the active device. The
     /// profile's backend preference is honored at stream (re)creation.

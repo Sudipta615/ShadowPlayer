@@ -46,6 +46,22 @@ impl Default for EqBandConfig {
     }
 }
 
+/// Which curve source owns the pipeline's single EQ stage.
+///
+/// The engine has one `ParametricEq` in the signal path. Graphic sliders are
+/// compiled into it when [`EqMode::Graphic`] is active; the serialized
+/// parametric bands drive it when [`EqMode::Parametric`] is active. Making the
+/// mode explicit is what stops a disabled graphic layer from silently
+/// overwriting an AutoEQ curve (and vice versa).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EqMode {
+    /// Parametric bands from [`EqConfig::bands`], including AutoEQ presets.
+    #[default]
+    Parametric,
+    /// Fixed-frequency slider curve from [`GraphicEqConfig`].
+    Graphic,
+}
+
 /// Configuration for a single dynamic EQ band.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DynamicEqBandConfig {
@@ -211,6 +227,9 @@ impl EqPreset {
 #[serde(default)]
 pub struct EqConfig {
     pub enabled: bool,
+    /// Which curve source owns the single EQ stage while `enabled` is true.
+    #[serde(default)]
+    pub mode: EqMode,
     pub preamp_db: f32,
     pub post_gain_db: f32,
     pub headroom_db: f32,
@@ -262,6 +281,7 @@ impl EqConfig {
         let _ = LN_10;
         Self {
             enabled: false,
+            mode: EqMode::Parametric,
             preamp_db: 0.0,
             post_gain_db: 0.0,
             headroom_db: 0.0,
@@ -394,6 +414,7 @@ impl Default for EqConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            mode: EqMode::Parametric,
             preamp_db: 0.0,
             post_gain_db: 0.0,
             headroom_db: 0.0,
