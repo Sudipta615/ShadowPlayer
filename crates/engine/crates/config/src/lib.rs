@@ -18,8 +18,8 @@ pub mod versioned_state;
 
 pub use config_file::{load_file_warnings, ConfigFileError};
 pub use dsp_config::{
-    BandConfig, BassManagementConfig, CaptureConfig, ChannelEqConfig, ChannelEqEntry,
-    ChannelMixConfig, ChannelMixTemplate, ChannelRoutingConfig, ChannelTrimConfig,
+    BandConfig, BassEnhancerConfig, BassManagementConfig, CaptureConfig, ChannelEqConfig,
+    ChannelEqEntry, ChannelMixConfig, ChannelMixTemplate, ChannelRoutingConfig, ChannelTrimConfig,
     ChannelTrimEntry, ConvolutionConfig, CorrectionConfig, CorrectionPhaseMode, CorrectionTarget,
     CrossfadeConfig, CrossfeedConfig, CrossoverFilterType, CrossoverSlope, DynamicEqBandConfig,
     DynamicEqConfig, EqBandConfig, EqConfig, EqMode, EqPreset, GraphicEqConfig, GraphicEqLayout,

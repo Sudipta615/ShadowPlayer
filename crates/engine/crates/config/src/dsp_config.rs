@@ -525,6 +525,30 @@ impl Default for StereoEnhancerConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct BassEnhancerConfig {
+    pub enabled: bool,
+    pub crossover_hz: f32,
+    pub subsonic_cut_hz: f32,
+    pub drive: f32,
+    pub harmonics_mix: f32,
+    pub direct_sub_mix: f32,
+}
+
+impl Default for BassEnhancerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            crossover_hz: 80.0,
+            subsonic_cut_hz: 30.0,
+            drive: 1.5,
+            harmonics_mix: 0.35,
+            direct_sub_mix: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LimiterConfig {
     pub enabled: bool,
     pub lookahead_ms: f32,

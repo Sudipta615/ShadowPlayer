@@ -66,6 +66,7 @@ pub trait AudioFloat:
     fn powf(self, exp: Self) -> Self;
     fn sin(self) -> Self;
     fn cos(self) -> Self;
+    fn tan(self) -> Self;
     fn is_finite(self) -> bool;
     fn is_nan(self) -> bool;
     fn clamp(self, lo: Self, hi: Self) -> Self;
@@ -133,6 +134,10 @@ impl AudioFloat for f32 {
     #[inline]
     fn cos(self) -> Self {
         f32::cos(self)
+    }
+    #[inline]
+    fn tan(self) -> Self {
+        f32::tan(self)
     }
     #[inline]
     fn is_finite(self) -> bool {
@@ -224,6 +229,10 @@ impl AudioFloat for f64 {
     #[inline]
     fn cos(self) -> Self {
         f64::cos(self)
+    }
+    #[inline]
+    fn tan(self) -> Self {
+        f64::tan(self)
     }
     #[inline]
     fn is_finite(self) -> bool {

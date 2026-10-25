@@ -278,6 +278,7 @@ impl DspPipeline {
         }
         self.crossfeed.process_block(left, right);
         self.stereo_enhancer.process_block(left, right);
+        self.bass_enhancer.process_block(left, right);
         self.timestretcher.process_block(left, right);
     }
 
@@ -447,6 +448,7 @@ impl DspPipeline {
         }
         self.crossfeed.process_block(left, right);
         self.stereo_enhancer.process_block(left, right);
+        self.bass_enhancer.process_block(left, right);
         self.timestretcher.process_block(left, right);
         self.volume.process_block_stereo(left, right);
         self.seek_fade.process_block(left, right);
@@ -485,6 +487,7 @@ impl DspPipeline {
         }
         self.crossfeed.process_block_f64(left, right);
         self.stereo_enhancer.process_block_f64(left, right);
+        self.bass_enhancer.process_block_f64(left, right);
         self.timestretcher.process_block_f64(left, right);
         self.volume.process_block_stereo_f64(left, right);
         self.seek_fade.process_block_f64(left, right);
@@ -524,8 +527,11 @@ impl DspPipeline {
         // Stereo enhancer (native f64 mid/side)
         let (l_s, r_s) = self.stereo_enhancer.process_f64(l_x, r_x);
 
+        // Psychoacoustic Bass Enhancer
+        let (l_bass, r_bass) = self.bass_enhancer.process_sample(l_s, r_s);
+
         // Volume (native f64 gain with smooth dezipper/ramp advancement)
-        let (l_v, r_v) = self.volume.process_stereo_f64(l_s, r_s);
+        let (l_v, r_v) = self.volume.process_stereo_f64(l_bass, r_bass);
 
         // Seek fade (f64 cosine curve)
         let (l_f, r_f) = self.seek_fade.process_f64(l_v, r_v);
@@ -590,7 +596,8 @@ impl DspPipeline {
         let (l_b, r_b) = (l_cv * self.balance_gain_l, r_cv * self.balance_gain_r);
         let (l_x, r_x) = self.crossfeed.process(l_b, r_b);
         let (l_s, r_s) = self.stereo_enhancer.process(l_x, r_x);
-        let (l_v, r_v) = self.volume.process_stereo(l_s, r_s);
+        let (l_bass, r_bass) = self.bass_enhancer.process_sample(l_s as f64, r_s as f64);
+        let (l_v, r_v) = self.volume.process_stereo(l_bass as f32, r_bass as f32);
         let (l_f, r_f) = self.seek_fade.process(l_v, r_v);
         // NOTE: Dither is NOT applied here. It must be applied at the final
         // sample-format conversion step in the cpal callback (see

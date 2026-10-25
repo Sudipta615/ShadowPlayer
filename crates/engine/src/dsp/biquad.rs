@@ -216,6 +216,66 @@ impl<T: AudioFloat> BiquadCoeffs<T> {
         Self::from_f64_raw(b0 / a0, b1 / a0, b2 / a0, a1_n / a0, a2_n / a0)
     }
 
+    /// Nyquist-decramped peaking EQ filter (Orfanidis formulation).
+    ///
+    /// Preserves symmetrical analog bell curves up to Nyquist without the
+    /// high-frequency bandwidth compression/cramping of standard RBJ filters.
+    pub fn peaking_decramped(sample_rate: f32, freq: f32, gain_db: f32, q: f32) -> Self {
+        let (sr, f, qv) = Self::validate_params(sample_rate, freq, q);
+        let gain = Self::validate_gain_db(gain_db);
+        if gain.abs() < 1e-6 {
+            return Self::identity();
+        }
+
+        // Linear center gain G = 10^(gain_db / 20)
+        let g = 10.0_f64.powf(gain / 20.0);
+        let w0 = 2.0 * std::f64::consts::PI * f / sr;
+        let c = w0.cos();
+        let delta_w = (w0 / qv).clamp(1e-4, std::f64::consts::PI * 0.99);
+        let w = (delta_w * 0.5).tan();
+
+        // Bandwidth scaling factor beta = 1 / sqrt(G)
+        let w_prime = (w / g.sqrt()).clamp(1e-6, 1e6);
+        let d = 1.0 + w_prime;
+
+        let b0 = (1.0 + g * w_prime) / d;
+        let b1 = (-2.0 * c) / d;
+        let b2 = (1.0 - g * w_prime) / d;
+        let a1 = (-2.0 * c) / d;
+        let a2 = (1.0 - w_prime) / d;
+
+        Self::from_f64_raw(b0, b1, b2, a1, a2)
+    }
+
+    /// Nyquist-decramped high-shelf filter.
+    ///
+    /// Extends the high-shelf transition smoothly up to the Nyquist frequency
+    /// without premature shelf termination.
+    pub fn highshelf_decramped(sample_rate: f32, freq: f32, gain_db: f32, q: f32) -> Self {
+        let (sr, f, qv) = Self::validate_params(sample_rate, freq, q);
+        let gain = Self::validate_gain_db(gain_db);
+        if gain.abs() < 1e-6 {
+            return Self::identity();
+        }
+
+        let g = 10.0_f64.powf(gain / 20.0);
+        let w0 = 2.0 * std::f64::consts::PI * f / sr;
+        let om0 = (w0 * 0.5).tan();
+        let sqrt2_over_q = std::f64::consts::SQRT_2 / qv;
+
+        // Shelf prewarping
+        let om_g = om0 * g.powf(0.25);
+        let d = om_g * om_g + sqrt2_over_q * om_g + 1.0;
+
+        let b0 = (g * om_g * om_g + (2.0 * g).sqrt() * om_g + 1.0) / d;
+        let b1 = 2.0 * (g * om_g * om_g - 1.0) / d;
+        let b2 = (g * om_g * om_g - (2.0 * g).sqrt() * om_g + 1.0) / d;
+        let a1 = 2.0 * (om_g * om_g - 1.0) / d;
+        let a2 = (om_g * om_g - sqrt2_over_q * om_g + 1.0) / d;
+
+        Self::from_f64_raw(b0, b1, b2, a1, a2)
+    }
+
     /// Band-pass filter (constant skirt gain)
     pub fn bandpass(sample_rate: f32, freq: f32, q: f32) -> Self {
         let (sr, f, qv) = Self::validate_params(sample_rate, freq, q);

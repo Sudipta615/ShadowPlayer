@@ -250,6 +250,66 @@ fn the_underrun_concealment_allocates_nothing() {
 }
 
 #[test]
+fn the_svf_stage_allocates_nothing_while_processing_samples() {
+    let mut svf = engine::dsp::equalizer::SvfFilter::<f32>::new(48_000.0);
+    svf.set_params(1_000.0, 1.0);
+    svf.set_gain_db(3.0);
+
+    for _ in 0..8 {
+        let _ = svf.process(0.25, engine::dsp::equalizer::SvfMode::Peaking);
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..4096 {
+            let _ = svf.process(0.25, engine::dsp::equalizer::SvfMode::Peaking);
+        }
+    });
+    assert_eq!(allocations, 0, "the SVF filter must not allocate");
+}
+
+#[test]
+fn the_bass_enhancer_stage_allocates_nothing_while_processing_blocks() {
+    let mut enhancer = engine::dsp::bass_enhancer::BassEnhancer::new(48_000.0);
+    enhancer.set_enabled(true);
+    let mut left = vec![0.25f32; 512];
+    let mut right = vec![-0.25f32; 512];
+
+    for _ in 0..4 {
+        enhancer.process_block(&mut left, &mut right);
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..128 {
+            enhancer.process_block(&mut left, &mut right);
+        }
+    });
+    assert_eq!(
+        allocations, 0,
+        "the psychoacoustic bass enhancer must not allocate"
+    );
+}
+
+#[test]
+fn the_critically_damped_smoother_allocates_nothing() {
+    let mut smoother = engine::dsp::smoother::CriticallyDampedSmoother::new(0.0, 20.0, 48_000.0);
+    smoother.set_target(1.0);
+
+    for _ in 0..8 {
+        let _ = smoother.next_value();
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..4096 {
+            let _ = smoother.next_value();
+        }
+    });
+    assert_eq!(
+        allocations, 0,
+        "the critically damped smoother must not allocate"
+    );
+}
+
+#[test]
 fn the_counter_itself_does_not_allocate() {
     // If measuring an allocation allocated one, the measurement would be
     // useless. This asserts the harness is sound: arming and disarming the

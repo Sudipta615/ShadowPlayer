@@ -817,6 +817,7 @@ fn stage_capability_table_is_complete_and_consistent() {
         "balance",
         "crossfeed",
         "stereo_enhancer",
+        "bass_enhancer",
         "timestretch",
         "volume",
         "seek_fade",
@@ -837,6 +838,7 @@ fn stage_capability_table_is_complete_and_consistent() {
         "convolution",
         "crossfeed",
         "stereo_enhancer",
+        "bass_enhancer",
         "timestretch",
         "balance",
     ] {
@@ -1035,4 +1037,27 @@ fn graph_nodes_report_full_passthrough_in_bit_perfect_mode() {
             .all(|n| n.latency_ms == 0.0 && n.tail_ms == 0.0),
         "bit-perfect must report zero latency and tail per node"
     );
+}
+
+#[test]
+fn test_pipeline_bass_enhancer_processing() {
+    let mut cfg = EngineConfig::default();
+    cfg.bass_enhancer.enabled = true;
+    cfg.bass_enhancer.crossover_hz = 80.0;
+    cfg.bass_enhancer.drive = 2.0;
+    cfg.bass_enhancer.harmonics_mix = 0.5;
+    let mut pipeline = DspPipeline::from_config(&cfg, 48_000.0);
+
+    let (transparent, reason) = pipeline.is_dsp_transparent();
+    assert!(!transparent);
+    assert_eq!(
+        reason,
+        Some("Psychoacoustic bass enhancer is active".to_string())
+    );
+
+    let mut left = vec![0.5f32; 128];
+    let mut right = vec![0.5f32; 128];
+    pipeline.process_block(&mut left, &mut right);
+    assert!(left.iter().all(|s| s.is_finite()));
+    assert!(right.iter().all(|s| s.is_finite()));
 }

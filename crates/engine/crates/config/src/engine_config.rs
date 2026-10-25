@@ -3,10 +3,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::dsp_config::{
-    BassManagementConfig, CaptureConfig, ChannelEqConfig, ChannelMixConfig, ChannelRoutingConfig,
-    ChannelTrimConfig, ConvolutionConfig, CorrectionConfig, CrossfadeConfig, CrossfeedConfig,
-    EqConfig, GraphicEqConfig, LfeConfig, LimiterConfig, LoudnessConfig, MultibandCompressorConfig,
-    StereoEnhancerConfig,
+    BassEnhancerConfig, BassManagementConfig, CaptureConfig, ChannelEqConfig, ChannelMixConfig,
+    ChannelRoutingConfig, ChannelTrimConfig, ConvolutionConfig, CorrectionConfig, CrossfadeConfig,
+    CrossfeedConfig, EqConfig, GraphicEqConfig, LfeConfig, LimiterConfig, LoudnessConfig,
+    MultibandCompressorConfig, StereoEnhancerConfig,
 };
 use super::enums::{
     AudioBackend, ChannelPolicy, DsdOutput, FallbackPolicy, LoudnessMode, PerformanceMode,
@@ -41,6 +41,8 @@ pub struct EngineConfig {
     pub loudness: LoudnessConfig,
     pub crossfeed: CrossfeedConfig,
     pub stereo_enhancer: StereoEnhancerConfig,
+    #[serde(default)]
+    pub bass_enhancer: BassEnhancerConfig,
     pub limiter: LimiterConfig,
     pub multiband_compressor: MultibandCompressorConfig,
     pub convolution: ConvolutionConfig,
@@ -530,6 +532,7 @@ impl Default for EngineConfig {
             loudness: LoudnessConfig::default(),
             crossfeed: CrossfeedConfig::default(),
             stereo_enhancer: StereoEnhancerConfig::default(),
+            bass_enhancer: BassEnhancerConfig::default(),
             limiter: LimiterConfig::default(),
             multiband_compressor: MultibandCompressorConfig::default(),
             convolution: ConvolutionConfig::default(),
@@ -669,6 +672,7 @@ impl EngineConfig {
             && !self.limiter.enabled
             && !self.crossfeed.enabled
             && !self.stereo_enhancer.enabled
+            && !self.bass_enhancer.enabled
             && !self.multiband_compressor.enabled
             && !self.convolution.enabled;
         if all_dsp_off && self.dither_enabled {

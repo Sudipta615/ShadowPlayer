@@ -4,6 +4,7 @@ pub mod aelog;
 pub mod analysis;
 pub mod analyzer;
 pub mod autoeq;
+pub mod bass_enhancer;
 pub mod biquad;
 pub mod channel_trim;
 pub mod clap_rack;
@@ -33,6 +34,7 @@ pub mod resampler;
 pub mod resampler_handle;
 pub mod safety;
 pub mod simd;
+pub mod smoother;
 pub mod stereo;
 pub mod timeline;
 pub mod timestretch;
@@ -41,6 +43,7 @@ pub mod true_peak;
 pub use analysis::{AnalysisEngine, AnalysisSnapshot};
 pub use analyzer::{AnalyzerSnapshot, AudioAnalyzer, ANALYZER_FFT_SIZE, ANALYZER_UPDATE_HZ};
 pub use autoeq::{AutoEq, AutoEqParams, AutoEqResult, FrequencyResponse, TargetCurve};
+pub use bass_enhancer::{BassEnhancer, BassEnhancerParams};
 pub use biquad::{
     BiquadCoeffs, BiquadCoeffsF32, BiquadCoeffsF64, BiquadState, BiquadStateF32, BiquadStateF64,
     FilterType, SmoothedBiquad, SmoothedBiquadF32, SmoothedBiquadF64,
@@ -58,7 +61,7 @@ pub use dynamics::{
 };
 pub use equalizer::{
     DynamicEq, DynamicEqBand, DynamicEqBandParams, EqBandParams, EqFilterType, ParametricEq,
-    MAX_DYNAMIC_EQ_BANDS, MAX_EQ_BANDS,
+    SvfFilter, SvfMode, MAX_DYNAMIC_EQ_BANDS, MAX_EQ_BANDS,
 };
 pub use float::AudioFloat;
 pub use gain::{FadeProcessor, FadeState, GainProcessor, GainProcessorF32, GainProcessorF64};
@@ -78,6 +81,7 @@ pub use resampler::AudioResampler;
 pub use resampler::LatencyProvider;
 #[cfg(feature = "resample")]
 pub use resampler::ResamplerError;
+pub use smoother::{CriticallyDampedSmoother, PolynomialSmoother};
 pub use stereo::StereoEnhancer;
 pub use timestretch::{TimeStretchConfig, TimeStretcher};
 pub use true_peak::TruePeakMeter;

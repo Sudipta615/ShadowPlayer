@@ -23,6 +23,7 @@
 use crate::buffer::{MAX_AUDIO_BLOCK_FRAMES, MAX_CHANNELS};
 use crate::decode::ChannelLayout;
 use crate::dsp::{
+    bass_enhancer::{BassEnhancer, BassEnhancerParams},
     channel_trim::ChannelTrimmer,
     convolution::ConvolutionEngine,
     crossfade::TrackMixer,
@@ -269,6 +270,16 @@ pub static DSP_STAGE_CAPABILITIES: &[DspStageCapability] = &[
         precision: StagePrecision::Any,
     },
     DspStageCapability {
+        name: "bass_enhancer",
+        channel_support: StageChannelSupport::StereoOnly,
+        position: "post-mix",
+        stateful: true,
+        realtime_safe: true,
+        bit_perfect_compatible: false,
+        sample_rate_sensitive: true,
+        precision: StagePrecision::Any,
+    },
+    DspStageCapability {
         name: "creative_fx",
         channel_support: StageChannelSupport::StereoOnly,
         position: "post-stereo",
@@ -360,6 +371,7 @@ pub struct DspPipeline {
     pub balance_gain_r: f32,
     pub crossfeed: Crossfeed,
     pub stereo_enhancer: StereoEnhancer,
+    pub bass_enhancer: BassEnhancer,
     pub timestretcher: TimeStretcher,
     pub volume: GainProcessor,
     pub seek_fade: FadeProcessor,
@@ -419,6 +431,7 @@ impl DspPipeline {
         let loudness_in = LoudnessNormalizer::new(sample_rate);
         let limiter = LookaheadLimiter::new(sample_rate);
         let stereo_enhancer = StereoEnhancer::new();
+        let bass_enhancer = BassEnhancer::new(sample_rate);
         let crossfeed = Crossfeed::new(sample_rate);
         let multiband_compressor = MultibandCompressor::new(sample_rate);
         let convolution = ConvolutionEngine::new(sample_rate, 8192);
@@ -446,6 +459,7 @@ impl DspPipeline {
             balance_gain_r: 1.0,
             crossfeed,
             stereo_enhancer,
+            bass_enhancer,
             timestretcher,
             limiter,
             channel_trim,
@@ -564,6 +578,15 @@ impl DspPipeline {
         self.stereo_enhancer
             .set_enabled(config.stereo_enhancer.enabled);
         self.stereo_enhancer.set_width(config.stereo_enhancer.width);
+
+        self.bass_enhancer.set_params(BassEnhancerParams {
+            enabled: config.bass_enhancer.enabled,
+            crossover_hz: config.bass_enhancer.crossover_hz,
+            subsonic_cut_hz: config.bass_enhancer.subsonic_cut_hz,
+            drive: config.bass_enhancer.drive,
+            harmonics_mix: config.bass_enhancer.harmonics_mix,
+            direct_sub_mix: config.bass_enhancer.direct_sub_mix,
+        });
 
         self.crossfeed.set_enabled(config.crossfeed.enabled);
         self.crossfeed.set_custom_params(
@@ -696,6 +719,7 @@ impl DspPipeline {
             // dither happens in the output callbacks and is driven by
             // `config.dither_enabled`, which the engine owns.
             self.stereo_enhancer.set_enabled(false);
+            self.bass_enhancer.set_enabled(false);
             self.crossfeed.set_enabled(false);
             self.convolution.set_enabled(false);
             self.limiter.enable_true_peak(false);

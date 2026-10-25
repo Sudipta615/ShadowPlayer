@@ -143,6 +143,7 @@ impl DspPipeline {
         self.crossfeed.set_sample_rate(sample_rate);
         self.limiter.set_sample_rate(sample_rate);
         self.stereo_enhancer.set_sample_rate(sample_rate);
+        self.bass_enhancer.set_sample_rate(sample_rate);
         self.out_preamp
             .set_slew_rate(1.0 / (PREAMP_RAMP_DURATION_MS * 0.001 * sample_rate));
         self.in_preamp
@@ -169,6 +170,7 @@ impl DspPipeline {
         self.convolution.reset();
         self.crossfeed.reset();
         self.stereo_enhancer.reset();
+        self.bass_enhancer.reset();
         self.timestretcher.reset();
         self.limiter.reset();
         self.seek_fade.reset();
@@ -185,6 +187,7 @@ impl DspPipeline {
         self.convolution.reset();
         self.crossfeed.reset();
         self.stereo_enhancer.reset();
+        self.bass_enhancer.reset();
         self.timestretcher.reset();
         self.limiter.reset();
         self.seek_fade.reset();
@@ -329,6 +332,12 @@ impl DspPipeline {
         if self.stereo_enhancer.is_enabled() && (self.stereo_enhancer.width() - 1.0).abs() > 1e-4 {
             return (false, Some("Stereo enhancer is active".to_string()));
         }
+        if self.bass_enhancer.is_enabled() {
+            return (
+                false,
+                Some("Psychoacoustic bass enhancer is active".to_string()),
+            );
+        }
         if (self.balance_gain_l - 1.0).abs() > 1e-4 || (self.balance_gain_r - 1.0).abs() > 1e-4 {
             return (false, Some("Stereo balance is not centered".to_string()));
         }
@@ -427,6 +436,7 @@ impl DspPipeline {
         let stereo_bypassed = self.bit_perfect
             || !self.stereo_enhancer.is_enabled()
             || (self.stereo_enhancer.width() - 1.0).abs() <= 1e-4;
+        let bass_bypassed = self.bit_perfect || !self.bass_enhancer.is_enabled();
         let loudness_bypassed =
             self.bit_perfect || (!self.out_loudness.is_enabled() && !self.in_loudness.is_enabled());
         let dynamics_bypassed = limiter_bypassed
@@ -435,6 +445,7 @@ impl DspPipeline {
             && correction_bypassed
             && crossfeed_bypassed
             && stereo_bypassed
+            && bass_bypassed
             && loudness_bypassed;
 
         let resampler_bypassed = !resampler_active && (self.speed - 1.0).abs() <= 1e-4;
@@ -759,6 +770,7 @@ impl DspPipeline {
                         }
                     }
                     "stereo_enhancer" => (self.stereo_enhancer.is_enabled(), 0.0, 0.0),
+                    "bass_enhancer" => (self.bass_enhancer.is_enabled(), 0.0, 0.0),
                     "timestretch" => {
                         let active = self.timestretcher.is_enabled();
                         let latency = if active {
@@ -962,6 +974,17 @@ impl DspPipeline {
 
     pub fn set_stereo_enhancer_enabled(&mut self, enabled: bool) {
         self.stereo_enhancer.set_enabled(enabled);
+    }
+
+    pub fn set_bass_enhancer_enabled(&mut self, enabled: bool) {
+        self.bass_enhancer.set_enabled(enabled);
+    }
+
+    pub fn set_bass_enhancer_params(
+        &mut self,
+        params: crate::dsp::bass_enhancer::BassEnhancerParams,
+    ) {
+        self.bass_enhancer.set_params(params);
     }
 
     pub fn set_limiter_params(
