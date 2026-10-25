@@ -6,9 +6,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.19.0] - 2026-10-25
+
+*Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Text EQ curves can be imported and exported.** AutoEQ
+  `ParametricEQ.txt`, `GraphicEQ.txt`, Equalizer APO, and REW text are parsed
+  by one clamped grammar and written back without inventing bands. File I/O
+  and the native picker run on a worker, so a slow network share cannot stall
+  a frame.
+- **A durable preset library with bindings.** Saved curves live in their own
+  table with provenance, a searchable virtualized browser, and optional
+  output-device or per-track bindings. Precedence is explicit: a full track
+  profile, a track preset pointer, the longest matching device pattern, the
+  global default, then the manual chain. Applying a preset pushes only the EQ
+  stage; it never reopens the output device.
+- **8,850 AutoEQ parametric corrections.** The AutoEQ dialog now browses
+  an embedded corpus instead of re-optimizing sixteen hand-written
+  measurement sketches. Every entry names its measurement source and carries
+  a preamp derived from the combined response peak, so a +15 dB correction
+  does not ship at 0 dB preamp. Search and the band preview are virtualized;
+  decoding happens once on a worker thread. AutoEQ is MIT-licensed and the
+  notice travels with the binary in Help and
+  `crates/ui/assets/autoeq/ATTRIBUTION.md`.
 
 ### Fixed
+- **The manual no longer promises measurement import it does not have.** Help
+  and Quick Start used to claim AutoEQ accepts a custom measurement curve;
+  neither the dialog nor the engine exposed one. They now describe the corpus
+  and point to the text-curve import that actually exists.
 - **The equalizer now has one authoritative state.** A single master enable,
   a single shared preamp, and an explicit Graphic vs Parametric / AutoEQ mode
   replace the layers that could silently disagree. Graphic edits are sent as
