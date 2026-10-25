@@ -91,9 +91,12 @@ its own README, test matrix, and C ABI.
 
 ### DSP studio
 
-- Parametric and graphic EQ, dynamics, filters, crossfeed, stereo enhancement,
-  spatial and screen audio, room correction, and creative effects including
-  chorus, flanger, phaser, delay, and saturation.
+- Parametric / AutoEQ and graphic EQ (10–64 bands) with one explicit mode
+  selector, one shared preamp, complete preset curves, dynamics, filters,
+  crossfeed, stereo enhancement, spatial and screen audio, room correction,
+  and creative effects including chorus, flanger, phaser, delay, and
+  saturation. The true-peak limiter is on by default; static auto-headroom is
+  opt-in and clearly labelled as fixed attenuation rather than a compressor.
 - A CLAP plugin rack with host bypass, parameter access, and native editor
   windows for plugins that implement `clap.gui`.
 - Named chain presets, per-track DSP profiles, and a global chain that can be

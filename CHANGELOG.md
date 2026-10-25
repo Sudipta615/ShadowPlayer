@@ -8,6 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The equalizer now has one authoritative state.** A single master enable,
+  a single shared preamp, and an explicit Graphic vs Parametric / AutoEQ mode
+  replace the layers that could silently disagree. Graphic edits are sent as
+  one atomic snapshot, so a preset or layout change installs every band and
+  cannot be truncated by the command budget.
+- **Factory and saved presets apply complete curves.** Presets write all
+  bands on 10, 15, 31, and 64-band layouts; custom presets remember their
+  source ladder and preamp, and selecting a factory preset restores unity
+  preamp. Switching modes no longer erases the inactive curve. A 64-band
+  AutoEQ correction is now persisted, captured by chain presets, and restored
+  as a whole instead of being truncated to the old ten-row panel.
+- **Extreme EQ use is audible, not suppressed.** Graphic sliders reach ±24 dB,
+  the preamp applies in full, and static auto-headroom is opt-in and labelled
+  as fixed attenuation. The true-peak limiter is on by default at −1 dBFS so
+  large boosts are caught only when they would actually clip.
+- **Persisted-but-unreachable DSP controls are now visible.** The Dynamics tab
+  exposes the limiter and three-band compressor; the Filters tab exposes
+  crossfeed and impulse-response correction. A Spatial Audio Master card owns
+  the spatial bypass and disables its subordinate controls when bypassed.
+- **Pure Direct mirrors the stages it bypasses and restores them on exit.**
+  EQ, preamp, limiter, compressor, spatial, and stereo state in the studio no
+  longer claim to be active after Pure Direct disabled them, and the next sync
+  cannot re-enable them behind the user's back. Playback volume and speed are
+  restored too, and leaving Pure Direct replays the captured pre-bypass chain
+  instead of leaving the player flat.
+
+### Testing and release
+- Engine regression tests measure +12 dB, +24 dB with an −18 dB preamp, and
+  static auto-headroom cancellation through the live EQ stage; config tests
+  cover legacy graphic migration and explicit-mode round trips. UI tests cover
+  complete presets, custom-preset ladders, interpolation, preamp migration,
+  and mode migration. Formatting, workspace tests, release performance
+  budgets, and clippy with warnings denied pass.
+
 ## [0.18.0] - 2026-10-24
 
 *Released with audio-engine 1.8.0. The player and the engine are versioned separately and released
