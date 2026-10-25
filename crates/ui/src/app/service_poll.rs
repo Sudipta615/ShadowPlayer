@@ -440,6 +440,26 @@ impl ShadowPlayerApp {
             self.apply_device_bound_preset(&device);
         }
 
+        // Decode the embedded AutoEQ corpus once, when its dialog is first
+        // opened. The worker owns the allocation; this loop only moves the
+        // finished catalog into the modal state.
+        if self.dsp_state.autoeq.is_open {
+            if let Err(error) = self.autoeq_catalog.ensure_started() {
+                self.dsp_state.autoeq.set_catalog_error(error);
+            }
+            if let Some(result) = self.autoeq_catalog.poll() {
+                match result {
+                    Ok(catalog) => self.dsp_state.autoeq.set_catalog(catalog),
+                    Err(error) => self.dsp_state.autoeq.set_catalog_error(error),
+                }
+                ctx.request_repaint();
+            } else if self.autoeq_catalog.is_loading() {
+                // Loading is an active task, not a heartbeat: stop requesting
+                // repaints as soon as the worker reports or the dialog closes.
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+            }
+        }
+
         // 2. Poll Library Scanner progress
         if self.scanner_service.poll() {
             // The library changed, so the smart playlists may have new

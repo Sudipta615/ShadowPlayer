@@ -1,5 +1,6 @@
 pub mod artwork_fetch_service;
 pub mod artwork_service;
+pub mod autoeq_catalog_service;
 pub mod autotag_service;
 pub mod biography_service;
 pub mod control_service;
@@ -16,6 +17,7 @@ pub mod waveform_service;
 
 pub use artwork_fetch_service::{ArtworkFetchEvent, ArtworkFetchProgress, ArtworkFetchService};
 pub use artwork_service::ArtworkService;
+pub use autoeq_catalog_service::AutoEqCatalogService;
 pub use autotag_service::{
     AutotagMatch, AutotagOutcome, AutotagProgress, AutotagResult, AutotagService,
 };

@@ -147,12 +147,44 @@ pub(super) fn render_equalizer_tab(ui: &mut egui::Ui, state: &mut HelpState, the
             ("Output Limiter & Compressor", "The true-peak look-ahead limiter is the output safety net and is on by default at a −1.0 dBFS ceiling. It catches peaks that would clip after EQ, preamp and compressor gain without changing the curve. The three-band compressor is off by default; its makeup gain runs before the limiter."),
             ("Crossfeed & Correction", "Crossfeed blends a delayed, filtered copy of each channel into the other to reduce the hard left/right separation of headphones. Correction convolves playback with a measured impulse response and blends it with the dry signal. Both are optional and live in the Filters tab."),
             ("Mid/Side EQ Mode (M/S)", "Splits stereo audio into Mid (monophonic center) and Side (spatial differences). Allows EQ-ing centered bass and lead vocals independently from wide ambient reverbs and panned guitars."),
-            ("AutoEQ Headphone Calibration", &format!("Comes with {} curated headphone measurements and accepts your own measurement curve, so any model can be flattened to the Harman reference target. AutoEQ enters Parametric mode and supplies its own preamp; static auto-headroom is disabled so the correction is not attenuated twice.", crate::modals::autoeq_modal::get_curated_autoeq_profiles().len())),
+            ("AutoEQ Headphone Calibration", &format!("Comes with {} AutoEQ parametric corrections, each carrying its measurement source and a preamp derived from the curve's combined peak response. Search by model, preview the ten filters, then apply: the correction enters Parametric mode and replaces the current parametric curve. ShadowPlayer does not import raw measurement files; to use your own correction, import a ParametricEQ or GraphicEQ text file from the Equalizer panel.", crate::state::autoeq_catalog::SHIPPED_CURVE_COUNT)),
         ];
 
         for (title, body) in eq_features {
             feature_card_row(ui, title, body, theme);
         }
+    });
+
+    // The corpus is compiled into the binary. The MIT license therefore has
+    // to travel with the binary, not only with the repository.
+    manual_card(ui, theme, |ui| {
+        card_title(
+            ui,
+            "AutoEQ Attribution",
+            "Third-party correction data and its license",
+            theme,
+        );
+        ui.label(
+            egui::RichText::new(
+                "The parametric AutoEQ browser ships correction curves created by Jaakko Pasanen and the AutoEQ project (github.com/jaakkopasanen/AutoEq), used under the MIT license. Poweramp is not affiliated with ShadowPlayer and does not endorse it; the curves were extracted from the AutoEQ-derived preset database that Poweramp bundles.",
+            )
+            .font(crate::theme::font(11.5))
+            .color(theme.text_secondary),
+        );
+        ui.add_space(6.0);
+        egui::CollapsingHeader::new(
+            egui::RichText::new("AutoEQ MIT license")
+                .font(crate::theme::font(11.5))
+                .color(theme.text_primary),
+        )
+        .id_salt("autoeq_license")
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(crate::state::autoeq_catalog::AUTO_EQ_LICENSE)
+                    .font(crate::theme::mono_font(9.5))
+                    .color(theme.text_muted),
+            );
+        });
     });
 }
 

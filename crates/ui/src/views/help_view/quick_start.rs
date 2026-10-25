@@ -64,11 +64,11 @@ pub(super) fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, 
             )
         };
 
-        let autoeq_profiles = crate::modals::autoeq_modal::get_curated_autoeq_profiles().len();
+        let autoeq_profiles = crate::state::autoeq_catalog::SHIPPED_CURVE_COUNT;
         let dsp_pillar = (
             "• 64-bit Floating Point DSP".to_string(),
             format!(
-                "Parametric and Graphic EQs (10 to 64 bands), minimum-phase biquad filters, {autoeq_profiles} curated headphone measurements with custom-measurement import, and TPDF dither."
+                "Parametric and Graphic EQs (10 to 64 bands), minimum-phase biquad filters, {autoeq_profiles} AutoEQ parametric corrections, text-curve import and export, and TPDF dither."
             ),
         );
 

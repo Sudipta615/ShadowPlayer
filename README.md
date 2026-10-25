@@ -97,6 +97,12 @@ its own README, test matrix, and C ABI.
   and creative effects including chorus, flanger, phaser, delay, and
   saturation. The true-peak limiter is on by default; static auto-headroom is
   opt-in and clearly labelled as fixed attenuation rather than a compressor.
+- Text-curve import and export for AutoEQ, Equalizer APO, and REW files, plus
+  a durable preset library that can bind a curve to an output device or a
+  track.
+- 8,850 AutoEQ parametric corrections with their measurement source, a
+  derived preamp, and search. AutoEQ is MIT-licensed; the notice ships in
+  Help and in `crates/ui/assets/autoeq/ATTRIBUTION.md`.
 - A CLAP plugin rack with host bypass, parameter access, and native editor
   windows for plugins that implement `clap.gui`.
 - Named chain presets, per-track DSP profiles, and a global chain that can be

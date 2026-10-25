@@ -255,13 +255,11 @@ impl ShadowPlayerApp {
             }
         }
 
-        show_autoeq_modal(
-            ctx,
-            &mut self.dsp_state.autoeq,
-            &mut self.dsp_state.eq_panel,
-            &self.session,
-            &self.theme,
-        );
+        if let Some(curve) = show_autoeq_modal(ctx, &mut self.dsp_state.autoeq, &self.theme) {
+            self.dsp_state.eq_panel.apply_imported_curve(&curve);
+            self.dsp_state.push_imported_eq(&self.session);
+            self.settings_dirty = true;
+        }
 
         show_bit_perfect_modal(
             ctx,

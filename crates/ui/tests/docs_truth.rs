@@ -323,8 +323,8 @@ fn the_manual_reads_capabilities_from_the_live_engine() {
             "the codec list must come from the compiled engine",
         ),
         (
-            "crate::modals::autoeq_modal::get_curated_autoeq_profiles().len()",
-            "the AutoEQ count must come from the bundled profile list",
+            "crate::state::autoeq_catalog::SHIPPED_CURVE_COUNT",
+            "the AutoEQ count must come from the bundled corpus",
         ),
     ] {
         assert!(
@@ -340,10 +340,6 @@ fn the_manual_reads_capabilities_from_the_live_engine() {
     assert!(
         !engine::decode::codecs::decodable_codecs().is_empty(),
         "this build compiled in no decoder, so the manual has nothing truthful to show"
-    );
-    assert!(
-        !ui::modals::autoeq_modal::get_curated_autoeq_profiles().is_empty(),
-        "the bundled AutoEQ profile list is empty"
     );
 }
 

@@ -27,10 +27,10 @@ use crate::modals::{
     RoomMeasurementState, SmartPlaylistEditorState,
 };
 use crate::services::{
-    ArtworkFetchService, ArtworkService, AutotagService, BiographyService, ControlService,
-    CrossfadePreview, ImportKind, ImportResult, ImportService, LoudnessService, LyricsService,
-    MediaToolEvent, MediaToolsService, MprisCommand, MprisService, MprisSnapshot, PodcastEvent,
-    PodcastService, PresetIoEvent, PresetIoService, ScannerService, WaveformService,
+    ArtworkFetchService, ArtworkService, AutoEqCatalogService, AutotagService, BiographyService,
+    ControlService, CrossfadePreview, ImportKind, ImportResult, ImportService, LoudnessService,
+    LyricsService, MediaToolEvent, MediaToolsService, MprisCommand, MprisService, MprisSnapshot,
+    PodcastEvent, PodcastService, PresetIoEvent, PresetIoService, ScannerService, WaveformService,
 };
 use crate::state::{
     AppState, DspState, LibraryState, PodcastState, SleepTimerMode, TelemetryState,
@@ -104,6 +104,8 @@ pub struct ShadowPlayerApp {
     import_service: ImportService,
     /// Text EQ-curve import/export. Owns its own worker; the UI only polls.
     preset_io: PresetIoService,
+    /// Decodes the embedded AutoEQ corpus on first open, off the UI thread.
+    autoeq_catalog: AutoEqCatalogService,
     mpris_service: MprisService,
     /// Loopback control for `shadowplayer-remote` and second-launch
     /// activation. `None` in a multi-instance process, which owns no
@@ -241,6 +243,7 @@ impl ShadowPlayerApp {
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
         let preset_io = PresetIoService::new();
+        let autoeq_catalog = AutoEqCatalogService::new();
         let mpris_service = MprisService::start();
         let (watch_tx, watch_rx) = crossbeam::channel::unbounded::<PathBuf>();
 
@@ -287,6 +290,7 @@ impl ShadowPlayerApp {
             scanner_service,
             import_service,
             preset_io,
+            autoeq_catalog,
             mpris_service,
             control_service,
             loudness_service,
