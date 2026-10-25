@@ -91,6 +91,12 @@ pub struct PlaybackCoordinator {
     /// Measurement events, kept separate from notices so the wizard can show a
     /// progress stage without also raising a toast for it.
     room_measurement_events: Vec<RoomMeasurementEvent>,
+
+    /// The last output-device arrival or negotiated change. The coordinator
+    /// owns the only drain of the bounded output-event channel (it must, or
+    /// the channel fills), so it republishes the arrival here for the shell's
+    /// device-bound EQ presets.
+    pending_output_device: Option<String>,
 }
 
 impl PlaybackCoordinator {
@@ -121,6 +127,7 @@ impl PlaybackCoordinator {
             play_registered: false,
             engine_notices: Vec::new(),
             room_measurement_events: Vec::new(),
+            pending_output_device: None,
         };
 
         coordinator.restore_saved_queue();
@@ -608,11 +615,25 @@ impl PlaybackCoordinator {
                 }
                 // Arrivals, list changes and the negotiated device are already
                 // reflected by the device picker.
-                OutputEvent::DeviceConnected { .. }
-                | OutputEvent::DeviceListChanged { .. }
-                | OutputEvent::OutputDeviceChanged { .. } => {}
+                OutputEvent::DeviceConnected { device } => {
+                    self.pending_output_device = Some(device);
+                }
+                OutputEvent::OutputDeviceChanged { device } => {
+                    if let Some(device) = device {
+                        self.pending_output_device = Some(device);
+                    }
+                }
+                OutputEvent::DeviceListChanged { .. } => {}
             }
         }
+    }
+
+    /// Take the most recent device arrival/negotiated output, if any.
+    ///
+    /// This is deliberately a *take*: a binding is applied once per event,
+    /// not once per frame, and the shell is the only consumer.
+    pub fn take_output_device_change(&mut self) -> Option<String> {
+        self.pending_output_device.take()
     }
 
     /// Record a user-facing engine problem, keeping the list bounded so a

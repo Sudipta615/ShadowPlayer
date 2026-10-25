@@ -343,13 +343,20 @@ pub(super) fn render_graphic_eq_tab(
 
     // ── Bottom Controls: Preamp + Tab-Specific Reset ─────────────────────────
     render_footer_controls(ui, state, actions, theme, EqTab::Graphic);
+
+    // The same durable library is available from either mode; a graphic curve
+    // saved here reappears across launches with its ladder and preamp.
+    ui.add_space(theme.space_md);
+    ui.separator();
+    ui.add_space(theme.space_sm);
+    super::preset_library::render_preset_library(ui, state, actions, theme);
 }
 
 /// Parametric mode owns the same stage as the graphic sliders, so showing the
 /// disabled graphic canvas here would invite edits that cannot be heard.
 fn render_parametric_curve_summary(
     ui: &mut egui::Ui,
-    state: &EqPanelState,
+    state: &mut EqPanelState,
     actions: &mut EqPanelActions,
     theme: &Theme,
 ) {
@@ -425,6 +432,11 @@ fn render_parametric_curve_summary(
                         .color(theme.text_muted),
                     );
                 });
+
+                ui.add_space(theme.space_md);
+                ui.separator();
+                ui.add_space(theme.space_sm);
+                super::preset_library::render_preset_library(ui, state, actions, theme);
             });
         });
 }

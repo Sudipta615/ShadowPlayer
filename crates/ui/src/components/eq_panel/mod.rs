@@ -31,6 +31,7 @@ mod filters;
 mod graphic;
 mod parametric;
 mod persistence;
+mod preset_library;
 mod presets;
 mod tone;
 
@@ -40,7 +41,7 @@ use filters::render_filters_tab;
 use graphic::render_graphic_eq_tab;
 use tone::render_tone_acoustics_tab;
 
-pub use actions::EqPanelActions;
+pub use actions::{EqPanelActions, PresetBindRequest, PresetSaveRequest};
 pub use persistence::PersistentEqState;
 
 pub use controls::custom_toggle_switch;
@@ -90,6 +91,11 @@ pub struct EqPanelState {
     pub bands: Vec<ParametricBand>,
     pub preamp_db: f32,
     pub auto_headroom: bool,
+
+    /// Durable, DB-backed presets. The legacy `custom_presets` above predate
+    /// the library and remain graphic-only; new saves go here so a curve can
+    /// carry provenance and a device binding.
+    pub library: crate::state::PresetLibraryState,
 
     // Graphic (supports up to 64 bands)
     pub graphic_enabled: bool,
@@ -178,6 +184,7 @@ impl Default for EqPanelState {
             // the curve's peak boost, so enabling it silently turns a +6 dB
             // bass slider into 0 dB at the centre and −6 dB everywhere else.
             auto_headroom: false,
+            library: crate::state::PresetLibraryState::default(),
 
             graphic_enabled: false,
             graphic_layout: GraphicEqLayout::TenBand,

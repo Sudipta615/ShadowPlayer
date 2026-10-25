@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use audio_session::AudioSession;
 use database::{
-    AlbumNotesRepo, AlbumRepo, ArtistRepo, Database, FavoritesRepo, GenreRepo, HistoryRepo,
-    PlaylistRepo, PodcastRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
+    AlbumNotesRepo, AlbumRepo, ArtistRepo, Database, EqPresetsRepo, FavoritesRepo, GenreRepo,
+    HistoryRepo, PlaylistRepo, PodcastRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo,
+    TrackRepo,
 };
 use domain::models::Track;
 use eframe::egui::{self, Margin, Pos2, Rect, Sense, Vec2};
@@ -46,6 +47,7 @@ mod clap_eval;
 mod command_palette;
 mod desktop;
 mod editors;
+mod eq_presets;
 mod eval;
 mod history;
 mod imports;
@@ -87,6 +89,8 @@ pub struct ShadowPlayerApp {
     scan_roots_repo: ScanRootsRepo,
     settings_repo: SettingsRepo,
     smart_playlist_repo: SmartPlaylistRepo,
+    /// Durable EQ presets and their device/track bindings.
+    eq_presets_repo: EqPresetsRepo,
 
     artwork_service: ArtworkService,
     lyrics_service: LyricsService,
@@ -222,6 +226,7 @@ impl ShadowPlayerApp {
         let scan_roots_repo = ScanRootsRepo::new(db.clone());
         let settings_repo = SettingsRepo::new(db.clone());
         let smart_playlist_repo = SmartPlaylistRepo::new(db.clone());
+        let eq_presets_repo = EqPresetsRepo::new(db.clone());
         let search_engine = SearchEngine::new(db.clone());
         let coordinator = PlaybackCoordinator::new(session.clone(), db.clone());
 
@@ -269,6 +274,7 @@ impl ShadowPlayerApp {
             scan_roots_repo,
             settings_repo,
             smart_playlist_repo,
+            eq_presets_repo,
 
             artwork_service,
             lyrics_service,
@@ -333,6 +339,8 @@ impl ShadowPlayerApp {
 
         // Load all persistent settings (normal, theme, EQ, DSP)
         app.load_persisted_settings();
+        // Durable presets live in their own table, not in the settings JSON.
+        app.reload_eq_presets();
         app.biography_service
             .set_source_dir(&app.dsp_state.settings_tab.biography_source_dir);
         app.crossfade_preview.set_preview(

@@ -433,6 +433,13 @@ impl ShadowPlayerApp {
         // plays with its own curve rather than the global one.
         self.apply_track_dsp_profile();
 
+        // The coordinator drains the bounded output-event channel and
+        // republishes device arrivals/changes. A preset bound to that device
+        // is applied here, after track overrides had their chance.
+        if let Some(device) = self.coordinator.take_output_device_change() {
+            self.apply_device_bound_preset(&device);
+        }
+
         // 2. Poll Library Scanner progress
         if self.scanner_service.poll() {
             // The library changed, so the smart playlists may have new

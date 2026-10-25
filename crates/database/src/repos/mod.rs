@@ -10,6 +10,7 @@
 //! repository's SQL.
 
 mod common;
+mod eq_presets;
 mod history;
 mod library_nodes;
 mod media;
@@ -17,6 +18,7 @@ mod playlist;
 mod settings;
 mod track;
 
+pub use eq_presets::*;
 pub use history::*;
 pub use library_nodes::*;
 pub use media::*;

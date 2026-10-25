@@ -105,6 +105,14 @@ impl DspState {
         self.settings_tab.bit_perfect = true;
     }
 
+    /// True while the Pure Direct bypass is engaged.
+    ///
+    /// Automatic behaviour (a device-bound EQ preset, for example) must not
+    /// quietly re-enable a stage this bypass turned off.
+    pub fn is_pure_direct(&self) -> bool {
+        self.pure_direct_saved.is_some()
+    }
+
     /// Leave Pure Direct and re-assert the stages it neutralised.
     pub fn exit_pure_direct(&mut self, session: &AudioSession) {
         session.set_bit_perfect(false);

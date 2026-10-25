@@ -135,6 +135,10 @@ impl ShadowPlayerApp {
             return;
         }
 
+        // The library view shows which preset this track points at, even when
+        // a full profile outranks that pointer.
+        self.refresh_track_preset_binding();
+
         let profile = match self.track_dsp_repo.get(&track.id) {
             Ok(Some(p)) if !p.is_neutral() => p,
             Ok(_) => {
@@ -151,6 +155,37 @@ impl ShadowPlayerApp {
                     &self.dsp_state.eq_panel,
                     &self.dsp_state.settings_tab,
                 ));
+
+                // A track may point at a shared library preset instead of
+                // carrying a full profile. The pointer ranks below a profile
+                // (handled above) and above the device binding.
+                if let Ok(Some(record)) =
+                    self.eq_presets_repo.preset_for_track(&track.id.to_string())
+                {
+                    match crate::state::StoredPreset::from_record(&record) {
+                        Ok(preset) => {
+                            // Snapshot the global chain before the preset
+                            // changes it, so the next full-profile track does
+                            // not mistake this curve for the global one.
+                            if self.app_state.dsp_global_snapshot.is_none() {
+                                self.app_state.dsp_global_snapshot =
+                                    Some(crate::state::ChainPreset::capture(
+                                        "Global",
+                                        "",
+                                        &self.dsp_state.eq_panel,
+                                        &self.dsp_state.settings_tab,
+                                    ));
+                            }
+                            preset.curve.apply(&mut self.dsp_state.eq_panel);
+                            self.dsp_state.push_imported_eq(&self.session);
+                        }
+                        Err(e) => log::warn!(
+                            "EQ preset {} bound to {} could not be decoded: {e}",
+                            record.name,
+                            track.title
+                        ),
+                    }
+                }
                 return;
             }
             Err(e) => {

@@ -98,6 +98,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v14(conn)?;
     }
 
+    if current_version < 15 {
+        apply_v15(conn)?;
+    }
+
     Ok(())
 }
 
@@ -1080,6 +1084,60 @@ fn apply_v14(conn: &mut Connection) -> Result<()> {
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
             log::error!("Migration V14 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// V15: a first-class EQ preset library and its bindings.
+///
+/// Before this, a saved curve lived inside the `eq_settings` JSON blob and a
+/// per-track profile stored a full copy of the chain. That made a preset
+/// impossible to tag, bind to an output device, or update in place. The rows
+/// here are the durable model:
+///
+/// * `eq_presets` owns the curve as an opaque JSON payload. The curve shape
+///   (graphic or parametric) belongs to the UI/config crate, so the database
+///   never needs a migration when a band field is added.
+/// * `source` follows the established taxonomy: 0 user, 10 built-in, 20
+///   AutoEQ. Provenance is what lets the library distinguish "my room curve"
+///   from "Sennheiser HD 600".
+/// * `output_pattern` binds a preset to an output device by case-insensitive
+///   substring; the longest pattern wins, so "USB DAC" beats "DAC".
+/// * `eq_preset_tracks` is a *pointer*, not a copy: editing the preset
+///   updates every bound track, which a duplicated chain diff cannot do.
+fn apply_v15(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V15 (EQ preset library)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS eq_presets (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            source INTEGER NOT NULL DEFAULT 0,
+            curve_json TEXT NOT NULL,
+            output_pattern TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_eq_presets_name
+            ON eq_presets(name COLLATE NOCASE, id);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_eq_presets_one_default
+            ON eq_presets(is_default) WHERE is_default = 1;",
+        "CREATE TABLE IF NOT EXISTS eq_preset_tracks (
+            track_id TEXT PRIMARY KEY NOT NULL,
+            preset_id TEXT NOT NULL REFERENCES eq_presets(id) ON DELETE CASCADE
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_eq_preset_tracks_preset
+            ON eq_preset_tracks(preset_id);",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (15, strftime('%s', 'now'));",
+    ];
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V15 statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }

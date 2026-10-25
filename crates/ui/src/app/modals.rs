@@ -16,9 +16,16 @@ impl ShadowPlayerApp {
         ctx: &egui::Context,
         current_track: Option<&Track>,
     ) {
-        let eq_actions = show_eq_panel(ctx, &mut self.dsp_state.eq_panel, &self.theme);
+        let mut eq_actions = show_eq_panel(ctx, &mut self.dsp_state.eq_panel, &self.theme);
         let want_import = eq_actions.import_curve;
         let want_export = eq_actions.export_curve;
+        let preset_save = eq_actions.preset_save.take();
+        let preset_apply = eq_actions.preset_apply.take();
+        let preset_delete = eq_actions.preset_delete.take();
+        let preset_default = eq_actions.preset_default.take();
+        let preset_bind = eq_actions.preset_bind.take();
+        let preset_bind_track = eq_actions.preset_bind_track.take();
+        let preset_unbind_track = eq_actions.preset_unbind_track;
         self.dsp_state
             .handle_eq_panel_actions(&self.session, eq_actions);
         if want_import {
@@ -27,6 +34,27 @@ impl ShadowPlayerApp {
         if want_export {
             let (name, text) = self.dsp_state.eq_panel.export_curve_text();
             self.preset_io.request_export(name, text);
+        }
+        if let Some(request) = preset_save {
+            self.save_eq_preset(request);
+        }
+        if let Some(id) = preset_apply {
+            self.apply_eq_preset(&id);
+        }
+        if let Some(id) = preset_delete {
+            self.delete_eq_preset(&id);
+        }
+        if let Some(id) = preset_default {
+            self.set_default_eq_preset(&id);
+        }
+        if let Some(request) = preset_bind {
+            self.bind_eq_preset(request);
+        }
+        if let Some(id) = preset_bind_track {
+            self.bind_eq_preset_to_track(&id);
+        }
+        if preset_unbind_track {
+            self.unbind_eq_preset_from_track();
         }
         if self.dsp_state.eq_panel.is_open {
             self.settings_dirty = true;
