@@ -6,7 +6,7 @@ use super::curve::render_spline_eq_canvas;
 use super::presets::{apply_active_preset, CustomEqPreset, EqPreset};
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
-use config::GraphicEqLayout;
+use config::{EqMode, GraphicEqLayout};
 use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,6 +19,48 @@ pub(super) fn render_graphic_eq_tab(
     actions: &mut EqPanelActions,
     theme: &Theme,
 ) {
+    // ── Curve source: exactly one of Graphic / Parametric may own the stage ──
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+        ui.label(
+            egui::RichText::new(tr!("Equalizer mode"))
+                .font(crate::theme::font(11.0))
+                .color(theme.text_muted),
+        );
+        for (mode, label) in [
+            (EqMode::Graphic, tr!("Graphic")),
+            (EqMode::Parametric, tr!("Parametric / AutoEQ")),
+        ] {
+            let selected = state.eq_mode == mode;
+            let button = egui::Button::new(
+                egui::RichText::new(label)
+                    .font(crate::theme::font(11.0))
+                    .color(if selected {
+                        Color32::WHITE
+                    } else {
+                        theme.text_secondary
+                    }),
+            )
+            .fill(if selected {
+                theme.accent
+            } else {
+                theme.bg_pill
+            })
+            .stroke(Stroke::NONE)
+            .corner_radius(CornerRadius::same(theme.radius_sm));
+            if ui.add(button).clicked() && !selected {
+                state.set_eq_mode(mode);
+                actions.eq_mode_changed = true;
+            }
+        }
+    });
+
+    if state.eq_mode == EqMode::Parametric {
+        render_parametric_curve_summary(ui, state, actions, theme);
+        render_footer_controls(ui, state, actions, theme, EqTab::Parametric);
+        return;
+    }
+
     // ── Sub-bar: Band Count Selector (Left) & Preset Dropdown + Save Button (Right) ─────────
     ui.horizontal(|ui| {
         // 1. Left side: Band Count Buttons (Secondary filter chips: visually distinct from main tabs)
@@ -69,9 +111,11 @@ pub(super) fn render_graphic_eq_tab(
                 .min_size(Vec2::new(60.0, 24.0));
 
                 if ui.add(btn).clicked() && !is_active {
-                    state.graphic_layout = layout.clone();
-                    actions.graphic_layout_changed = Some(layout);
-                    apply_active_preset(state, actions);
+                    // Preserve the curve the user is looking at. Re-applying
+                    // the selected factory preset here used to flatten every
+                    // hand-edited ("Custom") curve on a band-count change.
+                    state.set_graphic_layout(layout);
+                    actions.graphic_eq_changed = true;
                 }
             }
 
@@ -200,17 +244,16 @@ pub(super) fn render_graphic_eq_tab(
                                     .font(crate::theme::font(10.5))
                                     .color(theme.text_muted),
                             );
-                            for (idx, cp) in state.custom_presets.iter().enumerate() {
+                            for idx in 0..state.custom_presets.len() {
                                 let is_sel = state.selected_custom_preset_idx == Some(idx);
-                                if ui.selectable_label(is_sel, &cp.name).clicked() {
+                                let clicked = {
+                                    let cp = &state.custom_presets[idx];
+                                    ui.selectable_label(is_sel, &cp.name).clicked()
+                                };
+                                if clicked {
                                     state.selected_preset = EqPreset::Custom;
                                     state.selected_custom_preset_idx = Some(idx);
-                                    let num = state.graphic_layout.num_bands();
-                                    for i in 0..num {
-                                        let g = cp.gains.get(i).copied().unwrap_or(0.0);
-                                        state.graphic_gains[i] = g;
-                                        actions.graphic_slider_changed = Some(i);
-                                    }
+                                    apply_active_preset(state, actions);
                                 }
                             }
                         }
@@ -259,7 +302,8 @@ pub(super) fn render_graphic_eq_tab(
                             state.custom_presets.push(CustomEqPreset {
                                 name: trimmed.to_string(),
                                 gains,
-                                preamp_db: state.graphic_preamp_db,
+                                preamp_db: state.preamp_db,
+                                layout: Some(state.graphic_layout.clone()),
                             });
                             state.selected_custom_preset_idx = Some(state.custom_presets.len() - 1);
                             state.selected_preset = EqPreset::Custom;
@@ -280,4 +324,58 @@ pub(super) fn render_graphic_eq_tab(
 
     // ── Bottom Controls: Preamp + Tab-Specific Reset ─────────────────────────
     render_footer_controls(ui, state, actions, theme, EqTab::Graphic);
+}
+
+/// Parametric mode owns the same stage as the graphic sliders, so showing the
+/// disabled graphic canvas here would invite edits that cannot be heard.
+fn render_parametric_curve_summary(
+    ui: &mut egui::Ui,
+    state: &EqPanelState,
+    actions: &mut EqPanelActions,
+    theme: &Theme,
+) {
+    egui::Frame::NONE
+        .fill(theme.bg_card_hover)
+        .stroke(Stroke::new(1.0, theme.border_card))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
+        .inner_margin(Margin::symmetric(theme.space_3xl as i8, theme.space_2xl as i8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
+                ui.label(
+                    egui::RichText::new(tr!("Parametric / AutoEQ"))
+                        .font(crate::theme::font(14.0))
+                        .strong()
+                        .color(theme.text_primary),
+                );
+                ui.label(
+                    egui::RichText::new(tr!("The EQ stage is driven by parametric bands. Generate or replace the curve in the AutoEQ calibration dialog."))
+                        .font(crate::theme::font(11.5))
+                        .color(theme.text_secondary),
+                );
+                ui.label(
+                    egui::RichText::new(tr_args!(
+                        "{count} bands in the active parametric curve",
+                        "count" => state.bands.len()
+                    ))
+                    .font(crate::theme::font(10.5))
+                    .color(theme.text_muted),
+                );
+                ui.add_space(theme.space_sm);
+                let button = egui::Button::new(
+                    egui::RichText::new(tr!("Open AutoEQ"))
+                        .font(crate::theme::font(12.0))
+                        .strong()
+                        .color(Color32::WHITE),
+                )
+                .fill(theme.accent)
+                .stroke(Stroke::NONE)
+                .corner_radius(CornerRadius::same(theme.radius_md))
+                .min_size(Vec2::new(120.0, 30.0));
+                if ui.add(button).clicked() {
+                    actions.open_autoeq_dialog = true;
+                }
+            });
+        });
 }

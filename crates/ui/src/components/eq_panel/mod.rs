@@ -8,27 +8,40 @@
 //! - [`graphic`] — the Graphic Equalizer tab.
 //! - [`tone`] — the Tone & Acoustics tab.
 //! - [`advanced`] — the Advanced tab and its setting cards.
+//! - [`dynamics`] — the limiter and compressor tab.
+//! - [`filters`] — crossfeed and correction controls.
 //! - [`controls`] — shared footer, slider, and toggle primitives.
+//! - [`actions`] — the typed action sink returned to the dispatcher.
+//! - [`persistence`] — the serde snapshot used across launches.
 //!
-//! `mod.rs` owns the panel state, the action sink, and the window shell.
+//! `mod.rs` owns the panel state and the window shell.
 
 use crate::theme::Theme;
-use config::{CrossfeedProfile, GraphicEqLayout};
+use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
 use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
 
+mod actions;
 mod advanced;
 mod controls;
 mod curve;
+mod dynamics;
+mod filters;
 mod graphic;
 mod parametric;
+mod persistence;
 mod presets;
 mod tone;
 
 use advanced::render_advanced_tab;
+use dynamics::render_dynamics_tab;
+use filters::render_filters_tab;
 use graphic::render_graphic_eq_tab;
 use tone::render_tone_acoustics_tab;
+
+pub use actions::EqPanelActions;
+pub use persistence::PersistentEqState;
 
 pub use controls::custom_toggle_switch;
 pub use parametric::ParametricBand;
@@ -66,8 +79,15 @@ pub struct EqPanelState {
     pub window_pos: Option<[f32; 2]>, // Persisted center or user placed position
 
     // Parametric (legacy / AutoEQ targets)
+    /// The single master switch. The graphic and parametric layers are both
+    /// kept, but only the layer named by [`Self::eq_mode`] is audible.
     pub eq_enabled: bool,
-    pub bands: [ParametricBand; 10],
+    /// Which curve owns the engine's EQ stage.
+    pub eq_mode: EqMode,
+    /// The active parametric curve. AutoEQ can write 64 bands here; the
+    /// summary view edits/opens the curve as a whole rather than truncating it
+    /// to a fixed row count.
+    pub bands: Vec<ParametricBand>,
     pub preamp_db: f32,
     pub auto_headroom: bool,
 
@@ -103,6 +123,8 @@ pub struct EqPanelState {
     pub comp_makeup_db: [f32; 3],
     pub comp_knee_db: [f32; 3],
     pub comp_stereo_link: [bool; 3],
+    /// Which compressor band the Dynamics tab is editing. Scratch state.
+    pub comp_band: usize,
 
     // Filters & Correction
     pub crossfeed_enabled: bool,
@@ -127,10 +149,13 @@ impl Default for EqPanelState {
         let default_freqs = [
             31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
         ];
-        let mut bands: [ParametricBand; 10] = std::array::from_fn(|_| ParametricBand::default());
-        for (i, b) in bands.iter_mut().enumerate() {
-            b.freq = default_freqs[i];
-        }
+        let bands: Vec<ParametricBand> = default_freqs
+            .iter()
+            .map(|&freq| ParametricBand {
+                freq,
+                ..ParametricBand::default()
+            })
+            .collect();
 
         Self {
             is_open: false,
@@ -146,9 +171,13 @@ impl Default for EqPanelState {
             extended_range: false,
 
             eq_enabled: false,
+            eq_mode: EqMode::Graphic,
             bands,
             preamp_db: 0.0,
-            auto_headroom: true, // Audiophile default: prevents digital clipping when positive EQ boosts are applied
+            // Static auto-headroom is opt-in. It lowers the *whole* signal by
+            // the curve's peak boost, so enabling it silently turns a +6 dB
+            // bass slider into 0 dB at the centre and −6 dB everywhere else.
+            auto_headroom: false,
 
             graphic_enabled: false,
             graphic_layout: GraphicEqLayout::TenBand,
@@ -162,13 +191,16 @@ impl Default for EqPanelState {
             balance: 0.0,
             dither_enabled: false,
 
-            limiter_enabled: false,
+            // The output guard is on by default. Static auto-headroom is off,
+            // so an aggressive boost keeps its level and is caught by the
+            // look-ahead limiter only when it would actually clip.
+            limiter_enabled: true,
             limiter_mode: LimiterMode::Transparent,
-            limiter_true_peak: false,
+            limiter_true_peak: true,
             limiter_lookahead_ms: 5.0,
             limiter_attack_ms: 0.3,
             limiter_release_ms: 100.0,
-            limiter_ceiling_db: -0.1,
+            limiter_ceiling_db: -1.0,
             limiter_soft_clip: false,
 
             compressor_enabled: false,
@@ -179,6 +211,7 @@ impl Default for EqPanelState {
             comp_makeup_db: [0.0; 3],
             comp_knee_db: [3.0; 3],
             comp_stereo_link: [true; 3],
+            comp_band: 0,
 
             crossfeed_enabled: false,
             crossfeed_profile: CrossfeedProfile::Bauer,
@@ -195,231 +228,74 @@ impl Default for EqPanelState {
     }
 }
 
-/// Serde-serializable snapshot of EQ panel settings for persistent storage across sessions
-///
-/// `#[serde(default)]` at the struct level means a field added in a later build
-/// reads back as the fresh panel's value rather than failing the whole parse —
-/// which would silently discard every EQ setting the user had.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PersistentEqState {
-    pub is_open: bool,
-    pub window_pos: Option<[f32; 2]>,
-    pub active_tab: EqTab,
-    pub eq_enabled: bool,
-    pub graphic_enabled: bool,
-    pub graphic_layout: GraphicEqLayout,
-    pub graphic_gains: Vec<f32>,
-    pub graphic_preamp_db: f32,
-    pub selected_preset: EqPreset,
-    pub custom_presets: Vec<CustomEqPreset>,
-    pub selected_custom_preset_idx: Option<usize>,
-    pub extended_range: bool,
-    pub preamp_db: f32,
-    pub auto_headroom: bool,
-    /// Parametric bands — the shape AutoEQ targets write into, so they must
-    /// survive a restart.
-    pub bands: [ParametricBand; 10],
-    pub bass_shelf_db: f32,
-    pub treble_shelf_db: f32,
-    pub midside_eq: bool,
-    pub stereo_width: f32,
-    pub balance: f32,
-    pub dither_enabled: bool,
-    pub limiter_enabled: bool,
-    pub limiter_mode: LimiterMode,
-    pub limiter_true_peak: bool,
-    pub limiter_lookahead_ms: f32,
-    pub limiter_attack_ms: f32,
-    pub limiter_release_ms: f32,
-    pub limiter_ceiling_db: f32,
-    pub limiter_soft_clip: bool,
-    pub compressor_enabled: bool,
-    pub comp_threshold: [f32; 3],
-    pub comp_ratio: [f32; 3],
-    pub comp_attack_ms: [f32; 3],
-    pub comp_release_ms: [f32; 3],
-    pub comp_makeup_db: [f32; 3],
-    pub comp_knee_db: [f32; 3],
-    pub comp_stereo_link: [bool; 3],
-    pub crossfeed_enabled: bool,
-    pub crossfeed_profile: CrossfeedProfile,
-    pub crossfeed_freq: f32,
-    pub crossfeed_q: f32,
-    pub crossfeed_delay_ms: f32,
-    pub correction_enabled: bool,
-    pub correction_depth: f32,
-    pub correction_ir_path: String,
-    /// The creative-effects settings.
-    #[serde(default)]
-    pub fx: config::FxConfig,
-}
-
-impl From<&EqPanelState> for PersistentEqState {
-    fn from(s: &EqPanelState) -> Self {
-        Self {
-            is_open: s.is_open,
-            window_pos: s.window_pos,
-            active_tab: s.active_tab,
-            eq_enabled: s.eq_enabled,
-            graphic_enabled: s.graphic_enabled,
-            graphic_layout: s.graphic_layout.clone(),
-            graphic_gains: s.graphic_gains.to_vec(),
-            graphic_preamp_db: s.graphic_preamp_db,
-            selected_preset: s.selected_preset,
-            custom_presets: s.custom_presets.clone(),
-            selected_custom_preset_idx: s.selected_custom_preset_idx,
-            extended_range: s.extended_range,
-            preamp_db: s.preamp_db,
-            auto_headroom: s.auto_headroom,
-            bands: s.bands.clone(),
-            bass_shelf_db: s.bass_shelf_db,
-            treble_shelf_db: s.treble_shelf_db,
-            midside_eq: s.midside_eq,
-            stereo_width: s.stereo_width,
-            balance: s.balance,
-            dither_enabled: s.dither_enabled,
-            limiter_enabled: s.limiter_enabled,
-            limiter_mode: s.limiter_mode,
-            limiter_true_peak: s.limiter_true_peak,
-            limiter_lookahead_ms: s.limiter_lookahead_ms,
-            limiter_attack_ms: s.limiter_attack_ms,
-            limiter_release_ms: s.limiter_release_ms,
-            limiter_ceiling_db: s.limiter_ceiling_db,
-            limiter_soft_clip: s.limiter_soft_clip,
-            compressor_enabled: s.compressor_enabled,
-            comp_threshold: s.comp_threshold,
-            comp_ratio: s.comp_ratio,
-            comp_attack_ms: s.comp_attack_ms,
-            comp_release_ms: s.comp_release_ms,
-            comp_makeup_db: s.comp_makeup_db,
-            comp_knee_db: s.comp_knee_db,
-            comp_stereo_link: s.comp_stereo_link,
-            crossfeed_enabled: s.crossfeed_enabled,
-            crossfeed_profile: s.crossfeed_profile,
-            crossfeed_freq: s.crossfeed_freq,
-            crossfeed_q: s.crossfeed_q,
-            crossfeed_delay_ms: s.crossfeed_delay_ms,
-            correction_enabled: s.correction_enabled,
-            correction_depth: s.correction_depth,
-            correction_ir_path: s.correction_ir_path.clone(),
-            fx: s.fx,
+impl EqPanelState {
+    /// Switch band topology while preserving the visible curve.
+    ///
+    /// The old implementation changed the layout and then re-applied the
+    /// selected preset, which destroyed a custom curve and left the engine's
+    /// old bands active when the layout shrank. Interpolating the current
+    /// gains onto the new ladder keeps the shape the user is looking at; the
+    /// engine receives every new slider in the same atomic snapshot.
+    pub fn set_graphic_layout(&mut self, layout: GraphicEqLayout) {
+        let old_freqs = self.graphic_layout.frequencies();
+        let old_count = old_freqs.len().min(self.graphic_gains.len());
+        let old_gains = self.graphic_gains[..old_count].to_vec();
+        let new_freqs = layout.frequencies();
+        for (index, freq) in new_freqs.iter().enumerate().take(64) {
+            self.graphic_gains[index] =
+                presets::interpolate_curve_gain(*freq, &old_freqs[..old_count], &old_gains);
         }
-    }
-}
-
-impl Default for PersistentEqState {
-    fn default() -> Self {
-        Self::from(&EqPanelState::default())
-    }
-}
-
-impl PersistentEqState {
-    pub fn apply_to(&self, state: &mut EqPanelState) {
-        state.is_open = self.is_open;
-        state.window_pos = self.window_pos;
-        state.active_tab = self.active_tab;
-        state.eq_enabled = self.eq_enabled;
-        state.graphic_enabled = self.graphic_enabled;
-        state.graphic_layout = self.graphic_layout.clone();
-        for (i, &g) in self.graphic_gains.iter().take(64).enumerate() {
-            state.graphic_gains[i] = g;
+        for slot in self.graphic_gains.iter_mut().skip(new_freqs.len().min(64)) {
+            *slot = 0.0;
         }
-        state.graphic_preamp_db = self.graphic_preamp_db;
-        state.selected_preset = self.selected_preset;
-        state.custom_presets = self.custom_presets.clone();
-        state.selected_custom_preset_idx = self.selected_custom_preset_idx;
-        state.extended_range = self.extended_range;
-        state.preamp_db = self.preamp_db;
-        state.auto_headroom = self.auto_headroom;
-        for (i, band) in self.bands.iter().take(10).enumerate() {
-            state.bands[i] = band.clone();
-        }
-        state.bass_shelf_db = self.bass_shelf_db;
-        state.treble_shelf_db = self.treble_shelf_db;
-        state.midside_eq = self.midside_eq;
-        state.stereo_width = self.stereo_width;
-        state.balance = self.balance;
-        state.dither_enabled = self.dither_enabled;
-        state.limiter_enabled = self.limiter_enabled;
-        state.limiter_mode = self.limiter_mode;
-        state.limiter_true_peak = self.limiter_true_peak;
-        state.limiter_lookahead_ms = self.limiter_lookahead_ms;
-        state.limiter_attack_ms = self.limiter_attack_ms;
-        state.limiter_release_ms = self.limiter_release_ms;
-        state.limiter_ceiling_db = self.limiter_ceiling_db;
-        state.limiter_soft_clip = self.limiter_soft_clip;
-        state.compressor_enabled = self.compressor_enabled;
-        state.comp_threshold = self.comp_threshold;
-        state.comp_ratio = self.comp_ratio;
-        state.comp_attack_ms = self.comp_attack_ms;
-        state.comp_release_ms = self.comp_release_ms;
-        state.comp_makeup_db = self.comp_makeup_db;
-        state.comp_knee_db = self.comp_knee_db;
-        state.comp_stereo_link = self.comp_stereo_link;
-        state.crossfeed_enabled = self.crossfeed_enabled;
-        state.crossfeed_profile = self.crossfeed_profile;
-        state.crossfeed_freq = self.crossfeed_freq;
-        state.crossfeed_q = self.crossfeed_q;
-        state.crossfeed_delay_ms = self.crossfeed_delay_ms;
-        state.correction_enabled = self.correction_enabled;
-        state.correction_depth = self.correction_depth;
-        state.correction_ir_path = self.correction_ir_path.clone();
-        state.fx = self.fx;
+        self.graphic_layout = layout;
     }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Actions (returned to dsp_state and app each frame)
-// ─────────────────────────────────────────────────────────────────────────────
+    /// Flatten the graphic curve and its shared preamp.
+    pub fn reset_graphic_eq(&mut self) {
+        self.graphic_gains.fill(0.0);
+        self.preamp_db = 0.0;
+        self.graphic_preamp_db = 0.0;
+        self.selected_preset = EqPreset::Flat;
+        self.selected_custom_preset_idx = None;
+    }
 
-#[derive(Default)]
-pub struct EqPanelActions {
-    // Equalizer On/Off
-    pub eq_enabled_changed: Option<bool>,
-    pub graphic_enabled_changed: Option<bool>,
+    /// The master preamp. The graphic mirror exists only for old saved state.
+    ///
+    /// The engine can represent ±30 dB. Clamping here keeps the readout, the
+    /// slider and the audible gain identical instead of showing a value the
+    /// DSP silently truncated.
+    pub fn set_preamp(&mut self, db: f32) {
+        if !db.is_finite() {
+            return;
+        }
+        let db = db.clamp(-30.0, 30.0);
+        self.preamp_db = db;
+        self.graphic_preamp_db = db;
+    }
 
-    // Sliders & Preamp
-    pub graphic_slider_changed: Option<usize>,
-    pub graphic_preamp_changed: Option<f32>,
-    pub eq_preamp_changed: Option<f32>,
-    pub eq_band_changed: Option<usize>,
-    pub eq_auto_headroom_changed: Option<bool>,
-    pub eq_reset: bool,
-    pub graphic_reset: bool,
+    /// Enter a mode and keep the legacy flags consistent with it.
+    pub fn set_eq_mode(&mut self, mode: EqMode) {
+        self.eq_mode = mode;
+        self.graphic_enabled = self.eq_enabled && mode == EqMode::Graphic;
+    }
 
-    // Tone & Acoustics
-    pub bass_shelf_changed: Option<f32>,
-    pub treble_shelf_changed: Option<f32>,
-    pub midside_eq_changed: Option<bool>,
-    pub stereo_width_changed: Option<f32>,
-    pub balance_changed: Option<f32>,
-    pub dither_enabled_changed: Option<bool>,
-
-    // External Modals & Presets
-    pub open_autoeq_dialog: bool,
-    pub graphic_layout_changed: Option<GraphicEqLayout>,
-
-    // Dynamics (limiter/comp)
-    pub limiter_enabled_changed: Option<bool>,
-    pub limiter_mode_changed: Option<LimiterMode>,
-    pub limiter_true_peak_changed: Option<bool>,
-    pub limiter_params_changed: bool,
-    pub compressor_enabled_changed: Option<bool>,
-    pub comp_band_params_changed: Option<usize>,
-    pub comp_band_features_changed: Option<usize>,
-
-    // Creative effects
-    /// The creative-effects settings changed.
-    pub fx_changed: bool,
-
-    // Filters
-    pub crossfeed_enabled_changed: Option<bool>,
-    pub crossfeed_profile_changed: Option<CrossfeedProfile>,
-    pub crossfeed_custom_changed: bool,
-    pub correction_enabled_changed: Option<bool>,
-    pub correction_depth_changed: Option<f32>,
-    pub load_correction_ir: bool,
+    /// Whether the visible/curved values need the ±24 dB range.
+    ///
+    /// Extended range is a display preference, but the engine always applies
+    /// the stored value. Disabling it while a curve exceeds ±12 dB would draw
+    /// a clamped picture of a boost that is still audible, so every restore
+    /// path keeps the range open when the curve needs it.
+    pub fn needs_extended_range(&self) -> bool {
+        let bands = self
+            .graphic_layout
+            .num_bands()
+            .min(self.graphic_gains.len());
+        self.preamp_db.abs() > 12.0
+            || self.graphic_gains[..bands]
+                .iter()
+                .any(|gain| gain.abs() > 12.0)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -480,13 +356,18 @@ pub fn show_eq_panel(
             render_tab_navigation(ui, state, theme);
 
             // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
-            // The effects tab is not the equalizer, so it stays live even
-            // when the equalizer is bypassed.
-            let eq_active = state.graphic_enabled || state.eq_enabled;
-            let fx_tab = state.active_tab == EqTab::Effects;
+            // The effects, dynamics and filters tabs are not the equalizer:
+            // their stages have independent masters and can still be active
+            // while the EQ curve is bypassed. Greying them out behind an
+            // "Equalizer Bypassed" overlay hid live processing.
+            let eq_active = state.eq_enabled;
+            let independent_tab = matches!(
+                state.active_tab,
+                EqTab::Effects | EqTab::Dynamics | EqTab::Filters
+            );
             let content_start_y = ui.cursor().top();
 
-            ui.add_enabled_ui(eq_active || fx_tab, |ui| {
+            ui.add_enabled_ui(eq_active || independent_tab, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
                 egui::ScrollArea::vertical()
@@ -501,6 +382,18 @@ pub fn show_eq_panel(
                             EqTab::Tone => {
                                 render_tone_acoustics_tab(ui, state, &mut actions, theme);
                             }
+                            EqTab::Parametric => {
+                                // The explicit mode selector lives in the
+                                // Graphic tab; an old saved tab id still lands
+                                // on a usable editor instead of a blank page.
+                                render_graphic_eq_tab(ui, state, &mut actions, theme);
+                            }
+                            EqTab::Dynamics => {
+                                render_dynamics_tab(ui, state, &mut actions, theme);
+                            }
+                            EqTab::Filters => {
+                                render_filters_tab(ui, state, &mut actions, theme);
+                            }
                             EqTab::Advanced => {
                                 render_advanced_tab(ui, state, &mut actions, theme);
                             }
@@ -511,13 +404,12 @@ pub fn show_eq_panel(
                                     theme,
                                 );
                             }
-                            _ => {}
                         }
                     });
             });
 
-            // If EQ is bypassed, draw subtle darkening overlay & informative badge
-            if !eq_active && !fx_tab {
+            // Only EQ-owned tabs get the bypass overlay.
+            if !eq_active && !independent_tab {
                 let rect = ui.min_rect();
                 let overlay_rect = Rect::from_min_max(
                     Pos2::new(rect.left(), content_start_y),
@@ -600,12 +492,13 @@ fn render_header(
 
         ui.add_space(8.0);
 
-        // Master Toggle Switch: Enable Equalizer
-        let mut eq_active = state.graphic_enabled || state.eq_enabled;
+        // Master Toggle Switch: Enable Equalizer. This is the one enable
+        // state; the legacy `graphic_enabled` flag mirrors the selected mode so
+        // old chain presets keep loading correctly.
+        let mut eq_active = state.eq_enabled;
         if custom_toggle_switch(ui, &mut eq_active, "Enable Equalizer", theme) {
-            state.graphic_enabled = eq_active;
             state.eq_enabled = eq_active;
-            actions.graphic_enabled_changed = Some(eq_active);
+            state.graphic_enabled = eq_active && state.eq_mode == EqMode::Graphic;
             actions.eq_enabled_changed = Some(eq_active);
         }
 
@@ -670,13 +563,21 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
         let tab_items = [
             (EqTab::Graphic, tr!("Graphic Equalizer")),
             (EqTab::Tone, tr!("Tone & Acoustics")),
-            (EqTab::Advanced, tr!("Advanced")),
+            (EqTab::Dynamics, tr!("Dynamics")),
+            (EqTab::Filters, tr!("Filters")),
             (EqTab::Effects, tr!("Effects")),
+            (EqTab::Advanced, tr!("Advanced")),
         ];
 
-        let tab_w = 142.0;
+        let spacing = 5.0;
         let tab_h = 32.0;
-        let spacing = 6.0;
+        // Six tabs must still fit the default 760 px studio. The old fixed
+        // 142 px buttons would have forced a horizontal scrollbar that hid
+        // Dynamics and Filters entirely.
+        let tab_w =
+            ((ui.available_width() - 26.0 - spacing * (tab_items.len().saturating_sub(1)) as f32)
+                / tab_items.len() as f32)
+                .clamp(80.0, 128.0);
         let total_w =
             (tab_items.len() as f32 * tab_w) + ((tab_items.len() - 1) as f32 * spacing) + 10.0;
 
@@ -699,12 +600,12 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
                             for (tab, label) in tab_items {
                                 let is_sel = state.active_tab == tab;
                                 let (bg, text_col, font) = if is_sel {
-                                    (theme.accent, Color32::WHITE, crate::theme::font(12.5))
+                                    (theme.accent, Color32::WHITE, crate::theme::font(11.5))
                                 } else {
                                     (
                                         Color32::TRANSPARENT,
                                         theme.text_secondary,
-                                        crate::theme::font(12.0),
+                                        crate::theme::font(11.0),
                                     )
                                 };
 
@@ -728,4 +629,160 @@ fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Th
             },
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_change_interpolates_the_visible_curve_and_clears_stale_bands() {
+        let mut state = EqPanelState::default();
+        state.graphic_gains[..10]
+            .copy_from_slice(&[4.0, 3.0, 2.5, 0.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0]);
+        state.graphic_gains[10] = 99.0; // stale slot outside the 10-band layout
+
+        state.set_graphic_layout(GraphicEqLayout::ThirtyOneBand);
+
+        assert_eq!(state.graphic_layout, GraphicEqLayout::ThirtyOneBand);
+        let freqs = state.graphic_layout.frequencies();
+        for (freq, expected) in [
+            (31.5, 4.0),
+            (63.0, 3.0),
+            (125.0, 2.5),
+            (500.0, -1.0),
+            (1000.0, -2.0),
+            (16000.0, 4.0),
+        ] {
+            let index = freqs.iter().position(|f| (*f - freq).abs() < 1e-3).unwrap();
+            assert!(
+                (state.graphic_gains[index] - expected).abs() < 0.05,
+                "{freq} Hz should survive the layout change, got {} dB",
+                state.graphic_gains[index]
+            );
+        }
+        assert!(
+            state.graphic_gains[31..].iter().all(|g| *g == 0.0),
+            "bands beyond the new layout must not keep stale gains"
+        );
+
+        state.set_graphic_layout(GraphicEqLayout::TenBand);
+        assert_eq!(
+            &state.graphic_gains[..10],
+            &[4.0, 3.0, 2.5, 0.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0]
+        );
+        assert!(state.graphic_gains[10..].iter().all(|g| *g == 0.0));
+    }
+
+    #[test]
+    fn legacy_persisted_state_infers_graphic_only_from_the_legacy_flag() {
+        let legacy = PersistentEqState {
+            eq_enabled: true,
+            eq_mode: None,
+            graphic_enabled: true,
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        legacy.apply_to(&mut state);
+        assert_eq!(state.eq_mode, EqMode::Graphic);
+        assert!(state.graphic_enabled);
+
+        let active_legacy_graphic = PersistentEqState {
+            eq_enabled: false,
+            eq_mode: None,
+            graphic_enabled: true,
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        active_legacy_graphic.apply_to(&mut state);
+        assert!(state.eq_enabled, "the legacy graphic layer was audible");
+        assert!(state.graphic_enabled);
+
+        let parametric = PersistentEqState {
+            eq_enabled: true,
+            eq_mode: None,
+            graphic_enabled: false,
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        parametric.apply_to(&mut state);
+        assert_eq!(state.eq_mode, EqMode::Parametric);
+        assert!(!state.graphic_enabled);
+
+        // An explicit mode is authoritative even if the old layer flag still
+        // says the graphic EQ used to be active.
+        let explicit = PersistentEqState {
+            eq_enabled: true,
+            eq_mode: Some(EqMode::Parametric),
+            graphic_enabled: true,
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        explicit.apply_to(&mut state);
+        assert_eq!(state.eq_mode, EqMode::Parametric);
+        assert!(!state.graphic_enabled);
+    }
+
+    #[test]
+    fn persisted_extreme_graphic_gain_widens_the_visible_range() {
+        let saved = PersistentEqState {
+            eq_mode: Some(EqMode::Graphic),
+            graphic_gains: vec![18.0; 10],
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        saved.apply_to(&mut state);
+        assert!(state.extended_range);
+        assert!((state.graphic_gains[0] - 18.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn persisted_preamp_prefers_the_shared_field_and_backfills_the_mirror() {
+        let saved = PersistentEqState {
+            eq_mode: Some(EqMode::Parametric),
+            preamp_db: -3.0,
+            graphic_preamp_db: -8.0,
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        saved.apply_to(&mut state);
+        assert_eq!(state.preamp_db, -3.0);
+        assert_eq!(state.graphic_preamp_db, -3.0);
+
+        let legacy_graphic = PersistentEqState {
+            eq_mode: None,
+            graphic_enabled: true,
+            preamp_db: 0.0,
+            graphic_preamp_db: -6.0,
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        legacy_graphic.apply_to(&mut state);
+        assert_eq!(state.eq_mode, EqMode::Graphic);
+        assert_eq!(state.preamp_db, -6.0);
+        assert_eq!(state.graphic_preamp_db, -6.0);
+
+        let inert_graphic = PersistentEqState {
+            eq_mode: None,
+            preamp_db: 0.0,
+            graphic_preamp_db: -6.0,
+            ..Default::default()
+        };
+        let mut state = EqPanelState::default();
+        inert_graphic.apply_to(&mut state);
+        assert_eq!(state.eq_mode, EqMode::Parametric);
+        assert_eq!(state.preamp_db, 0.0);
+    }
+
+    #[test]
+    fn preamp_is_clamped_to_the_range_the_engine_can_represent() {
+        let mut state = EqPanelState::default();
+        state.set_preamp(45.0);
+        assert_eq!(state.preamp_db, 30.0);
+        assert_eq!(state.graphic_preamp_db, 30.0);
+        state.set_preamp(-45.0);
+        assert_eq!(state.preamp_db, -30.0);
+        state.set_preamp(f32::NAN);
+        assert_eq!(state.preamp_db, -30.0);
+    }
 }

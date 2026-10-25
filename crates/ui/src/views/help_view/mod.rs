@@ -275,7 +275,7 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
 
         let searchable_topics = [
             ("Bit-Perfect Pure Direct Stream", "Bypasses all operating system audio mixers, soft volume, EQ, and resampling for 100% bit-exact DAC delivery.", HelpTab::BitPerfectDac),
-            ("Auto Headroom Management", "Dynamic digital offset ensuring zero inter-sample peak distortion when boosting equalizer bands.", HelpTab::EqualizerAcoustics),
+            ("Static Auto Headroom", "Optional fixed attenuation equal to the EQ curve's peak boost; off by default, with the true-peak limiter as the output guard.", HelpTab::EqualizerAcoustics),
             ("EBU R128 Loudness Normalization", "Automated broadcast standard -14 LUFS gain matching preventing sudden jumps between tracks.", HelpTab::PlaybackDsp),
             ("Varispeed Engine", "Analog tape pitch shift mode scaling tempo and musical key simultaneously without phase artifacts.", HelpTab::PlaybackDsp),
             ("Binaural HRTF Spatialization", "Convolves stereo audio through Head-Related Transfer Function impulse responses for expansive 3D headphone sound.", HelpTab::SpatialBinaural),

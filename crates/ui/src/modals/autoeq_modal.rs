@@ -504,25 +504,41 @@ pub fn show_autoeq_modal(
                             .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
 
                             if ui.add(apply_btn).clicked() {
-                                // Apply directly to AudioEngine via AudioSession
+                                // Apply directly to the engine, then mirror the
+                                // same decisions into the panel. AutoEQ emits
+                                // its own computed preamp; enabling static
+                                // auto-headroom on top would attenuate the
+                                // curve a second time.
+                                session.set_eq_mode(config::EqMode::Parametric);
                                 session.set_eq_preset(res.preset.clone());
                                 session.set_preamp(res.preamp_db);
                                 session.set_eq_enabled(true);
-                                session.set_eq_auto_headroom(true);
+                                session.set_eq_auto_headroom(false);
 
                                 // Sync to UI state
                                 eq_panel_state.eq_enabled = true;
-                                eq_panel_state.preamp_db = res.preamp_db;
-                                eq_panel_state.auto_headroom = true;
+                                eq_panel_state.eq_mode = config::EqMode::Parametric;
+                                eq_panel_state.graphic_enabled = false;
+                                eq_panel_state.set_preamp(res.preamp_db);
+                                eq_panel_state.auto_headroom = false;
 
-                                for (i, band) in res.preset.bands.iter().take(10).enumerate() {
-                                    eq_panel_state.bands[i] = ParametricBand {
-                                        freq: band.frequency,
-                                        gain_db: band.gain_db,
-                                        q: band.q,
-                                        filter_type: band.filter_type.into(),
-                                        enabled: band.enabled,
-                                    };
+                                // Keep the whole correction. Truncating the
+                                // panel mirror to ten rows meant a restart or
+                                // a chain-preset save silently discarded the
+                                // rest of a 64-band AutoEQ curve.
+                                if !res.preset.bands.is_empty() {
+                                    eq_panel_state.bands = res
+                                        .preset
+                                        .bands
+                                        .iter()
+                                        .map(|band| ParametricBand {
+                                            freq: band.frequency,
+                                            gain_db: band.gain_db,
+                                            q: band.q,
+                                            filter_type: band.filter_type.into(),
+                                            enabled: band.enabled,
+                                        })
+                                        .collect();
                                 }
 
                                 state.is_open = false;

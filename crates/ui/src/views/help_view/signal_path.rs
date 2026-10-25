@@ -81,8 +81,8 @@ pub(super) fn render_interactive_pipeline_diagram(
         (SignalBlock::Equalizer, "4. DSP / EQ Rack", "64-bit Biquads"),
         (
             SignalBlock::LimiterHeadroom,
-            "5. Auto Headroom",
-            "Dynamic Limiter",
+            "5. Limiter / Headroom",
+            "True-Peak Guard",
         ),
         (SignalBlock::Dither, "6. TPDF Dither", "Noise Shaping"),
         (
@@ -191,11 +191,11 @@ pub(super) fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBloc
                 "Executes minimum-phase 2nd-order Direct Form II Transposed biquad filter topologies. Implements Robert Bristow-Johnson Audio EQ Cookbook algorithms recalculated on every parameter tick.".to_string(),
             ),
             SignalBlock::LimiterHeadroom => (
-                "Stage 5: Master Limiter & Auto Headroom Management",
+                "Stage 5: True-Peak Limiter & Optional Static Headroom",
                 "Audio samples potentially exceeding 0.0 dBFS due to EQ boosts",
-                "Guaranteed clean samples bounded strictly at or below 0.0 dBFS",
-                "A smart volume protector that automatically dials back the master volume when you boost the bass, so your speakers never crackle or distort.",
-                "Monitors inter-sample peaks using 4x oversampling. When EQ boosts push signal amplitude beyond 1.0 peak float, Auto Headroom applies an exact inverse attenuation offset, completely preventing harsh DAC digital overs.".to_string(),
+                "Samples bounded at the configured limiter ceiling (−1.0 dBFS by default)",
+                "The default output guard. It catches only the peaks that would actually clip, so an aggressive EQ boost keeps its level instead of being turned down for the whole song.",
+                "A look-ahead brickwall limiter delays the signal by the lookahead time and computes gain reduction from future peaks. True-peak mode oversamples to catch inter-sample overs. The optional static auto-headroom stage is separate: it applies a fixed attenuation equal to the curve's peak boost and is off by default.".to_string(),
             ),
             SignalBlock::Dither => (
                 "Stage 6: TPDF Triangular Probability Dithering",

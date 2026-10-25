@@ -77,6 +77,7 @@ impl SettingsCategory {
                 "Sample Rate Policies & Resampling Precision",
             ],
             Self::Spatial => &[
+                "Spatial Audio Master",
                 "3D Soundstage & Spatial Radar (Interactive)",
                 "Binaural HRTF & Head Tracking",
                 "Virtual Room Acoustics Simulation",
@@ -122,6 +123,7 @@ pub fn card_display_name(card: &str) -> &str {
         "Loudness Normalization (ReplayGain & EBU R128)" => "Loudness Normalization",
         "Audio Driver Backend & Hardware Device" => "Audio Hardware & Driver",
         "Sample Rate Policies & Resampling Precision" => "Sample Rate & Resampling",
+        "Spatial Audio Master" => "Spatial Master",
         "3D Soundstage & Spatial Radar (Interactive)" => "3D Soundstage & Radar",
         "Binaural HRTF & Head Tracking" => "Binaural HRTF",
         "Virtual Room Acoustics Simulation" => "Room Acoustics",
@@ -178,7 +180,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 83] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 84] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -286,6 +288,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 83] = [
         card: "Sample Rate Policies & Resampling Precision",
         label: "TPDF Dither",
         description: "Triangular PDF dithering eliminates quantization distortion when converting bit depth",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Spatial,
+        card: "Spatial Audio Master",
+        label: "Enable Spatial Audio",
+        description: "Bypass all spatial processing",
     },
     SettingsEntry {
         category: SettingsCategory::Spatial,

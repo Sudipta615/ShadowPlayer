@@ -368,9 +368,9 @@ pub const INFO_GRAPHIC_EQ_BANDS: InfoBoxContent = InfoBoxContent {
 pub const INFO_MASTER_PREAMP: InfoBoxContent = InfoBoxContent {
     title: "Master Digital Preamp",
     subtitle: "Input/Output Headroom Gain Stage",
-    description: "Applies digital gain before or after equalizer filtering to optimize dynamic range and level matching.",
-    technical_note: "Scaling digital gain in 32-bit floating point prevents inter-sample peaks and DAC overs when large positive filter gains are introduced without Auto Headroom.",
-    recommendation: "Keep at 0.0 dB if Auto Headroom is active. Lower manually by the maximum boost if Auto Headroom is bypassed.",
+    description: "Applies digital gain before equalizer filtering to optimize dynamic range and level matching.",
+    technical_note: "The preamp is shared by Graphic and Parametric / AutoEQ modes and is applied before the filters. Internal 32-bit float prevents integer overflow while mixing, but a large positive curve can still exceed the DAC ceiling. The true-peak limiter catches those peaks; static auto-headroom instead lowers the whole signal by the curve's peak boost.",
+    recommendation: "Keep at 0.0 dB with the limiter on. Lower it manually by the maximum boost when you want static headroom reserved without the limiter working, or when a custom curve needs exact level matching.",
 };
 
 pub const INFO_EQ_PRESETS: InfoBoxContent = InfoBoxContent {
@@ -416,17 +416,17 @@ pub const INFO_BALANCE: InfoBoxContent = InfoBoxContent {
 pub const INFO_EXTENDED_RANGE: InfoBoxContent = InfoBoxContent {
     title: "Extended Gain Range",
     subtitle: "±12 dB vs ±24 dB Maximum Scale",
-    description: "Unlocks maximum ±24.0 dB slider limits across all Graphic EQ bands, tone shelves, and preamp.",
+    description: "Unlocks maximum ±24.0 dB slider limits across all Graphic EQ bands, tone shelves, and preamp. A curve saved outside this range widens the preamp control to ±30 dB so its value stays visible.",
     technical_note: "Standard ±12.0 dB provides fine-grained 0.1 dB resolution for audiophile mastering; ±24.0 dB enables extreme surgical acoustic notch cuts.",
     recommendation: "Keep OFF (±12 dB Standard) for music listening to prevent sudden volume jumps.",
 };
 
 pub const INFO_AUTO_HEADROOM: InfoBoxContent = InfoBoxContent {
-    title: "Auto Headroom Management",
-    subtitle: "Digital Anti-Clipping Protection",
-    description: "Automatically and dynamically lowers master digital gain when positive EQ boosts exceed 0 dBFS.",
-    technical_note: "Calculates the maximum boost across all active bands and applies an equivalent negative digital offset. Completely transparent (0.0 dB attenuation) when EQ is flat.",
-    recommendation: "Keep ON to guarantee zero inter-sample peak distortion and prevent harsh DAC clipping.",
+    title: "Static Auto Headroom",
+    subtitle: "Pre-EQ Attenuation, Not a Compressor",
+    description: "Lowers the whole signal by the curve's peak boost so a positive EQ curve cannot clip the output stage.",
+    technical_note: "This is a static offset, not a dynamic processor: it recomputes the maximum combined boost across all active bands and applies exactly that much attenuation before the filters. A +6 dB bass boost with headroom on therefore produces 0 dB at the bass and -6 dB everywhere else; the boost shape is preserved, but absolute level is not. Flat curves are unity.",
+    recommendation: "Leave OFF for the unattenuated sound of a boost, with the true-peak limiter as the safety net. Turn ON only when you want the preamp reserved automatically.",
 };
 
 pub const INFO_MIDSIDE_EQ: InfoBoxContent = InfoBoxContent {
@@ -451,6 +451,38 @@ pub const INFO_AUTOEQ: InfoBoxContent = InfoBoxContent {
     description: "Compensates for headphone acoustic deviations using calibrated lab measurements from over 4,000 headphones and IEMs.",
     technical_note: "Applies multi-band biquad parametric corrections from Oratory1990, RTINGS, and Crinacle to match the Harman 2020 Target Curve.",
     recommendation: "Search for your exact headphone model in the AutoEQ dialog for flat studio-reference sound.",
+};
+
+pub const INFO_LIMITER: InfoBoxContent = InfoBoxContent {
+    title: "Output Limiter",
+    subtitle: "True-Peak Clip Guard",
+    description: "Catches peaks that would exceed the digital ceiling after EQ, preamp and compressor gain.",
+    technical_note: "A look-ahead brickwall limiter delays the signal by the lookahead time, computes the required gain from future peaks, and applies it before the transient reaches the output. True-peak mode oversamples to catch inter-sample peaks. It protects the output; it is not a substitute for preamp headroom when the boost is large.",
+    recommendation: "Keep ON with a -1.0 dB ceiling for a transparent safety net. Raise the ceiling to -0.1 dB only when the DAC is known to tolerate inter-sample peaks.",
+};
+
+pub const INFO_COMPRESSOR: InfoBoxContent = InfoBoxContent {
+    title: "Multiband Compressor",
+    subtitle: "Per-Band Dynamic Control",
+    description: "Reduces dynamic range independently in the low, mid and high bands.",
+    technical_note: "Each band has its own threshold, ratio, attack, release, knee and makeup gain. Makeup gain restores level after compression, so raising it also raises the noise floor. With the output limiter enabled, makeup gain that would clip is caught at the ceiling rather than wrapped.",
+    recommendation: "Leave OFF for critical listening. Use gentle ratios (2:1 to 4:1) and low makeup gain for background or loudness-limited playback.",
+};
+
+pub const INFO_CROSSFEED: InfoBoxContent = InfoBoxContent {
+    title: "Crossfeed",
+    subtitle: "Headphone Speaker Illusion",
+    description: "Mixes a small, delayed and low-passed amount of each channel into the other to reduce hard-panned headphone fatigue.",
+    technical_note: "Real speakers reach both ears with an interaural delay and high-frequency shadowing; headphones do not. Crossfeed models that path. It changes the stereo image, so it is intentionally bypassed for bit-perfect verification.",
+    recommendation: "Bauer is the usual starting point. Use Jmeier for a stronger effect; keep it off for binaural or spatial renderings that already contain the room.",
+};
+
+pub const INFO_CORRECTION: InfoBoxContent = InfoBoxContent {
+    title: "Room Correction",
+    subtitle: "Measured Impulse-Response Correction",
+    description: "Convolves playback with a correction filter derived from a room measurement.",
+    technical_note: "The depth control blends dry and corrected signal: 0% is bypass, 100% is full correction. An unloaded or missing IR leaves the path dry and logs the reason; no correction is silently invented.",
+    recommendation: "Measure at the listening position and correct only below the room's transition frequency. Keep depth below 100% if the correction sounds thin at the top.",
 };
 
 pub const INFO_SPEED_PITCH: InfoBoxContent = InfoBoxContent {

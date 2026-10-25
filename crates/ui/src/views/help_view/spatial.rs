@@ -104,6 +104,7 @@ pub(super) fn render_spatial_tab(ui: &mut egui::Ui, state: &mut HelpState, theme
         );
 
         let spatial_features = [
+            ("Spatial Master Enable", "One switch owns the whole spatial stage. With it off, HRTF, room, head-tracking and listener settings are bypassed and the remaining spatial controls are disabled. Settings stay saved, so re-enabling restores the same soundstage. Crossfeed and correction are separate stages in the DSP studio's Filters tab."),
             ("Spatial Synthesis Quality (Low, Medium, High, Ultra)", "Controls the order of spherical harmonics and the convolution FIR filter length. 'High' (recommended) provides 512-point convolution for pristine localization without excessive CPU consumption. 'Ultra' expands to 2048-point convolution."),
             ("HRTF Profile ID (SOFA Datasets)", "ShadowPlayer supports Spatially Oriented Format for Acoustics (SOFA) standardized files. Default profiles are derived from the KEMAR acoustic head mannequin and IRCAM 1002 studio datasets."),
             ("Listener Motion Smoothing (ms)", "When head tracking sensors or mouse azimuth adjustments occur, instant jumps cause clicks. This low-pass interpolation filter smoothly ramps virtual listener position over a 15–50 ms window."),

@@ -293,25 +293,10 @@ pub fn show_bit_perfect_modal(
                     .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
 
                     if ui.add(pure_direct_btn).clicked() {
-                        // Reset session to bit-perfect unity
-                        session.set_volume(1.0);
-                        session.set_preamp(0.0);
-                        session.set_speed(1.0);
-                        session.set_eq_enabled(false);
-                        session.set_graphic_eq_enabled(false);
-                        session.set_limiter_enabled(false);
-                        session.set_compressor_enabled(false);
-                        session.set_spatial_enabled(false);
-                        session.set_stereo_enhancer_enabled(false);
-                        session.set_bit_perfect(true);
-
-                        // Sync UI state
-                        dsp_state.eq_panel.eq_enabled = false;
-                        dsp_state.eq_panel.graphic_enabled = false;
-                        dsp_state.eq_panel.limiter_enabled = false;
-                        dsp_state.eq_panel.compressor_enabled = false;
-                        dsp_state.eq_panel.preamp_db = 0.0;
-                        dsp_state.settings_tab.bit_perfect = true;
+                        // One owner for the bypass: it snapshots the chain,
+                        // neutralises every stage, and mirrors the state so
+                        // the studio cannot re-enable a bypassed stage.
+                        dsp_state.enter_pure_direct(session);
                     }
 
                     if ui.button(tr!(Msg::S5E8250FB85D64C23)).clicked() {

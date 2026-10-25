@@ -1,14 +1,30 @@
 //! Shared panel controls: the footer preamp/reset strip, the gradient slider,
 //! and the toggle switch.
 
-use super::presets::EqPreset;
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
+use config::CrossfeedProfile;
 use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2};
+use engine::dsp::limiter::LimiterMode;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. Footer Controls: Preamp Slider & Tab-Specific Reset Button
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Slider excursion that can represent the current shared preamp.
+///
+/// Normal mode is ±12 dB and Extended Range is ±24 dB. A curve computed
+/// outside the panel (AutoEQ) can need more; the control widens just enough to
+/// show it instead of clamping the knob while the readout tells the truth.
+pub(super) fn preamp_display_limit(preamp_db: f32, extended_range: bool) -> f32 {
+    if preamp_db.abs() > 24.0 {
+        30.0
+    } else if extended_range || preamp_db.abs() > 12.0 {
+        24.0
+    } else {
+        12.0
+    }
+}
 
 pub(super) fn render_footer_controls(
     ui: &mut egui::Ui,
@@ -21,17 +37,13 @@ pub(super) fn render_footer_controls(
     let reset_btn_w = 95.0;
     let preamp_card_w = (avail_w - reset_btn_w - 12.0).max(200.0);
 
-    let preamp_max = if state.extended_range { 24.0 } else { 12.0 };
-    let min_lbl = if state.extended_range {
-        "-24dB"
-    } else {
-        "-12dB"
-    };
-    let max_lbl = if state.extended_range {
-        "+24dB"
-    } else {
-        "+12dB"
-    };
+    // A preset or AutoEQ curve may compute a preamp outside the normal range.
+    // Widen the control so the knob can actually represent it; otherwise the
+    // readout said −18 dB while the slider was pinned at −12 dB, and touching
+    // it silently reduced the headroom the curve needed.
+    let preamp_max = preamp_display_limit(state.preamp_db, state.extended_range);
+    let min_lbl = format!("-{preamp_max:.0}dB");
+    let max_lbl = format!("+{preamp_max:.0}dB");
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
@@ -77,7 +89,7 @@ pub(super) fn render_footer_controls(
                         );
 
                         let slider_w = (ui.available_width() - 50.0).max(80.0);
-                        let mut p = state.graphic_preamp_db;
+                        let mut p = state.preamp_db;
                         ui.allocate_ui_with_layout(
                             Vec2::new(slider_w, 20.0),
                             egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
@@ -89,10 +101,8 @@ pub(super) fn render_footer_controls(
                                     0.0,
                                     theme,
                                 ) {
-                                    state.graphic_preamp_db = p;
-                                    state.preamp_db = p;
-                                    actions.graphic_preamp_changed = Some(p);
-                                    actions.eq_preamp_changed = Some(p);
+                                    state.set_preamp(p);
+                                    actions.graphic_eq_changed = true;
                                 }
                             },
                         );
@@ -107,7 +117,7 @@ pub(super) fn render_footer_controls(
                     // Row 3: Readout
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            egui::RichText::new(format!("{:+.1} dB", state.graphic_preamp_db))
+                            egui::RichText::new(format!("{:+.1} dB", state.preamp_db))
                                 .font(crate::theme::font(11.5))
                                 .color(theme.text_secondary),
                         );
@@ -156,6 +166,9 @@ pub(super) fn render_footer_controls(
         let tooltip = match tab {
             EqTab::Graphic => "Reset Graphic EQ band sliders to 0.0 dB flat",
             EqTab::Tone => "Reset Bass, Treble, Stereo Width, and Balance to defaults",
+            EqTab::Parametric => "Flatten every parametric band and reset the shared preamp",
+            EqTab::Dynamics => "Reset the limiter and all three compressor bands to defaults",
+            EqTab::Filters => "Reset crossfeed and correction to their bypassed defaults",
             EqTab::Advanced => "Reset Advanced dynamic range and DSP processing modes to defaults",
             _ => "Reset settings for this tab",
         };
@@ -163,17 +176,10 @@ pub(super) fn render_footer_controls(
         if reset_resp.on_hover_text(tooltip).clicked() {
             match tab {
                 EqTab::Graphic => {
-                    // Reset Graphic EQ bands and master preamp to 0.0 dB flat
-                    let num = state.graphic_layout.num_bands();
-                    for i in 0..num {
-                        state.graphic_gains[i] = 0.0;
-                        actions.graphic_slider_changed = Some(i);
-                    }
-                    state.graphic_preamp_db = 0.0;
-                    actions.graphic_preamp_changed = Some(0.0);
-                    state.selected_preset = EqPreset::Flat;
-                    state.selected_custom_preset_idx = None;
-                    actions.graphic_reset = true;
+                    // One snapshot resets the whole curve, not 64 queued
+                    // single-band commands racing the engine's tick budget.
+                    state.reset_graphic_eq();
+                    actions.graphic_eq_changed = true;
                 }
                 EqTab::Tone => {
                     // Reset Tone shelves, stereo width, balance, and master preamp
@@ -189,18 +195,70 @@ pub(super) fn render_footer_controls(
                     state.balance = 0.0;
                     actions.balance_changed = Some(0.0);
 
-                    state.graphic_preamp_db = 0.0;
-                    actions.graphic_preamp_changed = Some(0.0);
+                    state.set_preamp(0.0);
+                    actions.graphic_eq_changed = true;
                 }
                 EqTab::Advanced => {
-                    // Reset Advanced settings to audiophile defaults
-                    state.extended_range = false;
-                    state.auto_headroom = true;
-                    actions.eq_auto_headroom_changed = Some(true);
+                    // Reset Advanced settings to the new honest defaults:
+                    // no hidden static attenuation, but the true-peak guard
+                    // remains available and on for new state.
+                    // Do not hide a curve that still exceeds the standard
+                    // range: the engine would keep applying it while the
+                    // canvas drew a clamped picture.
+                    state.extended_range = state.needs_extended_range();
+                    state.auto_headroom = false;
+                    actions.eq_auto_headroom_changed = Some(false);
                     state.midside_eq = false;
                     actions.midside_eq_changed = Some(false);
                     state.dither_enabled = false;
                     actions.dither_enabled_changed = Some(false);
+                }
+                EqTab::Parametric => {
+                    for band in &mut state.bands {
+                        band.gain_db = 0.0;
+                    }
+                    state.set_preamp(0.0);
+                    actions.eq_bands_changed = true;
+                    actions.graphic_eq_changed = true;
+                }
+                EqTab::Dynamics => {
+                    state.limiter_enabled = true;
+                    actions.limiter_enabled_changed = Some(true);
+                    state.limiter_mode = LimiterMode::Transparent;
+                    actions.limiter_mode_changed = Some(LimiterMode::Transparent);
+                    state.limiter_true_peak = true;
+                    actions.limiter_true_peak_changed = Some(true);
+                    state.limiter_lookahead_ms = 5.0;
+                    state.limiter_attack_ms = 0.3;
+                    state.limiter_release_ms = 100.0;
+                    state.limiter_ceiling_db = -1.0;
+                    state.limiter_soft_clip = false;
+                    actions.limiter_params_changed = true;
+                    state.compressor_enabled = false;
+                    actions.compressor_enabled_changed = Some(false);
+                    state.comp_threshold = [-24.0, -18.0, -18.0];
+                    state.comp_ratio = [4.0, 3.0, 3.0];
+                    state.comp_attack_ms = [10.0, 10.0, 5.0];
+                    state.comp_release_ms = [100.0, 100.0, 80.0];
+                    state.comp_makeup_db = [0.0; 3];
+                    state.comp_knee_db = [3.0; 3];
+                    state.comp_stereo_link = [true; 3];
+                    state.comp_band = 0;
+                    actions.comp_params_reset = true;
+                }
+                EqTab::Filters => {
+                    state.crossfeed_enabled = false;
+                    actions.crossfeed_enabled_changed = Some(false);
+                    state.crossfeed_profile = CrossfeedProfile::Bauer;
+                    actions.crossfeed_profile_changed = Some(CrossfeedProfile::Bauer);
+                    state.crossfeed_freq = 700.0;
+                    state.crossfeed_q = 0.707;
+                    state.crossfeed_delay_ms = 0.3;
+                    actions.crossfeed_custom_changed = true;
+                    state.correction_enabled = false;
+                    actions.correction_enabled_changed = Some(false);
+                    state.correction_depth = 1.0;
+                    actions.correction_depth_changed = Some(1.0);
                 }
                 _ => {}
             }
@@ -336,4 +394,20 @@ pub fn custom_toggle_switch(
 
     resp.on_hover_text(tooltip);
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preamp_display_limit;
+
+    #[test]
+    fn preamp_slider_widens_to_show_a_preset_that_needs_more_headroom() {
+        assert_eq!(preamp_display_limit(0.0, false), 12.0);
+        assert_eq!(preamp_display_limit(-12.0, false), 12.0);
+        assert_eq!(preamp_display_limit(-12.5, false), 24.0);
+        assert_eq!(preamp_display_limit(-24.0, false), 24.0);
+        assert_eq!(preamp_display_limit(-25.0, false), 30.0);
+        assert_eq!(preamp_display_limit(0.0, true), 24.0);
+        assert_eq!(preamp_display_limit(26.0, true), 30.0);
+    }
 }

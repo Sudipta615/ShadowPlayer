@@ -51,10 +51,10 @@ pub(super) fn render_advanced_tab(
                 render_advanced_toggle_card(
                     ui,
                     card_w,
-                    "Auto Headroom Management",
+                    "Static Auto Headroom",
                     &crate::components::info_box::INFO_AUTO_HEADROOM,
-                    "Dynamically lowers master digital gain when EQ boosts exceed 0 dBFS to prevent clipping.",
-                    if ah { "Auto Attenuation ON" } else { "Headroom Bypass" },
+                    "Reserves the curve's peak boost as fixed pre-EQ attenuation. It lowers the whole signal; it is not a limiter.",
+                    if ah { "Static Attenuation ON" } else { "Headroom Bypass" },
                     ah,
                     &mut ah,
                     |v| {
@@ -71,10 +71,10 @@ pub(super) fn render_advanced_tab(
             render_advanced_toggle_card(
                 ui,
                 card_w,
-                "Auto Headroom Management",
+                "Static Auto Headroom",
                 &crate::components::info_box::INFO_AUTO_HEADROOM,
-                "Dynamically lowers master digital gain when EQ boosts exceed 0 dBFS to prevent clipping.",
-                if ah { "Auto Attenuation ON" } else { "Headroom Bypass" },
+                "Reserves the curve's peak boost as fixed pre-EQ attenuation. It lowers the whole signal; it is not a limiter.",
+                if ah { "Static Attenuation ON" } else { "Headroom Bypass" },
                 ah,
                 &mut ah,
                 |v| {

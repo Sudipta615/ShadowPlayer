@@ -155,7 +155,7 @@ pub(super) fn render_spline_eq_canvas(
             state.graphic_gains[band] = gain;
             state.selected_preset = EqPreset::Custom;
             state.selected_custom_preset_idx = None;
-            actions.graphic_slider_changed = Some(band);
+            actions.graphic_eq_changed = true;
         }
         state.keyboard_band = band;
     }
@@ -184,7 +184,7 @@ pub(super) fn render_spline_eq_canvas(
                         state.graphic_gains[i] = rounded_gain;
                         state.selected_preset = EqPreset::Custom;
                         state.selected_custom_preset_idx = None;
-                        actions.graphic_slider_changed = Some(i);
+                        actions.graphic_eq_changed = true;
                     }
                 }
             }
@@ -197,7 +197,7 @@ pub(super) fn render_spline_eq_canvas(
                     state.graphic_gains[i] = 0.0;
                     state.selected_preset = EqPreset::Custom;
                     state.selected_custom_preset_idx = None;
-                    actions.graphic_slider_changed = Some(i);
+                    actions.graphic_eq_changed = true;
                 }
             }
         }

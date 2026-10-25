@@ -6,12 +6,30 @@ use audio_session::AudioSession;
 use config::{AudioBackend, CrossfadeConfig, TransitionMode};
 use engine::output::devices::OutputDeviceInfo;
 
+/// The stages Pure Direct neutralises, kept so leaving it restores the sound
+/// the user had before the bypass instead of leaving every stage off.
+#[derive(Clone, Copy)]
+struct PureDirectSaved {
+    eq_enabled: bool,
+    eq_mode: config::EqMode,
+    preamp_db: f32,
+    speed: f32,
+    volume: f32,
+    limiter_enabled: bool,
+    compressor_enabled: bool,
+    spatial_enabled: bool,
+    stereo_enhancer_enabled: bool,
+}
+
 /// Central DSP state container and command dispatcher
 #[derive(Default)]
 pub struct DspState {
     pub eq_panel: EqPanelState,
     pub settings_tab: SettingsTabState,
     pub autoeq: crate::modals::AutoEqModalState,
+    /// Set while Pure Direct has neutralised the chain; see
+    /// [`Self::enter_pure_direct`].
+    pure_direct_saved: Option<PureDirectSaved>,
     /// The CLAP plugin rack: its window state and the named preset library.
     pub clap_rack: ClapRackState,
     /// The output devices of the selected backend.
@@ -26,6 +44,98 @@ pub struct DspState {
 }
 
 impl DspState {
+    fn capture_pure_direct(&mut self, volume: f32) {
+        if self.pure_direct_saved.is_none() {
+            self.pure_direct_saved = Some(PureDirectSaved {
+                eq_enabled: self.eq_panel.eq_enabled,
+                eq_mode: self.eq_panel.eq_mode,
+                preamp_db: self.eq_panel.preamp_db,
+                speed: self.settings_tab.speed,
+                volume,
+                limiter_enabled: self.eq_panel.limiter_enabled,
+                compressor_enabled: self.eq_panel.compressor_enabled,
+                spatial_enabled: self.settings_tab.spatial_enabled,
+                stereo_enhancer_enabled: self.settings_tab.stereo_enhancer_enabled,
+            });
+        }
+    }
+
+    fn restore_pure_direct_state(&mut self) -> Option<PureDirectSaved> {
+        let saved = self.pure_direct_saved.take()?;
+        self.eq_panel.eq_enabled = saved.eq_enabled;
+        self.eq_panel.set_eq_mode(saved.eq_mode);
+        self.eq_panel.set_preamp(saved.preamp_db);
+        self.settings_tab.speed = saved.speed;
+        self.eq_panel.limiter_enabled = saved.limiter_enabled;
+        self.eq_panel.compressor_enabled = saved.compressor_enabled;
+        self.settings_tab.spatial_enabled = saved.spatial_enabled;
+        self.settings_tab.stereo_enhancer_enabled = saved.stereo_enhancer_enabled;
+        Some(saved)
+    }
+
+    /// Enter Pure Direct and neutralise every stage it bypasses.
+    ///
+    /// The previous state is captured once. Saving it is what lets the next
+    /// toggle-off restore the chain instead of leaving the user with a flat,
+    /// limiter-free, spatial-free setup.
+    pub fn enter_pure_direct(&mut self, session: &AudioSession) {
+        self.capture_pure_direct(session.volume());
+        session.set_volume(1.0);
+        session.set_preamp(0.0);
+        session.set_speed(1.0);
+        session.set_eq_enabled(false);
+        session.set_graphic_eq_enabled(false);
+        session.set_limiter_enabled(false);
+        session.set_compressor_enabled(false);
+        session.set_spatial_enabled(false);
+        session.set_stereo_enhancer_enabled(false);
+        session.set_bit_perfect(true);
+
+        // Mirror the engine so the studio does not keep drawing stages as
+        // active while Pure Direct bypasses them. Speed is neutralised too, so
+        // its control must show the neutral value until the bypass ends.
+        self.settings_tab.speed = 1.0;
+        self.eq_panel.eq_enabled = false;
+        self.eq_panel.graphic_enabled = false;
+        self.eq_panel.limiter_enabled = false;
+        self.eq_panel.compressor_enabled = false;
+        self.eq_panel.set_preamp(0.0);
+        self.settings_tab.spatial_enabled = false;
+        self.settings_tab.stereo_enhancer_enabled = false;
+        self.settings_tab.bit_perfect = true;
+    }
+
+    /// Leave Pure Direct and re-assert the stages it neutralised.
+    pub fn exit_pure_direct(&mut self, session: &AudioSession) {
+        session.set_bit_perfect(false);
+        self.settings_tab.bit_perfect = false;
+        let Some(saved) = self.restore_pure_direct_state() else {
+            return;
+        };
+        session.set_volume(saved.volume);
+        session.set_speed(saved.speed);
+        session.set_eq_mode(saved.eq_mode);
+        session.set_eq_enabled(saved.eq_enabled);
+        session.set_preamp(saved.preamp_db);
+        session.set_limiter_enabled(saved.limiter_enabled);
+        session.set_compressor_enabled(saved.compressor_enabled);
+        session.set_spatial_enabled(saved.spatial_enabled);
+        session.set_stereo_enhancer_enabled(saved.stereo_enhancer_enabled);
+    }
+
+    /// Push the complete graphic-EQ model as one engine command.
+    fn push_graphic_eq_state(&self, session: &AudioSession) {
+        let eq = &self.eq_panel;
+        let num = eq.graphic_layout.num_bands().min(eq.graphic_gains.len());
+        session.set_graphic_eq_state(
+            eq.graphic_layout.clone(),
+            eq.graphic_gains[..num].to_vec(),
+            eq.preamp_db,
+            eq.eq_enabled,
+            eq.auto_headroom,
+        );
+    }
+
     /// Refresh the cached device list for the selected backend.
     ///
     /// A no-op when the list is already for the current backend, so it is safe
@@ -84,6 +194,7 @@ impl DspState {
         if let Some(mode) = st.precision_mode {
             session.set_precision_mode(mode);
         }
+        session.set_spatial_enabled(st.spatial_enabled);
         session.set_spatial_quality(st.spatial_quality);
         if !st.hrtf_profile.is_empty() {
             session.set_hrtf_profile(st.hrtf_profile.clone());
@@ -132,28 +243,27 @@ impl DspState {
     pub fn sync_chain_to_session(&self, session: &AudioSession) {
         let eq = &self.eq_panel;
 
-        // Equalizer: parametric bands first, then the graphic layer that
-        // takes precedence when enabled.
+        // Equalizer: the explicit mode selects the curve source. Both models
+        // are restored so switching modes does not lose the other curve.
+        session.set_eq_mode(eq.eq_mode);
         session.set_eq_enabled(eq.eq_enabled);
-        for (i, band) in eq.bands.iter().enumerate() {
-            session.set_eq_band_params(
-                i,
-                band.freq,
-                band.gain_db,
-                band.q,
-                band.filter_type,
-                band.enabled,
-            );
-        }
+        // One atomic bank: a chain restore may contain a 64-band AutoEQ curve,
+        // and a shorter chain must not leave the previous curve's tail active.
+        let parametric_bands = eq
+            .bands
+            .iter()
+            .map(|band| config::EqBandConfig {
+                enabled: band.enabled,
+                filter_type: band.filter_type.into(),
+                frequency: band.freq,
+                gain_db: band.gain_db,
+                q: band.q,
+            })
+            .collect();
+        session.set_eq_bands(parametric_bands);
         session.set_preamp(eq.preamp_db);
         session.set_eq_auto_headroom(eq.auto_headroom);
-
-        session.set_graphic_eq_enabled(eq.graphic_enabled);
-        session.set_graphic_eq_layout(eq.graphic_layout.clone());
-        for b in 0..eq.graphic_layout.num_bands() {
-            session.set_graphic_eq_slider(b, eq.graphic_gains[b]);
-        }
-        session.set_graphic_eq_preamp(eq.graphic_preamp_db);
+        self.push_graphic_eq_state(session);
 
         // Tone.
         session.set_bass_shelf(eq.bass_shelf_db);
@@ -291,6 +401,9 @@ impl DspState {
         }
         if s.clear_output_profile {
             session.clear_output_profile();
+        }
+        if let Some(enabled) = s.spatial_enabled_changed {
+            session.set_spatial_enabled(enabled);
         }
         if let Some(q) = s.spatial_quality_changed {
             session.set_spatial_quality(q);
@@ -629,55 +742,63 @@ impl DspState {
         if eq_actions.fx_changed {
             session.set_fx_config(self.eq_panel.fx);
         }
-        if let Some(b) = eq_actions.eq_enabled_changed {
-            session.set_eq_enabled(b);
+        if eq_actions.eq_mode_changed {
+            session.set_eq_mode(self.eq_panel.eq_mode);
+            // Send the curve with the mode so the newly selected source starts
+            // from the state the panel is showing, not from an older command.
+            self.push_graphic_eq_state(session);
+        }
+        if let Some(enabled) = eq_actions.eq_enabled_changed {
+            if self.eq_panel.eq_mode == config::EqMode::Graphic {
+                // The atomic snapshot carries the enable state, so this cannot
+                // race a layout/slider update from the same frame.
+                self.push_graphic_eq_state(session);
+            } else {
+                session.set_eq_enabled(enabled);
+            }
         }
         if let Some(b) = eq_actions.eq_band_changed {
-            let band = &self.eq_panel.bands[b];
-            session.set_eq_band_params(
-                b,
-                band.freq,
-                band.gain_db,
-                band.q,
-                band.filter_type,
-                band.enabled,
-            );
+            if let Some(band) = self.eq_panel.bands.get(b) {
+                session.set_eq_band_params(
+                    b,
+                    band.freq,
+                    band.gain_db,
+                    band.q,
+                    band.filter_type,
+                    band.enabled,
+                );
+            }
         }
-        if let Some(v) = eq_actions.eq_preamp_changed {
-            session.set_preamp(v);
+        if eq_actions.eq_bands_changed {
+            // Replace the entire bank atomically. The panel keeps all 64 bands
+            // an AutoEQ curve can contain, and a reset must flatten every one
+            // rather than leaving a stale tail audible.
+            let bands = self
+                .eq_panel
+                .bands
+                .iter()
+                .map(|band| config::EqBandConfig {
+                    enabled: band.enabled,
+                    filter_type: band.filter_type.into(),
+                    frequency: band.freq,
+                    gain_db: band.gain_db,
+                    q: band.q,
+                })
+                .collect();
+            session.set_eq_bands(bands);
         }
         if let Some(b) = eq_actions.eq_auto_headroom_changed {
             session.set_eq_auto_headroom(b);
-        }
-        if eq_actions.eq_reset {
-            for b in 0..10 {
-                session.set_graphic_eq_slider(b, 0.0);
-            }
         }
         if eq_actions.open_autoeq_dialog {
             self.autoeq.is_open = true;
         }
 
-        if let Some(b) = eq_actions.graphic_enabled_changed {
-            session.set_graphic_eq_enabled(b);
-        }
-        if let Some(layout) = eq_actions.graphic_layout_changed {
-            let num = layout.num_bands();
-            session.set_graphic_eq_layout(layout);
-            for b in 0..num {
-                session.set_graphic_eq_slider(b, self.eq_panel.graphic_gains[b]);
-            }
-        }
-        if let Some(b) = eq_actions.graphic_slider_changed {
-            session.set_graphic_eq_slider(b, self.eq_panel.graphic_gains[b]);
-        }
-        if let Some(v) = eq_actions.graphic_preamp_changed {
-            session.set_graphic_eq_preamp(v);
-        }
-        if eq_actions.graphic_reset {
-            for b in 0..64 {
-                session.set_graphic_eq_slider(b, 0.0);
-            }
+        // One command for every graphic edit: layout change, preset load,
+        // reset, slider drag or preamp move. This is what makes a preset
+        // atomic and immune to the engine's 64-commands-per-tick budget.
+        if eq_actions.graphic_eq_changed {
+            self.push_graphic_eq_state(session);
         }
 
         if let Some(v) = eq_actions.bass_shelf_changed {
@@ -742,6 +863,25 @@ impl DspState {
                 s.comp_stereo_link[band],
             );
         }
+        if eq_actions.comp_params_reset {
+            let s = &self.eq_panel;
+            for band in 0..3 {
+                session.set_compressor_band_params(
+                    band,
+                    s.comp_threshold[band],
+                    s.comp_ratio[band],
+                    s.comp_attack_ms[band],
+                    s.comp_release_ms[band],
+                    s.comp_makeup_db[band],
+                );
+                session.set_compressor_band_features(
+                    band,
+                    s.comp_knee_db[band],
+                    config::CompressorDetector::Rms,
+                    s.comp_stereo_link[band],
+                );
+            }
+        }
 
         if let Some(b) = eq_actions.crossfeed_enabled_changed {
             session.set_crossfeed_enabled(b);
@@ -767,5 +907,64 @@ impl DspState {
         if eq_actions.load_correction_ir && !self.eq_panel.correction_ir_path.is_empty() {
             session.load_correction_ir(std::path::PathBuf::from(&self.eq_panel.correction_ir_path));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pure_direct_round_trip_restores_the_chain_state() {
+        let mut state = DspState::default();
+        state.eq_panel.eq_enabled = true;
+        state.eq_panel.set_eq_mode(config::EqMode::Graphic);
+        state.eq_panel.set_preamp(-7.5);
+        state.eq_panel.limiter_enabled = true;
+        state.eq_panel.compressor_enabled = true;
+        state.settings_tab.spatial_enabled = true;
+        state.settings_tab.stereo_enhancer_enabled = true;
+
+        state.settings_tab.speed = 1.25;
+        state.capture_pure_direct(0.7);
+        // The same fields enter_pure_direct then mirrors as off/unity.
+        state.settings_tab.speed = 1.0;
+        state.eq_panel.eq_enabled = false;
+        state.eq_panel.graphic_enabled = false;
+        state.eq_panel.limiter_enabled = false;
+        state.eq_panel.compressor_enabled = false;
+        state.eq_panel.set_preamp(0.0);
+        state.settings_tab.spatial_enabled = false;
+        state.settings_tab.stereo_enhancer_enabled = false;
+
+        let saved = state
+            .restore_pure_direct_state()
+            .expect("the bypass must have saved a snapshot");
+        assert_eq!(saved.eq_mode, config::EqMode::Graphic);
+        assert!((saved.volume - 0.7).abs() < 1e-6);
+        assert!((state.settings_tab.speed - 1.25).abs() < 1e-6);
+        assert!(state.eq_panel.eq_enabled);
+        assert_eq!(state.eq_panel.eq_mode, config::EqMode::Graphic);
+        assert!(state.eq_panel.graphic_enabled);
+        assert!((state.eq_panel.preamp_db - (-7.5)).abs() < 1e-6);
+        assert!(state.eq_panel.limiter_enabled);
+        assert!(state.eq_panel.compressor_enabled);
+        assert!(state.settings_tab.spatial_enabled);
+        assert!(state.settings_tab.stereo_enhancer_enabled);
+    }
+
+    #[test]
+    fn entering_pure_direct_twice_does_not_overwrite_the_snapshot() {
+        let mut state = DspState::default();
+        state.eq_panel.eq_enabled = true;
+        state.eq_panel.set_eq_mode(config::EqMode::Graphic);
+        state.eq_panel.set_preamp(-4.0);
+        state.capture_pure_direct(0.7);
+        state.eq_panel.eq_enabled = false;
+        state.eq_panel.set_preamp(0.0);
+        state.capture_pure_direct(0.3);
+        state.restore_pure_direct_state().unwrap();
+        assert!(state.eq_panel.eq_enabled);
+        assert!((state.eq_panel.preamp_db - (-4.0)).abs() < 1e-6);
     }
 }

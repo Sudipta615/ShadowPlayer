@@ -118,6 +118,9 @@ pub struct SettingsTabState {
     pub request_clap_library: bool,
 
     // Spatial
+    /// Master bypass for the whole spatial stage. Without this, the HRTF/room
+    /// controls wrote into a stage that still reported itself disabled.
+    pub spatial_enabled: bool,
     pub spatial_quality: SpatialQuality,
     pub hrtf_profile: String,
     pub listener_smoothing_ms: f32,
@@ -231,6 +234,7 @@ impl Default for SettingsTabState {
             request_organize: false,
             request_clap_library: false,
 
+            spatial_enabled: false,
             spatial_quality: SpatialQuality::High,
             hrtf_profile: String::new(),
             listener_smoothing_ms: 50.0,
@@ -324,6 +328,8 @@ pub struct SettingsTabActions {
     pub clear_output_profile: bool,
 
     // Spatial
+    /// The whole spatial stage was enabled or bypassed.
+    pub spatial_enabled_changed: Option<bool>,
     pub spatial_quality_changed: Option<SpatialQuality>,
     pub hrtf_profile_changed: Option<String>,
     pub listener_tracking_changed: bool,

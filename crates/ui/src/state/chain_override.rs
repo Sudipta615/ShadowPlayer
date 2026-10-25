@@ -12,6 +12,7 @@
 //! overridable (and testable) without another match arm here.
 
 use crate::state::chain_preset::{ChainEq, ChainPreset};
+use config::EqMode;
 use serde_json::{Map, Value};
 
 /// The JSON object that turns `base` into `current`, or `None` when they are
@@ -176,7 +177,7 @@ fn describe_object(section: &'static str, value: &Value, out: &mut Vec<OverrideL
 /// Which block of the EQ panel a chain field belongs to.
 fn eq_section(key: &str) -> &'static str {
     match key {
-        "eq_enabled" | "bands" | "preamp_db" | "auto_headroom" => "Equalizer",
+        "eq_enabled" | "eq_mode" | "bands" | "preamp_db" | "auto_headroom" => "Equalizer",
         "graphic_enabled" | "graphic_layout" | "graphic_gains" | "graphic_preamp_db" => {
             "Graphic EQ"
         }
@@ -204,6 +205,7 @@ fn eq_section(key: &str) -> &'static str {
 fn label_for(key: &str) -> String {
     match key {
         "eq_enabled" => "Enabled".to_string(),
+        "eq_mode" => "Mode".to_string(),
         "preamp_db" => "Preamp".to_string(),
         "auto_headroom" => "Auto headroom".to_string(),
         "bands" => "Parametric bands".to_string(),
@@ -301,6 +303,30 @@ fn format_value(key: &str, value: &Value) -> String {
     }
 }
 
+/// Repair a whole-chain profile written before `eq_mode` existed.
+///
+/// Such a profile can carry `graphic_enabled: true` without a mode key. The
+/// base chain has since gained an explicit mode (normally Parametric), so a
+/// plain merge would preserve Parametric and make the stored graphic curve
+/// inaudible. If the profile explicitly enabled the graphic layer and has no
+/// mode of its own, re-select Graphic and the shared master before diffing.
+fn normalize_pre_mode_override(overrides: &Value, base: &ChainPreset) -> Value {
+    let Some(eq) = overrides.get("eq").and_then(Value::as_object) else {
+        return overrides.clone();
+    };
+    let enables_graphic = eq.get("graphic_enabled").and_then(Value::as_bool) == Some(true);
+    if !enables_graphic || eq.contains_key("eq_mode") {
+        return overrides.clone();
+    }
+    let Some(mut merged) = merge_chain(base, overrides) else {
+        return overrides.clone();
+    };
+    merged.eq.eq_enabled = true;
+    merged.eq.eq_mode = Some(EqMode::Graphic);
+    merged.eq.graphic_enabled = true;
+    diff_chain(base, &merged).unwrap_or_else(|| overrides.clone())
+}
+
 /// The patch a pre-overrides profile implies on `base`.
 ///
 /// Profiles written before whole-chain overrides stored only the graphic EQ
@@ -311,17 +337,24 @@ pub fn legacy_patch(
     profile: &domain::models::TrackDspProfile,
     base: &ChainPreset,
 ) -> Option<Value> {
-    if profile.overrides.is_some() {
-        return profile.overrides.clone();
+    if let Some(overrides) = &profile.overrides {
+        return Some(normalize_pre_mode_override(overrides, base));
     }
-    if !profile.graphic_enabled
-        && profile.graphic_gains.is_empty()
-        && profile.graphic_preamp_db.abs() < 0.001
-    {
+    // A disabled legacy graphic layer was inert: its gains and preamp never
+    // reached the old engine. Treat it as neutral instead of copying its
+    // preamp into the now-shared field, where it would silently change the
+    // parametric curve the track inherits.
+    if !profile.graphic_enabled {
         return None;
     }
     let mut chain = base.clone();
-    chain.eq.graphic_enabled = profile.graphic_enabled;
+    // The old engine selected the graphic layer independently of the
+    // parametric master. A legacy profile that enabled it must therefore
+    // select Graphic mode and put the shared master on, or an upgrade from a
+    // parametric base would store a curve that never runs.
+    chain.eq.eq_enabled = true;
+    chain.eq.eq_mode = Some(EqMode::Graphic);
+    chain.eq.graphic_enabled = true;
     if !profile.graphic_gains.is_empty() {
         // A legacy profile stored the gains array it saw. Lay it over the
         // global array rather than replacing it, so a profile saved against a
@@ -332,6 +365,9 @@ pub fn legacy_patch(
         }
         chain.eq.graphic_gains = gains;
     }
+    // One preamp authority now. The legacy profile's value must win even when
+    // it is 0 dB, or the track would inherit an unrelated global preamp.
+    chain.eq.preamp_db = profile.graphic_preamp_db;
     chain.eq.graphic_preamp_db = profile.graphic_preamp_db;
     diff_chain(base, &chain)
 }
@@ -449,13 +485,70 @@ mod tests {
             overrides: None,
             replaygain_override_db: None,
         };
-        let patch = legacy_patch(&profile, &base()).expect("a legacy profile must convert");
-        let merged = merge_chain(&base(), &patch).unwrap();
+        let mut parametric_base = base();
+        parametric_base.eq.eq_mode = Some(EqMode::Parametric);
+        parametric_base.eq.eq_enabled = false;
+        let patch =
+            legacy_patch(&profile, &parametric_base).expect("a legacy profile must convert");
+        let merged = merge_chain(&parametric_base, &patch).unwrap();
+        assert_eq!(merged.eq.eq_mode, Some(EqMode::Graphic));
+        assert!(merged.eq.eq_enabled);
         assert!(merged.eq.graphic_enabled);
+        assert_eq!(merged.eq.preamp_db, -3.0);
         assert_eq!(merged.eq.graphic_preamp_db, -3.0);
         assert_eq!(merged.eq.graphic_gains[1], 2.0);
         // Untouched graphic bands keep the global value, not zero.
         assert_eq!(merged.eq.graphic_gains[9], base().eq.graphic_gains[9]);
+
+        let mut panel = crate::components::eq_panel::EqPanelState::default();
+        merged.eq.apply_to(&mut panel);
+        assert_eq!(panel.eq_mode, EqMode::Graphic);
+        assert!(panel.eq_enabled);
+        assert!(panel.graphic_enabled);
+        assert!((panel.preamp_db - (-3.0)).abs() < 1e-6);
+        assert!((panel.graphic_gains[1] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_pre_mode_chain_override_still_selects_graphic_mode() {
+        let profile = domain::models::TrackDspProfile {
+            graphic_gains: Vec::new(),
+            graphic_enabled: false,
+            graphic_preamp_db: 0.0,
+            overrides: Some(serde_json::json!({
+                "eq": {
+                    "graphic_enabled": true,
+                    "graphic_gains": [0.0, 6.0]
+                }
+            })),
+            replaygain_override_db: None,
+        };
+        let mut parametric_base = base();
+        parametric_base.eq.eq_mode = Some(EqMode::Parametric);
+        parametric_base.eq.eq_enabled = true;
+        let patch =
+            legacy_patch(&profile, &parametric_base).expect("a stored override must convert");
+        assert_eq!(patch["eq"]["eq_mode"], "Graphic");
+        let merged = merge_chain(&parametric_base, &patch).unwrap();
+        assert!(merged.eq.eq_enabled);
+        let mut panel = crate::components::eq_panel::EqPanelState::default();
+        merged.eq.apply_to(&mut panel);
+        assert_eq!(panel.eq_mode, EqMode::Graphic);
+        assert!(panel.eq_enabled);
+        assert!(panel.graphic_enabled);
+        assert_eq!(panel.graphic_gains[1], 6.0);
+    }
+
+    #[test]
+    fn a_disabled_legacy_graphic_profile_stays_inert() {
+        let profile = domain::models::TrackDspProfile {
+            graphic_gains: vec![8.0; 10],
+            graphic_enabled: false,
+            graphic_preamp_db: -6.0,
+            overrides: None,
+            replaygain_override_db: None,
+        };
+        assert!(legacy_patch(&profile, &base()).is_none());
     }
 
     #[test]

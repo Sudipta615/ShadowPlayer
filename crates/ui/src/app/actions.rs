@@ -198,7 +198,7 @@ impl ShadowPlayerApp {
         // therefore show the level actually reaching the engine, and the
         // global chain is restored untouched when the track ends.
         if let Some(gain_db) = profile.replaygain_override_db {
-            merged.eq.preamp_db += gain_db;
+            merged.eq.add_track_gain(gain_db);
         }
 
         merged.apply(
