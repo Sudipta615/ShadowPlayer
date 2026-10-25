@@ -373,7 +373,15 @@ impl DspState {
             session.set_volume_mode(m);
         }
         if let Some(b) = s.bit_perfect_changed {
-            session.set_bit_perfect(b);
+            // The persistent Output switch normally controls the engine-level
+            // bypass without touching the chain. If the user leaves Pure
+            // Direct here, though, the engine must also get the captured chain
+            // back; otherwise the studio stays flat while bit-perfect is off.
+            if !b && self.pure_direct_saved.is_some() {
+                self.exit_pure_direct(session);
+            } else {
+                session.set_bit_perfect(b);
+            }
         }
         if let Some(b) = s.dither_changed {
             session.set_dither_enabled(b);
