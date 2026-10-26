@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.21.0] - 2026-10-26
+
+*Released with audio-engine 1.10.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Spatial DSP & room correction suite.** Comprehensive acoustics and spatial audio processing:
+  - Higher-Order Ambisonics (HOA) decoding across 1st, 2nd, and 3rd orders with AmbiX (ACN/SN3D) and B-format support.
+  - Analytic Woodworth/Schroeder spherical head model and measured HRTF dataset interpolation.
+  - Room acoustics simulation, mode estimation, and reverberation time (RT60) calculations via Sabine and Eyring formulas.
+  - Parametric room correction filter synthesis with target curve profiles (Harman listener target, B&K 1974, flat reference) and psychoacoustic 1/N octave smoothing.
+  - Subwoofer bass management with configurable crossover slopes, phase alignment, and bass redirection.
+- **Immersive channel downmixing & height folding.** ITU-R BS.775 5.1/7.1 downmixing expanded with 7.1.4 immersive channel folding, rendering 3D bed and height channels cleanly into stereo with phase preservation.
+- **Extended DSD rate support.** DSF and DSDIFF stream readers now support 48 kHz integer-multiple rates up to DSD1024 (49.152 MHz) alongside standard 44.1 kHz DSD rates (DSD64 through DSD1024).
+- **CUE sheet ReplayGain parsing.** Sheet-level and track-level `REM REPLAYGAIN_TRACK_GAIN`, `REM REPLAYGAIN_ALBUM_GAIN`, and peak metadata extraction with parent inheritance.
+- **WavPack APEv2 tag extraction.** Full APEv2 tag reading for WavPack files, parsing title, artist, album, genre, year, track numbers, and embedded ReplayGain tags.
+- **DSP core optimizations.** Vectorized SIMD limiter processing, zero-allocation multiband compressor envelope detectors, TPDF and noise-shaped dithering, true peak 4x oversampled detection, and smooth gain ramping.
+
+### Testing and release
+- Full engine and player test suites pass, including ambisonics, HRTF, DSD 48k rates, CUE ReplayGain inheritance, and platform parity checks. Clippy warnings are zero across all workspace targets.
+
 ## [0.20.0] - 2026-10-26
 
 *Released with audio-engine 1.9.0. The player and the engine are versioned separately and released
