@@ -133,6 +133,16 @@ impl DsdDecoder {
         self.native
     }
 
+    /// The active DSD sampling rate.
+    pub fn rate(&self) -> crate::decode::dsd::DsdRate {
+        self.reader.rate()
+    }
+
+    /// Offset of ID3v2 metadata if present (DSF files only; 0 otherwise).
+    pub fn metadata_offset(&self) -> u64 {
+        self.reader.metadata_offset()
+    }
+
     /// The output rate in DoP mode (bit_rate / 16), or `None` when the decoder
     /// is not currently in DoP mode.
     pub fn dop_rate(&self) -> Option<u32> {

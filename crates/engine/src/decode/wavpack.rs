@@ -160,7 +160,7 @@ impl WavpackDecoder {
         } else {
             format!("i{}", facts.bits_per_sample)
         };
-        let format_info = AudioFormatInfo {
+        let mut format_info = AudioFormatInfo {
             codec,
             container: "WavPack (.wv)".to_string(),
             sample_rate: facts.sample_rate,
@@ -179,6 +179,16 @@ impl WavpackDecoder {
             is_lossless: true,
             is_dsd: false,
         };
+
+        if let Ok(Some(ape)) = crate::decode::apev2::read_from_file(path) {
+            format_info.replaygain_track_db = ape
+                .replaygain_track_gain()
+                .or_else(|| ape.r128_track_gain());
+            format_info.replaygain_album_db = ape
+                .replaygain_album_gain()
+                .or_else(|| ape.r128_album_gain());
+            format_info.true_peak_dbtp = ape.replaygain_track_peak();
+        }
 
         let mut decoder = Self {
             file: reader,
@@ -354,6 +364,96 @@ impl WavpackDecoder {
     pub fn format_info(&self) -> &AudioFormatInfo {
         &self.format_info
     }
+}
+
+/// Extract editorial tags and duration from a WavPack (`.wv`) file.
+pub fn extract_track_metadata(path: &Path) -> crate::decode::ExtractedTags {
+    let mut tags = crate::decode::ExtractedTags::unknown_for(path);
+
+    // Read duration from block scan
+    if let Ok(file) = File::open(path) {
+        let mut reader =
+            BufReader::with_capacity(crate::decode::DECODER_FILE_BUFFER_CAPACITY, file);
+        if let Ok((blocks, Some(facts))) = scan_blocks(&mut reader) {
+            let total_samples = facts.total_samples.unwrap_or_else(|| {
+                blocks
+                    .last()
+                    .map(|b| b.first_frame + b.frames as u64)
+                    .unwrap_or(0)
+            });
+            if facts.sample_rate > 0 {
+                tags.duration_secs = total_samples as f64 / facts.sample_rate as f64;
+            }
+        }
+    }
+
+    // Read APEv2 tags if present
+    if let Ok(Some(ape)) = crate::decode::apev2::read_from_file(path) {
+        if let Some(title) = ape.title() {
+            tags.title = title.to_string();
+        }
+        if let Some(artist) = ape.artist() {
+            tags.artist = artist.to_string();
+        }
+        if let Some(album) = ape.album() {
+            tags.album = album.to_string();
+        }
+        if let Some(album_artist) = ape.album_artist() {
+            tags.album_artist = album_artist.to_string();
+        }
+        if let Some(genre) = ape.genre() {
+            tags.genre = genre.to_string();
+        }
+        if let Some(date) = ape.date() {
+            tags.date = date.to_string();
+        }
+        if let Some(track) = ape.track_number() {
+            tags.track_number = track;
+        }
+        if let Some(total) = ape.track_total() {
+            tags.track_total = total;
+        }
+        if let Some(disc) = ape.disc_number() {
+            tags.disc_number = disc;
+        }
+    }
+
+    tags
+}
+
+/// Extract ReplayGain / EBU R128 loudness metadata from a WavPack (`.wv`) file.
+pub fn extract_loudness_metadata(path: &Path) -> crate::dsp::LoudnessMetadata {
+    let mut meta = crate::dsp::LoudnessMetadata::default();
+    if let Ok(Some(ape)) = crate::decode::apev2::read_from_file(path) {
+        meta.replaygain_track_db = ape
+            .replaygain_track_gain()
+            .or_else(|| ape.r128_track_gain());
+        meta.replaygain_track_peak = ape.replaygain_track_peak();
+        meta.replaygain_album_db = ape
+            .replaygain_album_gain()
+            .or_else(|| ape.r128_album_gain());
+        meta.replaygain_album_peak = ape.replaygain_album_peak();
+    }
+    meta
+}
+
+/// Read all metadata and stream properties for a WavPack (`.wv`) file.
+pub fn probe_metadata(path: &Path) -> crate::decode::ProbedMetadata {
+    let tags = extract_track_metadata(path);
+    let loudness = extract_loudness_metadata(path);
+    let mut probed = crate::decode::ProbedMetadata::from_tags_and_loudness(tags, loudness);
+
+    if let Ok(file) = File::open(path) {
+        let mut reader =
+            BufReader::with_capacity(crate::decode::DECODER_FILE_BUFFER_CAPACITY, file);
+        if let Ok((_blocks, Some(facts))) = scan_blocks(&mut reader) {
+            probed.sample_rate = Some(facts.sample_rate);
+            probed.channels = Some(facts.channels as usize);
+            probed.bits_per_sample = Some(facts.bits_per_sample);
+        }
+    }
+
+    probed
 }
 
 /// Scan the file's block headers into an index, gathering stream facts from
@@ -942,6 +1042,79 @@ mod tests {
         }
         assert_eq!(total, frames, "no frames dropped across blocks");
         assert!(dec.blocks.len() > 1, "500k frames must span blocks");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn wavpack_apev2_metadata_and_replaygain_extraction() {
+        let channels = 2u32;
+        let frames = 4096usize;
+        let src = signal(frames, channels as usize, 16, 7);
+        let mut bytes = encode_fixture(&src, channels, 44_100, 16);
+
+        // Build APEv2 tag
+        let items: &[(&str, &str)] = &[
+            ("Title", "Time"),
+            ("Artist", "Pink Floyd"),
+            ("Album", "The Dark Side of the Moon"),
+            ("Year", "1973"),
+            ("Track", "4/10"),
+            ("REPLAYGAIN_TRACK_GAIN", "-6.50 dB"),
+            ("REPLAYGAIN_TRACK_PEAK", "0.988257"),
+            ("REPLAYGAIN_ALBUM_GAIN", "-5.20 dB"),
+        ];
+        let mut payload = Vec::new();
+        for (k, v) in items {
+            payload.extend_from_slice(&(v.len() as u32).to_le_bytes());
+            payload.extend_from_slice(&0u32.to_le_bytes()); // flags: utf8
+            payload.extend_from_slice(k.as_bytes());
+            payload.push(0x00);
+            payload.extend_from_slice(v.as_bytes());
+        }
+        let tag_size = (payload.len() + 32) as u32;
+        let item_count = items.len() as u32;
+        let mut footer = Vec::new();
+        footer.extend_from_slice(b"APETAGEX");
+        footer.extend_from_slice(&2000u32.to_le_bytes());
+        footer.extend_from_slice(&tag_size.to_le_bytes());
+        footer.extend_from_slice(&item_count.to_le_bytes());
+        footer.extend_from_slice(&0u32.to_le_bytes());
+        footer.extend_from_slice(&[0u8; 8]);
+
+        bytes.extend_from_slice(&payload);
+        bytes.extend_from_slice(&footer);
+
+        let path = write_fixture(&bytes, "wv");
+
+        // Test extract_track_metadata
+        let tags = extract_track_metadata(&path);
+        assert_eq!(tags.title, "Time");
+        assert_eq!(tags.artist, "Pink Floyd");
+        assert_eq!(tags.album, "The Dark Side of the Moon");
+        assert_eq!(tags.date, "1973");
+        assert_eq!(tags.track_number, 4);
+        assert_eq!(tags.track_total, 10);
+        assert!((tags.duration_secs - (4096.0 / 44100.0)).abs() < 1e-4);
+
+        // Test extract_loudness_metadata
+        let loudness = extract_loudness_metadata(&path);
+        assert_eq!(loudness.replaygain_track_db, Some(-6.50));
+        assert_eq!(loudness.replaygain_track_peak, Some(0.988257));
+        assert_eq!(loudness.replaygain_album_db, Some(-5.20));
+
+        // Test probe_metadata
+        let probed = probe_metadata(&path);
+        assert_eq!(probed.tags.title, "Time");
+        assert_eq!(probed.sample_rate, Some(44_100));
+        assert_eq!(probed.channels, Some(2));
+        assert_eq!(probed.bits_per_sample, Some(16));
+
+        // Test format_info in WavpackDecoder
+        let dec = WavpackDecoder::open(&path).expect("open tagged wavpack");
+        assert_eq!(dec.format_info().replaygain_track_db, Some(-6.50));
+        assert_eq!(dec.format_info().replaygain_album_db, Some(-5.20));
+        assert_eq!(dec.format_info().true_peak_dbtp, Some(0.988257));
+
         let _ = std::fs::remove_file(&path);
     }
 }

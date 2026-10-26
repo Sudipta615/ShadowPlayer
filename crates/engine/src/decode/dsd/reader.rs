@@ -30,6 +30,8 @@ pub struct DsdReader {
     audio_frames: u64,
     /// Frames per channel consumed so far.
     frames_consumed: u64,
+    /// Absolute file offset of ID3v2 metadata chunk if present (DSF only).
+    metadata_offset: u64,
     decimator: DsdToPcmDecimator,
 }
 
@@ -73,6 +75,7 @@ impl DsdReader {
 
         // Read metadata ptr (ID3v2 tag offset; may be 0)
         reader.read_exact(&mut buf8)?;
+        let metadata_offset = u64::from_le_bytes(buf8);
 
         // Now expect 'fmt ' chunk
         let mut fmt_magic = [0u8; 4];
@@ -186,6 +189,7 @@ impl DsdReader {
             data_start_offset,
             audio_frames: audio_bytes / channel_count as u64,
             frames_consumed: 0,
+            metadata_offset,
             decimator: DsdToPcmDecimator::new(channel_count),
         })
     }
@@ -273,6 +277,7 @@ impl DsdReader {
             data_start_offset,
             audio_frames: audio_size / channels as u64,
             frames_consumed: 0,
+            metadata_offset: 0,
             decimator: DsdToPcmDecimator::new(channels),
         })
     }
@@ -359,6 +364,11 @@ impl DsdReader {
 
     pub fn channels(&self) -> usize {
         self.channels
+    }
+
+    /// Offset of ID3v2 metadata if present (DSF files only; 0 otherwise).
+    pub fn metadata_offset(&self) -> u64 {
+        self.metadata_offset
     }
 
     /// True when payload bytes are LSB-first (bit 0 = earliest sample).

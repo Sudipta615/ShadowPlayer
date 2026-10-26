@@ -347,8 +347,8 @@ impl Decoder {
             // draining the decoder, not here, so that a gapless handoff reads
             // the same way it does for any other source.
             crate::source::AudioSource::CueSegment(seg) => {
-                let sample_rate = Self::open(&seg.path)?.info().sample_rate;
                 let mut decoder = Self::open(&seg.path)?;
+                let sample_rate = decoder.info().sample_rate;
                 if seg.start_frame > 0 {
                     let secs = seg.start_frame as f64 / f64::from(sample_rate.max(1));
                     decoder.seek(secs as f32)?;

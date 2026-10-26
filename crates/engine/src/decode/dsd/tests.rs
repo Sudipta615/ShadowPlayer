@@ -713,10 +713,18 @@ fn test_dsd_rate_table_covers_supported_rates() {
         (11_289_600, DsdRate::Dsd256),
         (22_579_200, DsdRate::Dsd512),
         (45_158_400, DsdRate::Dsd1024),
+        (3_072_000, DsdRate::Dsd64_48k),
+        (6_144_000, DsdRate::Dsd128_48k),
+        (12_288_000, DsdRate::Dsd256_48k),
+        (24_576_000, DsdRate::Dsd512_48k),
+        (49_152_000, DsdRate::Dsd1024_48k),
     ] {
         assert_eq!(DsdRate::from_hz(hz), Some(expected));
         assert_eq!(expected.sample_rate_hz(), hz);
     }
+    assert_eq!(DsdRate::Dsd64.base_frequency_hz(), 44_100);
+    assert_eq!(DsdRate::Dsd64_48k.base_frequency_hz(), 48_000);
+    assert_eq!(DsdRate::Dsd128_48k.multiplier(), 128);
     assert_eq!(DsdRate::from_hz(48_000), None);
 }
 

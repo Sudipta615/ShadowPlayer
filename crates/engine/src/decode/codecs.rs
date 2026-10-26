@@ -42,7 +42,7 @@
 //! | PCM   | Available | Raw PCM via Symphonia |
 //! | AIFF  | Available | AIFF PCM via Symphonia format reader |
 //! | Opus  | Available (`codec-opus`) | Ogg demux + pure-Rust RFC 8251 decoder (`opus-decoder`, no FFI): 48 kHz decode, OpusHead pre-skip gapless, granule seeking, multichannel mapping families 0/1, OpusTags metadata + ReplayGain/R128 |
-//! | WavPack | Available (`codec-wavpack`) | Pure-Rust `wavicle` v5 codec (MIT/Apache-2.0, no FFI): lossless 16/24/32-bit int + f32, mono/stereo, bit-exact vs the reference. Multichannel / DSD / hybrid `.wv` are rejected explicitly; tag metadata is not yet wired (`metadata = false`) |
+//! | WavPack | Available (`codec-wavpack`) | Pure-Rust `wavicle` v5 codec (MIT/Apache-2.0, no FFI): lossless 16/24/32-bit int + f32, mono/stereo, bit-exact vs the reference. Multichannel / DSD / hybrid `.wv` are rejected explicitly; APEv2 tag metadata and ReplayGain are parsed (`metadata = true`, `replaygain = true`) |
 //! | Musepack | DeclaredUnavailable | No Musepack decoder is wired in this build (the planned path is FFI to libmpcdec); `.mpc` files are rejected with an explicit error |
 //! | TAK    | DeclaredUnavailable | **Blocked:** TAK has no open-source decoder (FFmpeg's support is experimental); `.tak` files are rejected with an explicit error |
 //! | TTA    | Available (`codec-tta`) | Native pure-Rust TTA1 decoder (`src/decode/tta.rs`): 8/16/24-bit, mono–16 channels, frame-indexed seeking, CRC-verified frames |
@@ -443,8 +443,7 @@ pub fn capability(codec: Codec) -> CodecCapability {
             // float, mono and stereo, bit-exact and verified against the
             // reference `wvunpack`. Multichannel / DSD / hybrid WavPack is
             // rejected explicitly at open (`src/decode/wavpack.rs`), and APEv2
-            // tag metadata is not yet parsed (`metadata`/`replaygain` stay
-            // false — honest, never claimed).
+            // tag metadata and ReplayGain are parsed via `decode::apev2`.
             #[cfg(feature = "codec-wavpack")]
             CodecStatus::Available,
             #[cfg(not(feature = "codec-wavpack"))]
@@ -466,13 +465,22 @@ pub fn capability(codec: Codec) -> CodecCapability {
             false,
             // multichannel: stereo/mono only (honest partial support)
             false,
-            // metadata: APEv2/ID3 tag parsing not wired yet
+            // metadata: APEv2 tag parsing wired via `decode::apev2`
+            #[cfg(feature = "codec-wavpack")]
+            true,
+            #[cfg(not(feature = "codec-wavpack"))]
             false,
-            // replaygain: not parsed yet
+            // replaygain: APEv2 tags carry ReplayGain
+            #[cfg(feature = "codec-wavpack")]
+            true,
+            #[cfg(not(feature = "codec-wavpack"))]
             false,
             // chapters
             false,
-            // ebu_r128
+            // ebu_r128: APEv2 tags can carry R128_TRACK_GAIN
+            #[cfg(feature = "codec-wavpack")]
+            true,
+            #[cfg(not(feature = "codec-wavpack"))]
             false,
             // streaming: block index requires random access at open
             false,
@@ -965,6 +973,16 @@ mod tests {
             assert_eq!(tta.support_level, CodecSupportLevel::FullySupported);
             assert!(tta.decode && tta.seek && tta.multichannel_decode && tta.streaming);
             assert!(tta.is_lossless);
+        }
+
+        // WavPack is available with decode, seek, gapless, and APEv2 metadata/replaygain.
+        #[cfg(feature = "codec-wavpack")]
+        {
+            let wv = capability(Codec::WavPack);
+            assert_eq!(wv.status, CodecStatus::Available);
+            assert_eq!(wv.support_level, CodecSupportLevel::FullySupported);
+            assert!(wv.decode && wv.seek && wv.gapless && wv.metadata && wv.replaygain);
+            assert!(wv.is_lossless);
         }
 
         assert_eq!(for_codec_string("opus"), Some(Codec::Opus));

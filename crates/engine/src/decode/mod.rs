@@ -61,11 +61,13 @@ pub const DECODER_FILE_BUFFER_CAPACITY: usize = 128 * 1024;
 
 // ── Format-routing metadata extractors ───────────────────────────────────────
 //
+pub mod apev2;
 pub mod channel_layout;
 pub mod channel_mix;
 pub mod format_descriptors;
 
 // Re-export types now living in sub-modules
+pub use apev2::Apev2Tag;
 pub use channel_layout::{ChannelId, ChannelLayout};
 pub use channel_mix::{
     downmix_interleaved_to_stereo, mix_interleaved_to_stereo_with_template,
@@ -79,7 +81,8 @@ pub use symphonia_decoder::ExtractedTags;
 
 // The standalone metadata extractors below dispatch by file extension so a
 // single entry point serves every codec: Ogg Opus tags can only be read by
-// the Opus backend (`opus-decoder`/`ogg`), everything else by Symphonia's
+// the Opus backend (`opus-decoder`/`ogg`), WavPack tags by the WavPack backend
+// (APEv2), DSD format info by the DSD reader, and everything else by Symphonia's
 // probe. Callers should use these instead of reaching into the per-backend
 // modules.
 
@@ -100,22 +103,57 @@ fn is_opus_path(path: &Path) -> bool {
     }
 }
 
+/// True when the path is a WavPack file and the `codec-wavpack` feature is enabled.
+#[allow(dead_code)]
+fn is_wavpack_path(path: &Path) -> bool {
+    #[cfg(feature = "codec-wavpack")]
+    {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("wv"))
+    }
+    #[cfg(not(feature = "codec-wavpack"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// True when the path is a DSD container (DSF or DFF).
+#[allow(dead_code)]
+fn is_dsd_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("dsf") || e.eq_ignore_ascii_case("dff"))
+}
+
 /// Extract editorial tags and duration from a file. Routes `.opus` to the
-/// Opus backend, everything else to Symphonia.
+/// Opus backend, `.wv` to WavPack, `.dsf`/`.dff` to DSD, everything else to Symphonia.
 pub fn extract_track_metadata(path: &Path) -> symphonia_decoder::ExtractedTags {
     #[cfg(feature = "codec-opus")]
     if is_opus_path(path) {
         return opus::extract_track_metadata(path);
     }
+    #[cfg(feature = "codec-wavpack")]
+    if is_wavpack_path(path) {
+        return wavpack::extract_track_metadata(path);
+    }
+    if is_dsd_path(path) {
+        return dsd::extract_track_metadata(path);
+    }
     symphonia_decoder::extract_track_metadata(path)
 }
 
 /// Extract ReplayGain / EBU R128 loudness metadata from file tags. Routes
-/// `.opus` to the Opus backend (OpusTags), everything else to Symphonia.
+/// `.opus` to the Opus backend, `.wv` to WavPack, everything else to Symphonia.
 pub fn extract_loudness_metadata(path: &Path) -> crate::dsp::LoudnessMetadata {
     #[cfg(feature = "codec-opus")]
     if is_opus_path(path) {
         return opus::extract_loudness_metadata(path);
+    }
+    #[cfg(feature = "codec-wavpack")]
+    if is_wavpack_path(path) {
+        return wavpack::extract_loudness_metadata(path);
     }
     symphonia_decoder::extract_loudness_metadata_symphonia(path)
 }
@@ -123,10 +161,9 @@ pub fn extract_loudness_metadata(path: &Path) -> crate::dsp::LoudnessMetadata {
 /// Read everything a single probe can tell us about a file: editorial tags,
 /// loudness tags, the stream format and embedded artwork.
 ///
-/// One open, one probe, never a decode. Routes `.opus` to the Opus reader
-/// (OpusTags cannot be read by Symphonia's probe) and everything else to the
-/// Symphonia probe. The desktop scanner is the main caller; it used to open
-/// each file three times.
+/// One open, one probe, never a decode. Routes `.opus` to the Opus reader,
+/// `.wv` to WavPack, `.dsf`/`.dff` to DSD, and everything else to the Symphonia
+/// probe. The desktop scanner is the main caller; it used to open each file three times.
 pub fn probe_metadata(path: &Path) -> ProbedMetadata {
     #[cfg(feature = "codec-opus")]
     if is_opus_path(path) {
@@ -134,6 +171,13 @@ pub fn probe_metadata(path: &Path) -> ProbedMetadata {
             opus::extract_track_metadata(path),
             opus::extract_loudness_metadata(path),
         );
+    }
+    #[cfg(feature = "codec-wavpack")]
+    if is_wavpack_path(path) {
+        return wavpack::probe_metadata(path);
+    }
+    if is_dsd_path(path) {
+        return dsd::probe_metadata(path);
     }
     symphonia_decoder::probe_metadata(path)
 }

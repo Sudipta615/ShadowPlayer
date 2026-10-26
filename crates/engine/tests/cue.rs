@@ -387,3 +387,32 @@ fn a_sheet_with_crlf_line_endings_parses_the_same_way() {
     assert_eq!(sheet.track_count(), 3);
     assert_eq!(sheet.title.as_deref(), Some("The Album"));
 }
+
+#[test]
+fn replaygain_tags_in_cue_sheets_are_parsed() {
+    let text = r#"
+REM GENRE Ambient
+REM DATE 2001
+REM REPLAYGAIN_ALBUM_GAIN -3.40 dB
+REM REPLAYGAIN_ALBUM_PEAK 0.950000
+REM COMPOSER "Brian Eno"
+PERFORMER "Brian Eno"
+TITLE "Music for Airports"
+FILE "airports.flac" WAVE
+  TRACK 01 AUDIO
+    TITLE "1/1"
+    REM COMPOSER "Brian Eno"
+    REM REPLAYGAIN_TRACK_GAIN -2.10 dB
+    REM REPLAYGAIN_TRACK_PEAK 0.880000
+    INDEX 01 00:00:00
+"#;
+    let sheet = CueSheet::parse(text).expect("valid CUE sheet");
+    assert_eq!(sheet.replaygain_album_gain, Some(-3.40));
+    assert_eq!(sheet.replaygain_album_peak, Some(0.950000));
+    assert_eq!(sheet.composer.as_deref(), Some("Brian Eno"));
+
+    let track = sheet.get_track(1).expect("track 1");
+    assert_eq!(track.replaygain_track_gain, Some(-2.10));
+    assert_eq!(track.replaygain_track_peak, Some(0.880000));
+    assert_eq!(track.composer.as_deref(), Some("Brian Eno"));
+}

@@ -47,7 +47,7 @@ pub enum DsdError {
     Io(#[from] std::io::Error),
 }
 
-/// DSD standard sampling rates (multiples of 44.1 kHz × 64).
+/// DSD standard sampling rates (multiples of 44.1 kHz × 64 or 48 kHz × 64).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DsdRate {
     /// DSD64: 2.8224 MHz (64 × 44.1 kHz)
@@ -60,6 +60,16 @@ pub enum DsdRate {
     Dsd512,
     /// DSD1024: 45.1584 MHz (1024 × 44.1 kHz)
     Dsd1024,
+    /// DSD64 (48k): 3.072 MHz (64 × 48 kHz)
+    Dsd64_48k,
+    /// DSD128 (48k): 6.144 MHz (128 × 48 kHz)
+    Dsd128_48k,
+    /// DSD256 (48k): 12.288 MHz (256 × 48 kHz)
+    Dsd256_48k,
+    /// DSD512 (48k): 24.576 MHz (512 × 48 kHz)
+    Dsd512_48k,
+    /// DSD1024 (48k): 49.152 MHz (1024 × 48 kHz)
+    Dsd1024_48k,
 }
 
 impl DsdRate {
@@ -70,6 +80,34 @@ impl DsdRate {
             Self::Dsd256 => 11_289_600,
             Self::Dsd512 => 22_579_200,
             Self::Dsd1024 => 45_158_400,
+            Self::Dsd64_48k => 3_072_000,
+            Self::Dsd128_48k => 6_144_000,
+            Self::Dsd256_48k => 12_288_000,
+            Self::Dsd512_48k => 24_576_000,
+            Self::Dsd1024_48k => 49_152_000,
+        }
+    }
+
+    /// Base PCM rate family: 44,100 Hz or 48,000 Hz.
+    pub fn base_frequency_hz(&self) -> u32 {
+        match self {
+            Self::Dsd64 | Self::Dsd128 | Self::Dsd256 | Self::Dsd512 | Self::Dsd1024 => 44_100,
+            Self::Dsd64_48k
+            | Self::Dsd128_48k
+            | Self::Dsd256_48k
+            | Self::Dsd512_48k
+            | Self::Dsd1024_48k => 48_000,
+        }
+    }
+
+    /// Oversampling multiplier over the base PCM rate (64..1024).
+    pub fn multiplier(&self) -> u32 {
+        match self {
+            Self::Dsd64 | Self::Dsd64_48k => 64,
+            Self::Dsd128 | Self::Dsd128_48k => 128,
+            Self::Dsd256 | Self::Dsd256_48k => 256,
+            Self::Dsd512 | Self::Dsd512_48k => 512,
+            Self::Dsd1024 | Self::Dsd1024_48k => 1024,
         }
     }
 
@@ -80,6 +118,11 @@ impl DsdRate {
             11_289_600 => Some(Self::Dsd256),
             22_579_200 => Some(Self::Dsd512),
             45_158_400 => Some(Self::Dsd1024),
+            3_072_000 => Some(Self::Dsd64_48k),
+            6_144_000 => Some(Self::Dsd128_48k),
+            12_288_000 => Some(Self::Dsd256_48k),
+            24_576_000 => Some(Self::Dsd512_48k),
+            49_152_000 => Some(Self::Dsd1024_48k),
             _ => None,
         }
     }
@@ -132,4 +175,32 @@ impl DsdPcmBlock {
             .map(|c| c.as_slice())
             .unwrap_or(&self.channels[0])
     }
+}
+
+/// Extract editorial tags and duration from a DSD (`.dsf` or `.dff`) file.
+pub fn extract_track_metadata(path: &std::path::Path) -> crate::decode::ExtractedTags {
+    let mut tags = crate::decode::ExtractedTags::unknown_for(path);
+    if let Ok(reader) = DsdReader::open(path) {
+        let fmt = reader.format_info();
+        if let Some(dur) = fmt.duration_secs {
+            tags.duration_secs = dur;
+        }
+    }
+    tags
+}
+
+/// Read all metadata and stream properties for a DSD (`.dsf` or `.dff`) file.
+pub fn probe_metadata(path: &std::path::Path) -> crate::decode::ProbedMetadata {
+    let tags = extract_track_metadata(path);
+    let loudness = crate::dsp::LoudnessMetadata::default();
+    let mut probed = crate::decode::ProbedMetadata::from_tags_and_loudness(tags, loudness);
+
+    if let Ok(reader) = DsdReader::open(path) {
+        let fmt = reader.format_info();
+        probed.sample_rate = Some(fmt.sample_rate);
+        probed.channels = Some(fmt.channels);
+        probed.bits_per_sample = fmt.bit_depth;
+    }
+
+    probed
 }

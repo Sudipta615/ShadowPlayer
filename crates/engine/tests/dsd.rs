@@ -218,6 +218,11 @@ fn the_dsd_rates_round_trip_through_their_bit_rate() {
         DsdRate::Dsd256,
         DsdRate::Dsd512,
         DsdRate::Dsd1024,
+        DsdRate::Dsd64_48k,
+        DsdRate::Dsd128_48k,
+        DsdRate::Dsd256_48k,
+        DsdRate::Dsd512_48k,
+        DsdRate::Dsd1024_48k,
     ] {
         let hz = rate.sample_rate_hz();
         assert_eq!(
@@ -228,6 +233,8 @@ fn the_dsd_rates_round_trip_through_their_bit_rate() {
     }
     assert_eq!(DsdRate::Dsd64.sample_rate_hz(), 2_822_400);
     assert_eq!(DsdRate::Dsd1024.sample_rate_hz(), 45_158_400);
+    assert_eq!(DsdRate::Dsd64_48k.sample_rate_hz(), 3_072_000);
+    assert_eq!(DsdRate::Dsd1024_48k.sample_rate_hz(), 49_152_000);
     assert_eq!(
         DsdRate::from_hz(1_000_000),
         None,

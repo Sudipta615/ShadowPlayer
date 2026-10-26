@@ -103,6 +103,12 @@ pub struct CueTrack {
     pub postgap_secs: Option<f64>,
     /// List of indices (sorted by index number).
     pub indexes: Vec<CueIndex>,
+    /// ReplayGain track gain in dB (e.g. from `REM REPLAYGAIN_TRACK_GAIN -6.50 dB`).
+    pub replaygain_track_gain: Option<f32>,
+    /// ReplayGain track peak ratio (e.g. from `REM REPLAYGAIN_TRACK_PEAK 0.988257`).
+    pub replaygain_track_peak: Option<f32>,
+    pub composer: Option<String>,
+    pub comment: Option<String>,
 }
 
 impl CueTrack {
@@ -152,6 +158,11 @@ pub struct CueSheet {
     pub files: Vec<String>,
     /// Ordered list of tracks.
     pub tracks: Vec<CueTrack>,
+    /// ReplayGain album gain in dB (e.g. from `REM REPLAYGAIN_ALBUM_GAIN -5.20 dB`).
+    pub replaygain_album_gain: Option<f32>,
+    /// ReplayGain album peak ratio (e.g. from `REM REPLAYGAIN_ALBUM_PEAK 0.999908`).
+    pub replaygain_album_peak: Option<f32>,
+    pub composer: Option<String>,
 }
 
 impl CueSheet {
@@ -183,7 +194,36 @@ impl CueSheet {
                             "GENRE" => sheet.genre = Some(val),
                             "DATE" | "YEAR" => sheet.date = Some(val),
                             "DISCID" => sheet.disc_id = Some(val),
-                            "COMMENT" => sheet.comment = Some(val),
+                            "COMPOSER" => {
+                                if let Some(track) = current_track.as_mut() {
+                                    track.composer = Some(val);
+                                } else {
+                                    sheet.composer = Some(val);
+                                }
+                            }
+                            "COMMENT" => {
+                                if let Some(track) = current_track.as_mut() {
+                                    track.comment = Some(val);
+                                } else {
+                                    sheet.comment = Some(val);
+                                }
+                            }
+                            "REPLAYGAIN_TRACK_GAIN" => {
+                                if let Some(track) = current_track.as_mut() {
+                                    track.replaygain_track_gain = parse_replaygain_value(&val);
+                                }
+                            }
+                            "REPLAYGAIN_TRACK_PEAK" => {
+                                if let Some(track) = current_track.as_mut() {
+                                    track.replaygain_track_peak = parse_replaygain_value(&val);
+                                }
+                            }
+                            "REPLAYGAIN_ALBUM_GAIN" => {
+                                sheet.replaygain_album_gain = parse_replaygain_value(&val);
+                            }
+                            "REPLAYGAIN_ALBUM_PEAK" => {
+                                sheet.replaygain_album_peak = parse_replaygain_value(&val);
+                            }
                             _ => {}
                         }
                     }
@@ -360,6 +400,18 @@ impl CueSheet {
     }
 }
 
+/// Parse a ReplayGain number string (e.g. "-6.50 dB" or "0.988257") into f32.
+fn parse_replaygain_value(val: &str) -> Option<f32> {
+    let clean = val.trim();
+    let clean = clean
+        .strip_suffix("dB")
+        .or_else(|| clean.strip_suffix("db"))
+        .or_else(|| clean.strip_suffix("DB"))
+        .unwrap_or(clean)
+        .trim();
+    clean.parse::<f32>().ok()
+}
+
 /// Tokenize a line from a CUE sheet respecting double quotes.
 fn tokenize_cue_line(line: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -451,5 +503,32 @@ FILE "DarkSide.flac" WAVE
         assert_eq!(durations[1].1, 68.0);
         let t3_start = 3.0 * 60.0 + 57.0 + (25.0 / 75.0);
         assert_eq!(durations[1].2, Some(t3_start - 68.0));
+    }
+
+    #[test]
+    fn test_cue_sheet_with_replaygain() {
+        let cue_text = r#"
+REM REPLAYGAIN_ALBUM_GAIN -5.20 dB
+REM REPLAYGAIN_ALBUM_PEAK 0.999908
+REM COMPOSER "Roger Waters"
+PERFORMER "Pink Floyd"
+TITLE "The Wall"
+FILE "TheWall.flac" WAVE
+  TRACK 01 AUDIO
+    TITLE "In the Flesh?"
+    REM COMPOSER "Roger Waters"
+    REM REPLAYGAIN_TRACK_GAIN -6.50 dB
+    REM REPLAYGAIN_TRACK_PEAK 0.988257
+    INDEX 01 00:00:00
+"#;
+        let cue = CueSheet::parse(cue_text).expect("parse cue with replaygain");
+        assert_eq!(cue.replaygain_album_gain, Some(-5.20));
+        assert_eq!(cue.replaygain_album_peak, Some(0.999908));
+        assert_eq!(cue.composer.as_deref(), Some("Roger Waters"));
+
+        let t1 = cue.get_track(1).unwrap();
+        assert_eq!(t1.replaygain_track_gain, Some(-6.50));
+        assert_eq!(t1.replaygain_track_peak, Some(0.988257));
+        assert_eq!(t1.composer.as_deref(), Some("Roger Waters"));
     }
 }

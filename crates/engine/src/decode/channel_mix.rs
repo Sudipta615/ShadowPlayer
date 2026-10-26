@@ -207,25 +207,152 @@ fn build_mix_matrix(
                     gain,
                 );
             }
-            if matches!(
-                template,
-                config::ChannelMixTemplate::SevenPointOneFourToStereo
-            ) {
-                for (id, destination) in [
-                    (ChannelId::TopFrontLeft, ChannelId::FrontLeft),
-                    (ChannelId::TopRearLeft, ChannelId::FrontLeft),
-                    (ChannelId::TopFrontRight, ChannelId::FrontRight),
-                    (ChannelId::TopRearRight, ChannelId::FrontRight),
-                ] {
-                    set_mix_gain(
-                        &mut matrix,
-                        source_layout.position_of(id),
-                        target_layout.position_of(destination),
-                        0.353_553_4,
-                    );
-                }
+            // Fold height and wide channels into FrontLeft and FrontRight
+            // per ITU-R BS.2051-3 when present in the source:
+            for (id, destination, gain) in [
+                (ChannelId::TopFrontLeft, ChannelId::FrontLeft, 0.353_553_4),
+                (ChannelId::TopRearLeft, ChannelId::FrontLeft, 0.353_553_4),
+                (ChannelId::TopSideLeft, ChannelId::FrontLeft, 0.353_553_4),
+                (ChannelId::TopFrontRight, ChannelId::FrontRight, 0.353_553_4),
+                (ChannelId::TopRearRight, ChannelId::FrontRight, 0.353_553_4),
+                (ChannelId::TopSideRight, ChannelId::FrontRight, 0.353_553_4),
+                (
+                    ChannelId::WideLeft,
+                    ChannelId::FrontLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::WideRight,
+                    ChannelId::FrontRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+            ] {
+                set_mix_gain(
+                    &mut matrix,
+                    source_layout.position_of(id),
+                    target_layout.position_of(destination),
+                    gain,
+                );
             }
             // LFE is never silently mixed into mains.
+        }
+        config::ChannelMixTemplate::ItuBs775 if target_count == 8 => {
+            // Target is 7.1: match roles that exist in both, and fold
+            // height and wide channels down into the horizontal bed.
+            role_identity(source_layout, target_layout, &mut matrix);
+            for (id, destination, gain) in [
+                (
+                    ChannelId::TopFrontLeft,
+                    ChannelId::FrontLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopFrontRight,
+                    ChannelId::FrontRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopRearLeft,
+                    ChannelId::RearLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopRearRight,
+                    ChannelId::RearRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopSideLeft,
+                    ChannelId::SideLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopSideRight,
+                    ChannelId::SideRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::WideLeft,
+                    ChannelId::FrontLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::WideRight,
+                    ChannelId::FrontRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+            ] {
+                set_mix_gain(
+                    &mut matrix,
+                    source_layout.position_of(id),
+                    target_layout.position_of(destination),
+                    gain,
+                );
+            }
+        }
+        config::ChannelMixTemplate::ItuBs775 if target_count == 6 => {
+            // Target is 5.1: match roles that exist in both, fold rear
+            // surrounds into side surrounds, and fold heights/wides down.
+            role_identity(source_layout, target_layout, &mut matrix);
+            for (id, destination, gain) in [
+                (
+                    ChannelId::RearLeft,
+                    ChannelId::SideLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::RearRight,
+                    ChannelId::SideRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopFrontLeft,
+                    ChannelId::FrontLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopFrontRight,
+                    ChannelId::FrontRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopRearLeft,
+                    ChannelId::SideLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopRearRight,
+                    ChannelId::SideRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopSideLeft,
+                    ChannelId::SideLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::TopSideRight,
+                    ChannelId::SideRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::WideLeft,
+                    ChannelId::FrontLeft,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+                (
+                    ChannelId::WideRight,
+                    ChannelId::FrontRight,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+            ] {
+                set_mix_gain(
+                    &mut matrix,
+                    source_layout.position_of(id),
+                    target_layout.position_of(destination),
+                    gain,
+                );
+            }
         }
         _ => role_identity(source_layout, target_layout, &mut matrix),
     }
@@ -294,7 +421,7 @@ pub fn mix_interleaved_to_stereo_with_template(
     actual_frames
 }
 
-/// Downmix an interleaved PCM slice to stereo using ITU-R BS.775 semantic channel matrix.
+/// Downmix an interleaved PCM slice to stereo using ITU-R BS.775 / BS.2051 semantic channel matrix.
 pub fn downmix_interleaved_to_stereo(
     samples: &[f32],
     layout: &ChannelLayout,
@@ -336,8 +463,17 @@ pub fn downmix_interleaved_to_stereo(
         let rl_idx = layout.position_of(ChannelId::RearLeft);
         let rr_idx = layout.position_of(ChannelId::RearRight);
         let bc_idx = layout.position_of(ChannelId::BackCenter);
+        let wl_idx = layout.position_of(ChannelId::WideLeft);
+        let wr_idx = layout.position_of(ChannelId::WideRight);
+        let tfl_idx = layout.position_of(ChannelId::TopFrontLeft);
+        let tfr_idx = layout.position_of(ChannelId::TopFrontRight);
+        let trl_idx = layout.position_of(ChannelId::TopRearLeft);
+        let trr_idx = layout.position_of(ChannelId::TopRearRight);
+        let tsl_idx = layout.position_of(ChannelId::TopSideLeft);
+        let tsr_idx = layout.position_of(ChannelId::TopSideRight);
 
         const SQRT_HALF: f32 = std::f32::consts::FRAC_1_SQRT_2;
+        const HEIGHT_GAIN: f32 = 0.353_553_4;
         for frame in 0..actual_frames {
             let base = frame * src_channels;
             let fl = if base + fl_idx < samples.len() {
@@ -351,30 +487,42 @@ pub fn downmix_interleaved_to_stereo(
                 0.0
             };
 
-            let center = c_idx
-                .and_then(|i| (base + i < samples.len()).then(|| samples[base + i]))
-                .unwrap_or(0.0);
-            let sl = sl_idx
-                .and_then(|i| (base + i < samples.len()).then(|| samples[base + i]))
-                .unwrap_or(0.0);
-            let sr = sr_idx
-                .and_then(|i| (base + i < samples.len()).then(|| samples[base + i]))
-                .unwrap_or(0.0);
-            let rl = rl_idx
-                .and_then(|i| (base + i < samples.len()).then(|| samples[base + i]))
-                .unwrap_or(0.0);
-            let rr = rr_idx
-                .and_then(|i| (base + i < samples.len()).then(|| samples[base + i]))
-                .unwrap_or(0.0);
-            // 6.1-style back center folds into both channels (BS.775 rear
-            // scaling). LFE is intentionally excluded from the fold.
-            let bc = bc_idx
-                .and_then(|i| (base + i < samples.len()).then(|| samples[base + i]))
-                .unwrap_or(0.0);
+            let get_s = |idx: Option<usize>| -> f32 {
+                idx.and_then(|i| (base + i < samples.len()).then(|| samples[base + i]))
+                    .unwrap_or(0.0)
+            };
 
-            // Fold in front, center, side surrounds, back center and rear surrounds
-            let l = fl + SQRT_HALF * center + SQRT_HALF * sl + 0.5 * bc + 0.5 * rl;
-            let r = fr + SQRT_HALF * center + SQRT_HALF * sr + 0.5 * bc + 0.5 * rr;
+            let center = get_s(c_idx);
+            let sl = get_s(sl_idx);
+            let sr = get_s(sr_idx);
+            let rl = get_s(rl_idx);
+            let rr = get_s(rr_idx);
+            let bc = get_s(bc_idx);
+            let wl = get_s(wl_idx);
+            let wr = get_s(wr_idx);
+            let tfl = get_s(tfl_idx);
+            let tfr = get_s(tfr_idx);
+            let trl = get_s(trl_idx);
+            let trr = get_s(trr_idx);
+            let tsl = get_s(tsl_idx);
+            let tsr = get_s(tsr_idx);
+
+            // Fold in front, center, side surrounds, back center and rear surrounds (ITU-R BS.775),
+            // plus wide and overhead height channels (ITU-R BS.2051).
+            let l = fl
+                + SQRT_HALF * center
+                + SQRT_HALF * sl
+                + 0.5 * bc
+                + 0.5 * rl
+                + SQRT_HALF * wl
+                + HEIGHT_GAIN * (tfl + trl + tsl);
+            let r = fr
+                + SQRT_HALF * center
+                + SQRT_HALF * sr
+                + 0.5 * bc
+                + 0.5 * rr
+                + SQRT_HALF * wr
+                + HEIGHT_GAIN * (tfr + trr + tsr);
 
             plane_l[frame] = l;
             plane_r[frame] = r;
@@ -383,4 +531,96 @@ pub fn downmix_interleaved_to_stereo(
     }
 
     actual_frames
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decode::ChannelLayout;
+
+    #[test]
+    fn test_downmix_five_point_one() {
+        let layout = ChannelLayout::FivePointOne;
+        // FL, FR, C, LFE, SL, SR
+        let samples = vec![1.0, 0.5, 0.8, 0.9, 0.4, 0.2];
+        let mut l = vec![0.0];
+        let mut r = vec![0.0];
+        let frames = downmix_interleaved_to_stereo(&samples, &layout, 6, &mut l, &mut r, 1);
+        assert_eq!(frames, 1);
+
+        const SQRT_HALF: f32 = std::f32::consts::FRAC_1_SQRT_2;
+        let expected_l = 1.0 + SQRT_HALF * 0.8 + SQRT_HALF * 0.4;
+        let expected_r = 0.5 + SQRT_HALF * 0.8 + SQRT_HALF * 0.2;
+        assert!((l[0] - expected_l).abs() < 1e-5);
+        assert!((r[0] - expected_r).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_downmix_seven_point_one_four_preserves_overheads() {
+        let layout = ChannelLayout::SevenPointOneFour;
+        // Layout: FL, FR, C, LFE, SL, SR, RL, RR, TFL, TFR, TRL, TRR
+        let mut samples = vec![0.0f32; 12];
+        // Only overheads have signal:
+        samples[8] = 1.0; // TFL
+        samples[9] = 1.0; // TFR
+        samples[10] = 0.5; // TRL
+        samples[11] = 0.5; // TRR
+
+        let mut l = vec![0.0];
+        let mut r = vec![0.0];
+        let frames = downmix_interleaved_to_stereo(&samples, &layout, 12, &mut l, &mut r, 1);
+        assert_eq!(frames, 1);
+
+        const HEIGHT_GAIN: f32 = 0.353_553_4;
+        let expected_l = HEIGHT_GAIN * (1.0 + 0.5);
+        let expected_r = HEIGHT_GAIN * (1.0 + 0.5);
+        assert!((l[0] - expected_l).abs() < 1e-5);
+        assert!((r[0] - expected_r).abs() < 1e-5);
+        assert!(l[0] > 0.0, "Overhead energy must not be muted");
+    }
+
+    #[test]
+    fn test_downmix_nine_point_one_six_preserves_wides_and_heights() {
+        let layout = ChannelLayout::NinePointOneSix;
+        // 16 channels: FL FR C LFE SL SR RL RR WL WR TFL TFR TSL TSR TRL TRR
+        let mut samples = vec![0.0f32; 16];
+        samples[8] = 0.8; // WL
+        samples[9] = 0.8; // WR
+        samples[10] = 1.0; // TFL
+        samples[11] = 1.0; // TFR
+        samples[12] = 0.6; // TSL
+        samples[13] = 0.6; // TSR
+
+        let mut l = vec![0.0];
+        let mut r = vec![0.0];
+        let frames = downmix_interleaved_to_stereo(&samples, &layout, 16, &mut l, &mut r, 1);
+        assert_eq!(frames, 1);
+
+        const SQRT_HALF: f32 = std::f32::consts::FRAC_1_SQRT_2;
+        const HEIGHT_GAIN: f32 = 0.353_553_4;
+        let expected_l = SQRT_HALF * 0.8 + HEIGHT_GAIN * (1.0 + 0.6);
+        let expected_r = SQRT_HALF * 0.8 + HEIGHT_GAIN * (1.0 + 0.6);
+        assert!((l[0] - expected_l).abs() < 1e-5);
+        assert!((r[0] - expected_r).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_template_seven_point_one_four_to_seven_point_one() {
+        let src_layout = ChannelLayout::SevenPointOneFour;
+        let dst_layout = ChannelLayout::SevenPointOne;
+        let matrix = build_mix_matrix(
+            &src_layout,
+            &dst_layout,
+            &config::ChannelMixTemplate::ItuBs775,
+        );
+
+        // TFL (src index 8) should route to FL (dst index 0)
+        assert!((matrix[8][0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+        // TFR (src index 9) should route to FR (dst index 1)
+        assert!((matrix[9][1] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+        // TRL (src index 10) should route to RL (dst index 6)
+        assert!((matrix[10][6] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+        // TRR (src index 11) should route to RR (dst index 7)
+        assert!((matrix[11][7] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+    }
 }
