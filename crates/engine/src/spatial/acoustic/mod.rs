@@ -59,7 +59,7 @@ pub use bake::{
     spectral_taps, AcousticBaker, BakePolicy, BakedObject, BakedPath, BakedScene, ACOUSTIC_IR_LEN,
     DEFAULT_BAKE_CELL_M,
 };
-pub use bass_room::{ModalBassRoom, ModeKind, RoomMode, MAX_MODAL_RESONATORS};
+pub use bass_room::{ModalBassRoom, ModeKind, RoomMode, SbirModel, MAX_MODAL_RESONATORS};
 pub use geometry::{
     portal_diffraction_edges, AcousticRoom, DiffractionEdge, Portal, Wall, WallSurface, ALL_WALLS,
 };
@@ -68,5 +68,6 @@ pub use material::{
 };
 pub use path::{AcousticPath, PathFlags, PathKind};
 pub use solver::{
-    diffract_around_edge, wall_index, AcousticWorld, MAX_PATHS, MAX_REFLECTION_ORDER,
+    diffract_around_edge, iso9613_air_absorption_db_per_meter, wall_index, AcousticWorld,
+    MAX_PATHS, MAX_REFLECTION_ORDER,
 };

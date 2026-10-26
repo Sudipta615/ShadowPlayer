@@ -139,6 +139,63 @@ pub enum DecoderPolicy {
     MaxRe,
     /// In-phase decoder — maximally narrow lobe, no side lobes.
     InPhase,
+    /// Mode-matching (regularized pseudoinverse) decoder:
+    /// Inverts the speaker array spherical-harmonic matrix with Tikhonov regularization
+    /// to eliminate energy imbalance and distortion on irregular arrays.
+    ModeMatching,
+}
+
+/// Gauss-Jordan matrix inversion with partial pivoting. Control path only.
+fn invert_matrix_gj(n: usize, a: &[f32], inv: &mut [f32]) -> bool {
+    inv.fill(0.0);
+    for i in 0..n {
+        inv[i * n + i] = 1.0;
+    }
+    let mut mat = a.to_vec();
+
+    for col in 0..n {
+        let mut pivot_row = col;
+        let mut max_val = mat[col * n + col].abs();
+        for r in (col + 1)..n {
+            let v = mat[r * n + col].abs();
+            if v > max_val {
+                max_val = v;
+                pivot_row = r;
+            }
+        }
+
+        if max_val < 1e-12 {
+            return false;
+        }
+
+        if pivot_row != col {
+            for c in 0..n {
+                mat.swap(col * n + c, pivot_row * n + c);
+                inv.swap(col * n + c, pivot_row * n + c);
+            }
+        }
+
+        let pivot = mat[col * n + col];
+        let inv_pivot = 1.0 / pivot;
+        for c in 0..n {
+            mat[col * n + c] *= inv_pivot;
+            inv[col * n + c] *= inv_pivot;
+        }
+
+        for r in 0..n {
+            if r != col {
+                let factor = mat[r * n + col];
+                if factor.abs() > 1e-12 {
+                    for c in 0..n {
+                        mat[r * n + c] -= factor * mat[col * n + c];
+                        inv[r * n + c] -= factor * inv[col * n + c];
+                    }
+                }
+            }
+        }
+    }
+
+    true
 }
 
 /// Per-order decoder weights for `policy` (length `channel_count(order)`).
@@ -147,6 +204,19 @@ pub fn order_weights(policy: DecoderPolicy, order: u8) -> Vec<f32> {
     let mut w = vec![1.0f32; n];
     match policy {
         DecoderPolicy::Basic => {}
+        DecoderPolicy::ModeMatching => {
+            // Mode-matching defaults to basic weights or mild max-rE at higher orders
+            let win = max_re_window(order);
+            for l in 1..=order as usize {
+                if let Some(&a) = win.get(l - 1) {
+                    let start = l * l;
+                    let end = (l + 1) * (l + 1);
+                    if end <= n {
+                        w[start..end].fill(a);
+                    }
+                }
+            }
+        }
         DecoderPolicy::MaxRe => {
             let win = max_re_window(order);
             for l in 1..=order as usize {
@@ -246,19 +316,132 @@ impl AmbisonicDecoder {
         if speakers.is_empty() {
             return Err(RenderError::DegenerateGeometry);
         }
-        let n = speakers.len() as f32;
-        let mut gains = Vec::with_capacity(speakers.len() * ch);
-        for idx in &speakers {
-            let dir = layout.speakers[*idx]
-                .position
-                .normalized()
-                .unwrap_or(Vec3::Y);
-            let mut y = vec![0.0f32; ch];
-            sh_n(self.order, dir, &mut y);
-            for (k, v) in y.iter().enumerate() {
-                gains.push(w[k] * v / n);
+        let m = speakers.len();
+        let mut gains = Vec::with_capacity(m * ch);
+
+        if self.policy == DecoderPolicy::ModeMatching {
+            // Build speaker encoding matrix C (m x ch)
+            let mut c_mat = vec![0.0f32; m * ch];
+            for (i, &idx) in speakers.iter().enumerate() {
+                let dir = layout.speakers[idx]
+                    .position
+                    .normalized()
+                    .unwrap_or(Vec3::Y);
+                let mut y = vec![0.0f32; ch];
+                sh_n(self.order, dir, &mut y);
+                c_mat[i * ch..(i + 1) * ch].copy_from_slice(&y);
+            }
+
+            let mut d_mat = vec![0.0f32; m * ch];
+            let mut solved = false;
+
+            if m >= ch {
+                // G = C^T * C (ch x ch)
+                let mut g = vec![0.0f32; ch * ch];
+                for r in 0..ch {
+                    for c in 0..ch {
+                        let mut sum = 0.0f32;
+                        for i in 0..m {
+                            sum += c_mat[i * ch + r] * c_mat[i * ch + c];
+                        }
+                        g[r * ch + c] = sum;
+                    }
+                }
+                // Tikhonov regularization
+                let tr: f32 = (0..ch).map(|k| g[k * ch + k]).sum();
+                let lambda = (1e-4 * tr / ch as f32).max(1e-6);
+                for k in 0..ch {
+                    g[k * ch + k] += lambda;
+                }
+                let mut inv_g = vec![0.0f32; ch * ch];
+                if invert_matrix_gj(ch, &g, &mut inv_g) {
+                    // D = C * inv_G (m x ch)
+                    for i in 0..m {
+                        for k in 0..ch {
+                            let mut sum = 0.0f32;
+                            for c in 0..ch {
+                                sum += c_mat[i * ch + c] * inv_g[c * ch + k];
+                            }
+                            d_mat[i * ch + k] = sum * w[k];
+                        }
+                    }
+                    solved = true;
+                }
+            } else {
+                // Under-determined: G = C * C^T (m x m)
+                let mut g = vec![0.0f32; m * m];
+                for r in 0..m {
+                    for c in 0..m {
+                        let mut sum = 0.0f32;
+                        for k in 0..ch {
+                            sum += c_mat[r * ch + k] * c_mat[c * ch + k];
+                        }
+                        g[r * m + c] = sum;
+                    }
+                }
+                let tr: f32 = (0..m).map(|k| g[k * m + k]).sum();
+                let lambda = (1e-3 * tr / m as f32).max(1e-6);
+                for k in 0..m {
+                    g[k * m + k] += lambda;
+                }
+                let mut inv_g = vec![0.0f32; m * m];
+                if invert_matrix_gj(m, &g, &mut inv_g) {
+                    // D = inv_G * C (m x ch)
+                    for i in 0..m {
+                        for k in 0..ch {
+                            let mut sum = 0.0f32;
+                            for c in 0..m {
+                                sum += inv_g[i * m + c] * c_mat[c * ch + k];
+                            }
+                            d_mat[i * ch + k] = sum * w[k];
+                        }
+                    }
+                    solved = true;
+                }
+            }
+
+            if solved {
+                // Normalize energy so that order-0 (W) matches unit gain
+                let energy_w: f32 = (0..m).map(|i| d_mat[i * ch].powi(2)).sum();
+                let norm = if energy_w > 1e-12 {
+                    1.0 / energy_w.sqrt()
+                } else {
+                    1.0
+                };
+                for v in &mut d_mat {
+                    *v *= norm;
+                }
+                gains = d_mat;
+            } else {
+                // Fallback to projection sampling
+                let n = m as f32;
+                for idx in &speakers {
+                    let dir = layout.speakers[*idx]
+                        .position
+                        .normalized()
+                        .unwrap_or(Vec3::Y);
+                    let mut y = vec![0.0f32; ch];
+                    sh_n(self.order, dir, &mut y);
+                    for (k, v) in y.iter().enumerate() {
+                        gains.push(w[k] * v / n);
+                    }
+                }
+            }
+        } else {
+            let n = m as f32;
+            for idx in &speakers {
+                let dir = layout.speakers[*idx]
+                    .position
+                    .normalized()
+                    .unwrap_or(Vec3::Y);
+                let mut y = vec![0.0f32; ch];
+                sh_n(self.order, dir, &mut y);
+                for (k, v) in y.iter().enumerate() {
+                    gains.push(w[k] * v / n);
+                }
             }
         }
+
         self.gains = gains;
         self.speakers = speakers;
         self.speaker_count = layout.speakers.len();

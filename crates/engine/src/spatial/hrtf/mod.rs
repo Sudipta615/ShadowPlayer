@@ -78,6 +78,33 @@ pub fn max_itd_sec(head_radius: f32, speed: f32) -> f32 {
     a / c * (std::f32::consts::FRAC_PI_2 + 1.0)
 }
 
+/// Kuhn frequency-dependent spherical head ITD model (seconds).
+///
+/// Models diffraction around the head: at low frequencies (< 500 Hz), the ITD is
+/// approximately 1.5x larger than at high frequencies (> 2 kHz), matching
+/// real human psychoacoustic localization cues.
+pub fn kuhn_itd_sec(frequency_hz: f32, azimuth: f32, head_radius: f32, speed: f32) -> f32 {
+    let woodworth = woodworth_itd_sec(azimuth, head_radius, speed);
+    let mut theta = azimuth.abs().rem_euclid(std::f32::consts::TAU);
+    if theta > std::f32::consts::PI {
+        theta = std::f32::consts::TAU - theta;
+    }
+    let a = head_radius.max(0.05);
+    let c = speed.max(1.0);
+    let itd_lf = (3.0 * a / c) * theta.sin();
+
+    let f = frequency_hz.max(10.0);
+    let factor = 1.0 / (1.0 + (f / 800.0).powi(2));
+    woodworth + (itd_lf - woodworth) * factor
+}
+
+/// Compute equivalent spherical head radius (m) from head width and depth anthropometry.
+pub fn anthropometric_head_radius(head_width_m: f32, head_depth_m: f32) -> f32 {
+    let w = head_width_m.clamp(0.10, 0.25);
+    let d = head_depth_m.clamp(0.12, 0.30);
+    (w + d) * 0.25
+}
+
 /// A Duda-Martens head-shadow shelf (first-order, bilinear-transformed).
 #[derive(Debug, Clone, Copy)]
 pub struct HeadShadow {

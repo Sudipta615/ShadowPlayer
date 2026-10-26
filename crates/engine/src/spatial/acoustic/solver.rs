@@ -379,6 +379,105 @@ impl AcousticWorld {
 
         n.min(N)
     }
+
+    /// Calculate room volume in cubic metres.
+    pub fn room_volume(&self) -> f32 {
+        self.room.width * self.room.depth * self.room.height
+    }
+
+    /// Calculate total room interior surface area in square metres.
+    pub fn room_surface_area(&self) -> f32 {
+        2.0 * (self.room.width * self.room.depth
+            + self.room.width * self.room.height
+            + self.room.depth * self.room.height)
+    }
+
+    /// Calculate total absorption area $A = \sum S_i \alpha_i$ (metric Sabins) for octave band `octave_idx`.
+    pub fn total_absorption_area(&self, octave_idx: usize) -> f32 {
+        let oct = octave_idx.min(crate::spatial::acoustic::material::OCTAVE_BANDS - 1);
+        let s_x = self.room.depth * self.room.height;
+        let s_y = self.room.width * self.room.height;
+        let s_z = self.room.width * self.room.depth;
+
+        let a_min_x = s_x * self.room.walls[wall_index(Wall::MinX)].absorption[oct];
+        let a_max_x = s_x * self.room.walls[wall_index(Wall::MaxX)].absorption[oct];
+        let a_min_y = s_y * self.room.walls[wall_index(Wall::MinY)].absorption[oct];
+        let a_max_y = s_y * self.room.walls[wall_index(Wall::MaxY)].absorption[oct];
+        let a_min_z = s_z * self.room.walls[wall_index(Wall::MinZ)].absorption[oct];
+        let a_max_z = s_z * self.room.walls[wall_index(Wall::MaxZ)].absorption[oct];
+
+        (a_min_x + a_max_x + a_min_y + a_max_y + a_min_z + a_max_z).max(1e-4)
+    }
+
+    /// Compute Sabine reverberation time RT60 (seconds) for octave band `octave_idx`.
+    pub fn sabine_rt60(&self, octave_idx: usize) -> f32 {
+        let v = self.room_volume();
+        let a = self.total_absorption_area(octave_idx);
+        0.1611 * v / a
+    }
+
+    /// Compute Eyring reverberation time RT60 (seconds) for octave band `octave_idx`.
+    pub fn eyring_rt60(&self, octave_idx: usize) -> f32 {
+        let v = self.room_volume();
+        let s = self.room_surface_area();
+        let a = self.total_absorption_area(octave_idx);
+        let alpha_avg = (a / s).clamp(0.001, 0.999);
+        0.1611 * v / (-s * (1.0 - alpha_avg).ln())
+    }
+
+    /// Compute the room's critical distance $r_c = \sqrt{A / (16\pi)}$ (metres).
+    pub fn critical_distance(&self, octave_idx: usize) -> f32 {
+        let a = self.total_absorption_area(octave_idx);
+        (a / (16.0 * std::f32::consts::PI)).sqrt()
+    }
+}
+
+/// Computes atmospheric sound attenuation coefficient $\alpha$ (dB/m) according to ISO 9613-1.
+///
+/// Parameters:
+/// - `freq_hz`: Sound frequency in Hz.
+/// - `temp_c`: Ambient temperature in Celsius (typically 20°C).
+/// - `rel_humidity_pct`: Relative humidity percent (e.g. 50.0%).
+/// - `pressure_kpa`: Atmospheric pressure in kPa (standard 101.325 kPa).
+pub fn iso9613_air_absorption_db_per_meter(
+    freq_hz: f32,
+    temp_c: f32,
+    rel_humidity_pct: f32,
+    pressure_kpa: f32,
+) -> f32 {
+    let t_k = (temp_c + 273.15).max(1.0);
+    let t_rel = t_k / 293.15; // T / T_0 (20°C)
+    let p_rel = (pressure_kpa / 101.325).max(1e-3); // p / p_0
+
+    // Saturation vapor pressure ratio (ISO 9613-1 eq. 5)
+    let c = -6.8346 * (273.16 / t_k).powf(1.261) + 4.6151;
+    let p_sat = 10.0f32.powf(c);
+
+    // Molar concentration of water vapor (%)
+    let h = (rel_humidity_pct.clamp(0.0, 100.0) * p_sat / p_rel).max(1e-6);
+
+    // Oxygen relaxation frequency f_rO (eq. 3)
+    let f_ro = p_rel * (24.0 + 4.04e4 * h * (0.02 + h) / (0.391 + h));
+
+    // Nitrogen relaxation frequency f_rN (eq. 4)
+    let f_rn = p_rel
+        * t_rel.powf(-0.5)
+        * (9.0 + 280.0 * h * (-4.17 * (t_rel.powf(-1.0 / 3.0) - 1.0)).exp());
+
+    let f = freq_hz.max(1.0);
+    let f_sq = f * f;
+
+    // Classic + rotational absorption term
+    let alpha_cr = 1.84e-11 * (1.0 / p_rel) * t_rel.sqrt() * f_sq;
+
+    // Molecular vibration absorption of Oxygen
+    let alpha_o = 0.01275 * (-2239.1 / t_k).exp() * (f_ro + f_sq / f_ro).recip() * f_sq;
+
+    // Molecular vibration absorption of Nitrogen
+    let alpha_n = 0.1068 * (-3352.0 / t_k).exp() * (f_rn + f_sq / f_rn).recip() * f_sq;
+
+    // Attenuation in dB/m (ISO 9613-1 eq. 2)
+    8.686 * (alpha_cr + t_rel.powf(-2.5) * (alpha_o + alpha_n))
 }
 
 /// Multiply two spectra (material cascades).

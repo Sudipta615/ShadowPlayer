@@ -269,6 +269,78 @@ impl ModalBassRoom {
             state.reset();
         }
     }
+
+    /// Synthesizes parametric cut filters targeting the worst resonant room modes at `listener_pos`.
+    pub fn synthesize_modal_damping_filters(
+        &self,
+        source_pos: Vec3,
+        listener_pos: Vec3,
+        max_cut_db: f32,
+        sample_rate: f32,
+    ) -> Vec<BiquadCoeffsF32> {
+        let mut filters = Vec::new();
+        let max_cut = max_cut_db.abs().min(18.0);
+        for m in &self.modes {
+            let coupling = self.source_listener_coupling(m, source_pos, listener_pos);
+            if coupling > 0.25 {
+                let cut_db = -max_cut * coupling;
+                let coeffs = BiquadCoeffsF32::peaking(sample_rate, m.frequency_hz, cut_db, m.q);
+                filters.push(coeffs);
+            }
+        }
+        filters
+    }
+}
+
+/// Speaker-Boundary Interference Response (SBIR) model.
+///
+/// Calculates cancellation notches and boundary boost caused by reflections off
+/// adjacent room boundaries (front wall, side wall, floor, ceiling).
+/// Destructive cancellation notches occur at frequencies:
+/// $f_{notch, n} = \frac{(2n - 1) c}{4 d}$
+/// Constructive reinforcement peaks occur at:
+/// $f_{peak, n} = \frac{n c}{2 d}$
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SbirModel {
+    pub speed_of_sound: f32,
+}
+
+impl SbirModel {
+    pub fn new(speed_of_sound: f32) -> Self {
+        Self {
+            speed_of_sound: if speed_of_sound > 100.0 {
+                speed_of_sound
+            } else {
+                343.0
+            },
+        }
+    }
+
+    /// Primary quarter-wavelength cancellation frequency (Hz) for distance `d_m` from a boundary.
+    pub fn cancellation_freq_hz(&self, d_m: f32) -> Option<f32> {
+        if d_m <= 0.01 {
+            return None; // Coupling boundary boost, no notch
+        }
+        Some(self.speed_of_sound / (4.0 * d_m))
+    }
+
+    /// Primary half-wavelength reinforcement frequency (Hz) for distance `d_m` from a boundary.
+    pub fn reinforcement_freq_hz(&self, d_m: f32) -> Option<f32> {
+        if d_m <= 0.01 {
+            return None;
+        }
+        Some(self.speed_of_sound / (2.0 * d_m))
+    }
+
+    /// Evaluates the SBIR interference transfer function magnitude (linear) at `freq_hz`
+    /// given boundary reflection coefficient $\gamma$ and speaker-to-wall distance `d_m`.
+    pub fn evaluate_sbir_linear(&self, freq_hz: f32, d_m: f32, reflection_coeff: f32) -> f32 {
+        let path_diff = 2.0 * d_m;
+        let k = std::f32::consts::TAU * freq_hz / self.speed_of_sound;
+        let phase = k * path_diff;
+        let g = reflection_coeff.clamp(0.0, 1.0);
+        (1.0 + 2.0 * g * phase.cos() + g * g).sqrt()
+    }
 }
 
 #[cfg(test)]
@@ -277,8 +349,6 @@ mod tests {
 
     #[test]
     fn schroeder_frequency_scales_with_volume() {
-        // Room 6x4x3 = 72 m3, RT60 = 0.5s
-        // fs ≈ 2000 * sqrt(0.5 / 72) ≈ 2000 * 0.0833 ≈ 166 Hz
         let room = ModalBassRoom::new(6.0, 4.0, 3.0, 0.5, 343.0, 48000.0);
         let fs = room.schroeder_frequency();
         assert!(
@@ -294,7 +364,6 @@ mod tests {
         assert!(!room.modes().is_empty());
 
         let mode = room.modes()[0];
-        // In the corner (0,0,0), eigenfunction is cos(0)*cos(0)*cos(0) = 1.0
         let corner = Vec3::new(0.0, 0.0, 0.0);
         let coupling = room.source_listener_coupling(&mode, corner, corner);
         assert!((coupling - 1.0).abs() < 1e-4);
@@ -313,5 +382,43 @@ mod tests {
             assert!(val.is_finite());
             assert!(val.abs() < 5.0);
         }
+    }
+
+    #[test]
+    fn modal_damping_filters_synthesize_for_strong_modes() {
+        let room = ModalBassRoom::new(6.0, 4.0, 3.0, 0.5, 343.0, 48000.0);
+        let src = Vec3::new(0.1, 0.1, 0.1);
+        let listener = Vec3::new(0.1, 0.1, 0.1);
+        let filters = room.synthesize_modal_damping_filters(src, listener, 12.0, 48000.0);
+        assert!(
+            !filters.is_empty(),
+            "Should generate modal notch filters for corner positions"
+        );
+    }
+
+    #[test]
+    fn sbir_cancellation_and_reinforcement_calculations() {
+        let sbir = SbirModel::new(343.0);
+        // At 1.0 metre from wall, notch at 343 / 4 = 85.75 Hz
+        let f_cancel = sbir.cancellation_freq_hz(1.0).unwrap();
+        assert!((f_cancel - 85.75).abs() < 1e-2);
+
+        // Reinforcement at 343 / 2 = 171.5 Hz
+        let f_peak = sbir.reinforcement_freq_hz(1.0).unwrap();
+        assert!((f_peak - 171.5).abs() < 1e-2);
+
+        // At cancel freq, with reflection 1.0, phase = pi -> linear mag ≈ 0
+        let mag_dip = sbir.evaluate_sbir_linear(85.75, 1.0, 1.0);
+        assert!(
+            mag_dip < 0.05,
+            "Cancellation notch should produce deep dip, got {mag_dip}"
+        );
+
+        // At peak freq, linear mag ≈ 2.0
+        let mag_peak = sbir.evaluate_sbir_linear(171.5, 1.0, 1.0);
+        assert!(
+            (mag_peak - 2.0).abs() < 0.05,
+            "Reinforcement should produce ~2.0, got {mag_peak}"
+        );
     }
 }

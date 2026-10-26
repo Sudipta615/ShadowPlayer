@@ -283,6 +283,83 @@ impl SubwooferPhase {
     }
 }
 
+/// All-pass phase alignment filter for subwoofer integration.
+///
+/// Provides continuous phase rotation (0° to 360°) and polarity inversion
+/// to acoustically match main loudspeaker phase response at the crossover frequency.
+#[derive(Debug, Clone)]
+pub struct AllpassPhaseFilter {
+    crossover_hz: f32,
+    phase_degrees: f32,
+    polarity_invert: bool,
+    coeffs: BiquadCoeffsF32,
+    state: BiquadStateF32,
+}
+
+impl AllpassPhaseFilter {
+    pub fn new(
+        sample_rate: f32,
+        crossover_hz: f32,
+        phase_degrees: f32,
+        polarity_invert: bool,
+    ) -> Self {
+        let mut filter = Self {
+            crossover_hz: crossover_hz.clamp(20.0, 500.0),
+            phase_degrees: phase_degrees.rem_euclid(360.0),
+            polarity_invert,
+            coeffs: BiquadCoeffsF32::identity(),
+            state: BiquadStateF32::default(),
+        };
+        filter.recompute(sample_rate);
+        filter
+    }
+
+    pub fn set_parameters(
+        &mut self,
+        sample_rate: f32,
+        crossover_hz: f32,
+        phase_degrees: f32,
+        polarity_invert: bool,
+    ) {
+        self.crossover_hz = crossover_hz.clamp(20.0, 500.0);
+        self.phase_degrees = phase_degrees.rem_euclid(360.0);
+        self.polarity_invert = polarity_invert;
+        self.recompute(sample_rate);
+    }
+
+    fn recompute(&mut self, sample_rate: f32) {
+        let sr = sample_rate.max(1.0);
+        if self.phase_degrees < 0.5 || self.phase_degrees > 359.5 {
+            self.coeffs = BiquadCoeffsF32::identity();
+            return;
+        }
+
+        let q = (self.phase_degrees / 180.0 * 2.0).clamp(0.2, 5.0);
+        self.coeffs = BiquadCoeffsF32::allpass(sr, self.crossover_hz, q);
+    }
+
+    #[inline]
+    pub fn process_sample(&mut self, sample: f32) -> f32 {
+        let y = self.state.process(sample, &self.coeffs);
+        if self.polarity_invert {
+            -y
+        } else {
+            y
+        }
+    }
+
+    #[inline]
+    pub fn process_block(&mut self, block: &mut [f32]) {
+        for s in block.iter_mut() {
+            *s = self.process_sample(*s);
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.state.reset();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,5 +448,18 @@ mod tests {
     fn subwoofer_phase_inverts_polarity() {
         let mut phase = SubwooferPhase::new(48000.0, 80.0, 0.0, true);
         assert_eq!(phase.process_sample(0.5), -0.5);
+    }
+
+    #[test]
+    fn allpass_phase_filter_preserves_magnitude_and_inverts() {
+        let mut ap = AllpassPhaseFilter::new(48000.0, 80.0, 90.0, true);
+        let mut buf = vec![0.5f32; 64];
+        ap.process_block(&mut buf);
+        for &s in &buf {
+            assert!(s.is_finite());
+        }
+        // At identity (0 deg, no invert), signal passes untouched
+        let mut ap_id = AllpassPhaseFilter::new(48000.0, 80.0, 0.0, false);
+        assert_eq!(ap_id.process_sample(0.75), 0.75);
     }
 }

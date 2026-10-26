@@ -171,3 +171,148 @@ impl HoaDecoder {
         self.decoder.bus_width()
     }
 }
+
+/// Dual-band Higher-Order Ambisonic Decoder.
+///
+/// Implements dual-band frequency-dependent Ambisonic decoding:
+/// - Low-frequency band (< crossover): Velocity-matched decoding (Basic / Mode-Matching)
+///   for accurate ITD phase wavefront reconstruction.
+/// - High-frequency band (>= crossover): Energy-matched decoding (Max-rE windowing)
+///   maximizing the energy vector to eliminate phantom-source comb filtering and maximize ILD contrast.
+/// - Realtime-safe: zero allocations during `decode`.
+#[derive(Debug)]
+pub struct DualBandHoaDecoder {
+    order: u8,
+    crossover_hz: f32,
+    sample_rate: f32,
+    lp_coeffs: BiquadCoeffsF32,
+    hp_coeffs: BiquadCoeffsF32,
+    lp_states: Vec<BiquadStateF32>,
+    hp_states: Vec<BiquadStateF32>,
+    low_decoder: AmbisonicDecoder,
+    high_decoder: AmbisonicDecoder,
+    scratch_bus_lp: Vec<f32>,
+    scratch_bus_hp: Vec<f32>,
+    scratch_out_lp: Vec<f32>,
+    scratch_out_hp: Vec<f32>,
+    prepared: bool,
+}
+
+impl DualBandHoaDecoder {
+    /// Construct a new dual-band HOA decoder. Default crossover is ~500 Hz.
+    pub fn new(order: u8, crossover_hz: f32) -> Self {
+        let o = order.min(MAX_AMBISONIC_ORDER);
+        Self {
+            order: o,
+            crossover_hz: crossover_hz.clamp(200.0, 1500.0),
+            sample_rate: 48_000.0,
+            lp_coeffs: BiquadCoeffsF32::lowpass(48_000.0, 500.0, 0.707),
+            hp_coeffs: BiquadCoeffsF32::highpass(48_000.0, 500.0, 0.707),
+            lp_states: Vec::new(),
+            hp_states: Vec::new(),
+            low_decoder: AmbisonicDecoder::with_order(DecoderPolicy::Basic, o),
+            high_decoder: AmbisonicDecoder::with_order(DecoderPolicy::MaxRe, o),
+            scratch_bus_lp: Vec::new(),
+            scratch_bus_hp: Vec::new(),
+            scratch_out_lp: Vec::new(),
+            scratch_out_hp: Vec::new(),
+            prepared: false,
+        }
+    }
+
+    /// Prepare decoders, crossover filter banks, and preallocate scratch buffers. Control path.
+    pub fn prepare(&mut self, layout: &SpeakerLayout, sample_rate: u32) -> Result<(), RenderError> {
+        let sr = sample_rate.max(1) as f32;
+        self.sample_rate = sr;
+        self.lp_coeffs = BiquadCoeffsF32::lowpass(sr, self.crossover_hz, 0.707);
+        self.hp_coeffs = BiquadCoeffsF32::highpass(sr, self.crossover_hz, 0.707);
+
+        let ch = channel_count(self.order);
+        self.lp_states = vec![BiquadStateF32::default(); ch];
+        self.hp_states = vec![BiquadStateF32::default(); ch];
+
+        self.low_decoder.prepare(layout, sample_rate)?;
+        self.high_decoder.prepare(layout, sample_rate)?;
+
+        let n_spk = layout.speakers.len();
+        const MAX_FRAMES: usize = crate::buffer::MAX_AUDIO_BLOCK_FRAMES;
+        self.scratch_bus_lp = vec![0.0f32; ch * MAX_FRAMES];
+        self.scratch_bus_hp = vec![0.0f32; ch * MAX_FRAMES];
+        self.scratch_out_lp = vec![0.0f32; n_spk * MAX_FRAMES];
+        self.scratch_out_hp = vec![0.0f32; n_spk * MAX_FRAMES];
+
+        self.prepared = true;
+        Ok(())
+    }
+
+    pub fn prepared(&self) -> bool {
+        self.prepared
+    }
+
+    pub fn order(&self) -> u8 {
+        self.order
+    }
+
+    pub fn crossover_hz(&self) -> f32 {
+        self.crossover_hz
+    }
+
+    pub fn channels(&self) -> usize {
+        self.low_decoder.channels()
+    }
+
+    pub fn bus_width(&self) -> usize {
+        channel_count(self.order)
+    }
+
+    /// Decode an interleaved ambisonic bus using dual-band energy-velocity optimization.
+    /// Realtime-safe: strictly zero allocations.
+    pub fn decode(&mut self, ambi_bus: &[f32], frames: usize, out: &mut [f32]) {
+        if !self.prepared || frames == 0 {
+            return;
+        }
+
+        let ch = channel_count(self.order);
+        let bus_len = frames * ch;
+        if ambi_bus.len() < bus_len {
+            return;
+        }
+
+        let n_spk = self.channels();
+        let out_len = frames * n_spk;
+        if out.len() < out_len {
+            return;
+        }
+
+        // Apply crossover filter bank to separate low- and high-frequency ambisonic bus frames
+        for f in 0..frames {
+            let offset = f * ch;
+            for c in 0..ch {
+                let sample = ambi_bus[offset + c];
+                let lp = self.lp_states[c].process(sample, &self.lp_coeffs);
+                let hp = self.hp_states[c].process(sample, &self.hp_coeffs);
+                self.scratch_bus_lp[offset + c] = lp;
+                self.scratch_bus_hp[offset + c] = hp;
+            }
+        }
+
+        self.scratch_out_lp[..out_len].fill(0.0);
+        self.scratch_out_hp[..out_len].fill(0.0);
+
+        self.low_decoder.process_bus(
+            &self.scratch_bus_lp[..bus_len],
+            frames,
+            &mut self.scratch_out_lp[..out_len],
+        );
+        self.high_decoder.process_bus(
+            &self.scratch_bus_hp[..bus_len],
+            frames,
+            &mut self.scratch_out_hp[..out_len],
+        );
+
+        // Recombine the low- and high-frequency decoded signals
+        for (i, sample) in out[..out_len].iter_mut().enumerate() {
+            *sample += self.scratch_out_lp[i] + self.scratch_out_hp[i];
+        }
+    }
+}

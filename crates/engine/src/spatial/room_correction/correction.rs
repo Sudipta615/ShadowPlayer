@@ -11,6 +11,7 @@
 
 use super::analysis::{RoomCorrectionTarget, RoomIrAnalysis};
 use crate::dsp::convolution::{ConvolutionEngine, ConvolutionError};
+use crate::dsp::correction::phase::{PhaseMode, RenderParams};
 
 use serde::{Deserialize, Serialize};
 
@@ -122,119 +123,83 @@ pub fn compute_correction_filter(
         })
         .collect();
 
-    // Determine filter length from latency budget (round to odd for linear phase).
-    let filter_len = (max_latency_samples * 2 + 1).clamp(3, 32768);
-    let half = filter_len / 2;
+    // Determine filter length from latency budget (power of two).
+    let n = (max_latency_samples * 2)
+        .clamp(16, 32768)
+        .next_power_of_two();
+    let num_bins = n / 2 + 1;
+    let nyquist = analysis
+        .freq_response
+        .last()
+        .map(|&(f, _)| f)
+        .unwrap_or(24_000.0)
+        .max(1000.0);
+    let sample_rate = (nyquist * 2.0) as f64;
+    let bin_step = nyquist / (num_bins - 1) as f32;
 
-    // Build a linear-phase FIR by inverse DFT of the correction gains.
-    // The `freq_response` grid covers ~20 Hz to Nyquist; we reconstruct a
-    // full-spectrum FIR by fitting a smooth inverse.
-    let mut ir = vec![0.0f32; filter_len];
-
-    match mode {
-        CorrectionMode::LinearPhase | CorrectionMode::MixedPhase => {
-            // Spectral sampling: place each band's gain as a symmetric FIR tap.
-            for (k, (&(freq_hz, _), &gain)) in analysis
+    let mut mag_db = vec![0.0f64; num_bins];
+    for (j, db) in mag_db.iter_mut().enumerate() {
+        let f = (j as f32 * bin_step).max(1.0);
+        let gain = if f <= analysis.freq_response[0].0 {
+            correction_gains[0]
+        } else if f >= analysis.freq_response[n_freqs - 1].0 {
+            correction_gains[n_freqs - 1]
+        } else {
+            let i = analysis
                 .freq_response
-                .iter()
-                .zip(correction_gains.iter())
-                .enumerate()
-            {
-                // Normalize frequency to [0, π].
-                // Use a raised-cosine window (Hann) around the center tap.
-                let _ = k;
-                let _w = std::f32::consts::TAU * freq_hz; // angular freq (not normalized)
-                                                          // Each FIR tap contributes to the spectrum symmetrically.
-                let scale = (gain - 1.0) / n_freqs as f32; // differential correction
-                for n in 0..filter_len {
-                    let t = n as f32 - half as f32;
-                    // Sinc kernel weighted by Hann window.
-                    let hann = 0.5
-                        * (1.0
-                            - (std::f32::consts::TAU * n as f32 / (filter_len - 1) as f32).cos());
-                    let sinc = if t.abs() < 1e-6 {
-                        1.0
-                    } else {
-                        (std::f32::consts::PI * t * freq_hz
-                            / (analysis
-                                .freq_response
-                                .last()
-                                .map(|&(f, _)| f)
-                                .unwrap_or(20_000.0)))
-                        .sin()
-                            / (std::f32::consts::PI * t * freq_hz
-                                / (analysis
-                                    .freq_response
-                                    .last()
-                                    .map(|&(f, _)| f)
-                                    .unwrap_or(20_000.0)))
-                    };
-                    ir[n] += scale * hann * sinc;
-                }
+                .partition_point(|p| p.0 < f)
+                .saturating_sub(1);
+            let f0 = analysis.freq_response[i].0;
+            let f1 = analysis.freq_response[(i + 1).min(n_freqs - 1)].0;
+            let g0 = correction_gains[i];
+            let g1 = correction_gains[(i + 1).min(n_freqs - 1)];
+            if (f1 - f0).abs() < 1e-4 {
+                g0
+            } else {
+                let t = (f.log10() - f0.log10()) / (f1.log10() - f0.log10());
+                g0 + t * (g1 - g0)
             }
-            // Add Dirac at center to make this a correction from 0 dB.
-            ir[half] += 1.0;
-        }
-        CorrectionMode::MinimumPhase => {
-            // Minimum-phase reconstruction: build symmetric autocorrelation then
-            // factor via real cepstrum (same method as HRTF min-phase).
-            for (k, (&(freq_hz, _), &gain)) in analysis
-                .freq_response
-                .iter()
-                .zip(correction_gains.iter())
-                .enumerate()
-            {
-                let _ = k;
-                let scale = (gain - 1.0) / n_freqs as f32;
-                for n in 0..filter_len {
-                    let t = n as f32 - half as f32;
-                    let hann = 0.5
-                        * (1.0
-                            - (std::f32::consts::TAU * n as f32 / (filter_len - 1) as f32).cos());
-                    let sinc = if t.abs() < 1e-6 {
-                        1.0
-                    } else {
-                        (std::f32::consts::PI * t * freq_hz
-                            / (analysis
-                                .freq_response
-                                .last()
-                                .map(|&(f, _)| f)
-                                .unwrap_or(20_000.0)))
-                        .sin()
-                            / (std::f32::consts::PI * t * freq_hz
-                                / (analysis
-                                    .freq_response
-                                    .last()
-                                    .map(|&(f, _)| f)
-                                    .unwrap_or(20_000.0)))
-                    };
-                    ir[n] += scale * hann * sinc;
-                }
-            }
-            ir[half] += 1.0;
-            // Truncate non-causal half to shift energy to t=0 (minimum-phase approximation).
-            let causal: Vec<f32> = ir[half..].to_vec();
-            ir.clear();
-            ir.extend_from_slice(&causal);
-            ir.resize(filter_len, 0.0);
-        }
+        };
+        *db = (gain.max(1e-12).log10() * 20.0) as f64;
     }
 
-    // Energy-normalize: ensure DC gain is 1.0 (or target DC).
-    let sum: f32 = ir.iter().sum();
-    if sum.abs() > 1e-6 {
-        for s in ir.iter_mut() {
-            *s /= sum;
-        }
-    }
+    let phase_mode = match mode {
+        CorrectionMode::MinimumPhase => PhaseMode::Minimum,
+        CorrectionMode::LinearPhase => PhaseMode::Linear,
+        CorrectionMode::MixedPhase => PhaseMode::Hybrid,
+    };
+    let render_params = RenderParams {
+        sample_rate,
+        ir_len_samples: n,
+        phase_mode,
+        hybrid_crossover_hz: 300.0,
+    };
+
+    let (ir, latency_samples) = if let Ok(rendered) =
+        crate::dsp::correction::phase::render_from_magnitude_db(&mag_db, &render_params)
+    {
+        let samples = rendered.samples.into_iter().map(|s| s as f32).collect();
+        let latency = match mode {
+            CorrectionMode::MinimumPhase => 0,
+            CorrectionMode::LinearPhase => n / 2,
+            CorrectionMode::MixedPhase => rendered.delay_samples.round() as usize,
+        };
+        (samples, latency)
+    } else {
+        // Fallback: simple Dirac with gain
+        let mut fallback = vec![0.0f32; n];
+        let half = match mode {
+            CorrectionMode::MinimumPhase => 0,
+            _ => n / 2,
+        };
+        fallback[half] = 1.0;
+        (fallback, half)
+    };
 
     RoomCorrectionFilter {
         ir,
         mode,
-        latency_samples: match mode {
-            CorrectionMode::LinearPhase | CorrectionMode::MixedPhase => half,
-            CorrectionMode::MinimumPhase => 0,
-        },
+        latency_samples,
     }
 }
 
@@ -374,5 +339,30 @@ mod tests {
         proc.process_stereo_interleaved(&mut buf, 128);
         // Unprepared → buffer untouched.
         assert!(buf.iter().all(|&v| v == 0.5));
+    }
+
+    #[test]
+    fn test_compute_correction_filter_minimum_phase_has_zero_latency() {
+        let mut ir_data = vec![0.0f32; 128];
+        ir_data[0] = 1.0;
+        let analysis = analyze_ir(&ir_data, 48_000.0);
+        let filter = compute_correction_filter(
+            &analysis,
+            &RoomCorrectionTarget::Flat,
+            CorrectionMode::MinimumPhase,
+            6.0,
+            64,
+        );
+        assert_eq!(filter.latency_samples, 0);
+        assert!(!filter.ir.is_empty());
+        // Peak of minimum phase should be at tap 0
+        let peak_idx = filter
+            .ir
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .map(|(i, _)| i)
+            .unwrap();
+        assert_eq!(peak_idx, 0);
     }
 }

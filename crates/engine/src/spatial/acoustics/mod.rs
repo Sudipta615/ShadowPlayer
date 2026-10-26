@@ -29,7 +29,10 @@ pub use impulse::{
 };
 pub use mls::{deconvolve_mls, fast_hadamard_transform, generate_mls, MlsOrder};
 pub use phase_response::{compute_phase_response, unwrap_phase, PhaseResponse};
-pub use rt60::{compute_rt60, schroeder_decay_curve, Rt60Metrics};
+pub use rt60::{
+    compute_multiband_rt60, compute_rt60, lundeby_truncation_point, schroeder_decay_curve,
+    MultibandRt60, Rt60Metrics,
+};
 pub use sweep::{deconvolve_sweep, generate_inverse_filter, generate_log_sweep, LogSweepConfig};
 pub use transfer_function::{estimate_transfer_function, TransferFunctionEstimate};
 
@@ -42,8 +45,10 @@ pub struct AcousticReport {
     pub direct_peak_index: usize,
     /// Peak direct arrival amplitude.
     pub direct_peak_amplitude: f32,
-    /// RT60 metrics (T20, T30).
+    /// RT60 metrics (T10, T20, T30).
     pub rt60: Rt60Metrics,
+    /// Multi-octave band RT60 (125 Hz - 4 kHz).
+    pub multiband_rt60: MultibandRt60,
     /// Early Decay Time metrics.
     pub edt: EdtMetrics,
     /// Acoustic clarity metrics (C50, C80, D50, Center Time).
@@ -58,6 +63,7 @@ pub struct AcousticReport {
 pub fn analyze_acoustics(ir: &[f32], sample_rate: f64) -> AcousticReport {
     let (direct_peak_index, direct_peak_amplitude) = find_direct_peak(ir);
     let rt60 = compute_rt60(ir, sample_rate);
+    let multiband_rt60 = compute_multiband_rt60(ir, sample_rate);
     let edt = compute_edt(ir, sample_rate);
     let clarity = compute_clarity(ir, sample_rate);
 
@@ -72,6 +78,7 @@ pub fn analyze_acoustics(ir: &[f32], sample_rate: f64) -> AcousticReport {
         direct_peak_index,
         direct_peak_amplitude,
         rt60,
+        multiband_rt60,
         edt,
         clarity,
         frequency_response_1_3,

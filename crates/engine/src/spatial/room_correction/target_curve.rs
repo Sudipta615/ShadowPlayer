@@ -22,6 +22,10 @@ pub enum TargetCurveKind {
         slope_db_per_octave: f64,
         pivot_freq_hz: f64,
     },
+    /// Brüel & Kjær 1974 reference curve (flat up to 1 kHz, -1 dB/octave tilt above 1 kHz).
+    Bk1974,
+    /// Cinema X-Curve (ISO 2969 / SMPTE 202M: flat 63 Hz–2 kHz, -3 dB/octave above 2 kHz, -1.5 dB/octave below 63 Hz).
+    CinemaXCurve,
     /// Custom user-specified (frequency_hz, gain_db) control points.
     Custom { points: Vec<(f64, f64)> },
 }
@@ -57,6 +61,22 @@ impl TargetCurve {
         Self {
             name: "Flat Reference Target".into(),
             kind: TargetCurveKind::Flat,
+        }
+    }
+
+    /// Creates a Brüel & Kjær 1974 reference curve.
+    pub fn bk_1974() -> Self {
+        Self {
+            name: "B&K 1974 House Curve".into(),
+            kind: TargetCurveKind::Bk1974,
+        }
+    }
+
+    /// Creates an ISO 2969 Cinema X-Curve.
+    pub fn cinema_x_curve() -> Self {
+        Self {
+            name: "ISO 2969 Cinema X-Curve".into(),
+            kind: TargetCurveKind::CinemaXCurve,
         }
     }
 
@@ -112,6 +132,25 @@ impl TargetCurve {
                 let octaves = (freq_hz / *pivot_freq_hz).log2();
                 slope_db_per_octave * octaves
             }
+            TargetCurveKind::Bk1974 => {
+                if freq_hz <= 1000.0 {
+                    0.0
+                } else {
+                    let octaves = (freq_hz / 1000.0).log2();
+                    -octaves
+                }
+            }
+            TargetCurveKind::CinemaXCurve => {
+                if freq_hz < 63.0 {
+                    let octaves = (63.0 / freq_hz).log2();
+                    -1.5 * octaves
+                } else if freq_hz <= 2000.0 {
+                    0.0
+                } else {
+                    let octaves = (freq_hz / 2000.0).log2();
+                    -3.0 * octaves
+                }
+            }
             TargetCurveKind::Custom { points } => {
                 if points.is_empty() {
                     return 0.0;
@@ -136,5 +175,35 @@ impl TargetCurve {
                 0.0
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bk1974_curve_evaluation() {
+        let curve = TargetCurve::bk_1974();
+        assert_eq!(curve.evaluate_db(500.0), 0.0);
+        assert_eq!(curve.evaluate_db(1000.0), 0.0);
+        // 2000 Hz is exactly 1 octave above 1000 Hz -> -1 dB
+        assert!((curve.evaluate_db(2000.0) - (-1.0)).abs() < 1e-4);
+        // 4000 Hz is 2 octaves above 1000 Hz -> -2 dB
+        assert!((curve.evaluate_db(4000.0) - (-2.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_cinema_x_curve_evaluation() {
+        let curve = TargetCurve::cinema_x_curve();
+        assert_eq!(curve.evaluate_db(100.0), 0.0);
+        assert_eq!(curve.evaluate_db(1000.0), 0.0);
+        assert_eq!(curve.evaluate_db(2000.0), 0.0);
+        // 4000 Hz is 1 octave above 2000 Hz -> -3 dB
+        assert!((curve.evaluate_db(4000.0) - (-3.0)).abs() < 1e-4);
+        // 8000 Hz is 2 octaves above 2000 Hz -> -6 dB
+        assert!((curve.evaluate_db(8000.0) - (-6.0)).abs() < 1e-4);
+        // 31.5 Hz is 1 octave below 63 Hz -> -1.5 dB
+        assert!((curve.evaluate_db(31.5) - (-1.5)).abs() < 1e-2);
     }
 }

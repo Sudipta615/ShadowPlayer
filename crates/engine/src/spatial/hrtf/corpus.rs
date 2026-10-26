@@ -97,6 +97,79 @@ impl HrtfCorpus {
 
         HrtfMeshKind::RegularGrid
     }
+
+    /// Perform diffuse-field equalization across the corpus.
+    /// Averages power across all directions, inverts with regularization,
+    /// and deconvolves direction-independent coloration from each measurement.
+    pub fn diffuse_field_equalize(&mut self) {
+        if self.measurements.is_empty() {
+            return;
+        }
+
+        let n_meas = self.measurements.len();
+        let ir_len = self.measurements[0]
+            .left
+            .len()
+            .max(self.measurements[0].right.len())
+            .max(32);
+        let fft_size = (ir_len * 2).next_power_of_two().max(64);
+        let num_bins = fft_size / 2 + 1;
+
+        let mut planner = realfft::RealFftPlanner::<f32>::new();
+        let rfft = planner.plan_fft_forward(fft_size);
+        let irfft = planner.plan_fft_inverse(fft_size);
+
+        let mut avg_pwr = vec![0.0f32; num_bins];
+        let mut in_buf = vec![0.0f32; fft_size];
+        let mut spec = vec![realfft::num_complex::Complex32::new(0.0, 0.0); num_bins];
+
+        // 1. Accumulate power spectra across all measurements (both ears)
+        for m in &self.measurements {
+            for ear_ir in [&m.left, &m.right] {
+                in_buf.fill(0.0);
+                let copy_len = ear_ir.len().min(fft_size);
+                in_buf[..copy_len].copy_from_slice(&ear_ir[..copy_len]);
+                let _ = rfft.process(&mut in_buf, &mut spec);
+                for (b, s) in spec.iter().enumerate() {
+                    avg_pwr[b] += s.re * s.re + s.im * s.im;
+                }
+            }
+        }
+
+        let total_count = (n_meas * 2) as f32;
+        for p in &mut avg_pwr {
+            *p /= total_count;
+        }
+
+        // Find reference level and regularize inverse
+        let max_pwr = avg_pwr.iter().copied().fold(0.0f32, f32::max).max(1e-9);
+        let reg_floor = max_pwr * 0.01; // -20 dB limit on maximum boost
+
+        // Build inverse magnitude curve
+        let mut inv_mag = vec![1.0f32; num_bins];
+        for (b, &pwr) in avg_pwr.iter().enumerate() {
+            let p_reg = pwr.max(reg_floor);
+            inv_mag[b] = (max_pwr / p_reg).sqrt();
+        }
+
+        // Apply inverse filtering to each measurement
+        for m in &mut self.measurements {
+            for ear_ir in [&mut m.left, &mut m.right] {
+                in_buf.fill(0.0);
+                let copy_len = ear_ir.len().min(fft_size);
+                in_buf[..copy_len].copy_from_slice(&ear_ir[..copy_len]);
+                let _ = rfft.process(&mut in_buf, &mut spec);
+                for (b, s) in spec.iter_mut().enumerate() {
+                    *s *= inv_mag[b];
+                }
+                let _ = irfft.process(&mut spec, &mut in_buf);
+                let norm = 1.0 / fft_size as f32;
+                for (s, &v) in ear_ir.iter_mut().zip(in_buf.iter()) {
+                    *s = v * norm;
+                }
+            }
+        }
+    }
 }
 
 /// Optional normalization applied to each (left, right) ear pair when loading a corpus.
@@ -107,6 +180,9 @@ pub enum HrtfNormalize {
     None,
     /// Divide every ear pair by its overall peak magnitude (unity peak).
     Peak,
+    /// Diffuse-field equalization: equalizes direction-independent spectral coloration
+    /// while preserving directional interaural cues.
+    DiffuseField,
 }
 
 /// Controls HRTF loading: tap length, target sample rate, and normalization.

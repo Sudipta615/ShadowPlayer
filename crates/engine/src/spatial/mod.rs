@@ -207,24 +207,24 @@ pub mod voice;
 pub use acoustic::{
     diffract_around_edge, spectral_taps, wall_index, AcousticBaker, AcousticPath, AcousticRoom,
     AcousticWorld, BakePolicy, BakedObject, BakedPath, BakedScene, DiffractionEdge, MaterialKind,
-    MaterialSpectrum, PathFlags, PathKind, Portal, Wall, ACOUSTIC_IR_LEN, ALL_WALLS,
+    MaterialSpectrum, PathFlags, PathKind, Portal, SbirModel, Wall, ACOUSTIC_IR_LEN, ALL_WALLS,
     DEFAULT_BAKE_CELL_M, MAX_PATHS, MAX_REFLECTION_ORDER, OCTAVE_BANDS, OCTAVE_BANDS_HZ,
 };
 pub use acoustics::{analyze_acoustics, AcousticReport};
 pub use ambisonic::{
     channel_count, encode_plane_wave, encode_plane_wave_n, in_phase_window, max_re_window,
     rotate_bus_frame, rotate_bus_frame_n, sh_foa, sh_n, AmbisonicDecoder, AmbisonicRenderer,
-    DecoderPolicy, HoaConfig, HoaDecoder, HoaDecoding, HoaEncoder, NearFieldCompensation,
-    PerSpeakerDelay, AMBISONIC_CHANNELS, AMBISONIC_CHANNELS_MAX, AMBISONIC_CHANNELS_ORDER_2,
-    AMBISONIC_ORDER, MAX_AMBISONIC_ORDER,
+    DecoderPolicy, DualBandHoaDecoder, HoaConfig, HoaDecoder, HoaDecoding, HoaEncoder,
+    NearFieldCompensation, PerSpeakerDelay, AMBISONIC_CHANNELS, AMBISONIC_CHANNELS_MAX,
+    AMBISONIC_CHANNELS_ORDER_2, AMBISONIC_ORDER, MAX_AMBISONIC_ORDER,
 };
 pub use automation::{
     AutomationMode, CurveQuat, CurveScalar, CurveVec3, SpatialAudioAutomationFrame,
     SpatialAutomation,
 };
 pub use bass::{
-    BassManager, CrossoverFilter, PsychoacousticBassProcessor, SpatialBassEngine, SubwooferDelay,
-    SubwooferPhase, MAX_BASS_CHANNELS, MAX_SUB_DELAY_SAMPLES,
+    AllpassPhaseFilter, BassManager, CrossoverFilter, PsychoacousticBassProcessor,
+    SpatialBassEngine, SubwooferDelay, SubwooferPhase, MAX_BASS_CHANNELS, MAX_SUB_DELAY_SAMPLES,
 };
 pub use bed::{BedId, SpatialBed, SpatialBedStore, MAX_BEDS};
 pub use binaural::{BinauralRenderer, VIRTUAL_RING_SPEAKERS};

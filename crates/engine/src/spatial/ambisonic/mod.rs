@@ -22,7 +22,8 @@ pub use decoder::{
 };
 pub use encode::{encode_plane_wave, encode_plane_wave_n, AmbisonicEncoder};
 pub use hoa::{
-    HoaConfig, HoaDecoder, HoaDecoding, HoaEncoder, NearFieldCompensation, PerSpeakerDelay,
+    DualBandHoaDecoder, HoaConfig, HoaDecoder, HoaDecoding, HoaEncoder, NearFieldCompensation,
+    PerSpeakerDelay,
 };
 pub use rotation::{rotate_bus_frame, rotate_bus_frame_n, rotation_supported, MAX_ROTATABLE_ORDER};
 
@@ -195,5 +196,48 @@ mod tests {
         for &val in &out {
             assert!(val.is_finite());
         }
+    }
+
+    #[test]
+    fn mode_matching_decoder_on_surround_array() {
+        let layout = SpeakerLayout::five_point_one();
+        let mut dec = AmbisonicDecoder::new(DecoderPolicy::ModeMatching);
+        dec.prepare(&layout, 48_000).expect("prepare");
+        assert!(dec.prepared());
+        let gains = dec.plane_wave_gains(Vec3::Y);
+        for &g in &gains {
+            assert!(g.is_finite());
+        }
+        // Center/Front speakers should have higher gain than rear speakers for front wave
+        let g_c = gains[2]; // Center
+        let g_lr = gains[4]; // Rear right
+        assert!(g_c > g_lr, "Center gain {g_c} should be > rear gain {g_lr}");
+    }
+
+    #[test]
+    fn dual_band_hoa_decoder_processes_audio() {
+        let layout = SpeakerLayout::seven_point_one_four();
+        let mut db_dec = DualBandHoaDecoder::new(3, 500.0);
+        db_dec.prepare(&layout, 48_000).expect("prepare");
+        assert!(db_dec.prepared());
+
+        let encoder = HoaEncoder::new(3);
+        let ch = encoder.channels();
+        let frames = 64;
+        let mut bus = vec![0.0f32; ch * frames];
+        for f in 0..frames {
+            let offset = f * ch;
+            encoder.encode(Vec3::Y, 1.0, &mut bus[offset..offset + ch]);
+        }
+
+        let mut out = vec![0.0f32; layout.speakers.len() * frames];
+        db_dec.decode(&bus, frames, &mut out);
+
+        for &val in &out {
+            assert!(val.is_finite());
+        }
+        // Energy in speakers should be positive
+        let total_energy: f32 = out.iter().map(|&x| x * x).sum();
+        assert!(total_energy > 0.0);
     }
 }

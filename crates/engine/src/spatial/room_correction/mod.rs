@@ -32,7 +32,9 @@ pub mod spatial_average;
 pub mod target_curve;
 pub mod validation;
 
-pub use analysis::{analyze_ir, RoomCorrectionTarget, RoomIrAnalysis};
+pub use analysis::{
+    analyze_ir, analyze_ir_fdw, FrequencyDependentWindow, RoomCorrectionTarget, RoomIrAnalysis,
+};
 pub use correction::{
     compute_correction_filter, CorrectionMode, RoomCorrectionFilter, RoomCorrectionProcessor,
 };

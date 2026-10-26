@@ -186,6 +186,14 @@ impl HrtfDataset {
         if corpus.measurements.is_empty() {
             return Err(HrtfLoadError::Empty);
         }
+        let mut dfe_corpus;
+        let corpus = if matches!(options.normalize, HrtfNormalize::DiffuseField) {
+            dfe_corpus = corpus.clone();
+            dfe_corpus.diffuse_field_equalize();
+            &dfe_corpus
+        } else {
+            corpus
+        };
         let taps = options.taps;
         if taps == 0 || taps > MAX_HRTF_TAPS {
             return Err(HrtfLoadError::Taps {
@@ -322,6 +330,14 @@ impl HrtfDataset {
         if corpus.measurements.is_empty() {
             return Err(HrtfLoadError::Empty);
         }
+        let mut dfe_corpus;
+        let corpus = if matches!(options.normalize, HrtfNormalize::DiffuseField) {
+            dfe_corpus = corpus.clone();
+            dfe_corpus.diffuse_field_equalize();
+            &dfe_corpus
+        } else {
+            corpus
+        };
         let taps = options.taps;
         if taps == 0 || taps > MAX_HRTF_TAPS {
             return Err(HrtfLoadError::Taps {
@@ -730,5 +746,66 @@ mod tests {
         assert!((a0 - 270.0).abs() < 0.1, "arc start {a0}");
         assert!((a1 - 90.0).abs() < 0.1, "arc end {a1}");
         assert!(e0.abs() < 0.1 && e1.abs() < 0.1, "el {e0}..{e1}");
+    }
+
+    #[test]
+    fn diffuse_field_normalization_in_dataset_load() {
+        let dir = |az_deg: f32, el_deg: f32| {
+            let (az, el) = (az_deg.to_radians(), el_deg.to_radians());
+            let h = el.cos();
+            [h * az.sin(), h * az.cos(), el.sin()]
+        };
+        let meas = |az: f32, el: f32| HrtfMeasurement {
+            direction: dir(az, el),
+            left: vec![1.0, 0.5, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0],
+            right: vec![0.8, 0.4, 0.15, 0.05, 0.0, 0.0, 0.0, 0.0],
+        };
+        let corpus = HrtfCorpus {
+            sample_rate: 48_000,
+            source: Some("dfe-test".into()),
+            measurements: vec![
+                meas(0.0, 0.0),
+                meas(90.0, 0.0),
+                meas(180.0, 0.0),
+                meas(270.0, 0.0),
+            ],
+            mesh_hint: Some(HrtfMeshKind::IrregularMesh),
+        };
+        let mesh = HrtfDataset::from_corpus(
+            &corpus,
+            &HrtfLoadOptions {
+                taps: 8,
+                target_sample_rate: 48_000,
+                normalize: HrtfNormalize::DiffuseField,
+            },
+        )
+        .expect("dfe corpus load");
+        assert_eq!(mesh.measured_direction_count(), 4);
+        assert_eq!(mesh.taps(), 8);
+        for &sample in &mesh.irs {
+            assert!(sample.is_finite());
+        }
+    }
+
+    #[test]
+    fn test_kuhn_itd_frequency_dependence() {
+        use super::super::{anthropometric_head_radius, kuhn_itd_sec};
+        let az = 90.0f32.to_radians(); // directly lateral
+        let radius = 0.0875;
+        let c = 343.0;
+
+        // At low frequencies (< 500 Hz), Kuhn ITD approaches 3 * a / c * sin(theta)
+        let itd_low = kuhn_itd_sec(200.0, az, radius, c);
+        // At high frequencies (> 2 kHz), Kuhn ITD approaches Woodworth / geometric ITD
+        let itd_high = kuhn_itd_sec(4000.0, az, radius, c);
+
+        assert!(
+            itd_low > itd_high,
+            "Low frequency ITD ({itd_low}) should be higher than high frequency ITD ({itd_high}) by Kuhn diffraction theory"
+        );
+
+        // Anthropometric head radius estimation: (0.15 + 0.20) / 4 = 0.0875
+        let est_radius = anthropometric_head_radius(0.15, 0.20);
+        assert!((est_radius - 0.0875).abs() < 1e-4);
     }
 }

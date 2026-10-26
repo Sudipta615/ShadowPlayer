@@ -32,11 +32,40 @@ pub enum RoomCorrectionTarget {
     HeadphoneCurve,
 }
 
-/// Analyze a room impulse response. **Control path — allocates.**
+/// Configuration for Frequency-Dependent Windowing (FDW).
 ///
-/// Returns a [`RoomIrAnalysis`] with the frequency response, energy-time curve,
-/// RT60, phase, and group delay computed from `ir` at `sample_rate`.
-pub fn analyze_ir(ir: &[f32], sample_rate: f32) -> RoomIrAnalysis {
+/// FDW applies a window whose duration scales inversely with frequency:
+/// longer windows at low frequencies to resolve room acoustic modes, and
+/// shorter windows at high frequencies to eliminate comb filtering from
+/// boundary reflections and isolate direct sound.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrequencyDependentWindow {
+    /// Number of periods/cycles included within the window (typically 4.0 to 15.0, default 6.0).
+    pub cycles: f32,
+    /// Minimum window half-width in milliseconds (default 2.0 ms, prevents excessive truncation at HF).
+    pub min_half_width_ms: f32,
+    /// Maximum window half-width in milliseconds (default 300.0 ms, limits modal integration at LF).
+    pub max_half_width_ms: f32,
+}
+
+impl Default for FrequencyDependentWindow {
+    fn default() -> Self {
+        Self {
+            cycles: 6.0,
+            min_half_width_ms: 2.0,
+            max_half_width_ms: 300.0,
+        }
+    }
+}
+
+/// Analyze a room impulse response with optional Frequency-Dependent Windowing (FDW).
+/// **Control path — allocates.**
+#[allow(clippy::needless_range_loop)]
+pub fn analyze_ir_fdw(
+    ir: &[f32],
+    sample_rate: f32,
+    fdw: Option<FrequencyDependentWindow>,
+) -> RoomIrAnalysis {
     if ir.is_empty() || sample_rate <= 0.0 {
         return RoomIrAnalysis {
             freq_response: Vec::new(),
@@ -46,6 +75,13 @@ pub fn analyze_ir(ir: &[f32], sample_rate: f32) -> RoomIrAnalysis {
             group_delay: Vec::new(),
         };
     }
+
+    let peak_idx = ir
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
 
     // Frequency grid: 64 log-spaced points from 20 Hz to Nyquist.
     let n_freqs = 64usize;
@@ -61,9 +97,28 @@ pub fn analyze_ir(ir: &[f32], sample_rate: f32) -> RoomIrAnalysis {
         let freq = f_min * (k as f32 * log_step).exp();
         let w = TAU * freq / sample_rate;
 
+        let (start_n, end_n, use_fdw) = if let Some(config) = fdw {
+            let half_sec = (0.5 * config.cycles / freq).clamp(
+                config.min_half_width_ms * 1e-3,
+                config.max_half_width_ms * 1e-3,
+            );
+            let half_samples = (half_sec * sample_rate).round().max(2.0) as usize;
+            let start = peak_idx.saturating_sub(half_samples);
+            let end = (peak_idx + half_samples + 1).min(ir.len());
+            (start, end, Some(half_samples))
+        } else {
+            (0, ir.len(), None)
+        };
+
         // DFT at this frequency.
         let (mut re, mut im) = (0.0f64, 0.0f64);
-        for (n, &v) in ir.iter().enumerate() {
+        for n in start_n..end_n {
+            let mut v = ir[n];
+            if let Some(half_samples) = use_fdw {
+                let dist = (n as isize - peak_idx as isize).unsigned_abs() as f32;
+                let win = 0.5 * (1.0 + (std::f32::consts::PI * dist / half_samples as f32).cos());
+                v *= win;
+            }
             let phase_n = w * n as f32;
             re += v as f64 * phase_n.cos() as f64;
             im -= v as f64 * phase_n.sin() as f64;
@@ -76,7 +131,13 @@ pub fn analyze_ir(ir: &[f32], sample_rate: f32) -> RoomIrAnalysis {
         let dw = 0.01f64;
         let (mut re2, mut im2) = (0.0f64, 0.0f64);
         let w2 = w as f64 + dw;
-        for (n, &v) in ir.iter().enumerate() {
+        for n in start_n..end_n {
+            let mut v = ir[n];
+            if let Some(half_samples) = use_fdw {
+                let dist = (n as isize - peak_idx as isize).unsigned_abs() as f32;
+                let win = 0.5 * (1.0 + (std::f32::consts::PI * dist / half_samples as f32).cos());
+                v *= win;
+            }
             let p = w2 * n as f64;
             re2 += v as f64 * p.cos();
             im2 -= v as f64 * p.sin();
@@ -111,6 +172,14 @@ pub fn analyze_ir(ir: &[f32], sample_rate: f32) -> RoomIrAnalysis {
         phase,
         group_delay,
     }
+}
+
+/// Analyze a room impulse response. **Control path — allocates.**
+///
+/// Returns a [`RoomIrAnalysis`] with the frequency response, energy-time curve,
+/// RT60, phase, and group delay computed from `ir` at `sample_rate`.
+pub fn analyze_ir(ir: &[f32], sample_rate: f32) -> RoomIrAnalysis {
+    analyze_ir_fdw(ir, sample_rate, None)
 }
 
 #[cfg(test)]
@@ -159,5 +228,41 @@ mod tests {
             "RT60 got {:.3} expected {rt60_expected:.3}",
             a.rt60
         );
+    }
+
+    #[test]
+    fn test_analyze_ir_fdw_windowing() {
+        let sr = 48_000.0f32;
+        // Direct impulse at index 0, strong reflection at 20 ms (sample 960)
+        let mut ir = vec![0.0f32; 2048];
+        ir[0] = 1.0;
+        ir[960] = 0.8;
+
+        let fdw = FrequencyDependentWindow {
+            cycles: 6.0,
+            min_half_width_ms: 1.0,
+            max_half_width_ms: 100.0,
+        };
+
+        let without_fdw = analyze_ir(&ir, sr);
+        let with_fdw = analyze_ir_fdw(&ir, sr, Some(fdw));
+
+        // At 10 kHz: 6 cycles is 0.6 ms (clamped to min 1.0 ms = 48 samples).
+        // 960 samples (20 ms) is far outside the window!
+        // So with FDW, 10 kHz magnitude will be direct sound (≈ 1.0).
+        let hf_mag_fdw = with_fdw
+            .freq_response
+            .iter()
+            .find(|(f, _)| *f > 8000.0)
+            .map(|(_, m)| *m)
+            .unwrap();
+
+        assert!(
+            (hf_mag_fdw - 1.0).abs() < 0.05,
+            "FDW should reject late reflection at HF, got {hf_mag_fdw}"
+        );
+
+        // Without FDW, the 0.8 reflection causes comb-filtering at high frequencies
+        assert!(without_fdw.freq_response.len() == with_fdw.freq_response.len());
     }
 }
