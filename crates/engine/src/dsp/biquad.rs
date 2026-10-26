@@ -17,6 +17,7 @@
 //! output type, ensuring the best possible coefficient accuracy even in `f32` mode.
 
 use crate::buffer::AudioFrame;
+use crate::dsp::filter_design::{design, BandwidthMode, FilterDesign};
 use crate::dsp::float::AudioFloat;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,14 +55,37 @@ impl<T: AudioFloat> BiquadCoeffs<T> {
     }
 
     /// Build from raw f64 values.  All public constructors call this.
+    ///
+    /// `pub(crate)` because [`crate::dsp::filter_design`] designs coefficients
+    /// for width models and prototypes that have no named constructor here
+    /// (octave bandwidths, the Vicanek matched design). Keeping one raw
+    /// builder means those designs land in exactly the same struct the rest of
+    /// the engine runs.
     #[inline]
-    fn from_f64_raw(b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) -> Self {
+    pub(crate) fn from_f64_raw(b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) -> Self {
         Self {
             b0: T::from_f64(b0),
             b1: T::from_f64(b1),
             b2: T::from_f64(b2),
             a1: T::from_f64(a1),
             a2: T::from_f64(a2),
+        }
+    }
+
+    /// Re-cast coefficients into another precision.
+    ///
+    /// Design always happens in `f64`; a `SmoothedBiquad<f32>` that opted into
+    /// an alternative width model therefore has to narrow the result. This is
+    /// the only lossy step on that path, and it is the same one the constructor
+    /// path takes via `T::from_f64`.
+    #[inline]
+    pub fn cast<U: AudioFloat>(&self) -> BiquadCoeffs<U> {
+        BiquadCoeffs {
+            b0: U::from_f64(self.b0.to_f64()),
+            b1: U::from_f64(self.b1.to_f64()),
+            b2: U::from_f64(self.b2.to_f64()),
+            a1: U::from_f64(self.a1.to_f64()),
+            a2: U::from_f64(self.a2.to_f64()),
         }
     }
 
@@ -1101,10 +1125,24 @@ impl Default for EqParams {
 impl EqParams {
     #[inline]
     fn lerp(a: &Self, b: &Self, t: f32) -> Self {
+        // Audio frequency and Q factor are perceptual/geometric quantities: linear
+        // interpolation crowds 90% of the transition into the highest octave.
+        // Exponential (logarithmic) interpolation preserves musical octave pacing
+        // across sweeps without zipper noise (Signalsmith Audio / DaisySP pattern).
+        let freq = if a.freq > 0.0 && b.freq > 0.0 && a.freq.is_finite() && b.freq.is_finite() {
+            a.freq * (b.freq / a.freq).powf(t)
+        } else {
+            a.freq + (b.freq - a.freq) * t
+        };
+        let q = if a.q > 0.0 && b.q > 0.0 && a.q.is_finite() && b.q.is_finite() {
+            a.q * (b.q / a.q).powf(t)
+        } else {
+            a.q + (b.q - a.q) * t
+        };
         Self {
-            freq: a.freq + (b.freq - a.freq) * t,
+            freq,
             gain_db: a.gain_db + (b.gain_db - a.gain_db) * t,
-            q: a.q + (b.q - a.q) * t,
+            q,
             // Topology uses the target immediately for the "to" filter; the
             // jump in the *response* caused by a topology change is smoothed
             // by `SmoothedBiquad::transition`, which crossfades from the
@@ -1161,6 +1199,8 @@ pub struct SmoothedBiquad<T: AudioFloat = f32> {
     sample_rate: f32,
     /// Active topology-change crossfade, if any. `None` in steady state.
     transition: Option<FilterTransition<T>>,
+    /// What this band's `q` means. See [`BandwidthMode`].
+    bandwidth_mode: BandwidthMode,
 }
 
 /// Type alias for the common f32 variant.
@@ -1181,6 +1221,63 @@ impl<T: AudioFloat> SmoothedBiquad<T> {
             states: [BiquadState::default(), BiquadState::default()],
             sample_rate: 44100.0,
             transition: None,
+            bandwidth_mode: BandwidthMode::EquivalentQ,
+        }
+    }
+
+    /// Choose what this band's `q` means, recomputing its coefficients.
+    ///
+    /// [`BandwidthMode::EquivalentQ`] is the historical behaviour (the
+    /// cookbook `alpha = sin(ω₀)/(2Q)`).
+    /// [`BandwidthMode::NyquistOctaves`] reads `q` as the low-frequency
+    /// equivalent of an octave width and designs the band so that width holds
+    /// up to Nyquist — the Equalizer APO `BW Oct` semantics.
+    ///
+    /// This is a *configuration* switch, not a live performance control:
+    /// changing it swaps the filter the band is running, so it snaps rather
+    /// than ramps. Callers that need a click-free change should set it while
+    /// the stage is bypassed or between tracks.
+    pub fn set_bandwidth_mode(&mut self, mode: BandwidthMode) {
+        if self.bandwidth_mode == mode {
+            return;
+        }
+        self.bandwidth_mode = mode;
+        self.current_coeffs = self.coefficients_for(self.current_params);
+        if self.remaining == 0 {
+            self.target_params = self.current_params;
+        }
+    }
+
+    /// What this band's `q` currently means.
+    #[inline]
+    pub fn bandwidth_mode(&self) -> BandwidthMode {
+        self.bandwidth_mode
+    }
+
+    /// Coefficients for one parameter set under the active bandwidth model.
+    ///
+    /// The two models share every other decision (topology, clamping, the
+    /// transition crossfade), so a band sounds identical in
+    /// [`BandwidthMode::EquivalentQ`] to the way it sounded before the model
+    /// existed.
+    #[inline]
+    fn coefficients_for(&self, params: EqParams) -> BiquadCoeffs<T> {
+        match self.bandwidth_mode {
+            BandwidthMode::EquivalentQ => params.filter_type.compute_coeffs(
+                self.sample_rate,
+                params.freq,
+                params.gain_db,
+                params.q,
+            ),
+            BandwidthMode::NyquistOctaves => design(
+                params.filter_type,
+                FilterDesign::NyquistOctaves,
+                self.sample_rate,
+                params.freq,
+                params.gain_db,
+                config::Bandwidth::Octaves(config::Bandwidth::octaves_for_q(params.q)),
+            )
+            .cast::<T>(),
         }
     }
 
@@ -1309,21 +1406,11 @@ impl<T: AudioFloat> SmoothedBiquad<T> {
         if self.remaining > 0 {
             let t = 1.0 - (self.remaining as f32 / self.smooth_steps as f32);
             let interpolated = EqParams::lerp(&self.current_params, &self.target_params, t);
-            self.current_coeffs = interpolated.filter_type.compute_coeffs(
-                self.sample_rate,
-                interpolated.freq,
-                interpolated.gain_db,
-                interpolated.q,
-            );
+            self.current_coeffs = self.coefficients_for(interpolated);
             self.remaining -= 1;
             if self.remaining == 0 {
                 self.current_params = self.target_params;
-                self.current_coeffs = self.target_params.filter_type.compute_coeffs(
-                    self.sample_rate,
-                    self.target_params.freq,
-                    self.target_params.gain_db,
-                    self.target_params.q,
-                );
+                self.current_coeffs = self.coefficients_for(self.target_params);
             }
         }
         if let Some(tr) = &mut self.transition {

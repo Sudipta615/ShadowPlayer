@@ -6,7 +6,10 @@
 //! * **AutoEQ parametric** — `Preamp: -6.2 dB` followed by
 //!   `Filter 1: ON PK Fc 105 Hz Gain 5.5 dB Q 0.70`.
 //! * **Equalizer APO / REW** — the same `Filter:` grammar without the index,
-//!   with `LS`/`HS` aliases and `Fc 1.0 kHz`.
+//!   with `LS`/`HS` aliases and `Fc 1.0 kHz`. Equalizer APO also allows the
+//!   width to be written as `BW Oct 0.5`, `BW Hz 100` or `S 0.5` (shelf
+//!   slope) instead of `Q`; all four spellings are read here and converted to
+//!   the `Q` the engine's biquads take (see [`crate::eq_width`]).
 //! * **AutoEQ graphic** — `GraphicEQ: 20 -1.2; 21 -1.1; …`.
 //!
 //! Parsing is pure and allocation-bounded: callers read the file on a worker
@@ -19,6 +22,7 @@
 
 use std::fmt;
 
+use crate::eq_width::{q_from_hz, q_from_octaves, q_from_slope};
 use crate::{EqBandConfig, EqPreset, FilterType};
 
 /// Highest frequency an imported band may specify.
@@ -245,7 +249,7 @@ fn parse_filter_line(line: &str) -> Option<EqBandConfig> {
         .or_else(|| value_after(&tokens, "f"))
         .unwrap_or(1_000.0);
     let gain = value_after(&tokens, "gain").unwrap_or(0.0);
-    let q = value_after(&tokens, "q").unwrap_or_else(|| default_q(filter_type));
+    let q = width_from_tokens(&tokens, frequency, gain).unwrap_or_else(|| default_q(filter_type));
 
     if !frequency.is_finite() || !gain.is_finite() || !q.is_finite() {
         return None;
@@ -258,6 +262,55 @@ fn parse_filter_line(line: &str) -> Option<EqBandConfig> {
         gain_db: clamp_gain(gain as f32),
         q: clamp_q(q as f32),
     })
+}
+
+/// Read a band's width in any of the spellings Equalizer APO accepts, as a
+/// `Q` the engine's biquads can run.
+///
+/// Precedence is `Q`, then `BW Oct`, `BW Hz`, then `S` (shelf slope). A file
+/// that names more than one is malformed; taking the first spelling in that
+/// order is predictable, and every spelling that is present is honoured rather
+/// than silently ignored — which is what used to happen: an APO export whose
+/// bands say `BW Oct 0.5` and no `Q` imported with the *default* Q and a curve
+/// nobody asked for.
+///
+/// Returns `None` when the line carries no width at all, so the caller can
+/// fall back to the documented per-type default.
+fn width_from_tokens(tokens: &[&str], frequency: f64, gain: f64) -> Option<f64> {
+    if let Some(q) = value_after(tokens, "q") {
+        return Some(q);
+    }
+
+    let lowered: Vec<String> = tokens
+        .iter()
+        .map(|t| t.trim_matches(':').to_ascii_lowercase())
+        .collect();
+
+    if let Some(position) = lowered.iter().position(|t| t == "bw") {
+        // `BW Oct 0.5` / `BW Hz 100` / bare `BW 0.5` (octaves is the APO
+        // default for a bare `BW`).
+        let unit = lowered.get(position + 1).map(String::as_str);
+        let (value_token, in_octaves) = match unit {
+            Some("oct") | Some("octaves") => (tokens.get(position + 2), true),
+            Some("hz") => (tokens.get(position + 2), false),
+            _ => (tokens.get(position + 1), true),
+        };
+        let value = value_token.and_then(|t| parse_number_with_unit(t))?;
+        return if in_octaves {
+            Some(q_from_octaves(value))
+        } else {
+            q_from_hz(value, frequency)
+        };
+    }
+
+    // `S 0.5` — the RBJ shelf slope. Applied to whatever filter type the line
+    // names; for a peaking band it still yields a well-defined Q, and treating
+    // an explicitly written slope as absent would silently change the curve.
+    if let Some(slope) = value_after(tokens, "s") {
+        return Some(q_from_slope(slope, gain));
+    }
+
+    None
 }
 
 /// Read the numeric token that follows `key`, tolerating a unit suffix.
@@ -554,6 +607,72 @@ Filter  2: OFF PK       Fc   1000.0 Hz  Gain   0.0 dB  Q  1.000
             assert!((point.0 - expected.0).abs() < 1e-3);
             assert!((point.1 - expected.1).abs() < 1e-3);
         }
+    }
+
+    #[test]
+    fn equalizer_apo_octave_bandwidth_imports_as_the_same_q_it_names() {
+        // Equalizer APO's own exports use `BW Oct`, never `Q`, for bands
+        // authored in REW. Before this was parsed the band silently fell back
+        // to Q = 1.0 — a curve the file never asked for.
+        let text = "Filter 1: ON PK Fc 1000 Hz Gain 3 dB BW Oct 0.5";
+        let curve = parse_curve("bw-oct", text).unwrap();
+        let q = curve.bands[0].q;
+        assert!(
+            (q - 2.871_7).abs() < 2e-3,
+            "half an octave at 1 kHz is Q ≈ 2.87, got {q}"
+        );
+    }
+
+    #[test]
+    fn a_full_octave_bandwidth_lands_on_the_textbook_q() {
+        let text = "Filter 1: ON PK Fc 500 Hz Gain -4 dB BW Oct 1.0";
+        let curve = parse_curve("bw-one", text).unwrap();
+        assert!((curve.bands[0].q - std::f32::consts::SQRT_2).abs() < 2e-3);
+        // `BW 1.0` with no unit is octaves in Equalizer APO's grammar.
+        let bare = parse_curve("bw-bare", "Filter 1: ON PK Fc 500 Hz Gain -4 dB BW 1.0").unwrap();
+        assert!((bare.bands[0].q - curve.bands[0].q).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hertz_bandwidth_divides_the_centre_frequency() {
+        let text = "Filter 1: ON PK Fc 2000 Hz Gain 2 dB BW Hz 250";
+        let curve = parse_curve("bw-hz", text).unwrap();
+        assert!(
+            (curve.bands[0].q - 8.0).abs() < 1e-3,
+            "250 Hz wide at 2 kHz is Q = 8, got {}",
+            curve.bands[0].q
+        );
+    }
+
+    #[test]
+    fn shelf_slope_imports_as_the_equivalent_q() {
+        // S = 1 is the ripple-free Butterworth slope for any gain, so the
+        // shelf lands on Q = 1/√2 regardless of the gain the line carries.
+        for gain in ["6", "-12"] {
+            let text = format!("Filter 1: ON LSC Fc 100 Hz Gain {gain} dB S 1.0");
+            let curve = parse_curve("slope", &text).unwrap();
+            let q = curve.bands[0].q;
+            assert!(
+                (q - std::f32::consts::FRAC_1_SQRT_2).abs() < 2e-3,
+                "S=1 must import as Butterworth Q, got {q}"
+            );
+        }
+        // A shallower slope is a lower Q.
+        let shallow = parse_curve("s05", "Filter 1: ON LSC Fc 100 Hz Gain 6 dB S 0.5").unwrap();
+        assert!(shallow.bands[0].q < std::f32::consts::FRAC_1_SQRT_2);
+    }
+
+    #[test]
+    fn an_explicit_q_wins_over_a_bandwidth_in_the_same_line() {
+        let text = "Filter 1: ON PK Fc 1000 Hz Gain 3 dB Q 4.0 BW Oct 2.0";
+        let curve = parse_curve("both", text).unwrap();
+        assert!((curve.bands[0].q - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_line_without_any_width_keeps_the_per_type_default() {
+        let curve = parse_curve("no-width", "Filter 1: ON PK Fc 1000 Hz Gain 3 dB").unwrap();
+        assert!((curve.bands[0].q - 1.0).abs() < 1e-6);
     }
 
     #[test]

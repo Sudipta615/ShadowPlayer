@@ -159,17 +159,20 @@ impl EqBand {
         self.filter_left.set_sample_rate(sample_rate);
         self.filter_right.set_sample_rate(sample_rate);
         if !self.params.enabled {
+            // Disabled bands must transition to true flat unity pass-through.
+            // Targeting FilterType::Peaking at 0.0 dB guarantees H(z) = 1.0,
+            // whereas Lowpass/Highpass/Notch with 0.0 dB gain would still filter audio.
             self.filter_left.set_target_params(
                 self.params.frequency,
                 0.0,
                 self.params.q,
-                self.params.filter_type.to_filter_type(),
+                FilterType::Peaking,
             );
             self.filter_right.set_target_params(
                 self.params.frequency,
                 0.0,
                 self.params.q,
-                self.params.filter_type.to_filter_type(),
+                FilterType::Peaking,
             );
             return;
         }
@@ -234,6 +237,13 @@ impl EqBand {
                 right[i] = or_;
             }
         }
+    }
+
+    /// What this band's `q` means — see [`crate::dsp::filter_design::BandwidthMode`].
+    #[inline]
+    pub(crate) fn set_bandwidth_mode(&mut self, mode: crate::dsp::filter_design::BandwidthMode) {
+        self.filter_left.set_bandwidth_mode(mode);
+        self.filter_right.set_bandwidth_mode(mode);
     }
 
     pub(crate) fn reset(&mut self) {

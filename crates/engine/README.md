@@ -4,7 +4,7 @@
 
 ### Independent, Headless, Bit-Perfect Audiophile Audio & DSP Engine built with pure Rust
 
-[![Version](https://img.shields.io/badge/version-1.8.0-blue.svg?style=flat-square&logo=rust)](Cargo.toml)
+[![Version](https://img.shields.io/badge/version-1.9.0-blue.svg?style=flat-square&logo=rust)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg?style=flat-square)](LICENSE-APACHE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.98-orange.svg?style=flat-square&logo=rust)](Cargo.toml)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg?style=flat-square)](#-hardware-output-backends--os-integration)
@@ -251,6 +251,7 @@ Decoded Audio Frames
   │
   ├── Acoustic Room & Headphone Correction Node (FIR/IIR calibration curves)
   ├── 64-Band Parametric Equalizer (+ AutoEQ headphone database presets)
+  ├── EQ Width Models (Q · `BW Oct` · `BW Hz` · shelf slope `S`, Nyquist-exact octave bands)
   ├── Graphic Equalizer Layer (10, 15, or 31 ISO standard bands)
   ├── 3-Band Multiband Compressor (Independent crossovers, attack, release, ratios)
   ├── Partitioned FFT Convolution (Zero-latency impulse response modeling)
@@ -288,6 +289,7 @@ nobody assumes a feature is wired up because the module exists:
 | `network_audio` | AES67 / RTP receive and send. No UI; drive it from an embedding host. |
 | `mpris` (feature `mpris`) | **Not used by the app.** It is gated behind a feature the app does not enable. The desktop app implements MPRIS2 itself (`crates/ui/src/services/mpris_service.rs`) because transport state lives in the app's coordinator, not in the engine — exposing it from the engine would have two owners of the same D-Bus name. |
 | `profile` | AutoEq / headphone target analysis. The app's AutoEq path applies the resulting filters through the DSP chain instead. |
+| `dsp::filter_design` | Matched (Vicanek) biquad design, Butterworth biquad ladders, and the Nyquist-exact octave-width model. The desktop app does not drive these directly; the width→Q conversions are already on the EQ-file import path, and a host reaches the models through `ParametricEq::set_bandwidth_mode` / `set_band_width`. |
 | `eval`, `governance`, `standards` | Engineering-process suites: qualification runs, standards conformance, release gates. Used by the engine's own test binaries. |
 | `fx` | Modulation effects (chorus, flanger, phaser, delay, distortion). Built and tested, not yet surfaced in the app's DSP panel. |
 | `buffer`, `track_cache`, `state` | Internal building blocks used by other engine modules; not host-facing. |

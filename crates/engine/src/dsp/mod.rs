@@ -54,7 +54,6 @@ pub use crossfade::{CrossfadeConfig, CrossfadeCurve, MixerState, TrackMixer};
 pub use crossover::{
     Crossover2Way, Crossover3Way, CrossoverArchitecture, CrossoverCpuTier, CrossoverPhaseBehavior,
 };
-pub use dither::{Dither, DitherType};
 pub use dynamics::{
     BallisticEnvelope, ChannelLinkMode, DetectionMode, DetectorConfig, DynamicsDetector,
     SidechainFilter,
@@ -98,3 +97,8 @@ pub use safety::{
     contain_non_finite_block, contain_non_finite_planes, FloatSafetyMode, NonFiniteIncident,
     NonFinitePolicy,
 };
+
+// Re-export filter_design under crate::dsp::filter_design for crates that
+// still import from that path (and to satisfy the biquad/equalizer imports).
+pub mod filter_design;
+pub use filter_design::{design, BandwidthMode, FilterDesign};

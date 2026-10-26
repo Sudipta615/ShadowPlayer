@@ -48,6 +48,7 @@ use std::hint::black_box;
 
 use config::{EqBandConfig, EqPreset, FilterType};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use engine::dsp::biquad::BiquadCoeffs;
 use engine::dsp::equalizer::{EqBandParams, EqFilterType, ParametricEq};
 
 mod common;
@@ -179,6 +180,111 @@ fn bench_dsp_eq(c: &mut Criterion) {
         b.iter(|| black_box(ParametricEq::from_preset(sample_rate, black_box(&preset))));
     });
     group.finish();
+
+    // Control path: the auto-headroom estimate. This runs once per band edit
+    // (a slider drag issues dozens a second) and is the reason the estimator
+    // uses the φ closed form instead of a per-band complex magnitude: the
+    // numbers here are the difference between a drag that keeps up and one
+    // that stalls the command thread.
+    //
+    // `legacy_estimate` is the estimator this replaced, kept alongside it so
+    // the comparison is *measured* in the same run rather than asserted from
+    // first principles: a 4096-point log sweep that evaluated the complex
+    // magnitude (four trigonometric calls) of every band at every point, plus
+    // the same golden-section refinement.
+    let mut group = c.benchmark_group("dsp_eq/headroom_estimate");
+    for bands in [10_usize, 31, 64] {
+        let params: Vec<EqBandParams> = (0..bands)
+            .map(|i| {
+                let t = i as f32 / (bands - 1) as f32;
+                EqBandParams::peaking(20.0 * 1000.0f32.powf(t), 4.0, 2.0)
+            })
+            .collect();
+        let mut eq = ParametricEq::new(bands, sample_rate);
+        eq.set_enabled(true);
+        eq.set_band_layout(&params);
+        let coeffs: Vec<BiquadCoeffs<f64>> = params
+            .iter()
+            .map(|p| {
+                p.filter_type.to_filter_type().compute_coeffs::<f64>(
+                    sample_rate,
+                    p.frequency,
+                    p.gain_db,
+                    p.q,
+                )
+            })
+            .collect();
+
+        group.throughput(Throughput::Elements(bands as u64));
+        group.bench_with_input(BenchmarkId::new("closed_form", bands), &bands, |b, _| {
+            b.iter(|| black_box(eq.combined_max_gain_db(black_box(sample_rate))));
+        });
+        group.bench_with_input(BenchmarkId::new("legacy_complex", bands), &bands, |b, _| {
+            b.iter(|| black_box(legacy_estimate(&coeffs, sample_rate)));
+        });
+    }
+    group.finish();
+}
+
+/// The headroom estimator as it was written before the `φ` closed form: a
+/// 4096-point log sweep of the complex response, then golden-section
+/// refinement to 1e-3 Hz. Behaviourally identical output; this exists only to
+/// be the measured "before" in the comparison above.
+fn legacy_estimate(coeffs: &[BiquadCoeffs<f64>], sample_rate: f32) -> f32 {
+    const SWEEP_POINTS: usize = 4096;
+    const INV_PHI: f64 = 0.618_033_988_749_894_9;
+
+    let min_f = 20.0_f64;
+    let max_f = (sample_rate as f64 * 0.49).min(20_000.0);
+    let eval = |freq: f64| -> f64 {
+        let mut total = 1.0_f64;
+        for c in coeffs {
+            total *= c.evaluate_magnitude(freq as f32, sample_rate);
+        }
+        total
+    };
+
+    let mut max_mag = 1.0_f64;
+    let log_min = min_f.ln();
+    let log_max = max_f.ln();
+    let log_step = (log_max - log_min) / SWEEP_POINTS as f64;
+    let mut best_index = 0usize;
+    for i in 0..=SWEEP_POINTS {
+        let mag = eval((log_min + i as f64 * log_step).exp());
+        if mag > max_mag {
+            max_mag = mag;
+            best_index = i;
+        }
+    }
+    let center = log_min + best_index as f64 * log_step;
+    let mut a = (center - log_step).exp();
+    let mut b = (center + log_step).exp();
+    let mut c = b - INV_PHI * (b - a);
+    let mut d = a + INV_PHI * (b - a);
+    let mut fc = eval(c);
+    let mut fd = eval(d);
+    max_mag = max_mag.max(fc).max(fd);
+    while (b - a).abs() > 1e-3 {
+        if fc < fd {
+            a = c;
+            c = d;
+            fc = fd;
+            d = a + INV_PHI * (b - a);
+            fd = eval(d);
+        } else {
+            b = d;
+            d = c;
+            fd = fc;
+            c = b - INV_PHI * (b - a);
+            fc = eval(c);
+        }
+        max_mag = max_mag.max(fc).max(fd);
+    }
+    if max_mag > 1.0 {
+        (20.0 * max_mag.log10()) as f32
+    } else {
+        0.0
+    }
 }
 
 criterion_group!(benches, bench_dsp_eq);

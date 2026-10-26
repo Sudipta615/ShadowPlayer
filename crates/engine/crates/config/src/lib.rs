@@ -9,6 +9,7 @@ mod dsp_config;
 mod engine_config;
 mod enums;
 mod eq_text;
+mod eq_width;
 mod fx_config;
 mod rate_policy;
 mod scene_config;
@@ -40,6 +41,10 @@ pub use enums::{
 pub use eq_text::{
     parse_curve, write_graphic, write_parametric, EqTextError, ImportedCurve, MAX_FREQ_HZ,
     MAX_GAIN_DB, MAX_Q, MIN_FREQ_HZ, MIN_Q,
+};
+pub use eq_width::{
+    hz_from_q, octaves_from_q, q_from_hz, q_from_octaves, q_from_slope, slope_from_q, Bandwidth,
+    MAX_OCTAVES, MAX_SLOPE, MIN_OCTAVES, MIN_SLOPE,
 };
 pub use fx_config::{
     ChorusConfig, DelayConfig, DistortionConfig, DistortionShape, EffectSettings, FlangerConfig,

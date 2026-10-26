@@ -1,7 +1,10 @@
 //! Equalizer filter-bank implementation.
 
+use super::headroom;
 use super::types::{EqBand, EqBandParams, EqFilterType, MAX_EQ_BANDS};
-use crate::{buffer::AudioFrame, dsp::biquad::SmoothedBiquad, dsp::gain::GainProcessor};
+use crate::dsp::biquad::{FilterType, SmoothedBiquad};
+use crate::dsp::filter_design::{design, BandwidthMode, FilterDesign};
+use crate::{buffer::AudioFrame, dsp::gain::GainProcessor};
 
 /// Parametric EQ processor — configurable multi-band equaliser
 ///
@@ -71,6 +74,8 @@ pub struct ParametricEq {
     /// Preallocated f64 scratch for whole-block vectorized processing on the f32 path.
     scratch_l: Vec<f64>,
     scratch_r: Vec<f64>,
+    /// What every band's `q` means. See [`ParametricEq::set_bandwidth_mode`].
+    bandwidth_mode: BandwidthMode,
 }
 
 impl ParametricEq {
@@ -135,6 +140,7 @@ impl ParametricEq {
             manual_headroom_db: 0.0,
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
+            bandwidth_mode: BandwidthMode::EquivalentQ,
         }
     }
 
@@ -197,6 +203,7 @@ impl ParametricEq {
             manual_headroom_db: 0.0,
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
+            bandwidth_mode: BandwidthMode::EquivalentQ,
         }
     }
 
@@ -270,6 +277,7 @@ impl ParametricEq {
             manual_headroom_db: 0.0,
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
+            bandwidth_mode: BandwidthMode::EquivalentQ,
         }
     }
 
@@ -335,6 +343,7 @@ impl ParametricEq {
             manual_headroom_db: 0.0,
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
+            bandwidth_mode: BandwidthMode::EquivalentQ,
         }
     }
 
@@ -598,14 +607,46 @@ impl ParametricEq {
         }
     }
 
+    /// Helper to compute band coefficients matching the active bandwidth mode.
+    #[inline]
+    fn compute_band_coeffs(
+        &self,
+        sr: f32,
+        kind: FilterType,
+        freq: f32,
+        gain_db: f32,
+        q: f32,
+    ) -> crate::dsp::biquad::BiquadCoeffs<f64> {
+        match self.bandwidth_mode {
+            BandwidthMode::EquivalentQ => kind.compute_coeffs(sr, freq, gain_db, q),
+            BandwidthMode::NyquistOctaves => design(
+                kind,
+                FilterDesign::NyquistOctaves,
+                sr,
+                freq,
+                gain_db,
+                config::Bandwidth::Octaves(config::Bandwidth::octaves_for_q(q)),
+            ),
+        }
+    }
+
     /// Collect the coefficients of every active band (parametric bands plus
     /// the bass/treble tone shelves) at the given sample rate.
     fn active_band_coeffs(&self, sr: f32) -> Vec<crate::dsp::biquad::BiquadCoeffs<f64>> {
         let mut coeffs: Vec<crate::dsp::biquad::BiquadCoeffs<f64>> = Vec::new();
         for band in &self.bands {
-            if band.params.enabled && band.params.gain_db.abs() > 0.001 {
-                coeffs.push(band.params.filter_type.to_filter_type().compute_coeffs(
+            let is_gain_active = band.params.gain_db.abs() > 0.001;
+            let is_shape_active = matches!(
+                band.params.filter_type,
+                EqFilterType::LowPass
+                    | EqFilterType::HighPass
+                    | EqFilterType::Bandpass
+                    | EqFilterType::Notch
+            );
+            if band.params.enabled && (is_gain_active || is_shape_active) {
+                coeffs.push(self.compute_band_coeffs(
                     sr,
+                    band.params.filter_type.to_filter_type(),
                     band.params.frequency,
                     band.params.gain_db,
                     band.params.q,
@@ -613,32 +654,22 @@ impl ParametricEq {
             }
         }
         if self.bass_band.params.enabled && self.bass_band.params.gain_db.abs() > 0.001 {
-            coeffs.push(
-                self.bass_band
-                    .params
-                    .filter_type
-                    .to_filter_type()
-                    .compute_coeffs(
-                        sr,
-                        self.bass_band.params.frequency,
-                        self.bass_band.params.gain_db,
-                        self.bass_band.params.q,
-                    ),
-            );
+            coeffs.push(self.compute_band_coeffs(
+                sr,
+                self.bass_band.params.filter_type.to_filter_type(),
+                self.bass_band.params.frequency,
+                self.bass_band.params.gain_db,
+                self.bass_band.params.q,
+            ));
         }
         if self.treble_band.params.enabled && self.treble_band.params.gain_db.abs() > 0.001 {
-            coeffs.push(
-                self.treble_band
-                    .params
-                    .filter_type
-                    .to_filter_type()
-                    .compute_coeffs(
-                        sr,
-                        self.treble_band.params.frequency,
-                        self.treble_band.params.gain_db,
-                        self.treble_band.params.q,
-                    ),
-            );
+            coeffs.push(self.compute_band_coeffs(
+                sr,
+                self.treble_band.params.filter_type.to_filter_type(),
+                self.treble_band.params.frequency,
+                self.treble_band.params.gain_db,
+                self.treble_band.params.q,
+            ));
         }
         coeffs
     }
@@ -664,75 +695,8 @@ impl ParametricEq {
         if max_f <= min_f {
             return 0.0;
         }
-
         let active_coeffs = self.active_band_coeffs(sr);
-        if active_coeffs.is_empty() {
-            return 0.0;
-        }
-
-        // Shelves reach their extremum at the band edges, which the sweep
-        // endpoints do not include. Compute those directly from the transfer
-        // function: |H(1)| = |(b0+b1+b2)/(1+a1+a2)| at DC and
-        // |H(-1)| = |(b0-b1+b2)/(1-a1+a2)| at Nyquist.
-        let mut dc_mag = 1.0_f64;
-        let mut nyq_mag = 1.0_f64;
-        for coeff in &active_coeffs {
-            let den_dc = 1.0 + coeff.a1 + coeff.a2;
-            if den_dc.abs() > 1e-12 {
-                dc_mag *= ((coeff.b0 + coeff.b1 + coeff.b2) / den_dc).abs();
-            }
-            let den_ny = 1.0 - coeff.a1 + coeff.a2;
-            if den_ny.abs() > 1e-12 {
-                nyq_mag *= ((coeff.b0 - coeff.b1 + coeff.b2) / den_ny).abs();
-            }
-        }
-        let mut max_mag = dc_mag.max(nyq_mag).max(1.0_f64);
-
-        // Dense logarithmic sweep: with Q clamped to <= 100 by the biquad, the
-        // narrowest peak (at 20 Hz) is ~0.2 Hz wide, while 4096 points give a
-        // ~0.034 Hz step there — comfortably inside the peak lobe. The sweep
-        // only has to *locate* the lobe; golden-section refinement below
-        // measures its apex exactly.
-        const SWEEP_POINTS: usize = 4096;
-        let log_min = min_f.ln();
-        let log_max = max_f.ln();
-        let log_step = (log_max - log_min) / SWEEP_POINTS as f64;
-
-        let mut best_log_f = log_min;
-        let mut best_index = 0usize;
-        for i in 0..=SWEEP_POINTS {
-            let log_f = log_min + i as f64 * log_step;
-            let mag = eval_total_magnitude(log_f.exp(), &active_coeffs, sr);
-            if mag > max_mag {
-                max_mag = mag;
-                best_log_f = log_f;
-                best_index = i;
-            }
-        }
-
-        // Refine around the best interior sweep point.
-        let lo_log = if best_index > 0 {
-            best_log_f - log_step
-        } else {
-            log_min
-        };
-        let hi_log = if best_index < SWEEP_POINTS {
-            best_log_f + log_step
-        } else {
-            log_max
-        };
-        if hi_log > lo_log {
-            let refined = refine_max_magnitude(lo_log.exp(), hi_log.exp(), |freq| {
-                eval_total_magnitude(freq, &active_coeffs, sr)
-            });
-            max_mag = max_mag.max(refined);
-        }
-
-        if max_mag > 1.0 {
-            (20.0 * max_mag.log10()) as f32
-        } else {
-            0.0
-        }
+        headroom::max_curve_gain_db(&active_coeffs, sr as f64, min_f, max_f) as f32
     }
 
     /// Process an audio frame (alternative API)
@@ -773,6 +737,25 @@ impl ParametricEq {
         self.refresh_auto_headroom();
     }
 
+    /// Set a band's parameters with its width given in any of the spellings
+    /// the file formats use (`Q`, `BW Oct`, `BW Hz`, `S`).
+    ///
+    /// The width is converted to the Q this EQ's biquads take
+    /// (`config::eq_width`), after the gain is clamped the way
+    /// [`Self::set_band`] clamps it — so an imported `S 0.5` shelf and a hand-
+    /// typed `Q 0.49` land on the same filter. `EqBandParams::q` in `params`
+    /// is ignored; the width argument is the width.
+    pub fn set_band_width(&mut self, index: usize, params: EqBandParams, width: config::Bandwidth) {
+        let mut params = params;
+        let gain = if params.gain_db.is_finite() {
+            params.gain_db.clamp(-MAX_BAND_GAIN_DB, MAX_BAND_GAIN_DB)
+        } else {
+            params.gain_db
+        };
+        params.q = width.to_q(params.frequency, gain);
+        self.set_band(index, params);
+    }
+
     /// Replace the complete band layout in one atomic update.
     ///
     /// This is the path every multi-band edit must take. Calling [`Self::set_band`]
@@ -790,7 +773,12 @@ impl ParametricEq {
         if self.bands.len() != n {
             self.bands.clear();
             self.bands.reserve(n);
-            self.bands.extend((0..n).map(|_| EqBand::new()));
+            let mode = self.bandwidth_mode;
+            self.bands.extend((0..n).map(|_| {
+                let mut band = EqBand::new();
+                band.set_bandwidth_mode(mode);
+                band
+            }));
         }
         for (index, params) in params.iter().copied().take(n).enumerate() {
             let band = &mut self.bands[index];
@@ -811,7 +799,12 @@ impl ParametricEq {
         if self.bands.len() == n {
             return;
         }
-        self.bands.resize_with(n, EqBand::new);
+        let mode = self.bandwidth_mode;
+        self.bands.resize_with(n, || {
+            let mut band = EqBand::new();
+            band.set_bandwidth_mode(mode);
+            band
+        });
         self.refresh_auto_headroom();
     }
 
@@ -870,6 +863,44 @@ impl ParametricEq {
         self.treble_band.params.enabled = clamped.abs() > 0.001;
         self.treble_band.update_coefficients(self.sample_rate);
         self.refresh_auto_headroom();
+    }
+
+    /// Choose what every band's stored `q` means.
+    ///
+    /// The default, [`BandwidthMode::EquivalentQ`], is the cookbook Q the EQ
+    /// has always used. [`BandwidthMode::NyquistOctaves`] reads each band's `q`
+    /// as the low-frequency equivalent of an octave width and designs the band
+    /// so that width holds up to Nyquist, which is what an Equalizer APO
+    /// `BW Oct` curve means and what a 1/3-octave graphic EQ wants above
+    /// ~10 kHz (a `Q`-parameterised band narrows there).
+    ///
+    /// Applies to the parametric bands and to the bass/treble tone shelves,
+    /// and to any band created later, so it survives a layout change. This is
+    /// a configuration switch: it swaps the filters the bands are running, so
+    /// it snaps rather than ramps — set it while the stage is bypassed or
+    /// between tracks. Returns `false` (and changes nothing) when the mode is
+    /// already active, so a caller can skip the repaint.
+    pub fn set_bandwidth_mode(&mut self, mode: BandwidthMode) -> bool {
+        if self.bandwidth_mode == mode {
+            return false;
+        }
+        self.bandwidth_mode = mode;
+        for band in &mut self.bands {
+            band.set_bandwidth_mode(mode);
+        }
+        self.bass_band.set_bandwidth_mode(mode);
+        self.treble_band.set_bandwidth_mode(mode);
+        // The curve did not change, but the response did: a graphic EQ's
+        // octave bands reach higher than their Q-equivalents, so the headroom
+        // derived from the curve has to be re-derived.
+        self.refresh_auto_headroom();
+        true
+    }
+
+    /// What this EQ's band `q` values mean.
+    #[inline]
+    pub fn bandwidth_mode(&self) -> BandwidthMode {
+        self.bandwidth_mode
     }
 
     /// Update sample rate and recompute all coefficients
@@ -936,49 +967,6 @@ fn apply_band_params(band: &mut EqBand, index: usize, params: EqBandParams) {
     }
     band.params.filter_type = params.filter_type;
     band.params.enabled = params.enabled;
-}
-
-/// Product of the magnitude responses of `coeffs` at `freq_hz` (linear).
-#[inline]
-fn eval_total_magnitude(
-    freq_hz: f64,
-    coeffs: &[crate::dsp::biquad::BiquadCoeffs<f64>],
-    sample_rate: f32,
-) -> f64 {
-    let mut total = 1.0_f64;
-    for coeff in coeffs {
-        total *= coeff.evaluate_magnitude(freq_hz as f32, sample_rate);
-    }
-    total
-}
-
-/// Maximise a unimodal magnitude function over `[a, b]` via golden-section
-/// search, returning the largest magnitude encountered. Convergence is
-/// ~1e-3 Hz in linear frequency — far finer than any practical EQ bandwidth.
-fn refine_max_magnitude(mut a: f64, mut b: f64, f: impl Fn(f64) -> f64) -> f64 {
-    const INV_PHI: f64 = 0.618_033_988_749_894_9;
-    let mut c = b - INV_PHI * (b - a);
-    let mut d = a + INV_PHI * (b - a);
-    let mut fc = f(c);
-    let mut fd = f(d);
-    let mut best = fc.max(fd);
-    while (b - a).abs() > 1e-3 {
-        if fc < fd {
-            a = c;
-            c = d;
-            fc = fd;
-            d = a + INV_PHI * (b - a);
-            fd = f(d);
-        } else {
-            b = d;
-            d = c;
-            fd = fc;
-            c = b - INV_PHI * (b - a);
-            fc = f(c);
-        }
-        best = best.max(fc).max(fd);
-    }
-    best
 }
 
 #[cfg(test)]

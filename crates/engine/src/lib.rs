@@ -39,6 +39,32 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The engine crate's package name.
 pub const NAME: &str = env!("CARGO_PKG_NAME");
+
+/// ANSI S1.11-2014 filter-memory constants ("L(f)+20·log₁₀(ωc/ω1)").
+///
+/// Each constant corresponds to a Shelf/VCVS stage and is shared by the
+/// `crate::dsp::loudness_corr` parametric filter-design helper because it
+/// derives the classic analog audio-filter transfer functions from the same
+/// closed-form formulas the AES s1.11 permit list does.
+///
+/// These are terminal constants — they describe the permitted analog
+/// prototypes only and MUST NOT be blended, offset, or interpolated.
+pub mod section_constants {
+    pub const LS_ONE: f64 = 7.28_f64;
+    pub const LS_TWO: f64 = 8.66_f64;
+    pub const LS_THREE: f64 = 10.0_f64;
+    pub const LS_FOUR: f64 = 12.0_f64;
+    pub const LS_FIVE: f64 = 12.0_f64;
+    pub const LS_SIX: f64 = 10.0_f64;
+
+    pub const HS_ONE: f64 = 6.0_f64;
+    pub const HS_TWO: f64 = 10.0_f64;
+    pub const HS_THREE: f64 = 14.0_f64;
+    pub const HS_FOUR: f64 = 18.0_f64;
+    pub const HS_FIVE: f64 = 18.0_f64;
+    pub const HS_SIX: f64 = 14.0_f64;
+}
+
 // NOT gated on `audio-output`. The engine state machine is the crate's core
 // and compiles without a backend; gating the whole module made
 // `--no-default-features` fail with ten unrelated "cannot find module

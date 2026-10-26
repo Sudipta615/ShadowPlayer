@@ -6,6 +6,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.20.0] - 2026-10-26
+
+*Released with audio-engine 1.9.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Equalizer bandwidth models & filter design suite.** `crates/engine/src/dsp/filter_design.rs`
+  and `crates/engine/crates/config/src/eq_width.rs` introduce comprehensive bandwidth mode
+  representations: standard quality factor ($Q$), octave bandwidth (`BW Oct`), frequency
+  bandwidth in Hertz (`BW Hz`), and shelf slope ($S$). Equalizer text importing now parses
+  and converts `BW Oct`, `BW Hz`, and shelf slope $S$ transparently to and from $Q$.
+- **Matched Vicanek biquads and Butterworth filter ladders.** Dedicated filter design
+  support for Vicanek-matched digital biquads that eliminate high-frequency cramping near
+  the Nyquist boundary, along with cascade generator helpers for high-order Butterworth filters.
+- **Dynamic loudness correction curves.** ANSI S1.11-2014 / ISO 226 equal-loudness contour
+  compensation modules (`dsp::loudness_corr`) to accurately adjust bass and treble perception
+  at varying listening levels without manual tone control adjustment.
+
+### Fixed
+- **Equalizer disabled band passthrough is flat unity.** When an EQ band is disabled,
+  its coefficients now target a flat Peaking filter with 0.0 dB gain ($H(z) = 1.0$)
+  rather than keeping its active filter type (which previously continued cutting or filtering
+  frequencies for LowPass, HighPass, Bandpass, and Notch bands).
+- **Logarithmic parameter smoothing in EQ biquads.** `EqParams::lerp` now interpolates
+  frequency and Q logarithmically/exponentially across parameter updates. This removes
+  audible zipper noise, parameter clustering in upper octaves, and coefficient instability
+  during interactive sweeps.
+- **Sample-rate invariant DC blocking in Bass Enhancer.** Replaced the static sample-rate
+  dependent DC pole (`0.995`, which drifted from 35 Hz at 44.1 kHz to ~153 Hz at 192 kHz)
+  with a dynamic, sample-rate invariant 10 Hz cutoff filter ($e^{-2\pi \cdot 10 / f_s}$),
+  preserving sub-bass content at high sample rates (88.2 kHz - 768 kHz).
+- **Non-finite sample protection and anti-denormal flushing across DSP chain.**
+  Added sanitization against NaN/Inf input samples, denormal flushing, and stability bounds
+  across the Simper State Variable Filter (SVF), Bass Enhancer harmonics generator, and
+  Dynamic Equalizer envelope detectors, preventing DSP state latching, denormal CPU spikes,
+  and digital blowups.
+- **Headroom estimator accounts for resonant filters and bandwidth modes.**
+  The equalizer headroom estimation now evaluates active resonant filters (`LowPass`,
+  `HighPass`, `Bandpass`, `Notch`) and active bandwidth modes, preventing digital clipping
+  when steep resonant slopes or high Q values are active.
+
+### Testing and release
+- Comprehensive unit test suites added for SVF non-finite rejection, dynamic EQ non-finite
+  rejection, sample-rate invariant bass enhancer DC pole, disabled lowpass band passthrough,
+  and resonant lowpass headroom estimation. Full workspace tests, clippy with denied warnings,
+  and engine test suites pass.
+
 ## [0.19.0] - 2026-10-25
 
 *Released with audio-engine 1.8.0. The player and the engine are versioned separately and released

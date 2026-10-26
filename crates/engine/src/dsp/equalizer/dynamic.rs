@@ -250,15 +250,32 @@ impl DynamicEqBand {
             // 1. Process detector over this chunk to find peak envelope
             let mut chunk_env_max = 0.0f32;
             for i in offset..offset + chunk_len {
-                let l_sample = left[i] as f32;
-                let r_sample = right[i] as f32;
-                let sc = ext_sc.map(|(sl, sr)| (sl[i], sr[i]));
+                let l_sample = if left[i].is_finite() {
+                    left[i] as f32
+                } else {
+                    0.0
+                };
+                let r_sample = if right[i].is_finite() {
+                    right[i] as f32
+                } else {
+                    0.0
+                };
+                let sc = ext_sc.map(|(sl, sr)| {
+                    let sl_f = if sl[i].is_finite() { sl[i] } else { 0.0 };
+                    let sr_f = if sr[i].is_finite() { sr[i] } else { 0.0 };
+                    (sl_f, sr_f)
+                });
                 let (el, er) = self.detector.process_frame(l_sample, r_sample, sc);
-                chunk_env_max = chunk_env_max.max(el.max(er));
+                let frame_max = if el.is_finite() && er.is_finite() {
+                    el.max(er)
+                } else {
+                    0.0
+                };
+                chunk_env_max = chunk_env_max.max(frame_max);
             }
 
             // 2. Derive dynamic gain for this sub-block
-            let env_db = if chunk_env_max > 1e-6 {
+            let env_db = if chunk_env_max.is_finite() && chunk_env_max > 1e-6 {
                 20.0 * chunk_env_max.log10()
             } else {
                 -120.0
@@ -277,15 +294,29 @@ impl DynamicEqBand {
                 self.params.static_gain_db
             };
 
+            let target_gain_db = if target_gain_db.is_finite() {
+                target_gain_db.clamp(
+                    self.params.static_gain_db - range_db,
+                    self.params.static_gain_db + range_db,
+                )
+            } else {
+                self.params.static_gain_db
+            };
+
             // Smooth gain transition across sub-blocks to prevent zipper noise
             let smoothing_alpha = 0.5f32;
+            if !self.current_gain_db.is_finite() {
+                self.current_gain_db = self.params.static_gain_db;
+            }
             self.current_gain_db += smoothing_alpha * (target_gain_db - self.current_gain_db);
             self.recompute_coeffs(self.current_gain_db);
 
             // 3. Filter the audio samples in this sub-block
             for i in offset..offset + chunk_len {
-                left[i] = self.state_l.process(left[i], &self.coeffs);
-                right[i] = self.state_r.process(right[i], &self.coeffs);
+                let l_in = if left[i].is_finite() { left[i] } else { 0.0 };
+                let r_in = if right[i].is_finite() { right[i] } else { 0.0 };
+                left[i] = self.state_l.process(l_in, &self.coeffs);
+                right[i] = self.state_r.process(r_in, &self.coeffs);
             }
 
             offset += chunk_len;
@@ -493,6 +524,47 @@ mod tests {
 
         for (a, b) in l.iter().zip(original_l.iter()) {
             assert!((a - b).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn test_dynamic_eq_non_finite_rejection() {
+        let sample_rate = 48_000.0;
+        let mut dyn_eq = DynamicEq::new(sample_rate);
+        if let Some(b) = dyn_eq.band_mut(0) {
+            b.set_params(DynamicEqBandParams {
+                frequency: 1000.0,
+                q: 1.414,
+                static_gain_db: 0.0,
+                dynamic_gain_db: -6.0,
+                threshold_db: -20.0,
+                ratio: 2.0,
+                attack_ms: 1.0,
+                release_ms: 50.0,
+                range_db: 6.0,
+                filter_type: EqFilterType::Peaking,
+                detector_mode: DetectionMode::Peak,
+                enabled: true,
+            });
+        }
+        dyn_eq.set_enabled(true);
+
+        // Feed block containing NaNs
+        let mut l = vec![f64::NAN; 64];
+        let mut r = vec![f64::NAN; 64];
+        dyn_eq.process_block(&mut l, &mut r, None);
+
+        // Output must be finite
+        for (&a, &b) in l.iter().zip(r.iter()) {
+            assert!(a.is_finite() && b.is_finite());
+        }
+
+        // Subsequent valid block must process normally without state poisoning
+        let mut valid_l = vec![0.5; 64];
+        let mut valid_r = vec![0.5; 64];
+        dyn_eq.process_block(&mut valid_l, &mut valid_r, None);
+        for (&a, &b) in valid_l.iter().zip(valid_r.iter()) {
+            assert!(a.is_finite() && b.is_finite());
         }
     }
 }
