@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.22.0] - 2026-10-26
+
+*Released with audio-engine 1.10.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Bit-perfect uncompressed WAV transcode & batch export.** Added 16-bit and 24-bit PCM WAV encoding in `crates/media-tools` and batch transcode export options in `MediaToolsModal` for CD mastering and hardware player compatibility.
+- **Audiophile file organization tokens.** Extended `library::organize` with `{format}`, `{samplerate}`, `{bitdepth}`, `{bitrate}`, and `{channels}` pattern tokens for hierarchical audio folder organization.
+- **Advanced smart playlist fields.** Added `Bitrate`, `Channels`, `FileSize`, `TrackNumber`, and `DiscNumber` to smart playlist filtering for Hi-Res audio, surround sound, and multi-disc collection querying.
+
+### Optimized & Hardened
+- **High-quality JPEG thumbnail cache.** Switched thumbnail disk caching from PNG to 85% high-quality JPEG in `library::ArtworkManager`, achieving an ~85% reduction in disk cache footprint (e.g. 4 GB to 600 MB for 100k tracks) and faster read times on mechanical HDDs, with full backward compatibility for existing PNG caches.
+- **Decompression bomb & DoS defense.** Configured strict memory limits (32 MB / 64 MB) and dimension bounds (4096px / 8192px) on image decoders; offloaded image decoding from the UI thread to background workers.
+- **Dual-core CPU starvation prevention.** Added cooperative scheduler yields (`thread::yield_now()`) every 100 scanned files during library indexing to guarantee audio playback and UI responsiveness on 2-core machines.
+- **Spinning HDD & SQLite optimization.** Single-pass directory inode preloading (`list_scan_entries_under_prefix`) eliminating thousands of sequential SQLite queries; optimized SQLite PRAGMAs (`cache_size = -8000`, `temp_store = MEMORY`, `mmap_size = 33554432`).
+- **Single-pass metadata tag reading.** Shared single `lofty` parser instances across tags, embedded lyrics, and cover artwork, cutting file reads in half.
+- **Minimized window throttling.** Throttled invisible window repaints to 500 ms (2 Hz) when minimized, cutting background GPU/APU power draw to ~0%.
+- **Input sanitization.** Added 10 MB playlist limits and null-byte injection guards in M3U/PLS parsers, plus 1 MB text limit and 16 MB SYLT frame cap on lyrics.
+
 ## [0.21.0] - 2026-10-26
 
 *Released with audio-engine 1.10.0. The player and the engine are versioned separately and released
