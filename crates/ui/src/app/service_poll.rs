@@ -609,7 +609,18 @@ impl ShadowPlayerApp {
 
         // 3. Reactive Repaints (capped at 30fps during playback for low CPU; 0% idle when paused)
         let is_playing = self.session.is_playing();
-        if is_playing || self.scanner_service.is_scanning() {
+        let is_minimized = ctx.input(|i| i.viewport().minimized == Some(true));
+        if is_minimized {
+            // When minimized, the window is invisible. Throttle repaints to 500ms (2Hz)
+            // to drop APU and GPU rendering usage to near zero while background audio plays.
+            if is_playing
+                || self.scanner_service.is_scanning()
+                || self.loudness_service.is_running()
+                || self.import_service.is_active()
+            {
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            }
+        } else if is_playing || self.scanner_service.is_scanning() {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
         } else if self.loudness_service.is_running() {
             // Progress bar only needs a couple of updates per second.

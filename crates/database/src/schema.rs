@@ -17,6 +17,17 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if let Err(e) = conn.execute_batch("PRAGMA synchronous = NORMAL;") {
         warn!("Could not set PRAGMA synchronous: {e}");
     }
+    // Optimizations for low-spec hardware and spinning HDDs:
+    // 1. -8000 KiB (8 MiB) cache keeps index pages in RAM, preventing mechanical seek latency.
+    // 2. MEMORY temp_store ensures query sorts/temp tables don't thrash spinning disks.
+    // 3. Bounded 32 MiB mmap reduces read() syscall overhead while staying safe on low-RAM machines.
+    if let Err(e) = conn.execute_batch(
+        "PRAGMA cache_size = -8000;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA mmap_size = 33554432;",
+    ) {
+        warn!("Could not set performance PRAGMAs: {e}");
+    }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let foreign_keys: i64 = conn.query_row("PRAGMA foreign_keys;", [], |r| r.get(0))?;
     if foreign_keys != 1 {

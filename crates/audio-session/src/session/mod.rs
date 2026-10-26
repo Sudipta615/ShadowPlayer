@@ -90,17 +90,27 @@ impl AudioSession {
             .name("shadow-engine-events".into())
             .spawn(move || {
                 while fw_running.load(Ordering::Relaxed) {
-                    let mut had_event = false;
-                    while let Ok(ev) = engine_event_rx.try_recv() {
-                        forward(&event_tx, ev, "engine");
-                        had_event = true;
-                    }
-                    while let Ok(out_ev) = output_event_rx.try_recv() {
-                        forward(&out_tx, out_ev, "output");
-                        had_event = true;
-                    }
-                    if !had_event {
-                        std::thread::sleep(Duration::from_millis(10));
+                    let ticker = crossbeam::channel::after(Duration::from_millis(150));
+                    crossbeam::channel::select! {
+                        recv(engine_event_rx) -> msg => match msg {
+                            Ok(ev) => {
+                                forward(&event_tx, ev, "engine");
+                                while let Ok(ev) = engine_event_rx.try_recv() {
+                                    forward(&event_tx, ev, "engine");
+                                }
+                            }
+                            Err(_) => break,
+                        },
+                        recv(output_event_rx) -> msg => match msg {
+                            Ok(out_ev) => {
+                                forward(&out_tx, out_ev, "output");
+                                while let Ok(out_ev) = output_event_rx.try_recv() {
+                                    forward(&out_tx, out_ev, "output");
+                                }
+                            }
+                            Err(_) => break,
+                        },
+                        recv(ticker) -> _ => {}
                     }
                 }
             });

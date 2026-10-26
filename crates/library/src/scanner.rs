@@ -60,9 +60,13 @@ impl LibraryScanner {
 
         info!("Starting incremental library scan for: {:?}", root);
 
-        // Album images referenced by a `.cue` sheet are indexed as that sheet's
-        // tracks, so they must not *also* be indexed as one long track.
-        let cue_covered = self.collect_cue_covered_audio(root, &cancel_flag);
+        // Preload existing tracks under this root into a fast in-memory map.
+        // For unchanged files (the overwhelming majority), this avoids issuing
+        // thousands of individual SQLite queries, dramatically reducing disk head
+        // seeks on spinning HDDs and CPU context switches on dual-core hardware.
+        let existing_map = repo
+            .list_scan_entries_under_prefix(root)
+            .unwrap_or_default();
 
         // Every path the walk reached, so a file that vanished can be pruned
         // afterwards. Pruning is skipped if the walk hit errors, because a
@@ -71,9 +75,10 @@ impl LibraryScanner {
         let mut walk_errors = 0usize;
         let mut skipped_count = 0usize;
 
-        // `follow_links(false)`: following symlinks let a scan index files
-        // outside the chosen root (and index them twice through an alias).
+        // Perform a single filesystem walk rather than walking the tree twice.
+        // This cuts spinning HDD directory traversal seeks by half.
         let walker = WalkDir::new(root).follow_links(false).into_iter();
+        let mut entries = Vec::new();
 
         for entry in walker {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -81,14 +86,39 @@ impl LibraryScanner {
                 return;
             }
 
-            let entry = match entry {
-                Ok(entry) => entry,
+            match entry {
+                Ok(entry) => entries.push(entry),
                 Err(e) => {
                     walk_errors += 1;
                     warn!("Skipping unreadable entry under {}: {}", root.display(), e);
-                    continue;
                 }
-            };
+            }
+        }
+
+        // Album images referenced by a `.cue` sheet are indexed as that sheet's
+        // tracks, so they must not *also* be indexed as one long track.
+        let mut cue_covered: HashSet<PathBuf> = HashSet::new();
+        for entry in &entries {
+            if entry.file_type().is_file() {
+                let p = entry.path();
+                let is_cue = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("cue"))
+                    .unwrap_or(false);
+                if is_cue {
+                    if let Some(audio) = metadata::cue_referenced_audio(p) {
+                        cue_covered.insert(audio);
+                    }
+                }
+            }
+        }
+
+        for entry in entries {
+            if cancel_flag.load(Ordering::Relaxed) {
+                info!("Library scan cancelled");
+                return;
+            }
 
             // Directories are not descended into when they are symlinks, but a
             // symlink to a file is still a file worth indexing.
@@ -123,6 +153,12 @@ impl LibraryScanner {
 
             scanned_count += 1;
 
+            // Yield occasionally to avoid pegging low-end dual-core CPUs at 100%
+            // and starving the realtime audio playback or UI rendering threads.
+            if scanned_count % 100 == 0 {
+                std::thread::yield_now();
+            }
+
             // Everything from here needs the file's metadata. Failing to get
             // it used to skip the file *silently*: not indexed, not counted,
             // not logged.
@@ -144,11 +180,9 @@ impl LibraryScanner {
                     .unwrap_or((0, 0));
                 let size = metadata.len();
 
-                if let Ok(Some(existing)) = repo.get_by_path(path) {
-                    // A row written before `mtime_nanos` existed carries no
-                    // sub-second part; accept the second-granularity match once
-                    // (and record the finer value) instead of forcing a full
-                    // re-decode of the library after the upgrade.
+                // Fast in-memory check against preloaded database records.
+                // Zero SQLite queries are executed for unchanged files!
+                if let Some(existing) = existing_map.get(path) {
                     let same_subsecond =
                         existing.mtime_nanos == mtime_nanos || existing.mtime_nanos == 0;
                     if existing.mtime_unix_secs == mtime_secs
@@ -178,11 +212,7 @@ impl LibraryScanner {
                     match metadata::extract_cue_metadata(path) {
                         Ok(cue_tracks) => {
                             for extracted in cue_tracks {
-                                let is_new = repo
-                                    .get_by_path(&extracted.track.path)
-                                    .ok()
-                                    .flatten()
-                                    .is_none();
+                                let is_new = !existing_map.contains_key(&extracted.track.path);
                                 if is_new {
                                     added_count += 1;
                                 } else {
@@ -219,7 +249,7 @@ impl LibraryScanner {
                 // File is new or changed - extract metadata
                 match extract_metadata(path) {
                     Ok(mut extracted) => {
-                        let already_indexed = repo.get_by_path(path).ok().flatten().is_some();
+                        let already_indexed = existing_map.contains_key(path);
 
                         // A file we have never seen at this path may simply have
                         // been moved or renamed; adopt the old identity when the
@@ -360,6 +390,7 @@ impl LibraryScanner {
 
     /// The album images that a `.cue` sheet in `root` claims, so the walk can
     /// index the sheet instead of the image.
+    #[allow(dead_code)]
     fn collect_cue_covered_audio(&self, root: &Path, cancel_flag: &AtomicBool) -> HashSet<PathBuf> {
         let mut covered = HashSet::new();
         let walker = WalkDir::new(root).follow_links(false).into_iter();

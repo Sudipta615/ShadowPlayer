@@ -10,6 +10,56 @@ use std::path::{Path, PathBuf};
 
 use super::common::{fts_query, like_prefix, map_track, parse_id};
 
+/// Compact metadata record used to accelerate library scanning without loading
+/// full Track structures or performing individual queries per track.
+#[derive(Debug, Clone)]
+pub struct TrackScanEntry {
+    pub id: TrackId,
+    pub path: PathBuf,
+    pub mtime_unix_secs: i64,
+    pub mtime_nanos: u32,
+    pub file_size_bytes: u64,
+    pub content_hash: Option<String>,
+    pub file_id: Option<String>,
+}
+
+const UPSERT_TRACK_SQL: &str = "INSERT INTO tracks (
+    id, path, title, artist, album, genre, year, track_number, disc_number,
+    duration_secs, sample_rate, channels, format, bitrate_kbps, bit_depth, is_lossless,
+    replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
+    replaygain_album_db, replaygain_album_peak,
+    file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash, file_id,
+    is_favorite, rating, has_lyrics, play_count, skip_count, last_played_at, added_at, bpm
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
+ON CONFLICT(path) DO UPDATE SET
+    title = excluded.title,
+    artist = excluded.artist,
+    album = excluded.album,
+    genre = excluded.genre,
+    year = excluded.year,
+    track_number = excluded.track_number,
+    disc_number = excluded.disc_number,
+    duration_secs = excluded.duration_secs,
+    sample_rate = excluded.sample_rate,
+    channels = excluded.channels,
+    format = excluded.format,
+    bitrate_kbps = excluded.bitrate_kbps,
+    bit_depth = excluded.bit_depth,
+    is_lossless = excluded.is_lossless,
+    replaygain_track_db = excluded.replaygain_track_db,
+    replaygain_track_peak = excluded.replaygain_track_peak,
+    r128_loudness_lufs = excluded.r128_loudness_lufs,
+    replaygain_album_db = excluded.replaygain_album_db,
+    replaygain_album_peak = excluded.replaygain_album_peak,
+    has_lyrics = excluded.has_lyrics,
+    skip_count = excluded.skip_count,
+    bpm = excluded.bpm,
+    file_size_bytes = excluded.file_size_bytes,
+    mtime_unix_secs = excluded.mtime_unix_secs,
+    mtime_nanos = excluded.mtime_nanos,
+    content_hash = excluded.content_hash,
+    file_id = COALESCE(excluded.file_id, tracks.file_id)";
+
 pub struct TrackRepo {
     db: Database,
 }
@@ -22,42 +72,7 @@ impl TrackRepo {
     pub fn upsert(&self, track: &Track) -> Result<()> {
         self.db.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO tracks (
-                    id, path, title, artist, album, genre, year, track_number, disc_number,
-                    duration_secs, sample_rate, channels, format, bitrate_kbps, bit_depth, is_lossless,
-                    replaygain_track_db, replaygain_track_peak, r128_loudness_lufs,
-                    replaygain_album_db, replaygain_album_peak,
-                    file_size_bytes, mtime_unix_secs, mtime_nanos, content_hash, file_id,
-                    is_favorite, rating, has_lyrics, play_count, skip_count, last_played_at, added_at, bpm
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
-                ON CONFLICT(path) DO UPDATE SET
-                    title = excluded.title,
-                    artist = excluded.artist,
-                    album = excluded.album,
-                    genre = excluded.genre,
-                    year = excluded.year,
-                    track_number = excluded.track_number,
-                    disc_number = excluded.disc_number,
-                    duration_secs = excluded.duration_secs,
-                    sample_rate = excluded.sample_rate,
-                    channels = excluded.channels,
-                    format = excluded.format,
-                    bitrate_kbps = excluded.bitrate_kbps,
-                    bit_depth = excluded.bit_depth,
-                    is_lossless = excluded.is_lossless,
-                    replaygain_track_db = excluded.replaygain_track_db,
-                    replaygain_track_peak = excluded.replaygain_track_peak,
-                    r128_loudness_lufs = excluded.r128_loudness_lufs,
-                    replaygain_album_db = excluded.replaygain_album_db,
-                    replaygain_album_peak = excluded.replaygain_album_peak,
-                    has_lyrics = excluded.has_lyrics,
-                    skip_count = excluded.skip_count,
-                    bpm = excluded.bpm,
-                    file_size_bytes = excluded.file_size_bytes,
-                    mtime_unix_secs = excluded.mtime_unix_secs,
-                    mtime_nanos = excluded.mtime_nanos,
-                    content_hash = excluded.content_hash,
-                    file_id = COALESCE(excluded.file_id, tracks.file_id)",
+                UPSERT_TRACK_SQL,
                 params![
                     track.id.to_string(),
                     encode_path_key(&track.path),
@@ -96,11 +111,60 @@ impl TrackRepo {
                 ],
             )?;
 
-            // NOTE: the `artists` / `albums` tables are vestigial — albums and
-            // artists are derived from `tracks` on demand (see AlbumRepo /
-            // ArtistRepo). Maintaining counters here doubled the write cost of
-            // every import and inflated on every re-upsert, so it is removed.
+            Ok(())
+        })
+    }
 
+    /// Upsert multiple tracks in a single transaction. Drastically reduces
+    /// disk sync overhead on spinning HDDs and low-spec storage during scans.
+    pub fn upsert_batch(&self, tracks: &[Track]) -> Result<()> {
+        if tracks.is_empty() {
+            return Ok(());
+        }
+        self.db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            {
+                let mut stmt = tx.prepare_cached(UPSERT_TRACK_SQL)?;
+                for track in tracks {
+                    stmt.execute(params![
+                        track.id.to_string(),
+                        encode_path_key(&track.path),
+                        track.title,
+                        track.artist,
+                        track.album,
+                        track.genre,
+                        track.year,
+                        track.track_number,
+                        track.disc_number,
+                        track.duration_secs,
+                        track.sample_rate,
+                        track.channels as i64,
+                        track.format,
+                        track.bitrate_kbps,
+                        track.bit_depth,
+                        if track.is_lossless { 1 } else { 0 },
+                        track.replaygain_track_db,
+                        track.replaygain_track_peak,
+                        track.r128_loudness_lufs,
+                        track.replaygain_album_db,
+                        track.replaygain_album_peak,
+                        track.file_size_bytes as i64,
+                        track.mtime_unix_secs,
+                        track.mtime_nanos,
+                        track.content_hash,
+                        track.file_id,
+                        if track.is_favorite { 1 } else { 0 },
+                        track.rating.min(5) as i64,
+                        if track.has_lyrics { 1 } else { 0 },
+                        track.play_count,
+                        track.skip_count as i64,
+                        track.last_played_at,
+                        track.added_at,
+                        track.bpm,
+                    ])?;
+                }
+            }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -597,6 +661,51 @@ impl TrackRepo {
                 out.push(r?);
             }
             Ok(out)
+        })
+    }
+
+    /// Fast census of all tracks in `prefix` with their file identity and timestamp info.
+    /// Used by the library scanner to check for unchanged tracks in memory without issuing
+    /// thousands of individual SELECT queries over spinning disk.
+    pub fn list_scan_entries_under_prefix(
+        &self,
+        prefix: &Path,
+    ) -> Result<std::collections::HashMap<PathBuf, TrackScanEntry>> {
+        let like = like_prefix(prefix);
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, path, mtime_unix_secs, mtime_nanos, file_size_bytes, content_hash, file_id
+                 FROM tracks WHERE path LIKE ?1 ESCAPE '\\';",
+            )?;
+            let iter = stmt.query_map(params![like], |row| {
+                let id_str: String = row.get(0)?;
+                let path_str: String = row.get(1)?;
+                let mtime_unix_secs: i64 = row.get(2)?;
+                let mtime_nanos: u32 = row.get(3)?;
+                let file_size_bytes: i64 = row.get(4)?;
+                let content_hash: Option<String> = row.get(5)?;
+                let file_id: Option<String> = row.get(6)?;
+                let id = parse_id(&id_str, "tracks.id")?;
+                let path = decode_path_key(&path_str);
+                Ok((
+                    path.clone(),
+                    TrackScanEntry {
+                        id,
+                        path,
+                        mtime_unix_secs,
+                        mtime_nanos,
+                        file_size_bytes: file_size_bytes.max(0) as u64,
+                        content_hash,
+                        file_id,
+                    },
+                ))
+            })?;
+            let mut map = std::collections::HashMap::new();
+            for r in iter {
+                let (k, v) = r?;
+                map.insert(k, v);
+            }
+            Ok(map)
         })
     }
 

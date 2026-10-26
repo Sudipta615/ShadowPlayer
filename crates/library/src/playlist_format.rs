@@ -151,6 +151,16 @@ pub fn sniff_format(bytes: &[u8], path: Option<&Path>) -> PlaylistFormat {
 
 /// Read a playlist file, whatever its format.
 pub fn parse_playlist(path: &Path) -> std::io::Result<Vec<ParsedPlaylist>> {
+    // Security bound: cap playlist files at 10MB to prevent memory exhaustion
+    const MAX_PLAYLIST_BYTES: u64 = 10 * 1024 * 1024;
+    let meta = std::fs::metadata(path)?;
+    if meta.len() > MAX_PLAYLIST_BYTES {
+        log::warn!(
+            "Playlist file {} exceeds 10MB limit; skipping",
+            path.display()
+        );
+        return Ok(Vec::new());
+    }
     let bytes = std::fs::read(path)?;
     let (text, guessed) = domain::text::decode_text_bytes(&bytes);
     if guessed {

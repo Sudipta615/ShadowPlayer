@@ -26,6 +26,12 @@ use lofty::tag::{ItemKey, Tag};
 /// prose when both are present: a file that carries timed lyrics is a file whose
 /// author wanted them to scroll. The value is returned verbatim otherwise;
 /// callers decide whether it is timed (LRC) or plain prose.
+/// Read lyrics embedded in a file's tags, if any.
+///
+/// Timed (`SYLT`) lyrics are converted to LRC and are preferred over unsynced
+/// prose when both are present: a file that carries timed lyrics is a file whose
+/// author wanted them to scroll. The value is returned verbatim otherwise;
+/// callers decide whether it is timed (LRC) or plain prose.
 pub fn extract_lyrics(path: &Path) -> Option<String> {
     let tagged = match lofty::read_from_path(path) {
         Ok(tagged) => tagged,
@@ -37,6 +43,11 @@ pub fn extract_lyrics(path: &Path) -> Option<String> {
         }
     };
 
+    extract_lyrics_from_tagged(&tagged, path)
+}
+
+/// Extract lyrics from an already-opened lofty TaggedFile, avoiding redundant disk I/O.
+pub fn extract_lyrics_from_tagged(tagged: &lofty::file::TaggedFile, path: &Path) -> Option<String> {
     // Timed lyrics win, then unsynced prose from the primary or any other tag.
     if let Some(lrc) = synced_lyrics(path) {
         return Some(lrc);
@@ -47,6 +58,16 @@ pub fn extract_lyrics(path: &Path) -> Option<String> {
         }
     }
     tagged.tags().iter().find_map(lyrics_in)
+}
+
+/// Check if an already-opened TaggedFile contains embedded lyrics without reading from disk again.
+pub fn has_embedded_lyrics_in_tagged(tagged: &lofty::file::TaggedFile) -> bool {
+    if let Some(tag) = tagged.primary_tag() {
+        if lyrics_in(tag).is_some() {
+            return true;
+        }
+    }
+    tagged.tags().iter().any(|t| lyrics_in(t).is_some())
 }
 
 /// Whether a track has any lyrics the player would show: embedded in its tags
@@ -64,7 +85,7 @@ pub fn has_lyrics(path: &Path) -> bool {
 ///
 /// Case-insensitive, matching `lyrics::find_sidecar_lyrics`: `Song.FLAC` may
 /// be accompanied by `song.LRC`.
-fn sidecar_lyrics_exists(song_path: &Path) -> bool {
+pub(crate) fn sidecar_lyrics_exists(song_path: &Path) -> bool {
     if song_path.with_extension("lrc").is_file() {
         return true;
     }
@@ -148,6 +169,8 @@ fn read_sylt_frame(path: &Path) -> Option<Vec<u8>> {
     use std::io::Read;
 
     let mut file = std::fs::File::open(path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+
     let mut header = [0u8; 10];
     file.read_exact(&mut header).ok()?;
     if &header[..3] != b"ID3" {
@@ -159,6 +182,13 @@ fn read_sylt_frame(path: &Path) -> Option<Vec<u8>> {
     }
     let unsynchronised = header[5] & 0x80 != 0;
     let size = synchsafe_u32(&header[6..10])? as usize;
+
+    // Security check: cap tag body size to 16MB and never allocate more than the file size
+    // to prevent memory exhaustion / DoS attacks from crafted headers.
+    const MAX_SAFE_TAG_SIZE: usize = 16 * 1024 * 1024;
+    if size > file_len as usize || size > MAX_SAFE_TAG_SIZE {
+        return None;
+    }
 
     let mut body = vec![0u8; size];
     file.read_exact(&mut body).ok()?;
@@ -190,6 +220,10 @@ fn read_sylt_frame(path: &Path) -> Option<Vec<u8>> {
             u32::from_be_bytes([body[pos + 4], body[pos + 5], body[pos + 6], body[pos + 7]])
                 as usize
         };
+        if frame_size == 0 {
+            pos += 10;
+            continue;
+        }
         let start = pos + 10;
         let end = start.checked_add(frame_size)?;
         if end > body.len() {

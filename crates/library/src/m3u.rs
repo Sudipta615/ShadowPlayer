@@ -137,7 +137,9 @@ fn is_windows_drive(text: &str) -> bool {
 /// exported elsewhere still resolve. Absolute paths are returned as-is.
 pub(crate) fn resolve(raw: &str, base_dir: Option<&Path>) -> PathBuf {
     let trimmed = raw.trim().trim_matches('"');
-    let unescaped = trimmed.replace('\\', "/");
+    // Strip null characters to prevent null-byte injection vulnerabilities
+    let clean = trimmed.replace('\0', "");
+    let unescaped = clean.replace('\\', "/");
 
     if unescaped.starts_with("file://") {
         if let Some(path) = file_uri_to_path(&unescaped) {
@@ -232,6 +234,16 @@ pub fn parse_m3u(text: &str, base_dir: Option<&Path>) -> Vec<M3uEntry> {
 
 /// Read and parse an M3U file, resolving relative paths against its directory.
 pub fn parse_m3u_file(path: &Path) -> std::io::Result<Vec<M3uEntry>> {
+    // Security bound: cap playlist files at 10MB to prevent memory exhaustion
+    const MAX_PLAYLIST_BYTES: u64 = 10 * 1024 * 1024;
+    let meta = std::fs::metadata(path)?;
+    if meta.len() > MAX_PLAYLIST_BYTES {
+        log::warn!(
+            "Playlist file {} exceeds 10MB limit; skipping",
+            path.display()
+        );
+        return Ok(Vec::new());
+    }
     // Tolerate the encodings a playlist exported elsewhere may use.
     let bytes = std::fs::read(path)?;
     let (text, guessed) = domain::text::decode_text_bytes(&bytes);

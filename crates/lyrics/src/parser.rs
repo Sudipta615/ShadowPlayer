@@ -210,6 +210,16 @@ fn read_sidecar(song_path: &Path) -> Option<String> {
 /// lyric sheet written by a Windows tag editor or a Japanese player used to be
 /// silently skipped. The bytes are decoded instead, and a guess is logged.
 fn read_text_file(path: &Path) -> Option<String> {
+    // Security check: cap lyric file size to 1MB to prevent memory exhaustion / DoS attacks.
+    const MAX_LYRIC_FILE_SIZE: u64 = 1024 * 1024;
+    let meta = fs::metadata(path).ok()?;
+    if meta.len() > MAX_LYRIC_FILE_SIZE {
+        log::warn!(
+            "Lyric file {} exceeds 1MB limit; skipping for safety",
+            path.display()
+        );
+        return None;
+    }
     let bytes = fs::read(path).ok()?;
     let (text, guessed) = domain::text::decode_text_bytes(&bytes);
     if guessed {

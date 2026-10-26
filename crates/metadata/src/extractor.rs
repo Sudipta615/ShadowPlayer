@@ -80,9 +80,14 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
             (sample_rate * channels as u32 * bits) / 1000
         }
     });
+    // Read tags via lofty once per file, shared between artwork,
+    // lyrics presence, and BPM extraction. This eliminates 2 to 3 redundant
+    // file opens and tag parses per audio track on disk.
+    let lofty_file = lofty::read_from_path(path).ok();
+
     let embedded_artwork = artwork.or_else(|| {
         use lofty::prelude::*;
-        let tagged_file = lofty::read_from_path(path).ok()?;
+        let tagged_file = lofty_file.as_ref()?;
         let tag = tagged_file
             .primary_tag()
             .or_else(|| tagged_file.first_tag())?;
@@ -94,15 +99,19 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         Some((picture.data().to_vec(), mime))
     });
 
-    // Index the lyric flag alongside the tags. The lyrics panel reads the same
-    // two sources, so "Has Lyrics" and the panel agree.
-    let has_lyrics = crate::has_lyrics(path);
+    // Check lyrics: if lofty already has them or if sidecar exists
+    let has_lyrics = if let Some(ref tagged) = lofty_file {
+        crate::lyrics::has_embedded_lyrics_in_tagged(tagged)
+            || crate::lyrics::sidecar_lyrics_exists(path)
+    } else {
+        crate::lyrics::sidecar_lyrics_exists(path)
+    };
 
-    // BPM is a first-class radio feature but not part of the engine's
-    // symphonia probe (which doesn't expose a typed tempo field). One lofty
-    // read here, alongside the lyric-flag check, keeps the extraction in the
-    // scanner where every other tag is read.
-    let bpm = extract_bpm(path);
+    let bpm = if let Some(ref tagged) = lofty_file {
+        extract_bpm_from_tagged(tagged)
+    } else {
+        None
+    };
 
     let track_id = TrackId::from_canonical_path(path);
     let now = std::time::SystemTime::now()
@@ -161,23 +170,29 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
     })
 }
 
-/// Read a track's tempo from its tags.
-///
-/// `TBPM`, `tmpo` and the MP4 `tmpo` atom all arrive as `IntegerBpm`; a few
-/// taggers write the free-form `BPM` key instead. Both are accepted, and a
-/// decimal value (`"128.5"`) is rounded because [`domain::models::Track`]
-/// stores a whole number of beats per minute.
-fn extract_bpm(path: &Path) -> Option<u16> {
+/// Read a track's tempo from an already-opened lofty TaggedFile.
+fn extract_bpm_from_tagged(tagged: &lofty::file::TaggedFile) -> Option<u16> {
     use lofty::prelude::*;
     use lofty::tag::ItemKey;
 
-    let tagged = lofty::read_from_path(path).ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
     let raw = tag
         .get(ItemKey::IntegerBpm)
         .and_then(|item| item.value().text())
         .or_else(|| tag.get(ItemKey::Bpm).and_then(|item| item.value().text()))?;
     parse_bpm(raw)
+}
+
+/// Read a track's tempo from its tags.
+///
+/// `TBPM`, `tmpo` and the MP4 `tmpo` atom all arrive as `IntegerBpm`; a few
+/// taggers write the free-form `BPM` key instead. Both are accepted, and a
+/// decimal value (`"128.5"`) is rounded because [`domain::models::Track`]
+/// stores a whole number of beats per minute.
+#[allow(dead_code)]
+fn extract_bpm(path: &Path) -> Option<u16> {
+    let tagged = lofty::read_from_path(path).ok()?;
+    extract_bpm_from_tagged(&tagged)
 }
 
 /// Parse the tag's textual tempo, tolerating `"128"`, `"128.0"` and `"128 BPM"`.

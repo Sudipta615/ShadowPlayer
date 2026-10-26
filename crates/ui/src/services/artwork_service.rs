@@ -138,28 +138,20 @@ impl ArtworkService {
         let cached_thumb = self.manager.get_cached_thumbnail_path(&id);
         let candidate = if cached_thumb.exists() {
             Some(cached_thumb)
-        } else if let Some(folder_art) = self.manager.find_folder_artwork(path) {
-            Some(folder_art)
-        } else if let Some(art) = path.extension().and_then(|_| {
-            let png = path.with_extension("png");
-            if png.exists() {
-                return Some(png);
-            }
-            let jpg = path.with_extension("jpg");
-            if jpg.exists() {
-                return Some(jpg);
-            }
-            None
-        }) {
-            Some(art)
-        } else if let Ok(extracted) = metadata::extract_metadata(path) {
-            if let Some((bytes, _)) = extracted.embedded_artwork {
-                self.manager.save_thumbnail(&id, &bytes)
-            } else {
-                None
-            }
         } else {
-            None
+            self.manager.find_folder_artwork(path).or_else(|| {
+                path.extension().and_then(|_| {
+                    let png = path.with_extension("png");
+                    if png.exists() {
+                        return Some(png);
+                    }
+                    let jpg = path.with_extension("jpg");
+                    if jpg.exists() {
+                        return Some(jpg);
+                    }
+                    None
+                })
+            })
         };
 
         let Some(art_file) = candidate else {
@@ -167,7 +159,36 @@ impl ArtworkService {
             return false;
         };
 
-        let Ok(img) = image::open(&art_file) else {
+        // Guard against oversized images stalling the UI thread or consuming excessive RAM
+        if std::fs::metadata(&art_file)
+            .map(|m| m.len() > 15 * 1024 * 1024)
+            .unwrap_or(true)
+        {
+            self.missing.insert(id);
+            return false;
+        }
+
+        let mut reader = match image::ImageReader::open(&art_file) {
+            Ok(r) => match r.with_guessed_format() {
+                Ok(guessed) => guessed,
+                Err(_) => {
+                    self.missing.insert(id);
+                    return false;
+                }
+            },
+            Err(_) => {
+                self.missing.insert(id);
+                return false;
+            }
+        };
+
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(4096);
+        limits.max_image_height = Some(4096);
+        limits.max_alloc = Some(32 * 1024 * 1024);
+        reader.limits(limits);
+
+        let Ok(img) = reader.decode() else {
             self.missing.insert(id);
             return false;
         };

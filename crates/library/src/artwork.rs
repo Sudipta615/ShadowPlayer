@@ -25,11 +25,26 @@ impl ArtworkManager {
         self.cache_dir.join(format!("{}.png", track_id))
     }
 
-    /// Save image bytes as a bounded thumbnail (e.g. 300x300 max).
+    /// Save image bytes as a bounded thumbnail (e.g. 160x160 max).
     pub fn save_thumbnail(&self, track_id: &TrackId, image_bytes: &[u8]) -> Option<PathBuf> {
-        let reader = ImageReader::new(Cursor::new(image_bytes))
+        // Security bounds: cap raw input bytes to 32MB to prevent memory exhaustion
+        const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+        if image_bytes.is_empty() || image_bytes.len() > MAX_IMAGE_BYTES {
+            return None;
+        }
+
+        let mut reader = ImageReader::new(Cursor::new(image_bytes))
             .with_guessed_format()
             .ok()?;
+
+        // Security bounds against decompression bombs (pixel flood attack):
+        // Limit max dimensions and total memory allocation.
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(8192);
+        limits.max_image_height = Some(8192);
+        limits.max_alloc = Some(64 * 1024 * 1024);
+        reader.limits(limits);
+
         let img = reader.decode().ok()?;
 
         // `thumbnail` is a fast box filter; Lanczos3 would cost far more CPU
