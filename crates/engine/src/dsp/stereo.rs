@@ -82,8 +82,18 @@ impl StereoEnhancer {
             return (left, right);
         }
 
-        let (ol, or_) = self.process_f64(left as f64, right as f64);
-        (ol as f32, or_ as f32)
+        // Dezippering: smoothly approach target width
+        self.current_width += (self.width - self.current_width) * self.slew_rate;
+
+        // Mid/side decomposition
+        let mid = (left + right) * 0.5;
+        let side = (left - right) * 0.5;
+
+        // Apply width to side channel only (phase-safe)
+        let adjusted_side = side * self.current_width;
+
+        // Reconstruct stereo
+        (mid + adjusted_side, mid - adjusted_side)
     }
 
     /// Process a stereo sample pair in native f64 precision.
@@ -108,32 +118,121 @@ impl StereoEnhancer {
     }
 
     /// Process a block of stereo frames in place. Hoists the enabled check
-    /// out of the per-frame loop.
+    /// out of the per-frame loop, and switches to a 2x2 matrix once settled.
     #[inline]
     pub fn process_block(&mut self, left: &mut [f32], right: &mut [f32]) {
         if !self.enabled {
             return;
         }
         let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+
+        // Check if settled
+        if (self.width - self.current_width).abs() < 1e-5 {
+            self.current_width = self.width;
+            let w = self.current_width;
+            // Passthrough check: if settled at width 1.0, mid + side = L, mid - side = R
+            if (w - 1.0).abs() < 1e-5 {
+                return;
+            }
+            let a = 0.5 * (1.0 + w);
+            let b = 0.5 * (1.0 - w);
+            for i in 0..n {
+                let l = left[i];
+                let r = right[i];
+                left[i] = a * l + b * r;
+                right[i] = b * l + a * r;
+            }
+            return;
+        }
+
         for i in 0..n {
-            let (ol, or_) = self.process_f64(left[i] as f64, right[i] as f64);
-            left[i] = ol as f32;
-            right[i] = or_ as f32;
+            self.current_width += (self.width - self.current_width) * self.slew_rate;
+            if (self.width - self.current_width).abs() < 1e-5 {
+                self.current_width = self.width;
+                let w = self.current_width;
+                let a = 0.5 * (1.0 + w);
+                let b = 0.5 * (1.0 - w);
+                let l = left[i];
+                let r = right[i];
+                left[i] = a * l + b * r;
+                right[i] = b * l + a * r;
+                if i + 1 < n && (w - 1.0).abs() >= 1e-5 {
+                    for j in (i + 1)..n {
+                        let lj = left[j];
+                        let rj = right[j];
+                        left[j] = a * lj + b * rj;
+                        right[j] = b * lj + a * rj;
+                    }
+                }
+                return;
+            }
+            let mid = (left[i] + right[i]) * 0.5;
+            let side = (left[i] - right[i]) * 0.5;
+            let adjusted_side = side * self.current_width;
+            left[i] = mid + adjusted_side;
+            right[i] = mid - adjusted_side;
         }
     }
 
     /// Process a block of stereo frames in native f64 precision. Hoists the
-    /// enabled check out of the per-frame loop.
+    /// enabled check out of the per-frame loop, and switches to a 2x2 matrix once settled.
     #[inline]
     pub fn process_block_f64(&mut self, left: &mut [f64], right: &mut [f64]) {
         if !self.enabled {
             return;
         }
         let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+
+        if (self.width - self.current_width).abs() < 1e-5 {
+            self.current_width = self.width;
+            let w = self.current_width as f64;
+            if (w - 1.0).abs() < 1e-5 {
+                return;
+            }
+            let a = 0.5 * (1.0 + w);
+            let b = 0.5 * (1.0 - w);
+            for i in 0..n {
+                let l = left[i];
+                let r = right[i];
+                left[i] = a * l + b * r;
+                right[i] = b * l + a * r;
+            }
+            return;
+        }
+
         for i in 0..n {
-            let (ol, or_) = self.process_f64(left[i], right[i]);
-            left[i] = ol;
-            right[i] = or_;
+            self.current_width += (self.width - self.current_width) * self.slew_rate;
+            if (self.width - self.current_width).abs() < 1e-5 {
+                self.current_width = self.width;
+                let w = self.current_width as f64;
+                let a = 0.5 * (1.0 + w);
+                let b = 0.5 * (1.0 - w);
+                let l = left[i];
+                let r = right[i];
+                left[i] = a * l + b * r;
+                right[i] = b * l + a * r;
+                if i + 1 < n && (w - 1.0).abs() >= 1e-5 {
+                    for j in (i + 1)..n {
+                        let lj = left[j];
+                        let rj = right[j];
+                        left[j] = a * lj + b * rj;
+                        right[j] = b * lj + a * rj;
+                    }
+                }
+                return;
+            }
+            let w = self.current_width as f64;
+            let mid = (left[i] + right[i]) * 0.5;
+            let side = (left[i] - right[i]) * 0.5;
+            let adjusted_side = side * w;
+            left[i] = mid + adjusted_side;
+            right[i] = mid - adjusted_side;
         }
     }
 
@@ -280,5 +379,44 @@ mod tests {
             (input_mid - output_mid).abs() < 1e-5,
             "Mid component should be preserved"
         );
+    }
+
+    #[test]
+    fn test_process_block_equivalence() {
+        let mut e_sample = StereoEnhancer::new();
+        e_sample.set_enabled(true);
+        e_sample.set_width(1.8);
+
+        let mut e_block = StereoEnhancer::new();
+        e_block.set_enabled(true);
+        e_block.set_width(1.8);
+
+        let n = 256;
+        let mut sample_l = vec![0.5f32; n];
+        let mut sample_r = vec![0.2f32; n];
+        for i in 0..n {
+            let (l, r) = e_sample.process(sample_l[i], sample_r[i]);
+            sample_l[i] = l;
+            sample_r[i] = r;
+        }
+
+        let mut block_l = vec![0.5f32; n];
+        let mut block_r = vec![0.2f32; n];
+        e_block.process_block(&mut block_l, &mut block_r);
+
+        for i in 0..n {
+            assert!(
+                (sample_l[i] - block_l[i]).abs() < 1e-5,
+                "L mismatch at {i}: {} vs {}",
+                sample_l[i],
+                block_l[i]
+            );
+            assert!(
+                (sample_r[i] - block_r[i]).abs() < 1e-5,
+                "R mismatch at {i}: {} vs {}",
+                sample_r[i],
+                block_r[i]
+            );
+        }
     }
 }

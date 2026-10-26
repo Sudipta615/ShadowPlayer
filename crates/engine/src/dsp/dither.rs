@@ -592,6 +592,308 @@ impl Dither {
         (ql.clamp(-1.0, 1.0), qr.clamp(-1.0, 1.0))
     }
 
+    /// Process a block of stereo frames in place with dithering and quantization.
+    #[inline]
+    pub fn process_block(&mut self, left: &mut [f32], right: &mut [f32]) {
+        if !self.is_active() {
+            return;
+        }
+        let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+
+        let quant_steps = 1u64 << (self.bit_depth - 1);
+        let quant_steps_f = quant_steps as f32;
+        let recip_quant_steps_f = 1.0 / quant_steps_f;
+        let half_lsb = 0.5 * recip_quant_steps_f;
+
+        #[allow(deprecated)]
+        match self.dither_type {
+            DitherType::None => {}
+
+            DitherType::Triangular => {
+                for i in 0..n {
+                    let nl = (Self::next_random_f32(&mut self.rng_state_left)
+                        + Self::next_random_f32(&mut self.rng_state_left))
+                        * half_lsb;
+                    let nr = (Self::next_random_f32(&mut self.rng_state_right)
+                        + Self::next_random_f32(&mut self.rng_state_right))
+                        * half_lsb;
+                    let dithered_l = left[i] + nl;
+                    let dithered_r = right[i] + nr;
+                    let ql = (dithered_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let qr = (dithered_r * quant_steps_f).round() * recip_quant_steps_f;
+                    left[i] = ql.clamp(-1.0, 1.0);
+                    right[i] = qr.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::Rectangular => {
+                for i in 0..n {
+                    let nl = Self::next_random_f32(&mut self.rng_state_left) * half_lsb;
+                    let nr = Self::next_random_f32(&mut self.rng_state_right) * half_lsb;
+                    let dithered_l = left[i] + nl;
+                    let dithered_r = right[i] + nr;
+                    let ql = (dithered_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let qr = (dithered_r * quant_steps_f).round() * recip_quant_steps_f;
+                    left[i] = ql.clamp(-1.0, 1.0);
+                    right[i] = qr.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::HighPassTriangular => {
+                for i in 0..n {
+                    let cur_l = Self::next_random_f32(&mut self.rng_state_left);
+                    let cur_r = Self::next_random_f32(&mut self.rng_state_right);
+                    let nl = (cur_l - self.hp_prev_left) * half_lsb;
+                    let nr = (cur_r - self.hp_prev_right) * half_lsb;
+                    self.hp_prev_left = cur_l;
+                    self.hp_prev_right = cur_r;
+                    let dithered_l = left[i] + nl;
+                    let dithered_r = right[i] + nr;
+                    let ql = (dithered_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let qr = (dithered_r * quant_steps_f).round() * recip_quant_steps_f;
+                    left[i] = ql.clamp(-1.0, 1.0);
+                    right[i] = qr.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::Shibata => {
+                for i in 0..n {
+                    let noise_l = (Self::next_random_f32(&mut self.rng_state_left)
+                        + Self::next_random_f32(&mut self.rng_state_left))
+                        * half_lsb;
+                    let noise_r = (Self::next_random_f32(&mut self.rng_state_right)
+                        + Self::next_random_f32(&mut self.rng_state_right))
+                        * half_lsb;
+
+                    let pos = self.shibata_err_pos;
+                    let feedback_l = self.shibata_feedback(&self.shibata_err_left, pos);
+                    let feedback_r = self.shibata_feedback(&self.shibata_err_right, pos);
+
+                    let shaped_l = left[i] + noise_l - feedback_l;
+                    let shaped_r = right[i] + noise_r - feedback_r;
+
+                    let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
+
+                    self.shibata_err_left[pos] = q_l - shaped_l;
+                    self.shibata_err_right[pos] = q_r - shaped_r;
+                    self.shibata_err_pos = (pos + 1) % 9;
+
+                    left[i] = q_l.clamp(-1.0, 1.0);
+                    right[i] = q_r.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::NoiseShaped => {
+                for i in 0..n {
+                    let nl = (Self::next_random_f32(&mut self.rng_state_left)
+                        + Self::next_random_f32(&mut self.rng_state_left))
+                        * half_lsb;
+                    let nr = (Self::next_random_f32(&mut self.rng_state_right)
+                        + Self::next_random_f32(&mut self.rng_state_right))
+                        * half_lsb;
+                    let shaped_l = left[i] + nl - self.shape_left * 0.5;
+                    let shaped_r = right[i] + nr - self.shape_right * 0.5;
+                    let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
+                    self.shape_left = q_l - shaped_l + self.shape_left * 0.5;
+                    self.shape_right = q_r - shaped_r + self.shape_right * 0.5;
+                    left[i] = q_l.clamp(-1.0, 1.0);
+                    right[i] = q_r.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
+                let coeffs: &[f32] = match self.dither_type {
+                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
+                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
+                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
+                    _ => unreachable!(),
+                };
+                for i in 0..n {
+                    let noise_l = (Self::next_random_f32(&mut self.rng_state_left)
+                        + Self::next_random_f32(&mut self.rng_state_left))
+                        * half_lsb;
+                    let noise_r = (Self::next_random_f32(&mut self.rng_state_right)
+                        + Self::next_random_f32(&mut self.rng_state_right))
+                        * half_lsb;
+
+                    let pos = self.ns_err_pos;
+                    let feedback_l = Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos);
+                    let feedback_r = Self::generic_ns_feedback(coeffs, &self.ns_err_right, pos);
+
+                    let shaped_l = left[i] + noise_l - feedback_l;
+                    let shaped_r = right[i] + noise_r - feedback_r;
+
+                    let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
+
+                    self.ns_err_left[pos] = q_l - shaped_l;
+                    self.ns_err_right[pos] = q_r - shaped_r;
+                    self.ns_err_pos = (pos + 1) % 8;
+
+                    left[i] = q_l.clamp(-1.0, 1.0);
+                    right[i] = q_r.clamp(-1.0, 1.0);
+                }
+            }
+        }
+    }
+
+    /// Process a block of stereo frames in place with f64 precision dithering and quantization.
+    #[inline]
+    pub fn process_block_f64(&mut self, left: &mut [f64], right: &mut [f64]) {
+        if !self.is_active() {
+            return;
+        }
+        let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+
+        let quant_steps = 1u64 << (self.bit_depth - 1);
+        let quant_steps_f = quant_steps as f64;
+        let recip_quant_steps_f = 1.0 / quant_steps_f;
+        let half_lsb = 0.5 * recip_quant_steps_f;
+
+        #[allow(deprecated)]
+        match self.dither_type {
+            DitherType::None => {}
+
+            DitherType::Triangular => {
+                for i in 0..n {
+                    let nl = (Self::next_random_f64(&mut self.rng_state_left)
+                        + Self::next_random_f64(&mut self.rng_state_left))
+                        * half_lsb;
+                    let nr = (Self::next_random_f64(&mut self.rng_state_right)
+                        + Self::next_random_f64(&mut self.rng_state_right))
+                        * half_lsb;
+                    let dithered_l = left[i] + nl;
+                    let dithered_r = right[i] + nr;
+                    let ql = (dithered_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let qr = (dithered_r * quant_steps_f).round() * recip_quant_steps_f;
+                    left[i] = ql.clamp(-1.0, 1.0);
+                    right[i] = qr.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::Rectangular => {
+                for i in 0..n {
+                    let nl = Self::next_random_f64(&mut self.rng_state_left) * half_lsb;
+                    let nr = Self::next_random_f64(&mut self.rng_state_right) * half_lsb;
+                    let dithered_l = left[i] + nl;
+                    let dithered_r = right[i] + nr;
+                    let ql = (dithered_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let qr = (dithered_r * quant_steps_f).round() * recip_quant_steps_f;
+                    left[i] = ql.clamp(-1.0, 1.0);
+                    right[i] = qr.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::HighPassTriangular => {
+                for i in 0..n {
+                    let cur_l = Self::next_random_f64(&mut self.rng_state_left) as f32;
+                    let cur_r = Self::next_random_f64(&mut self.rng_state_right) as f32;
+                    let nl = (cur_l - self.hp_prev_left) as f64 * half_lsb;
+                    let nr = (cur_r - self.hp_prev_right) as f64 * half_lsb;
+                    self.hp_prev_left = cur_l;
+                    self.hp_prev_right = cur_r;
+                    let dithered_l = left[i] + nl;
+                    let dithered_r = right[i] + nr;
+                    let ql = (dithered_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let qr = (dithered_r * quant_steps_f).round() * recip_quant_steps_f;
+                    left[i] = ql.clamp(-1.0, 1.0);
+                    right[i] = qr.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::Shibata => {
+                for i in 0..n {
+                    let noise_l = (Self::next_random_f64(&mut self.rng_state_left)
+                        + Self::next_random_f64(&mut self.rng_state_left))
+                        * half_lsb;
+                    let noise_r = (Self::next_random_f64(&mut self.rng_state_right)
+                        + Self::next_random_f64(&mut self.rng_state_right))
+                        * half_lsb;
+
+                    let pos = self.shibata_err_pos;
+                    let feedback_l = self.shibata_feedback(&self.shibata_err_left, pos) as f64;
+                    let feedback_r = self.shibata_feedback(&self.shibata_err_right, pos) as f64;
+
+                    let shaped_l = left[i] + noise_l - feedback_l;
+                    let shaped_r = right[i] + noise_r - feedback_r;
+
+                    let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
+
+                    self.shibata_err_left[pos] = (q_l - shaped_l) as f32;
+                    self.shibata_err_right[pos] = (q_r - shaped_r) as f32;
+                    self.shibata_err_pos = (pos + 1) % 9;
+
+                    left[i] = q_l.clamp(-1.0, 1.0);
+                    right[i] = q_r.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::NoiseShaped => {
+                for i in 0..n {
+                    let nl = (Self::next_random_f64(&mut self.rng_state_left)
+                        + Self::next_random_f64(&mut self.rng_state_left))
+                        * half_lsb;
+                    let nr = (Self::next_random_f64(&mut self.rng_state_right)
+                        + Self::next_random_f64(&mut self.rng_state_right))
+                        * half_lsb;
+                    let shaped_l = left[i] + nl - (self.shape_left as f64) * 0.5;
+                    let shaped_r = right[i] + nr - (self.shape_right as f64) * 0.5;
+                    let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
+                    self.shape_left = (q_l - shaped_l + (self.shape_left as f64) * 0.5) as f32;
+                    self.shape_right = (q_r - shaped_r + (self.shape_right as f64) * 0.5) as f32;
+                    left[i] = q_l.clamp(-1.0, 1.0);
+                    right[i] = q_r.clamp(-1.0, 1.0);
+                }
+            }
+
+            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
+                let coeffs: &[f32] = match self.dither_type {
+                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
+                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
+                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
+                    _ => unreachable!(),
+                };
+                for i in 0..n {
+                    let noise_l = (Self::next_random_f64(&mut self.rng_state_left)
+                        + Self::next_random_f64(&mut self.rng_state_left))
+                        * half_lsb;
+                    let noise_r = (Self::next_random_f64(&mut self.rng_state_right)
+                        + Self::next_random_f64(&mut self.rng_state_right))
+                        * half_lsb;
+
+                    let pos = self.ns_err_pos;
+                    let feedback_l =
+                        Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos) as f64;
+                    let feedback_r =
+                        Self::generic_ns_feedback(coeffs, &self.ns_err_right, pos) as f64;
+
+                    let shaped_l = left[i] + noise_l - feedback_l;
+                    let shaped_r = right[i] + noise_r - feedback_r;
+
+                    let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
+                    let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
+
+                    self.ns_err_left[pos] = (q_l - shaped_l) as f32;
+                    self.ns_err_right[pos] = (q_r - shaped_r) as f32;
+                    self.ns_err_pos = (pos + 1) % 8;
+
+                    left[i] = q_l.clamp(-1.0, 1.0);
+                    right[i] = q_r.clamp(-1.0, 1.0);
+                }
+            }
+        }
+    }
+
     /// Process a single (mono) sample with dithering and quantization.
     #[inline]
     pub fn process_mono(&mut self, sample: f32) -> f32 {
@@ -925,5 +1227,31 @@ mod tests {
         // every backend now passes the negotiated rate explicitly.
         let legacy = AudioFormatConverter::new(TargetFormat::I16, DitherType::Shibata);
         assert_eq!(legacy.sample_rate(), 44_100);
+    }
+
+    #[test]
+    fn test_dither_block_equivalence() {
+        let mut dither_sample = Dither::new(DitherType::Triangular, 16);
+        dither_sample.set_random_seed(12345);
+        let mut dither_block = Dither::new(DitherType::Triangular, 16);
+        dither_block.set_random_seed(12345);
+
+        let n = 256;
+        let mut sample_l = vec![0.12345f32; n];
+        let mut sample_r = vec![-0.6789f32; n];
+        for i in 0..n {
+            let (l, r) = dither_sample.process(sample_l[i], sample_r[i]);
+            sample_l[i] = l;
+            sample_r[i] = r;
+        }
+
+        let mut block_l = vec![0.12345f32; n];
+        let mut block_r = vec![-0.6789f32; n];
+        dither_block.process_block(&mut block_l, &mut block_r);
+
+        for i in 0..n {
+            assert_eq!(sample_l[i], block_l[i], "mismatch at sample {i} for left");
+            assert_eq!(sample_r[i], block_r[i], "mismatch at sample {i} for right");
+        }
     }
 }

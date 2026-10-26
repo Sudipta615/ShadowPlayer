@@ -75,6 +75,19 @@ impl KWeightStage1 {
         self.z2[ch] = crate::buffer::flush_denormal_f64(self.b2 * s - self.a2 * out);
         out as f32
     }
+
+    #[inline]
+    pub(crate) fn process_stereo(&mut self, left: f32, right: f32) -> (f32, f32) {
+        let sl = left as f64;
+        let sr = right as f64;
+        let out_l = self.b0 * sl + self.z1[0];
+        self.z1[0] = crate::buffer::flush_denormal_f64(self.b1 * sl - self.a1 * out_l + self.z2[0]);
+        self.z2[0] = crate::buffer::flush_denormal_f64(self.b2 * sl - self.a2 * out_l);
+        let out_r = self.b0 * sr + self.z1[1];
+        self.z1[1] = crate::buffer::flush_denormal_f64(self.b1 * sr - self.a1 * out_r + self.z2[1]);
+        self.z2[1] = crate::buffer::flush_denormal_f64(self.b2 * sr - self.a2 * out_r);
+        (out_l as f32, out_r as f32)
+    }
 }
 
 /// Second-order high-pass (stage 2 of K-weighting)
@@ -130,6 +143,19 @@ impl KWeightStage2 {
         self.z1[ch] = crate::buffer::flush_denormal_f64(self.b1 * s - self.a1 * out + self.z2[ch]);
         self.z2[ch] = crate::buffer::flush_denormal_f64(self.b2 * s - self.a2 * out);
         out as f32
+    }
+
+    #[inline]
+    pub(crate) fn process_stereo(&mut self, left: f32, right: f32) -> (f32, f32) {
+        let sl = left as f64;
+        let sr = right as f64;
+        let out_l = self.b0 * sl + self.z1[0];
+        self.z1[0] = crate::buffer::flush_denormal_f64(self.b1 * sl - self.a1 * out_l + self.z2[0]);
+        self.z2[0] = crate::buffer::flush_denormal_f64(self.b2 * sl - self.a2 * out_l);
+        let out_r = self.b0 * sr + self.z1[1];
+        self.z1[1] = crate::buffer::flush_denormal_f64(self.b1 * sr - self.a1 * out_r + self.z2[1]);
+        self.z2[1] = crate::buffer::flush_denormal_f64(self.b2 * sr - self.a2 * out_r);
+        (out_l as f32, out_r as f32)
     }
 }
 
@@ -342,6 +368,12 @@ impl LoudnessNormalizer {
         (left * g, right * g)
     }
 
+    /// Check whether the gain transition has settled to target within precision.
+    #[inline]
+    pub fn is_settled(&self) -> bool {
+        (self.target_gain_linear - self.current_gain_linear).abs() < 1e-6
+    }
+
     /// Process per-channel planar blocks in place with smooth loudness gain ramping.
     #[inline]
     pub fn process_planes(&mut self, planes: &mut [Vec<f32>], channels: usize, frames: usize) {
@@ -349,6 +381,20 @@ impl LoudnessNormalizer {
             return;
         }
         let ch = channels.min(planes.len());
+        if ch == 0 || frames == 0 {
+            return;
+        }
+        if self.is_settled() {
+            self.current_gain_linear = self.target_gain_linear;
+            let g = self.current_gain_linear;
+            if (g - 1.0).abs() < 1e-6 {
+                return;
+            }
+            for plane in planes.iter_mut().take(ch) {
+                crate::dsp::simd::dispatch_scale_slice(plane, g, frames);
+            }
+            return;
+        }
         for i in 0..frames {
             self.current_gain_linear +=
                 self.smooth_coeff * (self.target_gain_linear - self.current_gain_linear);
@@ -361,17 +407,46 @@ impl LoudnessNormalizer {
     }
 
     /// Process a block of stereo frames in place. Hoists the Off-mode check
-    /// out of the per-frame loop.
+    /// out of the per-frame loop, and switches to SIMD scaling once settled.
     #[inline]
     pub fn process_block(&mut self, left: &mut [f32], right: &mut [f32]) {
         if self.mode == LoudnessMode::Off {
             return;
         }
         let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+
+        if self.is_settled() {
+            self.current_gain_linear = self.target_gain_linear;
+            let g = self.current_gain_linear;
+            if (g - 1.0).abs() < 1e-6 {
+                return;
+            }
+            crate::dsp::simd::dispatch_scale_slice(left, g, n);
+            crate::dsp::simd::dispatch_scale_slice(right, g, n);
+            return;
+        }
+
         for i in 0..n {
             self.current_gain_linear +=
                 self.smooth_coeff * (self.target_gain_linear - self.current_gain_linear);
             self.current_gain_linear = crate::buffer::flush_denormal(self.current_gain_linear);
+            if self.is_settled() {
+                self.current_gain_linear = self.target_gain_linear;
+                let g = self.current_gain_linear;
+                left[i] *= g;
+                right[i] *= g;
+                if i + 1 < n {
+                    let rem = n - (i + 1);
+                    if (g - 1.0).abs() >= 1e-6 {
+                        crate::dsp::simd::dispatch_scale_slice(&mut left[i + 1..n], g, rem);
+                        crate::dsp::simd::dispatch_scale_slice(&mut right[i + 1..n], g, rem);
+                    }
+                }
+                return;
+            }
             let g = self.current_gain_linear;
             left[i] *= g;
             right[i] *= g;
@@ -379,17 +454,46 @@ impl LoudnessNormalizer {
     }
 
     /// Process a block of stereo frames in f64 precision. Hoists the Off-mode
-    /// check out of the per-frame loop.
+    /// check out of the per-frame loop, and switches to SIMD scaling once settled.
     #[inline]
     pub fn process_block_f64(&mut self, left: &mut [f64], right: &mut [f64]) {
         if self.mode == LoudnessMode::Off {
             return;
         }
         let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+
+        if self.is_settled() {
+            self.current_gain_linear = self.target_gain_linear;
+            let g = self.current_gain_linear as f64;
+            if (g - 1.0).abs() < 1e-6 {
+                return;
+            }
+            crate::dsp::simd::dispatch_scale_slice_f64(left, g, n);
+            crate::dsp::simd::dispatch_scale_slice_f64(right, g, n);
+            return;
+        }
+
         for i in 0..n {
             self.current_gain_linear +=
                 self.smooth_coeff * (self.target_gain_linear - self.current_gain_linear);
             self.current_gain_linear = crate::buffer::flush_denormal(self.current_gain_linear);
+            if self.is_settled() {
+                self.current_gain_linear = self.target_gain_linear;
+                let g = self.current_gain_linear as f64;
+                left[i] *= g;
+                right[i] *= g;
+                if i + 1 < n {
+                    let rem = n - (i + 1);
+                    if (g - 1.0).abs() >= 1e-6 {
+                        crate::dsp::simd::dispatch_scale_slice_f64(&mut left[i + 1..n], g, rem);
+                        crate::dsp::simd::dispatch_scale_slice_f64(&mut right[i + 1..n], g, rem);
+                    }
+                }
+                return;
+            }
             let g = self.current_gain_linear as f64;
             left[i] *= g;
             right[i] *= g;
@@ -631,6 +735,29 @@ impl LoudnessMeter {
             return;
         }
         let weights = self.channel_weights;
+        if n_channels == 2 {
+            let w0 = weights[0];
+            let w1 = weights[1];
+            for frame in samples.as_chunks::<2>().0 {
+                let sl = frame[0];
+                let sr = frame[1];
+                let (k1_l, k1_r) = self.stage1.process_stereo(sl, sr);
+                let (k2_l, k2_r) = self.stage2.process_stereo(k1_l, k1_r);
+                let weighted_sum = w0 * k2_l * k2_l + w1 * k2_r * k2_r;
+                self.true_peak_meters[0].process_sample(sl as f64);
+                self.true_peak_meters[1].process_sample(sr as f64);
+                self.block_sum += weighted_sum as f64;
+                self.block_samples += 1;
+                self.hop_samples += 1;
+
+                if self.hop_samples >= self.hop_capacity {
+                    self.hop_samples = 0;
+                    self.commit_hop();
+                }
+            }
+            return;
+        }
+
         for frame in samples.chunks_exact(n_channels) {
             let mut weighted_sum = 0.0f32;
             for (ch, &s) in frame.iter().enumerate() {
@@ -657,6 +784,31 @@ impl LoudnessMeter {
     pub fn process_stereo(&mut self, left: f32, right: f32) {
         let buf = [left, right];
         self.process_interleaved(&buf, 2);
+    }
+
+    /// Feed a block of stereo frames directly.
+    #[inline]
+    pub fn process_stereo_block(&mut self, left: &[f32], right: &[f32]) {
+        let n = left.len().min(right.len());
+        let w0 = self.channel_weights[0];
+        let w1 = self.channel_weights[1];
+        for i in 0..n {
+            let sl = left[i];
+            let sr = right[i];
+            let (k1_l, k1_r) = self.stage1.process_stereo(sl, sr);
+            let (k2_l, k2_r) = self.stage2.process_stereo(k1_l, k1_r);
+            let weighted_sum = w0 * k2_l * k2_l + w1 * k2_r * k2_r;
+            self.true_peak_meters[0].process_sample(sl as f64);
+            self.true_peak_meters[1].process_sample(sr as f64);
+            self.block_sum += weighted_sum as f64;
+            self.block_samples += 1;
+            self.hop_samples += 1;
+
+            if self.hop_samples >= self.hop_capacity {
+                self.hop_samples = 0;
+                self.commit_hop();
+            }
+        }
     }
 
     /// Commit one 100ms hop: record exact 400ms sliding window energy and update short-term ring.

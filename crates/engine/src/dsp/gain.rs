@@ -162,6 +162,39 @@ impl<T: AudioFloat> GainProcessor<T> {
     #[inline]
     pub fn process_block_stereo(&mut self, left: &mut [T], right: &mut [T]) {
         let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+        if self.is_settled() && self.gain == self.target_gain {
+            let g = self.gain;
+            if (g - T::one()).abs() < T::from_f64(1e-6) {
+                return;
+            }
+            if g == T::zero() {
+                left[..n].fill(T::zero());
+                right[..n].fill(T::zero());
+                return;
+            }
+            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
+                let left_f32: &mut [f32] = unsafe { std::mem::transmute(&mut left[..n]) };
+                let right_f32: &mut [f32] = unsafe { std::mem::transmute(&mut right[..n]) };
+                crate::dsp::simd::scale_slice(left_f32, g.to_f32(), n);
+                crate::dsp::simd::scale_slice(right_f32, g.to_f32(), n);
+                return;
+            }
+            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>() {
+                let left_f64: &mut [f64] = unsafe { std::mem::transmute(&mut left[..n]) };
+                let right_f64: &mut [f64] = unsafe { std::mem::transmute(&mut right[..n]) };
+                crate::dsp::simd::scale_slice_f64(left_f64, g.to_f64(), n);
+                crate::dsp::simd::scale_slice_f64(right_f64, g.to_f64(), n);
+                return;
+            }
+            for i in 0..n {
+                left[i] *= g;
+                right[i] *= g;
+            }
+            return;
+        }
         for i in 0..n {
             let (l, r) = self.process_stereo(left[i], right[i]);
             left[i] = l;
@@ -376,12 +409,27 @@ impl FadeProcessor {
             return;
         }
         let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+        if self.state == FadeState::FadedOut {
+            left[..n].fill(0.0);
+            right[..n].fill(0.0);
+            return;
+        }
         for i in 0..n {
             let g = self.current_curve_gain();
             left[i] *= g;
             right[i] *= g;
             self.advance(1);
             if self.state == FadeState::Idle && (self.gain - 1.0).abs() < 1e-6 {
+                return;
+            }
+            if self.state == FadeState::FadedOut {
+                if i + 1 < n {
+                    left[i + 1..n].fill(0.0);
+                    right[i + 1..n].fill(0.0);
+                }
                 return;
             }
         }
@@ -395,12 +443,27 @@ impl FadeProcessor {
             return;
         }
         let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+        if self.state == FadeState::FadedOut {
+            left[..n].fill(0.0);
+            right[..n].fill(0.0);
+            return;
+        }
         for i in 0..n {
             let g = self.current_curve_gain() as f64;
             left[i] *= g;
             right[i] *= g;
             self.advance(1);
             if self.state == FadeState::Idle && (self.gain - 1.0).abs() < 1e-6 {
+                return;
+            }
+            if self.state == FadeState::FadedOut {
+                if i + 1 < n {
+                    left[i + 1..n].fill(0.0);
+                    right[i + 1..n].fill(0.0);
+                }
                 return;
             }
         }

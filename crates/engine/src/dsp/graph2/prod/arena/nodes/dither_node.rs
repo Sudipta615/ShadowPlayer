@@ -50,12 +50,7 @@ impl DspNode for DitherNode {
         let (front, rest) = planes.split_at_mut(1);
         let left = &mut front[0];
         let right = &mut rest[0];
-        let n = left.len().min(right.len());
-        for i in 0..n {
-            let (ol, or) = self.dither.process(left[i], right[i]);
-            left[i] = ol;
-            right[i] = or;
-        }
+        self.dither.process_block(left, right);
     }
 
     fn process_block_f64(&mut self, planes: &mut [&mut [f64]]) {
@@ -65,11 +60,6 @@ impl DspNode for DitherNode {
         let (front, rest) = planes.split_at_mut(1);
         let left = &mut front[0];
         let right = &mut rest[0];
-        let n = left.len().min(right.len());
-        for i in 0..n {
-            let (ol, or) = self.dither.process_f64(left[i], right[i]);
-            left[i] = ol;
-            right[i] = or;
-        }
+        self.dither.process_block_f64(left, right);
     }
 }

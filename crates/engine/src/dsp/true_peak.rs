@@ -207,16 +207,8 @@ impl TruePeakMeter {
         self.pos = (self.pos + 1) % BRANCH_TAPS;
 
         let proto = prototype_coefficients();
-        let mut max_abs = sample.abs();
-        for branch in 0..FIR_BRANCHES {
-            let mut acc = 0.0_f64;
-            for tap in 0..BRANCH_TAPS {
-                let coeff_idx = branch + tap * FIR_BRANCHES;
-                let buf_idx = start + BRANCH_TAPS - 1 - tap;
-                acc += self.buf[buf_idx] * proto[coeff_idx];
-            }
-            max_abs = max_abs.max(acc.abs());
-        }
+        let branch_max = polyphase_max_abs(&self.buf, start, proto);
+        let mut max_abs = sample.abs().max(branch_max);
         max_abs = flush_denormal_f64(max_abs);
         // An overflow inside the polyphase dot product is the same failure
         // arriving from arithmetic rather than from the input.
@@ -228,6 +220,24 @@ impl TruePeakMeter {
         self.max_sample_peak_linear = self.max_sample_peak_linear.max(sample.abs());
         self.max_true_peak_linear = self.max_true_peak_linear.max(max_abs);
         max_abs
+    }
+
+    /// Feed a block of samples (f64) and write each sample's true peak into `out`.
+    #[inline]
+    pub fn process_block(&mut self, samples: &[f64], out: &mut [f64]) {
+        let n = samples.len().min(out.len());
+        for i in 0..n {
+            out[i] = self.process_sample(samples[i]);
+        }
+    }
+
+    /// Feed a block of samples (f32) and write each sample's true peak into `out`.
+    #[inline]
+    pub fn process_block_f32(&mut self, samples: &[f32], out: &mut [f32]) {
+        let n = samples.len().min(out.len());
+        for i in 0..n {
+            out[i] = self.process_sample(samples[i] as f64) as f32;
+        }
     }
 
     /// How many non-finite samples this meter has had to substitute.
@@ -276,6 +286,84 @@ impl TruePeakMeter {
             -144.0
         }
     }
+}
+
+#[inline]
+fn polyphase_max_abs(buf: &[f64], start: usize, proto: &[f64]) -> f64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            // Safety: guarded by runtime feature detection
+            return unsafe { polyphase_max_abs_avx2_fma(buf, start, proto) };
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        return unsafe { polyphase_max_abs_neon(buf, start, proto) };
+    }
+
+    polyphase_max_abs_scalar(buf, start, proto)
+}
+
+#[inline]
+fn polyphase_max_abs_scalar(buf: &[f64], start: usize, proto: &[f64]) -> f64 {
+    let mut acc0 = 0.0_f64;
+    let mut acc1 = 0.0_f64;
+    let mut acc2 = 0.0_f64;
+    let mut acc3 = 0.0_f64;
+
+    for tap in 0..BRANCH_TAPS {
+        let s = buf[start + BRANCH_TAPS - 1 - tap];
+        let base = tap * FIR_BRANCHES;
+        acc0 += s * proto[base];
+        acc1 += s * proto[base + 1];
+        acc2 += s * proto[base + 2];
+        acc3 += s * proto[base + 3];
+    }
+
+    acc0.abs().max(acc1.abs()).max(acc2.abs().max(acc3.abs()))
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn polyphase_max_abs_avx2_fma(buf: &[f64], start: usize, proto: &[f64]) -> f64 {
+    use std::arch::x86_64::*;
+    let mut acc = _mm256_setzero_pd();
+    let sign_mask = _mm256_set1_pd(-0.0);
+    for tap in 0..BRANCH_TAPS {
+        let s = buf[start + BRANCH_TAPS - 1 - tap];
+        let s_vec = _mm256_set1_pd(s);
+        let c_vec = _mm256_loadu_pd(proto.as_ptr().add(tap * FIR_BRANCHES));
+        acc = _mm256_fmadd_pd(s_vec, c_vec, acc);
+    }
+    let abs_acc = _mm256_andnot_pd(sign_mask, acc);
+    let mut out = [0.0f64; 4];
+    _mm256_storeu_pd(out.as_mut_ptr(), abs_acc);
+    out[0].max(out[1]).max(out[2].max(out[3]))
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn polyphase_max_abs_neon(buf: &[f64], start: usize, proto: &[f64]) -> f64 {
+    use std::arch::aarch64::*;
+    let mut acc01 = vdupq_n_f64(0.0);
+    let mut acc23 = vdupq_n_f64(0.0);
+    for tap in 0..BRANCH_TAPS {
+        let s = buf[start + BRANCH_TAPS - 1 - tap];
+        let s_vec = vdupq_n_f64(s);
+        let base_ptr = proto.as_ptr().add(tap * FIR_BRANCHES);
+        let c01 = vld1q_f64(base_ptr);
+        let c23 = vld1q_f64(base_ptr.add(2));
+        acc01 = vfmaq_f64(acc01, s_vec, c01);
+        acc23 = vfmaq_f64(acc23, s_vec, c23);
+    }
+    let abs01 = vabsq_f64(acc01);
+    let abs23 = vabsq_f64(acc23);
+    let mut out01 = [0.0f64; 2];
+    let mut out23 = [0.0f64; 2];
+    vst1q_f64(out01.as_mut_ptr(), abs01);
+    vst1q_f64(out23.as_mut_ptr(), abs23);
+    out01[0].max(out01[1]).max(out23[0].max(out23[1]))
 }
 
 impl crate::standards::StandardizedComponent for TruePeakMeter {
@@ -574,5 +662,38 @@ mod tests {
             peak_sum > 1.4 && peak_sum < 1.6,
             "Annex 2's centre taps sum to ~1.5 (unity passband gain); got {peak_sum}"
         );
+    }
+
+    #[test]
+    fn test_true_peak_block_and_scalar_equivalence() {
+        let sr = 48000.0f64;
+        let mut m1 = TruePeakMeter::new();
+        let mut m2 = TruePeakMeter::new();
+
+        let n = 128;
+        let mut samples = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = (2.0 * std::f64::consts::PI * 1000.0 * i as f64 / sr).sin() * 0.9;
+            samples.push(s);
+        }
+
+        let mut out1 = vec![0.0f64; n];
+        for i in 0..n {
+            out1[i] = m1.process_sample(samples[i]);
+        }
+
+        let mut out2 = vec![0.0f64; n];
+        m2.process_block(&samples, &mut out2);
+
+        for i in 0..n {
+            assert!(
+                (out1[i] - out2[i]).abs() < 1e-12,
+                "sample mismatch at {i}: {} vs {}",
+                out1[i],
+                out2[i]
+            );
+        }
+        assert_eq!(m1.max_true_peak_linear(), m2.max_true_peak_linear());
+        assert_eq!(m1.max_sample_peak_linear(), m2.max_sample_peak_linear());
     }
 }
