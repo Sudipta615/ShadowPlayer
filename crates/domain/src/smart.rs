@@ -34,11 +34,21 @@ pub enum SmartField {
     BitDepth,
     /// Beats per minute, tagged by the file.
     Bpm,
+    /// Audio bitrate in kbps (e.g. 320, 1411).
+    Bitrate,
+    /// Number of audio channels (1 = mono, 2 = stereo, etc.).
+    Channels,
+    /// File size in bytes.
+    FileSize,
+    /// Track number on disc.
+    TrackNumber,
+    /// Disc number in multi-disc set.
+    DiscNumber,
 }
 
 impl SmartField {
     /// Every field, in the order the UI should present them.
-    pub const ALL: [SmartField; 19] = [
+    pub const ALL: [SmartField; 24] = [
         SmartField::Title,
         SmartField::Artist,
         SmartField::Album,
@@ -58,6 +68,11 @@ impl SmartField {
         SmartField::NeverPlayed,
         SmartField::BitDepth,
         SmartField::Bpm,
+        SmartField::Bitrate,
+        SmartField::Channels,
+        SmartField::FileSize,
+        SmartField::TrackNumber,
+        SmartField::DiscNumber,
     ];
 
     pub fn label(self) -> &'static str {
@@ -81,6 +96,11 @@ impl SmartField {
             SmartField::NeverPlayed => "Never Played",
             SmartField::BitDepth => "Bit Depth",
             SmartField::Bpm => "BPM",
+            SmartField::Bitrate => "Bitrate (kbps)",
+            SmartField::Channels => "Channels",
+            SmartField::FileSize => "File Size (bytes)",
+            SmartField::TrackNumber => "Track Number",
+            SmartField::DiscNumber => "Disc Number",
         }
     }
 
@@ -109,6 +129,11 @@ impl SmartField {
             SmartField::NeverPlayed => "play_count",
             SmartField::BitDepth => "bit_depth",
             SmartField::Bpm => "bpm",
+            SmartField::Bitrate => "bitrate_kbps",
+            SmartField::Channels => "channels",
+            SmartField::FileSize => "file_size_bytes",
+            SmartField::TrackNumber => "track_number",
+            SmartField::DiscNumber => "disc_number",
         }
     }
 
@@ -126,6 +151,11 @@ impl SmartField {
                 | SmartField::Rating
                 | SmartField::BitDepth
                 | SmartField::Bpm
+                | SmartField::Bitrate
+                | SmartField::Channels
+                | SmartField::FileSize
+                | SmartField::TrackNumber
+                | SmartField::DiscNumber
         )
     }
 
@@ -385,7 +415,14 @@ impl SmartRule {
                 SmartField::BitDepth if number <= 0.0 => {
                     return Err("Bit Depth must be greater than zero.".to_string());
                 }
-                SmartField::Year | SmartField::PlayCount | SmartField::SkipCount
+                SmartField::Year
+                | SmartField::PlayCount
+                | SmartField::SkipCount
+                | SmartField::Bitrate
+                | SmartField::Channels
+                | SmartField::FileSize
+                | SmartField::TrackNumber
+                | SmartField::DiscNumber
                     if number < 0.0 =>
                 {
                     return Err(format!("{} cannot be negative.", self.field.label()));

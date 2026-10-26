@@ -24,6 +24,7 @@ const SF_FORMAT_PCM_24: c_int = 0x0003;
 const SF_FORMAT_FLAC: c_int = 0x170000;
 const SF_FORMAT_OGG: c_int = 0x200000;
 const SF_FORMAT_OPUS: c_int = 0x0064;
+const SF_FORMAT_WAV: c_int = 0x010000;
 
 /// The encoder to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +32,8 @@ const SF_FORMAT_OPUS: c_int = 0x0064;
 pub enum OutputFormat {
     /// Native FLAC. `bit_depth` must be 16 or 24.
     Flac { bit_depth: u16 },
+    /// Uncompressed WAV. `bit_depth` must be 16 or 24.
+    Wav { bit_depth: u16 },
     /// Ogg-Opus. Always 48 kHz; the source is resampled first.
     Opus,
 }
@@ -39,13 +42,14 @@ impl OutputFormat {
     pub fn extension(self) -> &'static str {
         match self {
             Self::Flac { .. } => "flac",
+            Self::Wav { .. } => "wav",
             Self::Opus => "opus",
         }
     }
 
     fn sample_rate(self, source: u32) -> u32 {
         match self {
-            Self::Flac { .. } => source,
+            Self::Flac { .. } | Self::Wav { .. } => source,
             Self::Opus => 48_000,
         }
     }
@@ -57,6 +61,11 @@ impl OutputFormat {
             Self::Flac { bit_depth } => Err(MediaError::InvalidInput(format!(
                 "FLAC bit depth must be 16 or 24, not {bit_depth}"
             ))),
+            Self::Wav { bit_depth: 16 } => Ok(SF_FORMAT_WAV | SF_FORMAT_PCM_16),
+            Self::Wav { bit_depth: 24 } => Ok(SF_FORMAT_WAV | SF_FORMAT_PCM_24),
+            Self::Wav { bit_depth } => Err(MediaError::InvalidInput(format!(
+                "WAV bit depth must be 16 or 24, not {bit_depth}"
+            ))),
             Self::Opus => Ok(SF_FORMAT_OGG | SF_FORMAT_OPUS),
         }
     }
@@ -66,6 +75,9 @@ impl OutputFormat {
             Self::Flac { bit_depth: 16 } => "FLAC 16-bit",
             Self::Flac { bit_depth: 24 } => "FLAC 24-bit",
             Self::Flac { .. } => "FLAC",
+            Self::Wav { bit_depth: 16 } => "WAV 16-bit",
+            Self::Wav { bit_depth: 24 } => "WAV 24-bit",
+            Self::Wav { .. } => "WAV",
             Self::Opus => "Opus",
         }
     }

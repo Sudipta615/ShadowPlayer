@@ -35,6 +35,14 @@ pub const TOKENS: &[(&str, &str)] = &[
     ("{genre}", "Genre"),
     ("{stem}", "Original file name, without extension"),
     ("{ext}", "File extension (added automatically if omitted)"),
+    ("{format}", "File format (FLAC, MP3, etc.)"),
+    ("{samplerate}", "Sample rate in Hz (44100, 96000, etc.)"),
+    ("{bitdepth}", "Bit depth in bits (16, 24, etc.)"),
+    ("{bitrate}", "Bitrate in kbps (320, 1000, etc.)"),
+    (
+        "{channels}",
+        "Channel count (1 for mono, 2 for stereo, etc.)",
+    ),
 ];
 
 /// A pattern that keeps the current file name shape.
@@ -305,6 +313,14 @@ fn token_value(token: &str, track: &Track) -> Option<String> {
             .and_then(|e| e.to_str())
             .unwrap_or(&track.format)
             .to_string(),
+        "{format}" => track.format.to_uppercase(),
+        "{samplerate}" => track.sample_rate.to_string(),
+        "{bitdepth}" => track.bit_depth.map(|b| b.to_string()).unwrap_or_default(),
+        "{bitrate}" => track
+            .bitrate_kbps
+            .map(|b| b.to_string())
+            .unwrap_or_default(),
+        "{channels}" => track.channels.to_string(),
         _ => return None,
     };
     Some(value)
@@ -837,5 +853,19 @@ mod tests {
             !dest.exists(),
             "no partial copy may be left at the destination"
         );
+    }
+
+    #[test]
+    fn format_and_audiophile_tokens_substitute_correctly() {
+        let mut t = track(1, "/music/track.flac", "Song", "Artist", "Album");
+        t.bit_depth = Some(16);
+        let plan = build_plan(
+            &[t],
+            "{artist} - {title} [{format} {samplerate}Hz {bitdepth}bit]",
+            None,
+        );
+        assert_eq!(plan.entries.len(), 1);
+        let dest_str = plan.entries[0].to.to_string_lossy();
+        assert!(dest_str.contains("FLAC 44100Hz 16bit].flac"));
     }
 }

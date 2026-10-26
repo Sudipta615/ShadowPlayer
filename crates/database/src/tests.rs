@@ -1794,6 +1794,8 @@ mod unit {
         b.rating = 2;
         b.has_lyrics = false;
         b.bit_depth = Some(16);
+        b.channels = 6;
+        b.bitrate_kbps = Some(320);
         b.play_count = 5;
         let mut c = sample_track(TrackId::new(), "/music/c.flac", "C", "X", "A");
         c.has_lyrics = true;
@@ -1831,6 +1833,20 @@ mod unit {
         assert_eq!(
             hi_depth.iter().map(|t| t.id).collect::<Vec<_>>(),
             vec![a.id, c.id]
+        );
+
+        let multi_chan = evaluate(SmartField::Channels, SmartOp::GreaterThan, "2");
+        assert_eq!(
+            multi_chan.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![b.id],
+            "channels field evaluates correctly"
+        );
+
+        let hi_bitrate = evaluate(SmartField::Bitrate, SmartOp::GreaterThan, "500");
+        assert_eq!(
+            hi_bitrate.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![a.id, c.id],
+            "bitrate field evaluates correctly"
         );
 
         // An impossible value is rejected visibly before it reaches SQL, and

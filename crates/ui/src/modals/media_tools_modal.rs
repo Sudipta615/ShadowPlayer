@@ -30,6 +30,8 @@ pub enum ExportChoice {
     Flac16,
     #[default]
     Flac24,
+    Wav16,
+    Wav24,
     Opus,
 }
 
@@ -38,6 +40,8 @@ impl ExportChoice {
         match self {
             Self::Flac16 => OutputFormat::Flac { bit_depth: 16 },
             Self::Flac24 => OutputFormat::Flac { bit_depth: 24 },
+            Self::Wav16 => OutputFormat::Wav { bit_depth: 16 },
+            Self::Wav24 => OutputFormat::Wav { bit_depth: 24 },
             Self::Opus => OutputFormat::Opus,
         }
     }
@@ -46,6 +50,8 @@ impl ExportChoice {
         match self {
             Self::Flac16 => "FLAC 16-bit",
             Self::Flac24 => "FLAC 24-bit",
+            Self::Wav16 => "WAV 16-bit",
+            Self::Wav24 => "WAV 24-bit",
             Self::Opus => "Opus 48 kHz",
         }
     }
@@ -499,6 +505,8 @@ fn render_export(
                 for choice in [
                     ExportChoice::Flac16,
                     ExportChoice::Flac24,
+                    ExportChoice::Wav16,
+                    ExportChoice::Wav24,
                     ExportChoice::Opus,
                 ] {
                     ui.selectable_value(&mut state.export_choice, choice, choice.label());
