@@ -30,11 +30,15 @@ use config::CompressorDetector;
 struct BandCompressor {
     threshold_db_cached: f32,
     ratio: f32,
+    /// Cached slope `1 - 1/R` to avoid division per sample in `gain_for_envelope`.
+    slope: f64,
     attack_coeff: f32,
     release_coeff: f32,
     makeup_gain: f32, // linear
     /// Soft-knee width in dB (0 = hard knee).
     knee_db: f32,
+    knee_half: f64,
+    recip_two_knee: f64,
     /// Detection mode (Peak | Rms).
     detector: CompressorDetector,
     /// When true, L/R share one gain derived from the louder envelope.
@@ -66,15 +70,26 @@ impl BandCompressor {
         let attack_ms = attack_ms.max(0.0001);
         let release_ms = release_ms.max(0.0001);
         let ratio = ratio.clamp(1.0, 100.0);
+        let slope = 1.0 - 1.0 / (ratio as f64).max(1.0);
+        let knee_val = knee_db.max(0.0) as f64;
+        let knee_half = knee_val * 0.5;
+        let recip_two_knee = if knee_val > 0.0 {
+            1.0 / (2.0 * knee_val)
+        } else {
+            0.0
+        };
         // RMS window ≈ 10 ms, independent of the attack/release times.
         let rms_window_secs = 0.010;
         Self {
             threshold_db_cached: threshold_db.max(-100.0),
             ratio,
+            slope,
             attack_coeff: (-1.0 / (attack_ms * 0.001 * sample_rate)).exp(),
             release_coeff: (-1.0 / (release_ms * 0.001 * sample_rate)).exp(),
             makeup_gain: 10.0_f32.powf(makeup_db / 20.0),
-            knee_db: knee_db.max(0.0),
+            knee_db: knee_val as f32,
+            knee_half,
+            recip_two_knee,
             detector,
             stereo_link,
             rms_mean_sq_l: 0.0,
@@ -134,21 +149,19 @@ impl BandCompressor {
         }
         let env_db = 20.0 * env_linear.log10().max(-100.0);
         let threshold_db = self.threshold_db_cached as f64;
-        let knee = self.knee_db as f64;
-        // slope = 1 - 1/R; 0 when ratio == 1 (transparent default).
-        let slope = 1.0 - 1.0 / (self.ratio as f64).max(1.0);
+        let slope = self.slope;
         if slope <= 0.0 {
             return 1.0;
         }
 
         let t = env_db - threshold_db;
-        let reduction_db = if 2.0 * t < -knee {
+        let reduction_db = if t < -self.knee_half {
             // Below the knee: no compression.
             0.0
-        } else if knee > 0.0 && 2.0 * t < knee {
+        } else if self.knee_db > 0.0 && t < self.knee_half {
             // Quadratic soft-knee region, C1-continuous with both neighbours.
-            let x = t + knee / 2.0;
-            (x * x) / (2.0 * knee) * slope
+            let x = t + self.knee_half;
+            (x * x) * self.recip_two_knee * slope
         } else {
             // Above the knee: full ratio.
             t * slope

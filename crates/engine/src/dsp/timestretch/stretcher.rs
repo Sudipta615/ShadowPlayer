@@ -413,6 +413,23 @@ impl TimeStretcher {
         let search_min = search_lo as isize - nominal_clamped as isize;
         let search_max = search_hi as isize - nominal_clamped as isize;
 
+        let cap = self.input_ring_l.len();
+        let ring_start = (self.input_write_pos + cap - (self.input_available % cap)) % cap;
+
+        // Precompute target template energy once outside the candidate search loops:
+        // scratch_target_l/r are invariant to the candidate offset k.
+        let mut norm_prev_coarse = 0.0001f32;
+        for j in (0..win_size).step_by(4) {
+            let prev = self.scratch_target_l[j] + self.scratch_target_r[j];
+            norm_prev_coarse += prev * prev;
+        }
+
+        let mut norm_prev_fine = 0.0001f32;
+        for j in (0..win_size).step_by(2) {
+            let prev = self.scratch_target_l[j] + self.scratch_target_r[j];
+            norm_prev_fine += prev * prev;
+        }
+
         let mut best_k = 0isize;
         let mut best_corr = f32::NEG_INFINITY;
 
@@ -421,24 +438,22 @@ impl TimeStretcher {
             let abs_start = (nominal_clamped as isize + k) as usize;
             let mut corr = 0.0f32;
             let mut norm_cand = 0.0001f32;
-            let mut norm_prev = 0.0001f32;
 
             for j in (0..win_size).step_by(4) {
                 let offset = abs_start + j;
-                if offset >= self.input_available {
-                    break;
-                }
-                let (cl, cr) = self.get_input_sample(offset);
-                let (pl, pr) = (self.scratch_target_l[j], self.scratch_target_r[j]);
+                let idx = (ring_start + offset) % cap;
+                let cl = self.input_ring_l[idx];
+                let cr = self.input_ring_r[idx];
+                let pl = self.scratch_target_l[j];
+                let pr = self.scratch_target_r[j];
 
                 let cand = cl + cr;
                 let prev = pl + pr;
                 corr += cand * prev;
                 norm_cand += cand * cand;
-                norm_prev += prev * prev;
             }
 
-            let norm = (norm_cand * norm_prev).sqrt();
+            let norm = (norm_cand * norm_prev_coarse).sqrt();
             let score = if norm > 0.0 { corr / norm } else { 0.0 };
 
             if score > best_corr {
@@ -454,21 +469,19 @@ impl TimeStretcher {
                 let abs_start = (nominal_clamped as isize + k_refined) as usize;
                 let mut corr = 0.0f32;
                 let mut norm_cand = 0.0001f32;
-                let mut norm_prev = 0.0001f32;
                 for j in (0..win_size).step_by(2) {
                     let offset = abs_start + j;
-                    if offset >= self.input_available {
-                        break;
-                    }
-                    let (cl, cr) = self.get_input_sample(offset);
-                    let (pl, pr) = (self.scratch_target_l[j], self.scratch_target_r[j]);
+                    let idx = (ring_start + offset) % cap;
+                    let cl = self.input_ring_l[idx];
+                    let cr = self.input_ring_r[idx];
+                    let pl = self.scratch_target_l[j];
+                    let pr = self.scratch_target_r[j];
                     let cand = cl + cr;
                     let prev = pl + pr;
                     corr += cand * prev;
                     norm_cand += cand * cand;
-                    norm_prev += prev * prev;
                 }
-                let norm = (norm_cand * norm_prev).sqrt();
+                let norm = (norm_cand * norm_prev_fine).sqrt();
                 let score = if norm > 0.0 { corr / norm } else { 0.0 };
                 if score > best_corr {
                     best_corr = score;

@@ -315,3 +315,38 @@ fn a_stalled_passthrough_consumer_is_counted() {
         "past a full buffer the passthrough path had to drop, and says so"
     );
 }
+
+#[test]
+fn test_feed_block_and_read_block() {
+    let mut resampler1 =
+        AudioResampler::<f32>::new(ResamplerQuality::Fast, 44100.0, 48000.0).unwrap();
+    let mut resampler2 =
+        AudioResampler::<f32>::new(ResamplerQuality::Fast, 44100.0, 48000.0).unwrap();
+
+    let n = 2048;
+    let l_in: Vec<f32> = (0..n).map(|i| (i as f32 * 0.05).sin() * 0.5).collect();
+    let r_in: Vec<f32> = (0..n).map(|i| (i as f32 * 0.07).cos() * 0.5).collect();
+
+    // resampler1 fed sample-by-sample
+    for i in 0..n {
+        resampler1.feed(l_in[i], r_in[i]);
+    }
+
+    // resampler2 fed in blocks
+    resampler2.feed_block(&l_in, &r_in);
+
+    assert_eq!(resampler1.available_output(), resampler2.available_output());
+    let avail = resampler2.available_output();
+    assert!(avail > 0);
+
+    let mut out_l = vec![0.0f32; avail];
+    let mut out_r = vec![0.0f32; avail];
+    let read_count = resampler2.read_block(&mut out_l, &mut out_r);
+    assert_eq!(read_count, avail);
+
+    for i in 0..avail {
+        let (exp_l, exp_r) = resampler1.read().unwrap();
+        assert!((out_l[i] - exp_l).abs() < 1e-6);
+        assert!((out_r[i] - exp_r).abs() < 1e-6);
+    }
+}

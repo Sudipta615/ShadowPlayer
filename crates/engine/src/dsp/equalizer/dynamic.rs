@@ -311,13 +311,14 @@ impl DynamicEqBand {
             self.current_gain_db += smoothing_alpha * (target_gain_db - self.current_gain_db);
             self.recompute_coeffs(self.current_gain_db);
 
-            // 3. Filter the audio samples in this sub-block
-            for i in offset..offset + chunk_len {
-                let l_in = if left[i].is_finite() { left[i] } else { 0.0 };
-                let r_in = if right[i].is_finite() { right[i] } else { 0.0 };
-                left[i] = self.state_l.process(l_in, &self.coeffs);
-                right[i] = self.state_r.process(r_in, &self.coeffs);
-            }
+            // 3. Filter the audio samples in this sub-block (vectorized stereo cascade)
+            crate::dsp::biquad::BiquadState::process_stereo_block(
+                &mut self.state_l,
+                &mut self.state_r,
+                &mut left[offset..offset + chunk_len],
+                &mut right[offset..offset + chunk_len],
+                &self.coeffs,
+            );
 
             offset += chunk_len;
         }

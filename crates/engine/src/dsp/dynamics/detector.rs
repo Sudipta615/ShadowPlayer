@@ -190,14 +190,15 @@ impl DynamicsDetector {
     ) -> (f32, f32) {
         let (raw_l, raw_r) = ext_sc.unwrap_or((in_l, in_r));
 
-        // 1. Lookahead buffering if active
+        // 1. Lookahead buffering if active (power-of-two mask avoids integer division)
         let (sc_l, sc_r) = if self.config.lookahead_samples > 0 {
             let cap = self.lookahead_cap;
+            let mask = cap - 1;
             let wp = self.lookahead_write;
             self.lookahead_buf_l[wp] = raw_l;
             self.lookahead_buf_r[wp] = raw_r;
-            self.lookahead_write = (wp + 1) % cap;
-            let rp = (wp + cap - (self.config.lookahead_samples % cap)) % cap;
+            self.lookahead_write = (wp + 1) & mask;
+            let rp = (wp + cap - (self.config.lookahead_samples & mask)) & mask;
             (self.lookahead_buf_l[rp], self.lookahead_buf_r[rp])
         } else {
             (raw_l, raw_r)

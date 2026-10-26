@@ -17,62 +17,67 @@ pub fn vector_abs_max(src: &[f32], n: usize) -> f32 {
     let mut i = 0usize;
     let mut max_val = 0.0f32;
 
-    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[cfg(target_arch = "x86_64")]
     {
-        use core::arch::x86_64::{_mm_and_ps, _mm_loadu_ps, _mm_max_ps, _mm_set1_ps, _mm_store_ss};
-        // Mask out sign bit: 0x7FFF_FFFF
-        let mask = unsafe { _mm_set1_ps(f32::from_bits(0x7FFF_FFFF)) };
-        let mut vmax = unsafe { _mm_set1_ps(0.0) };
+        if is_x86_feature_detected!("avx2") {
+            use core::arch::x86_64::{
+                _mm256_and_ps, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_loadu_ps,
+                _mm256_max_ps, _mm256_set1_ps, _mm_max_ps, _mm_shuffle_ps, _mm_store_ss,
+            };
+            let mask = unsafe { _mm256_set1_ps(f32::from_bits(0x7FFF_FFFF)) };
+            let mut vmax256 = unsafe { _mm256_set1_ps(0.0) };
 
-        // Operand order matters, and is the whole subtlety here.
-        //
-        // `MAXPS` computes `DEST = (SRC1 > SRC2) ? SRC1 : SRC2`. With the
-        // accumulator passed as SRC1 and the candidate as SRC2, a NaN
-        // candidate makes `SRC1 > NaN` false, so DEST takes **SRC2 — the
-        // NaN** — and one bad sample poisons the lane.
-        //
-        // Passing the candidate first inverts that: `NaN > SRC2` is also
-        // false, so DEST takes SRC2, the accumulator. The NaN is dropped and
-        // the previous peak survives. Because the accumulator starts at 0.0
-        // and only ever absorbs non-NaN candidates, no lane can become NaN,
-        // which is also what makes the horizontal reduce below safe in either
-        // order.
-        while i + 4 <= n {
-            unsafe {
-                let v = _mm_loadu_ps(src.as_ptr().add(i));
-                let vabs = _mm_and_ps(v, mask);
-                vmax = _mm_max_ps(vabs, vmax);
+            while i + 8 <= n {
+                unsafe {
+                    let v = _mm256_loadu_ps(src.as_ptr().add(i));
+                    let vabs = _mm256_and_ps(v, mask);
+                    vmax256 = _mm256_max_ps(vabs, vmax256);
+                }
+                i += 8;
             }
-            i += 4;
-        }
 
-        // Horizontal max of 4-lane vector
-        unsafe {
-            use core::arch::x86_64::_mm_shuffle_ps;
-            let shuf1 = _mm_shuffle_ps(vmax, vmax, 0b01_00_11_10);
-            let m1 = _mm_max_ps(vmax, shuf1);
-            let shuf2 = _mm_shuffle_ps(m1, m1, 0b00_00_00_01);
-            let m2 = _mm_max_ps(m1, shuf2);
-            let mut res = 0.0f32;
-            _mm_store_ss(&mut res, m2);
-            max_val = max_val.max(res);
+            unsafe {
+                let low128 = _mm256_castps256_ps128(vmax256);
+                let high128 = _mm256_extractf128_ps(vmax256, 1);
+                let v128 = _mm_max_ps(low128, high128);
+                let shuf1 = _mm_shuffle_ps(v128, v128, 0b01_00_11_10);
+                let m1 = _mm_max_ps(v128, shuf1);
+                let shuf2 = _mm_shuffle_ps(m1, m1, 0b00_00_00_01);
+                let m2 = _mm_max_ps(m1, shuf2);
+                let mut res = 0.0f32;
+                _mm_store_ss(&mut res, m2);
+                max_val = max_val.max(res);
+            }
+        } else if is_x86_feature_detected!("sse2") {
+            use core::arch::x86_64::{
+                _mm_and_ps, _mm_loadu_ps, _mm_max_ps, _mm_set1_ps, _mm_shuffle_ps, _mm_store_ss,
+            };
+            let mask = unsafe { _mm_set1_ps(f32::from_bits(0x7FFF_FFFF)) };
+            let mut vmax = unsafe { _mm_set1_ps(0.0) };
+
+            while i + 4 <= n {
+                unsafe {
+                    let v = _mm_loadu_ps(src.as_ptr().add(i));
+                    let vabs = _mm_and_ps(v, mask);
+                    vmax = _mm_max_ps(vabs, vmax);
+                }
+                i += 4;
+            }
+
+            unsafe {
+                let shuf1 = _mm_shuffle_ps(vmax, vmax, 0b01_00_11_10);
+                let m1 = _mm_max_ps(vmax, shuf1);
+                let shuf2 = _mm_shuffle_ps(m1, m1, 0b00_00_00_01);
+                let m2 = _mm_max_ps(m1, shuf2);
+                let mut res = 0.0f32;
+                _mm_store_ss(&mut res, m2);
+                max_val = max_val.max(res);
+            }
         }
     }
 
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     {
-        // `vmaxnmq_f32` (FMAXNM), NOT `vmaxq_f32` (FMAX).
-        //
-        // FMAX propagates NaN: one NaN sample poisons the whole vector and
-        // the meter reads NaN. FMAXNM returns the *number*, ignoring NaN —
-        // which is what the scalar tail does (`f32::max` ignores NaN) and
-        // what the SSE2 path above gets for free, since `maxps` returns the
-        // second operand when it is NaN and the accumulator is passed first.
-        //
-        // Without this, the same audio reported a number on x86_64 and NaN on
-        // aarch64. Unreachable under `NonFinitePolicy::Clamp` (the chain
-        // clamps after every stage) but reachable under `Ignore`, which skips
-        // containment entirely.
         use core::arch::aarch64::{vabsq_f32, vld1q_f32, vmaxnmq_f32, vmaxvq_f32};
         let mut vmax = unsafe { vld1q_f32([0.0, 0.0, 0.0, 0.0].as_ptr()) };
 
@@ -103,10 +108,89 @@ pub fn vector_abs_max(src: &[f32], n: usize) -> f32 {
 #[inline]
 pub fn vector_abs_max_f64(src: &[f64], n: usize) -> f64 {
     let n = n.min(src.len());
-    let mut max_val = 0.0f64;
-    for x in src.iter().take(n) {
-        max_val = max_val.max(x.abs());
+    if n == 0 {
+        return 0.0;
     }
+    let mut i = 0usize;
+    let mut max_val = 0.0f64;
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") {
+            use core::arch::x86_64::{
+                _mm256_and_pd, _mm256_castpd256_pd128, _mm256_extractf128_pd, _mm256_loadu_pd,
+                _mm256_max_pd, _mm256_set1_pd, _mm_cvtsd_f64, _mm_max_pd, _mm_shuffle_pd,
+            };
+            let mask = unsafe { _mm256_set1_pd(f64::from_bits(0x7FFF_FFFF_FFFF_FFFF)) };
+            let mut vmax256 = unsafe { _mm256_set1_pd(0.0) };
+
+            while i + 4 <= n {
+                unsafe {
+                    let v = _mm256_loadu_pd(src.as_ptr().add(i));
+                    let vabs = _mm256_and_pd(v, mask);
+                    vmax256 = _mm256_max_pd(vabs, vmax256);
+                }
+                i += 4;
+            }
+
+            unsafe {
+                let low128 = _mm256_castpd256_pd128(vmax256);
+                let high128 = _mm256_extractf128_pd(vmax256, 1);
+                let v128 = _mm_max_pd(low128, high128);
+                let shuf = _mm_shuffle_pd(v128, v128, 0b01);
+                let m = _mm_max_pd(v128, shuf);
+                max_val = max_val.max(_mm_cvtsd_f64(m));
+            }
+        } else if is_x86_feature_detected!("sse2") {
+            use core::arch::x86_64::{
+                _mm_and_pd, _mm_cvtsd_f64, _mm_loadu_pd, _mm_max_pd, _mm_set1_pd, _mm_shuffle_pd,
+            };
+            let mask = unsafe { _mm_set1_pd(f64::from_bits(0x7FFF_FFFF_FFFF_FFFF)) };
+            let mut vmax = unsafe { _mm_set1_pd(0.0) };
+
+            while i + 2 <= n {
+                unsafe {
+                    let v = _mm_loadu_pd(src.as_ptr().add(i));
+                    let vabs = _mm_and_pd(v, mask);
+                    vmax = _mm_max_pd(vabs, vmax);
+                }
+                i += 2;
+            }
+
+            unsafe {
+                let shuf = _mm_shuffle_pd(vmax, vmax, 0b01);
+                let m = _mm_max_pd(vmax, shuf);
+                max_val = max_val.max(_mm_cvtsd_f64(m));
+            }
+        }
+    }
+
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    {
+        use core::arch::aarch64::{vabsq_f64, vgetq_lane_f64, vld1q_f64, vmaxnmq_f64};
+        let mut vmax = unsafe { vld1q_f64([0.0, 0.0].as_ptr()) };
+
+        while i + 2 <= n {
+            unsafe {
+                let v = vld1q_f64(src.as_ptr().add(i));
+                let vabs = vabsq_f64(v);
+                vmax = vmaxnmq_f64(vmax, vabs);
+            }
+            i += 2;
+        }
+
+        unsafe {
+            let m0 = vgetq_lane_f64(vmax, 0);
+            let m1 = vgetq_lane_f64(vmax, 1);
+            max_val = max_val.max(m0.max(m1));
+        }
+    }
+
+    while i < n {
+        max_val = max_val.max(src[i].abs());
+        i += 1;
+    }
+
     max_val
 }
 

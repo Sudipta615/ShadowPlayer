@@ -428,6 +428,95 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         }
     }
 
+    /// Feed a block of stereo frames into the resampler.
+    ///
+    /// Batches slice copies and reduces per-sample checks, invoking `process_chunk()`
+    /// only as each chunk is filled.
+    pub fn feed_block(&mut self, left: &[T], right: &[T]) {
+        let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+
+        if !self.disabled
+            && self.rebuild_rx.is_none()
+            && !self.needs_rebuild
+            && (self.rebuilt_effective_source != self.compute_effective_source_rate()
+                || self.rebuilt_output_rate != self.output_rate
+                || self.rebuilt_quality != self.inner.quality()
+                || self.pending_quality.is_some())
+        {
+            self.needs_rebuild = true;
+        }
+
+        if self.disabled || self.is_passthrough() {
+            for i in 0..n {
+                self.push_sample_direct(left[i], right[i]);
+            }
+            return;
+        }
+
+        let mut offset = 0;
+        while offset < n {
+            if let Some(ref rx) = self.rebuild_rx {
+                match rx.try_recv() {
+                    Ok(result) => {
+                        self.rebuild_rx = None;
+                        self.apply_rebuild_result(result);
+                    }
+                    Err(crossbeam::channel::TryRecvError::Empty) => {}
+                    Err(crossbeam::channel::TryRecvError::Disconnected) => {
+                        log::error!("Resampler builder thread disconnected unexpectedly.");
+                        self.rebuild_rx = None;
+                        self.needs_rebuild = true;
+                        self.rebuild_failures += 1;
+                    }
+                }
+            } else if self.needs_rebuild {
+                if self.rebuild_failures >= MAX_REBUILD_FAILURES {
+                    self.needs_rebuild = false;
+                    self.disabled = true;
+                    log::error!(
+                        "Resampler disabled after {} consecutive rebuild failures.",
+                        MAX_REBUILD_FAILURES
+                    );
+                    for i in offset..n {
+                        self.push_sample_direct(left[i], right[i]);
+                    }
+                    return;
+                } else {
+                    self.trigger_rebuild();
+                }
+            }
+
+            let input_buf_len = self.input_buffers[0].len();
+            if self.input_pos >= input_buf_len {
+                self.process_chunk();
+                if self.input_pos >= input_buf_len {
+                    return;
+                }
+            }
+
+            let needed = self.inner.input_frames_next();
+            let to_fill = (needed.saturating_sub(self.input_pos))
+                .min(input_buf_len - self.input_pos)
+                .min(n - offset);
+
+            if to_fill > 0 {
+                self.input_buffers[0][self.input_pos..self.input_pos + to_fill]
+                    .copy_from_slice(&left[offset..offset + to_fill]);
+                self.input_buffers[1][self.input_pos..self.input_pos + to_fill]
+                    .copy_from_slice(&right[offset..offset + to_fill]);
+                self.input_pos += to_fill;
+                offset += to_fill;
+            }
+
+            if self.input_pos >= needed {
+                self.process_chunk();
+            }
+        }
+    }
+
     /// Write a single stereo sample directly into the output buffers with
     /// no heap allocation. Used by the disabled-resampler bypass path.
     #[inline]
@@ -641,6 +730,35 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         self.output_available -= 1;
 
         Some((left, right))
+    }
+
+    /// Read available resampled stereo frames into destination slices.
+    /// Returns the number of frames read.
+    pub fn read_block(&mut self, out_l: &mut [T], out_r: &mut [T]) -> usize {
+        let max_read = out_l.len().min(out_r.len());
+        let mut count = 0;
+        while self.crossfade_remaining > 0 && count < max_read {
+            if let Some((l, r)) = self.read() {
+                out_l[count] = l;
+                out_r[count] = r;
+                count += 1;
+            } else {
+                return count;
+            }
+        }
+
+        let avail = self.output_available.min(max_read - count);
+        if avail > 0 {
+            let rpos = self.output_read_pos;
+            out_l[count..count + avail]
+                .copy_from_slice(&self.output_buffers[0][rpos..rpos + avail]);
+            out_r[count..count + avail]
+                .copy_from_slice(&self.output_buffers[1][rpos..rpos + avail]);
+            self.output_read_pos += avail;
+            self.output_available -= avail;
+            count += avail;
+        }
+        count
     }
 
     /// Number of output samples available for reading

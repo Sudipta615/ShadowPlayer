@@ -288,8 +288,138 @@ impl<T: AudioFloat> SvfFilter<T> {
 
     /// Process a block of samples in place for the given mode.
     pub fn process_block(&mut self, buffer: &mut [T], mode: SvfMode) {
-        for s in buffer.iter_mut() {
-            *s = self.process(*s, mode);
+        match mode {
+            SvfMode::LowPass => {
+                for s in buffer.iter_mut() {
+                    let (lp, _, _, _) = self.process_multimode(*s);
+                    *s = lp;
+                }
+            }
+            SvfMode::HighPass => {
+                for s in buffer.iter_mut() {
+                    let (_, _, hp, _) = self.process_multimode(*s);
+                    *s = hp;
+                }
+            }
+            SvfMode::BandPass => {
+                for s in buffer.iter_mut() {
+                    let (_, bp, _, _) = self.process_multimode(*s);
+                    *s = bp;
+                }
+            }
+            SvfMode::Notch => {
+                for s in buffer.iter_mut() {
+                    let (_, _, _, notch) = self.process_multimode(*s);
+                    *s = notch;
+                }
+            }
+            SvfMode::Peaking => {
+                for s in buffer.iter_mut() {
+                    *s = self.process_peaking(*s);
+                }
+            }
+            SvfMode::LowShelf => {
+                for s in buffer.iter_mut() {
+                    *s = self.process_lowshelf(*s);
+                }
+            }
+            SvfMode::HighShelf => {
+                for s in buffer.iter_mut() {
+                    *s = self.process_highshelf(*s);
+                }
+            }
+            SvfMode::AllPass => {
+                for s in buffer.iter_mut() {
+                    *s = self.process(*s, SvfMode::AllPass);
+                }
+            }
+        }
+    }
+
+    /// Process a stereo frame through a stereo pair of SVF filters in place.
+    #[inline(always)]
+    pub fn process_stereo_frame(
+        left_filter: &mut Self,
+        right_filter: &mut Self,
+        xl: T,
+        xr: T,
+        mode: SvfMode,
+    ) -> (T, T) {
+        (
+            left_filter.process(xl, mode),
+            right_filter.process(xr, mode),
+        )
+    }
+
+    /// Process a stereo block through a stereo pair of SVF filters in place.
+    ///
+    /// Hoists the filter mode dispatch out of the per-sample loop to maximize instruction
+    /// cache efficiency and auto-vectorization.
+    pub fn process_stereo_block(
+        left_filter: &mut Self,
+        right_filter: &mut Self,
+        left: &mut [T],
+        right: &mut [T],
+        mode: SvfMode,
+    ) {
+        let n = left.len().min(right.len());
+        match mode {
+            SvfMode::LowPass => {
+                for i in 0..n {
+                    let (lp, _, _, _) = left_filter.process_multimode(left[i]);
+                    left[i] = lp;
+                    let (rp, _, _, _) = right_filter.process_multimode(right[i]);
+                    right[i] = rp;
+                }
+            }
+            SvfMode::HighPass => {
+                for i in 0..n {
+                    let (_, _, hp, _) = left_filter.process_multimode(left[i]);
+                    left[i] = hp;
+                    let (_, _, rp, _) = right_filter.process_multimode(right[i]);
+                    right[i] = rp;
+                }
+            }
+            SvfMode::BandPass => {
+                for i in 0..n {
+                    let (_, bp, _, _) = left_filter.process_multimode(left[i]);
+                    left[i] = bp;
+                    let (_, rp, _, _) = right_filter.process_multimode(right[i]);
+                    right[i] = rp;
+                }
+            }
+            SvfMode::Notch => {
+                for i in 0..n {
+                    let (_, _, _, notch) = left_filter.process_multimode(left[i]);
+                    left[i] = notch;
+                    let (_, _, _, rp) = right_filter.process_multimode(right[i]);
+                    right[i] = rp;
+                }
+            }
+            SvfMode::Peaking => {
+                for i in 0..n {
+                    left[i] = left_filter.process_peaking(left[i]);
+                    right[i] = right_filter.process_peaking(right[i]);
+                }
+            }
+            SvfMode::LowShelf => {
+                for i in 0..n {
+                    left[i] = left_filter.process_lowshelf(left[i]);
+                    right[i] = right_filter.process_lowshelf(right[i]);
+                }
+            }
+            SvfMode::HighShelf => {
+                for i in 0..n {
+                    left[i] = left_filter.process_highshelf(left[i]);
+                    right[i] = right_filter.process_highshelf(right[i]);
+                }
+            }
+            SvfMode::AllPass => {
+                for i in 0..n {
+                    left[i] = left_filter.process(left[i], SvfMode::AllPass);
+                    right[i] = right_filter.process(right[i], SvfMode::AllPass);
+                }
+            }
         }
     }
 }
@@ -494,5 +624,49 @@ mod tests {
 
         let out2 = svf.process(0.5, SvfMode::Peaking);
         assert!(out2.is_finite(), "Output must be finite despite Inf params");
+    }
+
+    #[test]
+    fn test_svf_stereo_block_equivalence() {
+        let mut left_filter = SvfFilter::<f64>::new(48000.0);
+        let mut right_filter = SvfFilter::<f64>::new(48000.0);
+        left_filter.set_params(1200.0, 1.4);
+        right_filter.set_params(1200.0, 1.4);
+        left_filter.set_gain_db(4.0);
+        right_filter.set_gain_db(4.0);
+
+        let mut ref_l = left_filter;
+        let mut ref_r = right_filter;
+
+        let mut l_block: Vec<f64> = (0..256).map(|i| (i as f64 * 0.1).sin()).collect();
+        let mut r_block: Vec<f64> = (0..256).map(|i| (i as f64 * 0.15).cos()).collect();
+
+        let l_expected: Vec<f64> = l_block
+            .iter()
+            .map(|&x| ref_l.process(x, SvfMode::Peaking))
+            .collect();
+        let r_expected: Vec<f64> = r_block
+            .iter()
+            .map(|&x| ref_r.process(x, SvfMode::Peaking))
+            .collect();
+
+        SvfFilter::process_stereo_block(
+            &mut left_filter,
+            &mut right_filter,
+            &mut l_block,
+            &mut r_block,
+            SvfMode::Peaking,
+        );
+
+        for i in 0..256 {
+            assert!(
+                (l_block[i] - l_expected[i]).abs() < 1e-12,
+                "Left sample {i} mismatch"
+            );
+            assert!(
+                (r_block[i] - r_expected[i]).abs() < 1e-12,
+                "Right sample {i} mismatch"
+            );
+        }
     }
 }
