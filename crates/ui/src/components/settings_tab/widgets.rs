@@ -97,6 +97,12 @@ pub fn setting_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(
         .fill(theme.bg_card)
         .stroke(Stroke::new(1.0, theme.border_card))
         .corner_radius(CornerRadius::same(theme.radius_xl))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 4],
+            blur: 16,
+            spread: 0,
+            color: theme.shadow,
+        })
         .inner_margin(egui::Margin::symmetric(
             theme.space_5xl as i8,
             theme.space_3xl as i8,

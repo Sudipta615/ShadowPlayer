@@ -21,10 +21,19 @@ use crate::MediaError;
 const SFM_WRITE: c_int = 0x20;
 const SF_FORMAT_PCM_16: c_int = 0x0002;
 const SF_FORMAT_PCM_24: c_int = 0x0003;
-const SF_FORMAT_FLAC: c_int = 0x170000;
-const SF_FORMAT_OGG: c_int = 0x200000;
-const SF_FORMAT_OPUS: c_int = 0x0064;
+const SF_FORMAT_PCM_32: c_int = 0x0004;
+const SF_FORMAT_FLOAT: c_int = 0x0006;
 const SF_FORMAT_WAV: c_int = 0x010000;
+const SF_FORMAT_AIFF: c_int = 0x020000;
+const SF_FORMAT_FLAC: c_int = 0x170000;
+const SF_FORMAT_CAF: c_int = 0x180000;
+const SF_FORMAT_OGG: c_int = 0x200000;
+const SF_FORMAT_MPEG: c_int = 0x230000;
+const SF_FORMAT_VORBIS: c_int = 0x0060;
+const SF_FORMAT_OPUS: c_int = 0x0064;
+const SF_FORMAT_ALAC_16: c_int = 0x0070;
+const SF_FORMAT_ALAC_24: c_int = 0x0072;
+const SF_FORMAT_MPEG_LAYER_III: c_int = 0x0082;
 
 /// The encoder to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,29 +41,67 @@ const SF_FORMAT_WAV: c_int = 0x010000;
 pub enum OutputFormat {
     /// Native FLAC. `bit_depth` must be 16 or 24.
     Flac { bit_depth: u16 },
-    /// Uncompressed WAV. `bit_depth` must be 16 or 24.
+    /// Uncompressed PCM WAV. `bit_depth` must be 16, 24, or 32.
     Wav { bit_depth: u16 },
+    /// 32-bit floating-point WAV.
+    WavFloat,
+    /// Uncompressed PCM AIFF. `bit_depth` must be 16, 24, or 32.
+    Aiff { bit_depth: u16 },
+    /// 32-bit floating-point AIFF.
+    AiffFloat,
+    /// MPEG-1 Audio Layer III (MP3).
+    Mp3,
     /// Ogg-Opus. Always 48 kHz; the source is resampled first.
     Opus,
+    /// Ogg-Vorbis.
+    Vorbis,
+    /// Apple Core Audio Format (CAF) with ALAC compression. `bit_depth` must be 16 or 24.
+    CafAlac { bit_depth: u16 },
+    /// Apple Core Audio Format (CAF) with uncompressed PCM. `bit_depth` must be 16 or 24.
+    CafPcm { bit_depth: u16 },
 }
 
 impl OutputFormat {
+    pub const ALL: &'static [OutputFormat] = &[
+        Self::Flac { bit_depth: 16 },
+        Self::Flac { bit_depth: 24 },
+        Self::Wav { bit_depth: 16 },
+        Self::Wav { bit_depth: 24 },
+        Self::Wav { bit_depth: 32 },
+        Self::WavFloat,
+        Self::Mp3,
+        Self::Opus,
+        Self::Vorbis,
+        Self::Aiff { bit_depth: 16 },
+        Self::Aiff { bit_depth: 24 },
+        Self::Aiff { bit_depth: 32 },
+        Self::AiffFloat,
+        Self::CafAlac { bit_depth: 16 },
+        Self::CafAlac { bit_depth: 24 },
+        Self::CafPcm { bit_depth: 16 },
+        Self::CafPcm { bit_depth: 24 },
+    ];
+
     pub fn extension(self) -> &'static str {
         match self {
             Self::Flac { .. } => "flac",
-            Self::Wav { .. } => "wav",
+            Self::Wav { .. } | Self::WavFloat => "wav",
+            Self::Aiff { .. } | Self::AiffFloat => "aiff",
+            Self::Mp3 => "mp3",
             Self::Opus => "opus",
+            Self::Vorbis => "ogg",
+            Self::CafAlac { .. } | Self::CafPcm { .. } => "caf",
         }
     }
 
-    fn sample_rate(self, source: u32) -> u32 {
+    pub fn sample_rate(self, source: u32) -> u32 {
         match self {
-            Self::Flac { .. } | Self::Wav { .. } => source,
             Self::Opus => 48_000,
+            _ => source,
         }
     }
 
-    fn libsndfile_format(self) -> Result<c_int, MediaError> {
+    pub fn libsndfile_format(self) -> Result<c_int, MediaError> {
         match self {
             Self::Flac { bit_depth: 16 } => Ok(SF_FORMAT_FLAC | SF_FORMAT_PCM_16),
             Self::Flac { bit_depth: 24 } => Ok(SF_FORMAT_FLAC | SF_FORMAT_PCM_24),
@@ -63,22 +110,58 @@ impl OutputFormat {
             ))),
             Self::Wav { bit_depth: 16 } => Ok(SF_FORMAT_WAV | SF_FORMAT_PCM_16),
             Self::Wav { bit_depth: 24 } => Ok(SF_FORMAT_WAV | SF_FORMAT_PCM_24),
+            Self::Wav { bit_depth: 32 } => Ok(SF_FORMAT_WAV | SF_FORMAT_PCM_32),
             Self::Wav { bit_depth } => Err(MediaError::InvalidInput(format!(
-                "WAV bit depth must be 16 or 24, not {bit_depth}"
+                "WAV bit depth must be 16, 24, or 32, not {bit_depth}"
             ))),
+            Self::WavFloat => Ok(SF_FORMAT_WAV | SF_FORMAT_FLOAT),
+            Self::Aiff { bit_depth: 16 } => Ok(SF_FORMAT_AIFF | SF_FORMAT_PCM_16),
+            Self::Aiff { bit_depth: 24 } => Ok(SF_FORMAT_AIFF | SF_FORMAT_PCM_24),
+            Self::Aiff { bit_depth: 32 } => Ok(SF_FORMAT_AIFF | SF_FORMAT_PCM_32),
+            Self::Aiff { bit_depth } => Err(MediaError::InvalidInput(format!(
+                "AIFF bit depth must be 16, 24, or 32, not {bit_depth}"
+            ))),
+            Self::AiffFloat => Ok(SF_FORMAT_AIFF | SF_FORMAT_FLOAT),
+            Self::Mp3 => Ok(SF_FORMAT_MPEG | SF_FORMAT_MPEG_LAYER_III),
             Self::Opus => Ok(SF_FORMAT_OGG | SF_FORMAT_OPUS),
+            Self::Vorbis => Ok(SF_FORMAT_OGG | SF_FORMAT_VORBIS),
+            Self::CafAlac { bit_depth: 16 } => Ok(SF_FORMAT_CAF | SF_FORMAT_ALAC_16),
+            Self::CafAlac { bit_depth: 24 } => Ok(SF_FORMAT_CAF | SF_FORMAT_ALAC_24),
+            Self::CafAlac { bit_depth } => Err(MediaError::InvalidInput(format!(
+                "CAF ALAC bit depth must be 16 or 24, not {bit_depth}"
+            ))),
+            Self::CafPcm { bit_depth: 16 } => Ok(SF_FORMAT_CAF | SF_FORMAT_PCM_16),
+            Self::CafPcm { bit_depth: 24 } => Ok(SF_FORMAT_CAF | SF_FORMAT_PCM_24),
+            Self::CafPcm { bit_depth } => Err(MediaError::InvalidInput(format!(
+                "CAF PCM bit depth must be 16 or 24, not {bit_depth}"
+            ))),
         }
     }
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Flac { bit_depth: 16 } => "FLAC 16-bit",
             Self::Flac { bit_depth: 24 } => "FLAC 24-bit",
             Self::Flac { .. } => "FLAC",
             Self::Wav { bit_depth: 16 } => "WAV 16-bit",
             Self::Wav { bit_depth: 24 } => "WAV 24-bit",
+            Self::Wav { bit_depth: 32 } => "WAV 32-bit",
             Self::Wav { .. } => "WAV",
-            Self::Opus => "Opus",
+            Self::WavFloat => "WAV 32-bit Float",
+            Self::Aiff { bit_depth: 16 } => "AIFF 16-bit",
+            Self::Aiff { bit_depth: 24 } => "AIFF 24-bit",
+            Self::Aiff { bit_depth: 32 } => "AIFF 32-bit",
+            Self::Aiff { .. } => "AIFF",
+            Self::AiffFloat => "AIFF 32-bit Float",
+            Self::Mp3 => "MP3 (MPEG Layer III)",
+            Self::Opus => "Ogg-Opus 48 kHz",
+            Self::Vorbis => "Ogg-Vorbis",
+            Self::CafAlac { bit_depth: 16 } => "CAF ALAC 16-bit",
+            Self::CafAlac { bit_depth: 24 } => "CAF ALAC 24-bit",
+            Self::CafAlac { .. } => "CAF ALAC",
+            Self::CafPcm { bit_depth: 16 } => "CAF PCM 16-bit",
+            Self::CafPcm { bit_depth: 24 } => "CAF PCM 24-bit",
+            Self::CafPcm { .. } => "CAF PCM",
         }
     }
 }
@@ -87,6 +170,12 @@ impl OutputFormat {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranscodeOptions {
     pub format: OutputFormat,
+    /// Explicit target sample rate in Hz. If None or 0, follows source.
+    #[serde(default)]
+    pub sample_rate: Option<u32>,
+    /// Explicit target channels: None = keep source, Some(1) = mono downmix, Some(2) = stereo downmix.
+    #[serde(default)]
+    pub channels: Option<usize>,
     /// Copy the source's editorial tags to the new file. On by default.
     #[serde(default = "default_true")]
     pub copy_tags: bool,
@@ -100,6 +189,8 @@ impl Default for TranscodeOptions {
     fn default() -> Self {
         Self {
             format: OutputFormat::Flac { bit_depth: 24 },
+            sample_rate: None,
+            channels: None,
             copy_tags: true,
         }
     }
@@ -162,13 +253,25 @@ pub fn transcode(
             message: "the decoder reported zero channels".to_string(),
         });
     }
-    let target_rate = options.format.sample_rate(source_rate);
+    let target_rate = options
+        .sample_rate
+        .filter(|&r| r > 0)
+        .unwrap_or_else(|| options.format.sample_rate(source_rate));
     let resampled = target_rate != source_rate;
-    if options.format == OutputFormat::Opus && channels > 2 {
-        return Err(MediaError::Unsupported(
-            "Opus export supports mono and stereo sources; choose FLAC for this channel layout"
-                .to_string(),
-        ));
+    let (samples, channels) = match options.channels {
+        Some(1) if channels != 1 => (downmix_to_mono(&samples, channels), 1),
+        Some(2) if channels != 2 => (downmix_to_stereo(&samples, channels), 2),
+        _ => (samples, channels),
+    };
+    if (options.format == OutputFormat::Opus
+        || options.format == OutputFormat::Vorbis
+        || options.format == OutputFormat::Mp3)
+        && channels > 2
+    {
+        return Err(MediaError::Unsupported(format!(
+            "{} export supports mono and stereo sources; choose FLAC or WAV for multichannel layouts",
+            options.format.label()
+        )));
     }
     let samples = if resampled {
         resample_interleaved(&samples, channels, source_rate, target_rate)
@@ -216,6 +319,59 @@ pub fn transcode(
         metadata_written,
         warnings,
     })
+}
+
+fn downmix_to_stereo(samples: &[f32], channels: usize) -> Vec<f32> {
+    if channels == 2 {
+        return samples.to_vec();
+    }
+    let frames = samples.len() / channels;
+    let mut out = Vec::with_capacity(frames * 2);
+    if channels == 1 {
+        for &s in samples {
+            out.push(s);
+            out.push(s);
+        }
+    } else if channels >= 6 {
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+        for i in 0..frames {
+            let offset = i * channels;
+            let l = samples[offset];
+            let r = samples[offset + 1];
+            let c = samples[offset + 2];
+            let ls = samples[offset + 4];
+            let rs = samples[offset + 5];
+            let left = l + c * inv_sqrt2 + ls * inv_sqrt2;
+            let right = r + c * inv_sqrt2 + rs * inv_sqrt2;
+            out.push(left * 0.7);
+            out.push(right * 0.7);
+        }
+    } else {
+        for i in 0..frames {
+            let offset = i * channels;
+            out.push(samples[offset]);
+            out.push(samples[offset + 1.min(channels - 1)]);
+        }
+    }
+    out
+}
+
+fn downmix_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
+    if channels == 1 {
+        return samples.to_vec();
+    }
+    let frames = samples.len() / channels;
+    let mut out = Vec::with_capacity(frames);
+    let scale = 1.0 / channels as f32;
+    for i in 0..frames {
+        let offset = i * channels;
+        let mut sum = 0.0f32;
+        for ch in 0..channels {
+            sum += samples[offset + ch];
+        }
+        out.push(sum * scale);
+    }
+    out
 }
 
 /// Decode every PCM frame into one interleaved buffer.
@@ -642,5 +798,27 @@ mod tests {
             .to_string_lossy()
             .ends_with(".part"));
         assert_ne!(temp, output);
+    }
+
+    #[test]
+    fn format_definitions_and_extensions_are_consistent() {
+        for fmt in OutputFormat::ALL {
+            assert!(!fmt.extension().is_empty());
+            assert!(!fmt.label().is_empty());
+            assert!(fmt.libsndfile_format().is_ok());
+        }
+    }
+
+    #[test]
+    fn channel_downmix_transforms_buffers_as_expected() {
+        let stereo = vec![1.0, 0.5, 0.8, 0.2];
+        let mono = downmix_to_mono(&stereo, 2);
+        assert_eq!(mono.len(), 2);
+        assert!((mono[0] - 0.75).abs() < 1e-4);
+        assert!((mono[1] - 0.50).abs() < 1e-4);
+
+        let reconstructed = downmix_to_stereo(&mono, 1);
+        assert_eq!(reconstructed.len(), 4);
+        assert_eq!(reconstructed, vec![0.75, 0.75, 0.5, 0.5]);
     }
 }

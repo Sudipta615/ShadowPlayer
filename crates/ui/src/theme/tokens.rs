@@ -223,4 +223,46 @@ impl Theme {
         .into();
         ctx.set_style_of(ctx.theme(), style);
     }
+
+    /// Return a copy of this theme with translucent frosted glass surfaces
+    /// and optical specular edge highlights applied across cards and panels.
+    pub fn with_frosted_glass(&self, enabled: bool) -> Self {
+        if !enabled {
+            return *self;
+        }
+
+        let mut theme = *self;
+
+        // Translucent frosted glass surface opacities:
+        // Sidebar: ~84% opacity (215/255)
+        // Cards/Panels: ~70% opacity (180/255)
+        // Card hover/active: elevated opacities
+        // Search/Inputs: ~84% opacity (215/255) to preserve input contrast
+        let frost_alpha = |c: Color32, target: u8| -> Color32 {
+            let a = if c.a() < target { c.a() } else { target };
+            Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+        };
+
+        theme.bg_sidebar = frost_alpha(self.bg_sidebar, 215);
+        theme.bg_card = frost_alpha(self.bg_card, 180);
+        theme.bg_card_hover = frost_alpha(self.bg_card_hover, 205);
+        theme.bg_card_active = frost_alpha(self.bg_card_active, 225);
+        theme.bg_pill = frost_alpha(self.bg_pill, 185);
+        theme.bg_pill_hover = frost_alpha(self.bg_pill_hover, 215);
+        theme.bg_input = frost_alpha(self.bg_input, 215);
+
+        // Specular rim / micro-bevel highlights:
+        // Glass edges catch light creating a delicate 1px specular contour.
+        if self.is_light {
+            theme.border_card = Color32::from_rgba_unmultiplied(0, 0, 0, 36);
+            theme.border_subtle = Color32::from_rgba_unmultiplied(0, 0, 0, 20);
+            theme.shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 60);
+        } else {
+            theme.border_card = Color32::from_rgba_unmultiplied(255, 255, 255, 38);
+            theme.border_subtle = Color32::from_rgba_unmultiplied(255, 255, 255, 22);
+            theme.shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 110);
+        }
+
+        theme
+    }
 }

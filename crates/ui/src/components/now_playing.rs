@@ -79,6 +79,12 @@ impl<'a> NowPlayingCard<'a> {
             .fill(self.theme.bg_card)
             .stroke(Stroke::new(1.0_f32, self.theme.border_card))
             .corner_radius(CornerRadius::same(self.theme.radius_xl))
+            .shadow(egui::epaint::Shadow {
+                offset: [0, 4],
+                blur: 16,
+                spread: 0,
+                color: self.theme.shadow,
+            })
             .inner_margin(egui::Margin::symmetric(
                 if dense {
                     10

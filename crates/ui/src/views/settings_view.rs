@@ -26,6 +26,7 @@ pub struct SettingsViewActions {
     pub reload_themes: bool,
     pub import_theme: bool,
     pub open_custom_themes_folder: bool,
+    pub frosted_glass_changed: Option<bool>,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
     /// Play or stop the crossfade audition.
@@ -40,6 +41,11 @@ pub struct SettingsViewActions {
     pub open_cd_ripper: bool,
     pub open_transcode_export: bool,
     pub open_update_check: bool,
+    pub start_file_conversion: bool,
+    pub cancel_file_conversion: bool,
+    pub pick_converter_dir: bool,
+    pub pick_converter_files: bool,
+    pub clear_converter_queue: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -58,6 +64,9 @@ pub fn render_settings_view(
     // The saved language preference; empty means "follow the environment".
     locale: &str,
     crossfade_preview: CrossfadePreviewContext<'_>,
+    converter_busy: bool,
+    converter_progress: Option<(usize, usize, String)>,
+    converter_activity: &str,
     mut on_start_scan: impl FnMut(PathBuf),
     mut on_import: impl FnMut(ImportKind),
 ) -> SettingsViewActions {
@@ -115,6 +124,9 @@ pub fn render_settings_view(
             graph_build_ms: session.graph_build_stats().0,
             graph_builds: session.graph_build_stats().1,
             locale,
+            converter_busy,
+            converter_progress,
+            converter_activity,
         };
 
         let s_actions = show_settings_tab_extended(ui, &mut dsp_state.settings_tab, theme, &extra);
@@ -140,6 +152,9 @@ pub fn render_settings_view(
         }
         if s_actions.open_custom_themes_folder {
             view_actions.open_custom_themes_folder = true;
+        }
+        if let Some(enabled) = s_actions.frosted_glass_changed {
+            view_actions.frosted_glass_changed = Some(enabled);
         }
         if s_actions.open_artwork_fetch {
             view_actions.open_artwork_fetch = true;
@@ -189,6 +204,21 @@ pub fn render_settings_view(
         }
         if let Some(locale) = s_actions.locale_changed.clone() {
             view_actions.locale_changed = Some(locale);
+        }
+        if s_actions.start_file_conversion {
+            view_actions.start_file_conversion = true;
+        }
+        if s_actions.cancel_file_conversion {
+            view_actions.cancel_file_conversion = true;
+        }
+        if s_actions.pick_converter_dir {
+            view_actions.pick_converter_dir = true;
+        }
+        if s_actions.pick_converter_files {
+            view_actions.pick_converter_files = true;
+        }
+        if s_actions.clear_converter_queue {
+            view_actions.clear_converter_queue = true;
         }
 
         dsp_state.handle_settings_actions(session, &s_actions);

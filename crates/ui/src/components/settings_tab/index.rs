@@ -12,17 +12,19 @@ pub enum SettingsCategory {
     Spatial,
     MixBus,
     Tools,
+    Converter,
     Library,
     Appearance,
 }
 
 impl SettingsCategory {
-    pub const ALL: [SettingsCategory; 7] = [
+    pub const ALL: [SettingsCategory; 8] = [
         SettingsCategory::Playback,
         SettingsCategory::Output,
         SettingsCategory::Spatial,
         SettingsCategory::MixBus,
         SettingsCategory::Tools,
+        SettingsCategory::Converter,
         SettingsCategory::Library,
         SettingsCategory::Appearance,
     ];
@@ -34,6 +36,7 @@ impl SettingsCategory {
             Self::Spatial => "Spatial 3D",
             Self::MixBus => "Mix Bus",
             Self::Tools => "Tools",
+            Self::Converter => "File Converter",
             Self::Library => "Library & App",
             Self::Appearance => "Themes & Appearance",
         }
@@ -47,6 +50,7 @@ impl SettingsCategory {
             Self::Spatial => crate::components::icons::draw_bar_chart,
             Self::MixBus => crate::components::icons::draw_equalizer_sliders,
             Self::Tools => crate::components::icons::draw_gear,
+            Self::Converter => crate::components::icons::draw_reset,
             Self::Library => crate::components::icons::draw_folder,
             Self::Appearance => crate::components::icons::draw_moon,
         }
@@ -59,6 +63,7 @@ impl SettingsCategory {
             Self::Spatial => crate::components::icons::draw_bar_chart(ui, rect, color),
             Self::MixBus => crate::components::icons::draw_equalizer_sliders(ui, rect, color),
             Self::Tools => crate::components::icons::draw_gear(ui, rect, color),
+            Self::Converter => crate::components::icons::draw_reset(ui, rect, color),
             Self::Library => crate::components::icons::draw_folder(ui, rect, color),
             Self::Appearance => crate::components::icons::draw_moon(ui, rect, color),
         }
@@ -102,6 +107,12 @@ impl SettingsCategory {
                 "Transcode Export",
                 "Automatic Updates",
             ],
+            Self::Converter => &[
+                "Converter Format & Quality",
+                "Destination & Naming",
+                "Metadata & Tag Preservation",
+                "Batch File Conversion Queue",
+            ],
             Self::Library => &[
                 "Interface & Language",
                 "Smart Playlists",
@@ -110,7 +121,7 @@ impl SettingsCategory {
                 "Application Instances",
                 "About ShadowPlayer",
             ],
-            Self::Appearance => &["Theme Gallery"],
+            Self::Appearance => &["Surface Material", "Theme Gallery"],
         }
     }
 }
@@ -143,6 +154,10 @@ pub fn card_display_name(card: &str) -> &str {
         "CD Ripper" => "CD Ripper",
         "Transcode Export" => "Transcode Export",
         "Automatic Updates" => "Automatic Updates",
+        "Converter Format & Quality" => "Format & Quality",
+        "Destination & Naming" => "Destination & Naming",
+        "Metadata & Tag Preservation" => "Tag Preservation",
+        "Batch File Conversion Queue" => "Batch Conversion",
         "Interface & Language" => "Interface & Language",
         "Smart Playlists" => "Smart Playlists",
         "Music Library Storage & Directories" => "Library Storage",
@@ -180,7 +195,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 84] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 94] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -684,6 +699,67 @@ pub static SETTINGS_INDEX: [SettingsEntry; 84] = [
         card: "Smart Playlists",
         label: "Refresh Interval",
         description: "How many minutes pass between two refreshes under the timer policy",
+    },
+    // ── Converter Category ──────────────────────────────────────────
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Converter Format & Quality",
+        label: "Target Audio Format",
+        description: "Select output format (FLAC, WAV, MP3, Opus, Ogg Vorbis, AIFF, Apple CAF)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Converter Format & Quality",
+        label: "Target Sample Rate",
+        description: "Resample using windowed-sinc filter, or keep source rate untouched",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Converter Format & Quality",
+        label: "Channel Configuration",
+        description: "Downmix surround sound to stereo, fold to mono, or keep source channels",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Destination & Naming",
+        label: "Output Folder",
+        description: "Directory where converted audio files will be written",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Destination & Naming",
+        label: "File Naming Pattern",
+        description: "Custom naming template with tokens: {artist}, {album}, {track}, {title}, etc.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Destination & Naming",
+        label: "Overwrite Existing Files",
+        description: "Off: append index (1) on conflict. On: replace existing destination file.",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Metadata & Tag Preservation",
+        label: "Preserve Metadata Tags",
+        description: "Copy title, artist, album, genre, year, and track numbering to converted files",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Batch File Conversion Queue",
+        label: "Queue Source Files",
+        description: "Select audio files from disk to batch convert into the destination folder",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Converter,
+        card: "Batch File Conversion Queue",
+        label: "Batch Conversion Controls",
+        description: "Start background multi-threaded conversion worker or abort running job",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Appearance,
+        card: "Surface Material",
+        label: "Frosted Glass Surfaces",
+        description: "Apply authentic frosted glass translucency and specular highlights across any active theme",
     },
 ];
 

@@ -179,11 +179,27 @@ pub struct SettingsTabState {
     /// only user-written biographies are shown.
     pub biography_source_dir: String,
 
+    // Audio Converter
+    pub converter_format: media_tools::transcode::OutputFormat,
+    pub converter_sample_rate: u32,
+    pub converter_channels: u8,
+    pub converter_copy_tags: bool,
+    pub converter_overwrite: bool,
+    pub converter_output_dir: PathBuf,
+    pub converter_naming_pattern: String,
+    #[serde(skip)]
+    pub converter_input_files: Vec<PathBuf>,
+    #[serde(skip)]
+    pub converter_status_message: Option<String>,
+
     // Themes & Appearance state
     #[serde(skip)]
     pub theme_gallery: crate::theme::ThemeGalleryState,
     #[serde(skip)]
     pub theme_editor: crate::theme::ThemeEditorState,
+    /// Apply translucent frosted glass surfaces and optical specular rims
+    /// across any active theme.
+    pub frosted_glass_enabled: bool,
 
     // Legacy collapsible section flags preserved for compatibility
     pub section_playback: bool,
@@ -279,8 +295,19 @@ impl Default for SettingsTabState {
             new_scan_path: String::new(),
             biography_source_dir: String::new(),
 
+            converter_format: media_tools::transcode::OutputFormat::Flac { bit_depth: 24 },
+            converter_sample_rate: 0,
+            converter_channels: 0,
+            converter_copy_tags: true,
+            converter_overwrite: false,
+            converter_output_dir: PathBuf::new(),
+            converter_naming_pattern: "{artist}/{album}/{track} - {title}".to_string(),
+            converter_input_files: Vec::new(),
+            converter_status_message: None,
+
             theme_gallery: crate::theme::ThemeGalleryState::default(),
             theme_editor: crate::theme::ThemeEditorState::default(),
+            frosted_glass_enabled: false,
 
             section_playback: true,
             section_output: false,
@@ -412,6 +439,14 @@ pub struct SettingsTabActions {
     pub reload_themes: bool,
     pub import_theme: bool,
     pub open_custom_themes_folder: bool,
+    pub frosted_glass_changed: Option<bool>,
+
+    // Audio Converter actions
+    pub start_file_conversion: bool,
+    pub cancel_file_conversion: bool,
+    pub pick_converter_dir: bool,
+    pub pick_converter_files: bool,
+    pub clear_converter_queue: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -483,4 +518,10 @@ pub struct SettingsExtraContext<'a> {
     /// stored, not what is active, so the user can see that the choice is
     /// "the system decides" even when the system happens to speak German.
     pub locale: &'a str,
+    /// File converter worker is currently transcoding.
+    pub converter_busy: bool,
+    /// Progress of the converter worker (done, total, current file name).
+    pub converter_progress: Option<(usize, usize, String)>,
+    /// Activity message of the converter worker.
+    pub converter_activity: &'a str,
 }

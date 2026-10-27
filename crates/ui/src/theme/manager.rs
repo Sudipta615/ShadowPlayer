@@ -19,6 +19,19 @@ pub struct ThemeCardInfo {
     pub is_active: bool,
     pub is_staged: bool,
     pub preview_colors: [eframe::egui::Color32; 4],
+    pub accent: eframe::egui::Color32,
+    pub accent_highlight: eframe::egui::Color32,
+    pub accent_warm: eframe::egui::Color32,
+    pub bg_app: eframe::egui::Color32,
+    pub bg_card: eframe::egui::Color32,
+    pub bg_pill: eframe::egui::Color32,
+    pub text_primary: eframe::egui::Color32,
+    pub text_secondary: eframe::egui::Color32,
+    pub text_muted: eframe::egui::Color32,
+    pub text_dim: eframe::egui::Color32,
+    pub border_card: eframe::egui::Color32,
+    pub border_subtle: eframe::egui::Color32,
+    pub fonts: ThemeFonts,
     /// Requested font families that are not bundled; those roles use Inter.
     pub missing_fonts: Vec<String>,
 }
@@ -153,6 +166,10 @@ const BUNDLED_THEMES: &[(&str, &str)] = &[
     (
         "silverprint.shadowtheme",
         include_str!("custom-theme/silverprint.shadowtheme"),
+    ),
+    (
+        "smoked-glass.shadowtheme",
+        include_str!("custom-theme/smoked-glass.shadowtheme"),
     ),
 ];
 
@@ -311,6 +328,19 @@ impl ThemeManager {
                 is_active,
                 is_staged,
                 preview_colors: [t.bg_app, t.accent, t.accent_highlight, t.accent_warm],
+                accent: t.accent,
+                accent_highlight: t.accent_highlight,
+                accent_warm: t.accent_warm,
+                bg_app: t.bg_app,
+                bg_card: t.bg_card,
+                bg_pill: t.bg_pill,
+                text_primary: t.text_primary,
+                text_secondary: t.text_secondary,
+                text_muted: t.text_muted,
+                text_dim: t.text_dim,
+                border_card: t.border_card,
+                border_subtle: t.border_subtle,
+                fonts: ThemeFonts::default(),
                 missing_fonts: Vec::new(),
             });
         }
@@ -335,6 +365,19 @@ impl ThemeManager {
                 is_active,
                 is_staged,
                 preview_colors: [t.bg_app, t.accent, t.accent_highlight, t.accent_warm],
+                accent: t.accent,
+                accent_highlight: t.accent_highlight,
+                accent_warm: t.accent_warm,
+                bg_app: t.bg_app,
+                bg_card: t.bg_card,
+                bg_pill: t.bg_pill,
+                text_primary: t.text_primary,
+                text_secondary: t.text_secondary,
+                text_muted: t.text_muted,
+                text_dim: t.text_dim,
+                border_card: t.border_card,
+                border_subtle: t.border_subtle,
+                fonts: user.fonts.clone(),
                 missing_fonts: user.fonts.missing_fonts(),
             });
         }
@@ -571,7 +614,7 @@ impl ThemeManager {
         if path.exists() {
             return Ok(path);
         }
-        let example = include_str!("../../../../docs/themes/example_ocean_night.shadowtheme");
+        let example = include_str!("custom-theme/example_ocean_night.shadowtheme");
         std::fs::write(&path, example)?;
         Ok(path)
     }
@@ -738,7 +781,7 @@ mod tests {
 
         std::fs::create_dir_all(&src_dir).unwrap();
         let external_file = src_dir.join("imported_sample.shadowtheme");
-        let example = include_str!("../../../../docs/themes/example_ocean_night.shadowtheme");
+        let example = include_str!("custom-theme/example_ocean_night.shadowtheme");
         std::fs::write(&external_file, example).unwrap();
 
         let mut manager =

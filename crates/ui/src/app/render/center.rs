@@ -23,6 +23,29 @@ impl ShadowPlayerApp {
             )
             .show(ui, |root_ui| {
                 let full_rect = root_ui.available_rect_before_wrap();
+                // Ambient artwork bloom behind translucent glass panels
+                if self.theme.bg_card.a() < 255 {
+                    if let Some(art) = playback
+                        .current_track
+                        .and_then(|t| self.artwork_service.get_texture(&t.id))
+                    {
+                        let bloom_size =
+                            Vec2::splat(full_rect.height().max(full_rect.width()) * 0.75);
+                        let bloom_rect = Rect::from_center_size(
+                            Pos2::new(
+                                full_rect.right() - bloom_size.x * 0.35,
+                                full_rect.center().y,
+                            ),
+                            bloom_size,
+                        );
+                        root_ui.painter().image(
+                            art.id(),
+                            bloom_rect,
+                            Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                            crate::theme::with_alpha(egui::Color32::WHITE, 36),
+                        );
+                    }
+                }
                 let avail_w = full_rect.width();
                 let avail_h = full_rect.height();
                 let is_help_view = self.app_state.active_nav == NavItem::Help;
@@ -272,6 +295,9 @@ impl ShadowPlayerApp {
                                 progress: self.crossfade_preview.progress(),
                                 error: self.crossfade_preview.error(),
                             },
+                            self.media_tools_service.is_busy(),
+                            self.media_tools.export_progress.clone(),
+                            self.media_tools_service.activity(),
                             |path| scan_to_start = Some(path),
                             |kind| import_req = Some(kind),
                         );
@@ -332,34 +358,29 @@ impl ShadowPlayerApp {
                         }
                         if let Some(preview_id) = sv_actions.preview_theme {
                             self.theme_manager.stage_theme(&preview_id);
-                            self.theme = self.theme_manager.effective_theme();
-                            self.applied_theme = None;
+                            self.sync_effective_theme();
                         }
                         if let Some(apply_id) = sv_actions.apply_theme {
                             self.theme_manager.stage_theme(&apply_id);
                             if let Some(committed) = self.theme_manager.commit_staged() {
-                                self.theme = self
-                                    .theme_manager
-                                    .resolve_theme(&committed, self.theme.is_light);
                                 let _ = self.settings_repo.set_value("active_theme", &committed);
                             }
-                            self.applied_theme = None;
+                            self.sync_effective_theme();
                             self.settings_dirty = true;
                             self.toasts.success("Theme applied");
                         }
                         if sv_actions.cancel_theme_preview {
                             self.theme_manager.unstage_theme();
-                            self.theme = self.theme_manager.effective_theme();
-                            self.applied_theme = None;
+                            self.sync_effective_theme();
                         }
                         if sv_actions.reload_themes {
                             self.theme_manager.load_all();
-                            self.theme = self.theme_manager.resolve_theme(
-                                &self.theme_manager.active_id.clone(),
-                                self.theme.is_light,
-                            );
-                            self.applied_theme = None;
+                            self.sync_effective_theme();
                             self.toasts.info("Themes reloaded");
+                        }
+                        if sv_actions.frosted_glass_changed.is_some() {
+                            self.sync_effective_theme();
+                            self.settings_dirty = true;
                         }
                         if sv_actions.import_theme {
                             if let Some(paths) = rfd::FileDialog::new()
@@ -389,14 +410,11 @@ impl ShadowPlayerApp {
                                 if let Some(theme_id) = last_theme_id {
                                     self.theme_manager.stage_theme(&theme_id);
                                     if let Some(committed) = self.theme_manager.commit_staged() {
-                                        self.theme = self
-                                            .theme_manager
-                                            .resolve_theme(&committed, self.theme.is_light);
                                         let _ = self
                                             .settings_repo
                                             .set_value("active_theme", &committed);
                                     }
-                                    self.applied_theme = None;
+                                    self.sync_effective_theme();
                                     self.settings_dirty = true;
                                     self.toasts.success(format!(
                                         "Imported {imported_count} theme(s) into custom-theme/"
@@ -430,6 +448,118 @@ impl ShadowPlayerApp {
                             self.media_tools.update_enabled =
                                 self.dsp_state.settings_tab.update_check_enabled;
                             self.media_tools.open(MediaToolsTab::Update);
+                        }
+                        if sv_actions.pick_converter_dir {
+                            if let Some(folder) = rfd::FileDialog::new()
+                                .set_title("Select Destination Folder")
+                                .pick_folder()
+                            {
+                                self.dsp_state.settings_tab.converter_output_dir = folder;
+                                self.settings_dirty = true;
+                            }
+                        }
+                        if sv_actions.pick_converter_files {
+                            if let Some(files) = rfd::FileDialog::new()
+                                .set_title("Select Audio Files to Convert")
+                                .add_filter(
+                                    "Audio Files",
+                                    &[
+                                        "flac", "wav", "mp3", "m4a", "aac", "ogg", "opus", "aiff",
+                                        "alac", "wv", "dsf", "dff", "caf",
+                                    ],
+                                )
+                                .pick_files()
+                            {
+                                for file in files {
+                                    if !self
+                                        .dsp_state
+                                        .settings_tab
+                                        .converter_input_files
+                                        .contains(&file)
+                                    {
+                                        self.dsp_state
+                                            .settings_tab
+                                            .converter_input_files
+                                            .push(file);
+                                    }
+                                }
+                            }
+                        }
+                        if sv_actions.clear_converter_queue {
+                            self.dsp_state.settings_tab.converter_input_files.clear();
+                        }
+                        if sv_actions.start_file_conversion {
+                            if self.dsp_state.settings_tab.converter_input_files.is_empty() {
+                                self.toasts
+                                    .warning("Add audio files to the queue before converting");
+                            } else if self
+                                .dsp_state
+                                .settings_tab
+                                .converter_output_dir
+                                .as_os_str()
+                                .is_empty()
+                            {
+                                self.toasts
+                                    .warning("Select a destination folder before converting");
+                            } else {
+                                let options = media_tools::transcode::TranscodeOptions {
+                                    format: self.dsp_state.settings_tab.converter_format,
+                                    sample_rate: if self
+                                        .dsp_state
+                                        .settings_tab
+                                        .converter_sample_rate
+                                        > 0
+                                    {
+                                        Some(self.dsp_state.settings_tab.converter_sample_rate)
+                                    } else {
+                                        None
+                                    },
+                                    channels: if self.dsp_state.settings_tab.converter_channels > 0
+                                    {
+                                        Some(
+                                            self.dsp_state.settings_tab.converter_channels as usize,
+                                        )
+                                    } else {
+                                        None
+                                    },
+                                    copy_tags: self.dsp_state.settings_tab.converter_copy_tags,
+                                };
+                                let inputs =
+                                    self.dsp_state.settings_tab.converter_input_files.clone();
+                                let output_dir =
+                                    self.dsp_state.settings_tab.converter_output_dir.clone();
+                                let pattern = self
+                                    .dsp_state
+                                    .settings_tab
+                                    .converter_naming_pattern
+                                    .trim()
+                                    .to_string();
+                                let naming_pattern = if pattern.is_empty() {
+                                    None
+                                } else {
+                                    Some(pattern)
+                                };
+                                let overwrite = self.dsp_state.settings_tab.converter_overwrite;
+                                self.dsp_state.settings_tab.converter_status_message =
+                                    Some("Converting files…".to_string());
+                                let started =
+                                    self.media_tools_service.transcode_batch_with_options(
+                                        inputs,
+                                        output_dir,
+                                        options,
+                                        naming_pattern,
+                                        overwrite,
+                                    );
+                                if started {
+                                    self.toasts.info("Batch conversion started");
+                                }
+                            }
+                        }
+                        if sv_actions.cancel_file_conversion {
+                            self.media_tools_service.cancel();
+                            self.dsp_state.settings_tab.converter_status_message =
+                                Some("Conversion cancelled".to_string());
+                            self.toasts.info("Conversion cancelled");
                         }
                     }
                     NavItem::Podcasts => {

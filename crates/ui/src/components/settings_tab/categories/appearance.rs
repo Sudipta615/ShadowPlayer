@@ -1,6 +1,6 @@
 //! The Appearance category: theme gallery and editor.
 
-use super::super::widgets::{card_header, setting_card};
+use super::super::widgets::{card_header, setting_card, setting_item, toggle_switch};
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
 use eframe::egui;
@@ -16,7 +16,49 @@ pub(in crate::components::settings_tab) fn render_appearance_category(
         return;
     };
 
-    // Card 3: Theme Gallery & Browser
+    // Card 1: Surface Material (Frosted Glass Optics)
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_moon,
+            "Surface Material",
+            "Translucency, optical specular highlights, and ambient bloom across themes",
+            Some((
+                if state.frosted_glass_enabled {
+                    "ACTIVE"
+                } else {
+                    "OFF"
+                },
+                theme.bg_pill,
+                if state.frosted_glass_enabled {
+                    theme.accent
+                } else {
+                    theme.text_dim
+                },
+            )),
+            theme,
+        );
+
+        let prev = state.frosted_glass_enabled;
+        setting_item(
+            ui,
+            "Frosted Glass Surfaces",
+            "Render cards and panels with authentic translucency, micro-bevel specular rims, and ambient artwork bloom across any active theme",
+            theme,
+            |ui| {
+                if toggle_switch(ui, &mut state.frosted_glass_enabled, theme) {
+                    actions.frosted_glass_changed = Some(state.frosted_glass_enabled);
+                }
+            },
+        );
+        if prev != state.frosted_glass_enabled && actions.frosted_glass_changed.is_none() {
+            actions.frosted_glass_changed = Some(state.frosted_glass_enabled);
+        }
+    });
+
+    ui.add_space(theme.space_md);
+
+    // Card 2: Theme Gallery & Browser
     setting_card(ui, theme, |ui| {
         let has_errs = !manager.errors().is_empty();
         card_header(

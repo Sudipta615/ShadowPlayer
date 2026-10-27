@@ -197,7 +197,7 @@ pub fn render_theme_gallery(
 
         // 3. Render grid of cards
         let avail_w = ui.available_width();
-        let card_w = 220.0_f32;
+        let card_w = 236.0_f32;
         let spacing = theme.space_md;
         let cols = ((avail_w + spacing) / (card_w + spacing)).floor().max(1.0) as usize;
 
@@ -216,47 +216,71 @@ pub fn render_theme_gallery(
     actions
 }
 
+fn color_to_hex(c: Color32) -> String {
+    format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b())
+}
+
+fn contrast_text_for(bg: Color32) -> Color32 {
+    if super::contrast::luminance(bg) > 0.35 {
+        Color32::from_rgb(15, 23, 42)
+    } else {
+        Color32::WHITE
+    }
+}
+
 fn render_theme_card(
     ui: &mut egui::Ui,
     card: &ThemeCardInfo,
     theme: &Theme,
     actions: &mut GalleryActions,
 ) {
-    let card_w = 220.0_f32;
-    let card_bg = if card.is_active {
-        theme.bg_card_active
-    } else {
-        theme.bg_card
-    };
+    let card_w = 236.0_f32;
+    // The card is rendered using its OWN theme surface and palette
+    let card_bg = card.bg_card;
     let card_border = if card.is_active {
-        theme.border_active_row
+        card.accent
     } else if card.is_staged {
-        theme.accent_highlight
+        card.accent_warm
     } else {
-        theme.border_card
+        card.border_card
+    };
+    let stroke_width = if card.is_active {
+        2.0
+    } else if card.is_staged {
+        1.5
+    } else {
+        1.0
     };
 
     egui::Frame::NONE
         .fill(card_bg)
-        .stroke(Stroke::new(1.0, card_border))
+        .stroke(Stroke::new(stroke_width, card_border))
         .corner_radius(CornerRadius::same(theme.radius_md))
         .inner_margin(Margin::same(theme.space_md as i8))
         .show(ui, |ui| {
             ui.set_width(card_w);
             ui.vertical(|ui| {
-                // Header: Name + Badge
+                // 1. Top Primary Accent Color Banner
+                let (banner_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(card_w - 20.0, 5.0), Sense::hover());
+                ui.painter()
+                    .rect_filled(banner_rect, CornerRadius::same(2), card.accent);
+
+                ui.add_space(theme.space_xs);
+
+                // 2. Header: Name + Status & Mode Badges
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(&card.name)
-                            .font(crate::theme::font(13.0))
+                            .font(crate::theme::font(13.5))
                             .strong()
-                            .color(theme.text_primary),
+                            .color(card.text_primary),
                     );
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if card.is_active {
                             let badge = egui::Frame::NONE
-                                .fill(theme.accent)
+                                .fill(card.accent)
                                 .corner_radius(CornerRadius::same(theme.radius_xs))
                                 .inner_margin(Margin::symmetric(
                                     theme.space_xs as i8,
@@ -267,12 +291,12 @@ fn render_theme_card(
                                     egui::RichText::new("ACTIVE")
                                         .font(crate::theme::mono_font(8.5))
                                         .strong()
-                                        .color(Color32::WHITE),
+                                        .color(contrast_text_for(card.accent)),
                                 );
                             });
                         } else if card.is_staged {
                             let badge = egui::Frame::NONE
-                                .fill(theme.accent_warm)
+                                .fill(card.accent_warm)
                                 .corner_radius(CornerRadius::same(theme.radius_xs))
                                 .inner_margin(Margin::symmetric(
                                     theme.space_xs as i8,
@@ -283,14 +307,34 @@ fn render_theme_card(
                                     egui::RichText::new("STAGED")
                                         .font(crate::theme::mono_font(8.5))
                                         .strong()
-                                        .color(Color32::WHITE),
+                                        .color(contrast_text_for(card.accent_warm)),
                                 );
                             });
                         }
+
+                        let mode_label = if card.tags.iter().any(|t| t == "oled") {
+                            "OLED"
+                        } else if card.is_light {
+                            "LIGHT"
+                        } else {
+                            "DARK"
+                        };
+                        let mode_badge = egui::Frame::NONE
+                            .fill(card.bg_pill)
+                            .stroke(Stroke::new(1.0, card.border_subtle))
+                            .corner_radius(CornerRadius::same(theme.radius_xs))
+                            .inner_margin(Margin::symmetric(4, 2));
+                        mode_badge.show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(mode_label)
+                                    .font(crate::theme::mono_font(8.0))
+                                    .color(card.text_dim),
+                            );
+                        });
                     });
                 });
 
-                // Author & Version
+                // 3. Author & Version
                 let mut meta_text = String::new();
                 if !card.author.is_empty() {
                     meta_text.push_str(&format!("by {}", card.author));
@@ -312,50 +356,172 @@ fn render_theme_card(
                     ui.label(
                         egui::RichText::new(meta_text)
                             .font(crate::theme::font(10.5))
-                            .color(theme.text_dim),
+                            .color(card.text_dim),
                     );
                 }
 
                 ui.add_space(theme.space_xs);
 
-                // Palette Swatches (4 dots)
+                // 4. Primary Color Indicator & Palette Swatches Row
+                let hex = color_to_hex(card.accent);
                 ui.horizontal(|ui| {
-                    for color in card.preview_colors {
-                        let (dot_rect, _) =
-                            ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-                        let p = ui.painter_at(dot_rect);
-                        p.circle_filled(dot_rect.center(), 6.0, color);
-                        p.circle_stroke(
-                            dot_rect.center(),
-                            6.0,
-                            Stroke::new(1.0, theme.border_subtle),
-                        );
-                    }
+                    let primary_pill = egui::Frame::NONE
+                        .fill(card.bg_pill)
+                        .stroke(Stroke::new(1.0, card.border_subtle))
+                        .corner_radius(CornerRadius::same(theme.radius_xs))
+                        .inner_margin(Margin::symmetric(6, 3));
+                    primary_pill
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(5.0, 0.0);
+                                let (dot_rect, _) =
+                                    ui.allocate_exact_size(Vec2::splat(11.0), Sense::hover());
+                                ui.painter().circle_filled(dot_rect.center(), 5.0, card.accent);
+                                ui.painter().circle_stroke(
+                                    dot_rect.center(),
+                                    5.0,
+                                    Stroke::new(1.0, card.border_card),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("Primary {hex}"))
+                                        .font(crate::theme::mono_font(9.5))
+                                        .strong()
+                                        .color(card.text_primary),
+                                );
+                            });
+                        })
+                        .response
+                        .on_hover_text(format!("Primary theme accent color: {hex}"));
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(3.0, 0.0);
+                        for &color in card.preview_colors.iter().rev() {
+                            let (dot_rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+                            let p = ui.painter_at(dot_rect);
+                            p.circle_filled(dot_rect.center(), 5.0, color);
+                            p.circle_stroke(
+                                dot_rect.center(),
+                                5.0,
+                                Stroke::new(1.0, card.border_subtle),
+                            );
+                        }
+                    });
                 });
 
                 ui.add_space(theme.space_xs);
 
-                // Description
+                // 5. Typography / Unique Font Pairing
+                let display_font = card.fonts.display.as_deref().unwrap_or("Inter");
+                let body_font = card.fonts.body.as_deref().unwrap_or("Inter");
+                let mono_font_name = card.fonts.mono.as_deref().unwrap_or("JetBrains Mono");
+
+                if card.missing_fonts.is_empty() {
+                    let font_summary = if display_font == body_font {
+                        display_font.to_string()
+                    } else {
+                        format!("{display_font} + {body_font}")
+                    };
+                    let font_frame = egui::Frame::NONE
+                        .fill(card.bg_pill)
+                        .stroke(Stroke::new(1.0, card.border_subtle))
+                        .corner_radius(CornerRadius::same(theme.radius_xs))
+                        .inner_margin(Margin::symmetric(6, 3));
+                    font_frame
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(5.0, 0.0);
+                                ui.label(
+                                    egui::RichText::new("Aa")
+                                        .font(crate::theme::font(10.0))
+                                        .strong()
+                                        .color(card.accent_highlight),
+                                );
+                                ui.label(
+                                    egui::RichText::new(&font_summary)
+                                        .font(crate::theme::font(10.0))
+                                        .color(card.text_secondary),
+                                );
+                            });
+                        })
+                        .response
+                        .on_hover_text(format!(
+                            "Theme Typography:\n• Headings: {display_font}\n• Body/UI: {body_font}\n• Technical: {mono_font_name}\n\nFont pairing is available and active."
+                        ));
+                } else {
+                    let missing_names = card.missing_fonts.join(", ");
+                    let warn_frame = egui::Frame::NONE
+                        .fill(Color32::from_rgba_unmultiplied(245, 158, 11, 24))
+                        .stroke(Stroke::new(1.0, theme.warning_yellow))
+                        .corner_radius(CornerRadius::same(theme.radius_xs))
+                        .inner_margin(Margin::symmetric(6, 4));
+                    warn_frame.show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("! Missing: {missing_names}"))
+                                        .font(crate::theme::font(10.0))
+                                        .strong()
+                                        .color(theme.warning_yellow),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Inter used as fallback")
+                                        .font(crate::theme::mono_font(8.5))
+                                        .color(card.text_dim),
+                                );
+                                if let Some(first_missing) = card.missing_fonts.first() {
+                                    let query = first_missing.replace(' ', "+");
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("Get Font ↗")
+                                                    .font(crate::theme::font(9.0))
+                                                    .strong()
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .fill(Color32::from_rgb(217, 119, 6))
+                                            .corner_radius(CornerRadius::same(theme.radius_xs)),
+                                        )
+                                        .on_hover_text(format!(
+                                            "Open Google Fonts to download '{first_missing}'"
+                                        ))
+                                        .clicked()
+                                    {
+                                        let url =
+                                            format!("https://fonts.google.com/?query={query}");
+                                        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                                    }
+                                }
+                            });
+                        });
+                    });
+                }
+
+                ui.add_space(theme.space_xs);
+
+                // 6. Description
                 if !card.description.is_empty() {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(&card.description)
                                 .font(crate::theme::font(10.5))
-                                .color(theme.text_secondary),
+                                .color(card.text_secondary),
                         )
                         .truncate(),
                     );
                 }
 
-                // Tags
+                // 7. Tags
                 if !card.tags.is_empty() {
                     ui.add_space(theme.space_xxs);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, theme.space_xxs);
                         for tag in card.tags.iter().take(3) {
                             let badge = egui::Frame::NONE
-                                .fill(theme.bg_pill)
-                                .stroke(Stroke::new(1.0, theme.border_subtle))
+                                .fill(card.bg_pill)
+                                .stroke(Stroke::new(1.0, card.border_subtle))
                                 .corner_radius(CornerRadius::same(theme.radius_sm))
                                 .inner_margin(Margin::symmetric(
                                     theme.space_xs as i8,
@@ -364,61 +530,60 @@ fn render_theme_card(
                             badge.show(ui, |ui| {
                                 ui.label(
                                     egui::RichText::new(format!("#{tag}"))
-                                        .font(crate::theme::mono_font(9.0))
-                                        .color(theme.text_muted),
+                                        .font(crate::theme::mono_font(8.5))
+                                        .color(card.text_muted),
                                 );
                             });
                         }
                     });
                 }
 
-                if !card.missing_fonts.is_empty() {
-                    ui.add_space(theme.space_xs);
-                    let names = card.missing_fonts.join(", ");
-                    ui.label(
-                        egui::RichText::new(format!("Font unavailable: {names} · using Inter"))
-                            .font(crate::theme::mono_font(9.0))
-                            .color(theme.warning_yellow),
-                    )
-                    .on_hover_text(
-                        "This theme requests typefaces that are not bundled with ShadowPlayer. \
-                         Those roles fall back to Inter so the interface stays readable.",
-                    );
-                }
-
                 ui.add_space(theme.space_sm);
 
-                // Action buttons: Preview, Apply
+                // 8. Action buttons: Preview & Apply
                 ui.horizontal(|ui| {
                     if ui
                         .add(
                             egui::Button::new(
                                 egui::RichText::new("Preview")
                                     .font(crate::theme::font(11.0))
-                                    .color(theme.accent_highlight),
+                                    .color(card.accent_highlight),
                             )
-                            .fill(theme.bg_pill)
+                            .fill(card.bg_pill)
+                            .stroke(Stroke::new(1.0, card.border_subtle))
                             .corner_radius(CornerRadius::same(theme.radius_sm)),
                         )
+                        .on_hover_text("Live preview this theme without applying")
                         .clicked()
                     {
                         actions.preview_theme = Some(card.id.clone());
                     }
 
-                    if !card.is_active
-                        && ui
+                    if !card.is_active {
+                        let apply_fg = contrast_text_for(card.accent);
+                        if ui
                             .add(
                                 egui::Button::new(
                                     egui::RichText::new("Apply")
                                         .font(crate::theme::font(11.0))
-                                        .color(Color32::WHITE),
+                                        .strong()
+                                        .color(apply_fg),
                                 )
-                                .fill(theme.accent)
+                                .fill(card.accent)
                                 .corner_radius(CornerRadius::same(theme.radius_sm)),
                             )
+                            .on_hover_text("Apply this theme to ShadowPlayer")
                             .clicked()
-                    {
-                        actions.apply_theme = Some(card.id.clone());
+                        {
+                            actions.apply_theme = Some(card.id.clone());
+                        }
+                    } else {
+                        ui.label(
+                            egui::RichText::new("✓ Active")
+                                .font(crate::theme::font(11.0))
+                                .strong()
+                                .color(card.accent),
+                        );
                     }
                 });
             });

@@ -47,6 +47,7 @@ impl ShadowPlayerApp {
                 && std::env::var("SHADOWPLAYER_EVAL_SETTINGS").is_ok()
             {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Settings;
+                self.dsp_state.eq_panel.is_open = false;
                 if let Ok(cat_str) = std::env::var("SHADOWPLAYER_EVAL_SETTINGS_CAT") {
                     match cat_str.as_str() {
                         "spatial" => {
@@ -593,8 +594,19 @@ impl ShadowPlayerApp {
                     self.app_state.command_palette.query = q;
                 }
             }
-            if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_LIGHT").is_ok() {
-                self.theme = crate::theme::Theme::light();
+            if self.app_state.frame_count == 1 {
+                if let Ok(theme_name) = std::env::var("SHADOWPLAYER_EVAL_THEME") {
+                    self.theme_manager.stage_theme(&theme_name);
+                    let _ = self.theme_manager.commit_staged();
+                    self.sync_effective_theme();
+                }
+                if std::env::var("SHADOWPLAYER_EVAL_LIGHT").is_ok() {
+                    self.theme = crate::theme::Theme::light();
+                }
+                if std::env::var("SHADOWPLAYER_EVAL_FROSTED").is_ok() {
+                    self.dsp_state.settings_tab.frosted_glass_enabled = true;
+                    self.sync_effective_theme();
+                }
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_HELP").is_ok() {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Help;

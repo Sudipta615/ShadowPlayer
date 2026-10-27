@@ -361,6 +361,8 @@ impl CdRipper {
         if let Some(format) = options.format.export_format() {
             let encode_options = TranscodeOptions {
                 format,
+                sample_rate: None,
+                channels: None,
                 copy_tags: false,
             };
             if let Err(error) = transcode::transcode(&wav_path, &final_path, &encode_options) {

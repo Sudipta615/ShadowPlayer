@@ -24,9 +24,9 @@ mod state;
 mod widgets;
 
 use categories::{
-    render_appearance_category, render_library_category, render_mixbus_category,
-    render_output_category, render_playback_category, render_spatial_category,
-    render_tools_category,
+    render_appearance_category, render_converter_category, render_library_category,
+    render_mixbus_category, render_output_category, render_playback_category,
+    render_spatial_category, render_tools_category,
 };
 use search::{render_settings_search, render_settings_search_results};
 
@@ -241,6 +241,15 @@ pub fn show_settings_tab_extended(
                                 SettingsCategory::Tools => {
                                     render_tools_category(ui, state, theme, extra, &mut actions);
                                 }
+                                SettingsCategory::Converter => {
+                                    render_converter_category(
+                                        ui,
+                                        state,
+                                        theme,
+                                        extra,
+                                        &mut actions,
+                                    );
+                                }
                                 SettingsCategory::Library => {
                                     render_library_category(ui, state, theme, extra, &mut actions);
                                 }
@@ -273,7 +282,7 @@ mod search_tests {
     /// Every source that renders a settings row, paired with the category it
     /// belongs to. The chain-preset card is rendered inside the Spatial
     /// category, so its rows are checked as Spatial rows.
-    fn category_sources() -> [(SettingsCategory, String); 7] {
+    fn category_sources() -> [(SettingsCategory, String); 8] {
         [
             (
                 SettingsCategory::Playback,
@@ -298,6 +307,10 @@ mod search_tests {
             (
                 SettingsCategory::Tools,
                 include_str!("categories/tools.rs").to_string(),
+            ),
+            (
+                SettingsCategory::Converter,
+                include_str!("categories/converter.rs").to_string(),
             ),
             (
                 SettingsCategory::Library,

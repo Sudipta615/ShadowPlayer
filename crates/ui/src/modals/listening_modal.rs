@@ -394,7 +394,7 @@ pub fn render_report_body(
                     // name: a truncating label would otherwise eat the
                     // whole row and the count would sit on top of it.
                     let count_w = 96.0;
-                    let text_w = (ui.available_width() - count_w).max(80.0);
+                    let text_w = (ui.available_width() - count_w - 8.0).max(80.0);
                     let text = if entry.detail.is_empty() {
                         entry.name.clone()
                     } else {
@@ -437,16 +437,21 @@ pub fn render_report_body(
                 .font(crate::theme::font(10.5))
                 .color(theme.text_dim),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(format!(
-                    "peak {busiest} · today {}",
-                    day_values.last().copied().unwrap_or(0)
-                ))
-                .font(crate::theme::mono_font(10.0))
-                .color(theme.text_muted),
-            );
-        });
+        let label_w = (ui.available_width() - 4.0).max(60.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(label_w, 16.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "peak {busiest} · today {}",
+                        day_values.last().copied().unwrap_or(0)
+                    ))
+                    .font(crate::theme::mono_font(10.0))
+                    .color(theme.text_muted),
+                );
+            },
+        );
     });
 
     // ── By hour of day ────────────────────────────────────────────

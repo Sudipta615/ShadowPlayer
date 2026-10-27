@@ -242,23 +242,45 @@ impl MediaToolsService {
         copy_tags: bool,
         overwrite: bool,
     ) -> bool {
+        self.transcode_batch_with_options(
+            inputs,
+            output_dir,
+            TranscodeOptions {
+                format,
+                sample_rate: None,
+                channels: None,
+                copy_tags,
+            },
+            None,
+            overwrite,
+        )
+    }
+
+    /// Transcode a batch of files with custom sample rate, downmixing, and optional naming pattern.
+    pub fn transcode_batch_with_options(
+        &mut self,
+        inputs: Vec<PathBuf>,
+        output_dir: PathBuf,
+        options: TranscodeOptions,
+        naming_pattern: Option<String>,
+        overwrite: bool,
+    ) -> bool {
         if inputs.is_empty() {
             return false;
         }
-        if !self.start("Exporting…") {
+        if !self.start("Converting audio…") {
             return false;
         }
         let (tx, rx) = unbounded();
         self.rx = Some(rx);
         let cancel = Arc::clone(&self.cancel);
         std::thread::Builder::new()
-            .name("transcode-export".to_string())
+            .name("transcode-batch".to_string())
             .spawn(move || {
                 if let Err(error) = std::fs::create_dir_all(&output_dir) {
                     let _ = tx.send(MediaToolEvent::TranscodeFinished(Err(error.to_string())));
                     return;
                 }
-                let options = TranscodeOptions { format, copy_tags };
                 let total = inputs.len();
                 let mut reports = Vec::new();
                 for (done, input) in inputs.into_iter().enumerate() {
@@ -268,16 +290,61 @@ impl MediaToolsService {
                         )));
                         return;
                     }
-                    let stem = input
+                    let ext = options.format.extension();
+                    let file_stem = input
                         .file_stem()
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "track".to_string());
-                    let mut output = output_dir.join(format!("{stem}.{}", format.extension()));
+
+                    let target_rel_path = if let Some(ref pattern) = naming_pattern {
+                        let meta = engine::decode::extract_track_metadata(&input);
+                        let mut p = pattern.clone();
+                        p = p.replace(
+                            "{title}",
+                            if !meta.title.is_empty() {
+                                &meta.title
+                            } else {
+                                &file_stem
+                            },
+                        );
+                        p = p.replace(
+                            "{artist}",
+                            if !meta.artist.is_empty() {
+                                &meta.artist
+                            } else {
+                                "Unknown Artist"
+                            },
+                        );
+                        p = p.replace(
+                            "{album}",
+                            if !meta.album.is_empty() {
+                                &meta.album
+                            } else {
+                                "Unknown Album"
+                            },
+                        );
+                        p = p.replace("{track}", &format!("{:02}", meta.track_number));
+                        p = p.replace("{year}", &meta.date);
+                        p = p.replace("{genre}", &meta.genre);
+                        p = p.replace("{format}", ext);
+                        p = p.replace("{stem}", &file_stem);
+                        if !p.ends_with(&format!(".{ext}")) {
+                            format!("{p}.{ext}")
+                        } else {
+                            p
+                        }
+                    } else {
+                        format!("{file_stem}.{ext}")
+                    };
+
+                    let mut output = output_dir.join(&target_rel_path);
+                    if let Some(parent) = output.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
                     if output == input || (output.exists() && !overwrite) {
                         let mut n = 1u32;
                         loop {
-                            let candidate =
-                                output_dir.join(format!("{stem} ({n}).{}", format.extension()));
+                            let candidate = output_dir.join(format!("{file_stem} ({n}).{ext}"));
                             if candidate != input && !candidate.exists() {
                                 output = candidate;
                                 break;

@@ -368,16 +368,23 @@ impl ShadowPlayerApp {
                     self.media_tools.export_progress = None;
                     match result {
                         Ok(reports) => {
+                            let count = reports.len();
                             self.media_tools.export_message = Some(format!(
                                 "Exported {} file(s) to {}",
-                                reports.len(),
+                                count,
                                 self.media_tools.export_output_dir.display()
                             ));
+                            self.dsp_state.settings_tab.converter_status_message =
+                                Some(format!("Successfully converted {count} file(s)"));
                             self.media_tools.export_error = None;
                             self.toasts
-                                .info(format!("Exported {} file(s)", reports.len()));
+                                .info(format!("Converted/Exported {} file(s)", count));
                         }
-                        Err(error) => self.media_tools.export_error = Some(error),
+                        Err(error) => {
+                            self.dsp_state.settings_tab.converter_status_message =
+                                Some(format!("Conversion failed: {error}"));
+                            self.media_tools.export_error = Some(error);
+                        }
                     }
                 }
                 MediaToolEvent::UpdateChecked(result) => match result {
