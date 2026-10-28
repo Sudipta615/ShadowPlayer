@@ -113,6 +113,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v15(conn)?;
     }
 
+    if current_version < 16 {
+        apply_v16(conn)?;
+    }
+
     Ok(())
 }
 
@@ -1149,6 +1153,68 @@ fn apply_v15(conn: &mut Connection) -> Result<()> {
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
             log::error!("Migration V15 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn apply_v16(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V16 (Audio zones and ZoneSwitch rules)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS audio_zones (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            output_device TEXT,
+            output_backend TEXT,
+            volume REAL NOT NULL DEFAULT 1.0,
+            muted INTEGER NOT NULL DEFAULT 0,
+            dsp_preset TEXT,
+            linked_master_id TEXT REFERENCES audio_zones(id) ON DELETE SET NULL,
+            timing_offset_ms REAL NOT NULL DEFAULT 0.0,
+            clock_drift_pct REAL NOT NULL DEFAULT 0.0,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_audio_zones_default
+            ON audio_zones(is_default) WHERE is_default = 1;",
+        "CREATE TABLE IF NOT EXISTS zone_switch_rules (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            target_zone_id TEXT NOT NULL REFERENCES audio_zones(id) ON DELETE CASCADE,
+            conditions_json TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_zone_switch_rules_priority
+            ON zone_switch_rules(priority DESC);",
+        "INSERT OR IGNORE INTO audio_zones (
+            id, name, output_device, output_backend, volume, muted, dsp_preset,
+            linked_master_id, timing_offset_ms, clock_drift_pct, is_default, created_at
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000001',
+            'Main Zone',
+            NULL,
+            NULL,
+            1.0,
+            0,
+            NULL,
+            NULL,
+            0.0,
+            0.0,
+            1,
+            strftime('%s', 'now')
+        );",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (16, strftime('%s', 'now'));",
+    ];
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V16 statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }

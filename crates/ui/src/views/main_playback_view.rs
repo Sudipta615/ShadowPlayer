@@ -173,6 +173,9 @@ pub fn render_main_playback_view(
     if np_events.open_bit_perfect {
         app_state.bit_perfect_modal_open = true;
     }
+    if np_events.open_zones {
+        app_state.zone_manager_modal.is_open = true;
+    }
     if np_events.open_loudness {
         view_action.open_loudness = true;
     }

@@ -62,6 +62,8 @@ pub struct AppState {
     pub import_playlists_modal: crate::modals::import_playlists_modal::ImportPlaylistsModalState,
     /// Acoustic alignment & speaker setup suite.
     pub speaker_setup_modal: crate::modals::speaker_setup_modal::SpeakerSetupModalState,
+    /// Multi-zone audio playback and ZoneSwitch routing hub.
+    pub zone_manager_modal: crate::modals::zones_modal::ZoneManagerModalState,
     /// The command palette's own state: its query and the highlighted row.
     pub command_palette: crate::components::command_palette::CommandPaletteState,
     /// Single-window compact player mode.
@@ -128,6 +130,7 @@ impl Default for AppState {
             scrobble_log_open: false,
             import_playlists_modal: Default::default(),
             speaker_setup_modal: Default::default(),
+            zone_manager_modal: Default::default(),
             command_palette: Default::default(),
             mini_player: false,
             now_playing_full: false,

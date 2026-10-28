@@ -16,6 +16,7 @@ pub mod scrobble_log_modal;
 pub mod smart_playlist_modal;
 pub mod speaker_setup_modal;
 pub mod track_dsp_modal;
+pub mod zones_modal;
 
 pub use crate::components::eq_panel::show_eq_panel;
 pub use crate::components::track_properties_modal::show_track_properties_modal;
@@ -42,3 +43,4 @@ pub use smart_playlist_modal::{
     show_smart_playlist_editor, SmartPlaylistActions, SmartPlaylistEditorState,
 };
 pub use speaker_setup_modal::{show_speaker_setup_modal, SpeakerSetupModalState};
+pub use zones_modal::{show_zone_manager_modal, ZoneManagerAction, ZoneManagerModalState};

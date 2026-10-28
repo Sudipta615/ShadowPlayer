@@ -261,6 +261,9 @@ impl ShadowPlayerApp {
                             skip_count: 0,
                             last_played_at: None,
                             added_at: 0,
+                            sort_artist_folded: None,
+                            sort_title_folded: None,
+                            sort_album_folded: None,
                         };
                         self.track_repo.upsert(&track).unwrap();
                         scope.push(track);
@@ -471,6 +474,9 @@ impl ShadowPlayerApp {
                             skip_count: 0,
                             last_played_at: Some(1_700_000_000),
                             added_at: 1_600_000_000 + (i as i64) * 86_400,
+                            sort_artist_folded: None,
+                            sort_title_folded: None,
+                            sort_album_folded: None,
                         };
                         let _ = self.track_repo.upsert(&track);
                     }
@@ -548,6 +554,9 @@ impl ShadowPlayerApp {
                             skip_count: 0,
                             last_played_at: None,
                             added_at: 1_600_000_000,
+                            sort_artist_folded: None,
+                            sort_title_folded: None,
+                            sort_album_folded: None,
                         };
                         let _ = self.track_repo.upsert(&track);
                         let day_ago = (i % 20) as i64;

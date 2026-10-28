@@ -43,6 +43,9 @@ mod unit {
             skip_count: 0,
             last_played_at: None,
             added_at: 1700000000,
+            sort_artist_folded: None,
+            sort_title_folded: None,
+            sort_album_folded: None,
         }
     }
 
@@ -1976,5 +1979,65 @@ mod unit {
         assert!(loaded.rules.is_empty());
         // An empty AND playlist matches nothing, which is the safe reading.
         assert!(repo.evaluate(&loaded).unwrap().is_empty());
+    }
+
+    #[test]
+    fn zone_repo_round_trip_and_migration_v16() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+        let repo = ZoneRepo::new(db.clone());
+
+        // Migration V16 should have seeded the default Main Zone
+        let zones = repo.list_zones().unwrap();
+        assert!(!zones.is_empty());
+        let default_zone = zones.iter().find(|z| z.is_default).expect("default zone");
+        assert_eq!(default_zone.name, "Main Zone");
+
+        // Create a custom secondary zone
+        let mut dac_zone =
+            domain::zone::ZoneConfig::new_custom("Living Room DAC", Some("USB Audio DAC".into()));
+        dac_zone.set_timing_offset(15.5);
+        dac_zone.set_clock_drift(0.025);
+        dac_zone.linked_master_id = Some(default_zone.id);
+        repo.save_zone(&dac_zone).unwrap();
+
+        // Verify retrieval
+        let loaded_dac = repo
+            .get_zone(dac_zone.id)
+            .unwrap()
+            .expect("loaded dac zone");
+        assert_eq!(loaded_dac.name, "Living Room DAC");
+        assert_eq!(loaded_dac.output_device.as_deref(), Some("USB Audio DAC"));
+        assert_eq!(loaded_dac.timing_offset_ms, 15.5);
+        assert_eq!(loaded_dac.clock_drift_pct, 0.025);
+        assert_eq!(loaded_dac.linked_master_id, Some(default_zone.id));
+
+        // Create a ZoneSwitch rule
+        let rule = domain::zone::ZoneSwitchRule::new(
+            "Auto Route DSD",
+            dac_zone.id,
+            vec![domain::zone::ZoneSwitchCondition::new(
+                domain::zone::ZoneMatchField::Format,
+                domain::smart::SmartOp::Equals,
+                "DSD",
+            )],
+            100,
+        );
+        repo.save_rule(&rule).unwrap();
+
+        let rules = repo.list_rules().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].name, "Auto Route DSD");
+        assert_eq!(rules[0].target_zone_id, dac_zone.id);
+
+        // Cannot delete default zone
+        assert!(!repo.delete_zone(default_zone.id).unwrap());
+
+        // Can delete custom zone
+        assert!(repo.delete_zone(dac_zone.id).unwrap());
+        assert!(repo.get_zone(dac_zone.id).unwrap().is_none());
+
+        // Cascade deleted rule
+        let rules_after = repo.list_rules().unwrap();
+        assert!(rules_after.is_empty());
     }
 }

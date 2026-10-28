@@ -44,6 +44,7 @@ pub fn render_albums_view(
         biography_editor,
         notes: &mut library_state.album_notes,
         notes_repo: album_notes_repo,
+        album_analyzer: Some(&library_state.album_analyzer),
         theme,
     }
     .show(ui);

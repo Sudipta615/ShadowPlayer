@@ -281,12 +281,132 @@ impl ShadowPlayerApp {
             &self.theme,
         );
 
+        let available_devices = self.session.available_devices();
+        let zone_actions = crate::modals::show_zone_manager_modal(
+            ctx,
+            &mut self.app_state.zone_manager_modal,
+            &self.zone_coordinator,
+            &available_devices,
+            &self.theme,
+        );
+        for action in zone_actions {
+            self.handle_zone_action(action);
+        }
+
         show_track_properties_modal(
             ctx,
             self.app_state.track_properties_track.as_ref(),
             &mut self.app_state.track_properties_open,
             &self.theme,
         );
+    }
+
+    fn handle_zone_action(&mut self, action: crate::modals::ZoneManagerAction) {
+        use crate::modals::ZoneManagerAction;
+        match action {
+            ZoneManagerAction::SetActiveZone(id) => {
+                self.zone_coordinator.set_active_zone(id);
+                if let Some(zone) = self.zone_coordinator.active_zone() {
+                    self.session
+                        .set_output_device(zone.config.output_device.clone());
+                    self.session.set_volume(zone.effective_volume());
+                }
+            }
+            ZoneManagerAction::CreateZone { name, device } => {
+                let mut cfg = domain::zone::ZoneConfig::new_custom(name, device);
+                cfg.created_at_unix = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let _ = self.zone_repo.save_zone(&cfg);
+                self.zone_coordinator.add_zone(cfg);
+            }
+            ZoneManagerAction::DeleteZone(id) => {
+                let _ = self.zone_repo.delete_zone(id);
+                self.zone_coordinator.remove_zone(id);
+            }
+            ZoneManagerAction::SetOutputDevice { zone_id, device } => {
+                if let Some(zone) = self.zone_coordinator.get_zone_mut(zone_id) {
+                    zone.config.output_device = device.clone();
+                    let _ = self.zone_repo.save_zone(&zone.config);
+                }
+                if self.zone_coordinator.active_zone_id() == zone_id {
+                    self.session.set_output_device(device);
+                }
+            }
+            ZoneManagerAction::SetVolume { zone_id, volume } => {
+                if let Some(zone) = self.zone_coordinator.get_zone_mut(zone_id) {
+                    zone.set_volume(volume);
+                    let _ = self.zone_repo.save_zone(&zone.config);
+                }
+                if self.zone_coordinator.active_zone_id() == zone_id {
+                    self.session.set_volume(volume);
+                }
+            }
+            ZoneManagerAction::SetMuted { zone_id, muted } => {
+                if let Some(zone) = self.zone_coordinator.get_zone_mut(zone_id) {
+                    zone.set_muted(muted);
+                    let _ = self.zone_repo.save_zone(&zone.config);
+                }
+                if self.zone_coordinator.active_zone_id() == zone_id {
+                    let vol = if muted {
+                        0.0
+                    } else if let Some(zone) = self.zone_coordinator.active_zone() {
+                        zone.config.volume
+                    } else {
+                        1.0
+                    };
+                    self.session.set_volume(vol);
+                }
+            }
+            ZoneManagerAction::LinkZone {
+                master,
+                slave,
+                offset_ms,
+            } => {
+                self.zone_coordinator.link_zones(master, slave, offset_ms);
+                if let Some(slave_zone) = self.zone_coordinator.get_zone(slave) {
+                    let _ = self.zone_repo.save_zone(&slave_zone.config);
+                }
+            }
+            ZoneManagerAction::UnlinkZone(slave) => {
+                self.zone_coordinator.unlink_zone(slave);
+                if let Some(slave_zone) = self.zone_coordinator.get_zone(slave) {
+                    let _ = self.zone_repo.save_zone(&slave_zone.config);
+                }
+            }
+            ZoneManagerAction::SetTimingOffset { zone_id, offset_ms } => {
+                if let Some(zone) = self.zone_coordinator.get_zone_mut(zone_id) {
+                    zone.config.set_timing_offset(offset_ms);
+                    let _ = self.zone_repo.save_zone(&zone.config);
+                }
+            }
+            ZoneManagerAction::SetClockDrift { zone_id, drift_pct } => {
+                if let Some(zone) = self.zone_coordinator.get_zone_mut(zone_id) {
+                    zone.config.set_clock_drift(drift_pct);
+                    let _ = self.zone_repo.save_zone(&zone.config);
+                }
+            }
+            ZoneManagerAction::SaveRule(rule) => {
+                let _ = self.zone_repo.save_rule(&rule);
+                let rules = self.zone_repo.list_rules().unwrap_or_default();
+                self.zone_coordinator.set_rules(rules);
+            }
+            ZoneManagerAction::DeleteRule(id) => {
+                let _ = self.zone_repo.delete_rule(&id);
+                let rules = self.zone_repo.list_rules().unwrap_or_default();
+                self.zone_coordinator.set_rules(rules);
+            }
+            ZoneManagerAction::ToggleRule { rule_id, enabled } => {
+                if let Ok(mut rules) = self.zone_repo.list_rules() {
+                    if let Some(r) = rules.iter_mut().find(|r| r.id == rule_id) {
+                        r.enabled = enabled;
+                        let _ = self.zone_repo.save_rule(r);
+                    }
+                    self.zone_coordinator.set_rules(rules);
+                }
+            }
+        }
     }
 
     pub(super) fn render_library_modals(&mut self, ctx: &egui::Context) {

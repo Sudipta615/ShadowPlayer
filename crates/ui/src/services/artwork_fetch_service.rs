@@ -105,7 +105,7 @@ impl ArtworkFetchService {
 
         self.cancel.store(false, Ordering::Relaxed);
         let cancel = self.cancel.clone();
-        let (tx, rx) = channel::unbounded();
+        let (tx, rx) = channel::bounded(128);
         self.rx = Some(rx);
         self.running = true;
         self.progress = ArtworkFetchProgress {

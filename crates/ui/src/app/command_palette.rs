@@ -138,6 +138,12 @@ impl ShadowPlayerApp {
             PaletteAction::OpenCrossfeed,
         ));
         entries.push(PaletteEntry::new(
+            "Audio",
+            "Audio zones & multi-room playback",
+            "manage independent zones, master-slave sync, and ZoneSwitch",
+            PaletteAction::OpenZones,
+        ));
+        entries.push(PaletteEntry::new(
             "Panel",
             "Loudness inspector",
             "how loud this track is",
@@ -311,6 +317,9 @@ impl ShadowPlayerApp {
             PaletteAction::OpenCrossfeed => {
                 self.dsp_state.eq_panel.active_tab = crate::components::eq_panel::EqTab::Filters;
                 self.dsp_state.eq_panel.is_open = true;
+            }
+            PaletteAction::OpenZones => {
+                self.app_state.zone_manager_modal.is_open = true;
             }
             PaletteAction::OpenLoudness => {
                 self.open_loudness_inspector();

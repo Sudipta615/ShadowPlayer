@@ -111,10 +111,10 @@ pub struct LibraryState {
     pub rebuilds: u64,
 
     /// A representative track for each album, used to show the cover art in
-    /// the album grid. The grid used to paint a permanent placeholder disc,
-    /// because artwork is cached per *track* and the grid only knows the
-    /// album.
+    /// the album grid.
     pub album_cover_tracks: HashMap<(String, String), (TrackId, PathBuf)>,
+    /// Pre-aggregated in-memory album index for $O(1)$ album metadata reads.
+    pub album_analyzer: library::AlbumAnalyzer,
     /// A representative track for each artist, used to show a cover in the
     /// artist grid.
     pub artist_cover_tracks: HashMap<String, (TrackId, PathBuf)>,
@@ -238,22 +238,13 @@ impl LibraryState {
         self.smart_playlist_cache.get(id).map(|s| s.evaluated_at)
     }
 
-    /// Pick one track per album to stand in for its cover art.
-    ///
-    /// Artwork is cached per track, so the album grid needs to know which
-    /// track stands in for each album. The first track of an album wins, which
-    /// is the one the album's own detail view uses too.
+    /// Pre-aggregate album metadata and pick one track per album to stand in for cover art.
     fn rebuild_album_covers(&mut self) {
-        let mut covers: HashMap<(String, String), (TrackId, PathBuf)> =
-            HashMap::with_capacity(self.albums.len());
-        for track in &self.all_tracks {
-            if track.album.is_empty() {
-                continue;
-            }
-            let key = (track.album.clone(), track.artist.clone());
-            covers.entry(key).or_insert((track.id, track.path.clone()));
+        self.album_analyzer = library::AlbumAnalyzer::analyze(&self.all_tracks);
+        self.album_cover_tracks = self.album_analyzer.cover_tracks();
+        if self.albums.is_empty() && !self.all_tracks.is_empty() {
+            self.albums = self.album_analyzer.to_albums();
         }
-        self.album_cover_tracks = covers;
 
         let mut artist_covers: HashMap<String, (TrackId, PathBuf)> =
             HashMap::with_capacity(self.artists.len());
@@ -329,7 +320,6 @@ impl LibraryState {
 
         // Force a rebuild: underlying data changed.
         self.displayed_key = None;
-        self.rebuild_album_covers();
 
         self.update_displayed_tracks(
             search_engine,
@@ -604,44 +594,57 @@ fn apply_quick_filter(
     }
 }
 
-/// Sort the tracks in place.
+/// Sort the tracks in place using pre-folded byte slice keys.
 ///
-/// The sort is a *stable* sort over cached keys: the key of every track is
-/// computed once, so the comparisons are cheap and the sort does not
-/// re-lower-case a title for every comparison it makes.
+/// Comparisons compare pre-folded byte slices directly (`&[u8]`),
+/// eliminating per-comparison heap allocations during sorts.
 pub fn sort_tracks(tracks: &mut [Track], field: SortField, order: SortOrder) {
     match field {
-        SortField::Title => tracks.sort_by_cached_key(|t| t.title.to_lowercase()),
-        SortField::Artist => tracks.sort_by_cached_key(|t| {
-            (
-                t.artist.to_lowercase(),
-                t.album.to_lowercase(),
-                t.track_number.unwrap_or(0),
-            )
+        SortField::Title => {
+            tracks.sort_unstable_by(|a, b| a.sort_title_bytes().cmp(b.sort_title_bytes()))
+        }
+        SortField::Artist => tracks.sort_unstable_by(|a, b| {
+            a.sort_artist_bytes()
+                .cmp(b.sort_artist_bytes())
+                .then_with(|| a.sort_album_bytes().cmp(b.sort_album_bytes()))
+                .then_with(|| {
+                    a.track_number
+                        .unwrap_or(0)
+                        .cmp(&b.track_number.unwrap_or(0))
+                })
         }),
-        SortField::Album => tracks.sort_by_cached_key(|t| {
-            (
-                t.album.to_lowercase(),
-                t.disc_number.unwrap_or(1),
-                t.track_number.unwrap_or(0),
-            )
+        SortField::Album => tracks.sort_unstable_by(|a, b| {
+            a.sort_album_bytes()
+                .cmp(b.sort_album_bytes())
+                .then_with(|| a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1)))
+                .then_with(|| {
+                    a.track_number
+                        .unwrap_or(0)
+                        .cmp(&b.track_number.unwrap_or(0))
+                })
         }),
-        SortField::Duration => tracks.sort_by(|a, b| a.duration_secs.total_cmp(&b.duration_secs)),
-        SortField::TrackNumber => tracks.sort_by_key(|t| {
-            (
-                t.disc_number.unwrap_or(1),
-                t.track_number.unwrap_or(0),
-                t.title.to_lowercase(),
-            )
+        SortField::Duration => {
+            tracks.sort_unstable_by(|a, b| a.duration_secs.total_cmp(&b.duration_secs))
+        }
+        SortField::TrackNumber => tracks.sort_unstable_by(|a, b| {
+            a.disc_number
+                .unwrap_or(1)
+                .cmp(&b.disc_number.unwrap_or(1))
+                .then_with(|| {
+                    a.track_number
+                        .unwrap_or(0)
+                        .cmp(&b.track_number.unwrap_or(0))
+                })
+                .then_with(|| a.sort_title_bytes().cmp(b.sort_title_bytes()))
         }),
-        SortField::DateAdded => tracks.sort_by_key(|t| t.added_at),
+        SortField::DateAdded => tracks.sort_unstable_by_key(|t| t.added_at),
         // Favorites first regardless of direction: "sort by favorites" with
         // the least-favorite track at the top would be a strange reading.
         SortField::Favorite => {
             tracks.sort_by_key(|t| std::cmp::Reverse(t.is_favorite));
             return;
         }
-        SortField::Rating => tracks.sort_by_key(|t| t.rating),
+        SortField::Rating => tracks.sort_unstable_by_key(|t| t.rating),
     }
     if order == SortOrder::Descending {
         tracks.reverse();
@@ -690,6 +693,9 @@ mod sort_tests {
             skip_count: 0,
             last_played_at: None,
             added_at: 0,
+            sort_artist_folded: None,
+            sort_title_folded: None,
+            sort_album_folded: None,
         }
     }
 
@@ -813,6 +819,9 @@ mod smart_refresh_tests {
             skip_count: 0,
             last_played_at: None,
             added_at: 0,
+            sort_artist_folded: None,
+            sort_title_folded: None,
+            sort_album_folded: None,
         }
     }
 

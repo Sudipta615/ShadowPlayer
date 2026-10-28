@@ -71,6 +71,15 @@ fn decode_cp1252(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Compute a pre-folded collation key for case-insensitive ordering.
+///
+/// Pre-folding strings into lower-case byte slices once during ingestion
+/// allows sorting by title/artist/album to compare pre-folded byte slices
+/// (`&[u8]`) directly with zero heap allocations during sort comparisons.
+pub fn fold_collation_key(s: &str) -> Box<[u8]> {
+    s.to_lowercase().into_bytes().into_boxed_slice()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +124,11 @@ mod tests {
         let (text, guessed) = decode_text_bytes(&[b'c', b'a', b'f', 0xE9]);
         assert_eq!(text, "café");
         assert!(guessed);
+    }
+
+    #[test]
+    fn collation_key_is_lowercased_bytes() {
+        let key = fold_collation_key("Boards of Canada - Geogaddi");
+        assert_eq!(&*key, b"boards of canada - geogaddi");
     }
 }

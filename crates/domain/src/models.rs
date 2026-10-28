@@ -80,9 +80,68 @@ pub struct Track {
     pub skip_count: u32,
     pub last_played_at: Option<i64>,
     pub added_at: i64,
+    /// Derived, pre-folded byte slice key for artist sorting.
+    /// Bypasses per-comparison `to_lowercase()` allocations during sorts.
+    #[serde(default)]
+    pub sort_artist_folded: Option<Box<[u8]>>,
+    /// Derived, pre-folded byte slice key for title sorting.
+    #[serde(default)]
+    pub sort_title_folded: Option<Box<[u8]>>,
+    /// Derived, pre-folded byte slice key for album sorting.
+    #[serde(default)]
+    pub sort_album_folded: Option<Box<[u8]>>,
 }
 
 impl Track {
+    /// Populate pre-folded sort collation keys if not already present.
+    pub fn ensure_sort_keys(&mut self) {
+        if self.sort_artist_folded.is_none() {
+            self.sort_artist_folded = Some(crate::text::fold_collation_key(&self.artist));
+        }
+        if self.sort_title_folded.is_none() {
+            self.sort_title_folded = Some(crate::text::fold_collation_key(&self.title));
+        }
+        if self.sort_album_folded.is_none() {
+            self.sort_album_folded = Some(crate::text::fold_collation_key(&self.album));
+        }
+    }
+
+    /// Builder helper to attach pre-folded sort collation keys.
+    pub fn with_sort_keys(mut self) -> Self {
+        self.ensure_sort_keys();
+        self
+    }
+
+    /// Return pre-folded artist bytes, falling back to raw artist bytes.
+    #[inline]
+    pub fn sort_artist_bytes(&self) -> &[u8] {
+        if let Some(ref k) = self.sort_artist_folded {
+            k
+        } else {
+            self.artist.as_bytes()
+        }
+    }
+
+    /// Return pre-folded title bytes, falling back to raw title bytes.
+    #[inline]
+    pub fn sort_title_bytes(&self) -> &[u8] {
+        if let Some(ref k) = self.sort_title_folded {
+            k
+        } else {
+            self.title.as_bytes()
+        }
+    }
+
+    /// Return pre-folded album bytes, falling back to raw album bytes.
+    #[inline]
+    pub fn sort_album_bytes(&self) -> &[u8] {
+        if let Some(ref k) = self.sort_album_folded {
+            k
+        } else {
+            self.album.as_bytes()
+        }
+    }
+
     pub fn duration_formatted(&self) -> String {
         format_duration(self.duration_secs)
     }

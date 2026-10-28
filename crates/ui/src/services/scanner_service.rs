@@ -42,7 +42,8 @@ impl ScannerService {
             return;
         }
 
-        let (tx, rx) = crossbeam::channel::unbounded();
+        // Bounded channel to prevent queue bloating while ensuring smooth event bursts
+        let (tx, rx) = crossbeam::channel::bounded(128);
         self.scan_rx = Some(rx);
         self.is_scanning = true;
         self.scan_progress_text = format!("Scanning: {}...", path.display());
@@ -52,9 +53,12 @@ impl ScannerService {
         let cancel = self.scan_cancel.clone();
         let scan_path = path;
 
-        std::thread::spawn(move || {
-            scanner.scan_directory(&scan_path, cancel, Some(tx));
-        });
+        std::thread::Builder::new()
+            .name("shadowplayer-scanner".into())
+            .spawn(move || {
+                scanner.scan_directory(&scan_path, cancel, Some(tx));
+            })
+            .expect("spawn scanner worker");
     }
 
     /// Poll scan events; returns true if scan completed and library should reload

@@ -42,6 +42,8 @@ pub struct AlbumsView<'a> {
     /// Markdown liner notes for the selected album.
     pub notes: &'a mut AlbumNotesState,
     pub notes_repo: &'a AlbumNotesRepo,
+    /// Pre-aggregated in-memory album metadata index.
+    pub album_analyzer: Option<&'a library::AlbumAnalyzer>,
     pub theme: &'a Theme,
 }
 
@@ -358,24 +360,28 @@ impl<'a> AlbumsView<'a> {
                     );
                 });
             } else {
+                let card_w = self.theme.card_w;
+                let card_h = 196.0;
+                let avail_w = ui.available_width();
+                let gap = self.theme.card_gutter;
+                let cols = ((avail_w + gap) / (card_w + gap)).floor().max(1.0) as usize;
+                let total_rows = self.albums.len().div_ceil(cols);
+                let row_height = card_h + gap;
+
                 egui::ScrollArea::vertical()
                     .id_salt("albums_grid_scroll")
-                    .show(ui, |ui| {
-                        let card_w = self.theme.card_w;
-                        let card_h = 196.0;
-                        let avail_w = ui.available_width();
-                        // Bound the cover decoding per frame, exactly as the
-                        // songs table does, so a large library cannot spike a
-                        // frame.
+                    .show_rows(ui, row_height, total_rows, |ui, row_range| {
                         let ctx = ui.ctx().clone();
                         let mut art_budget = 8usize;
-                        let gap = self.theme.card_gutter;
-                        let cols = ((avail_w + gap) / (card_w + gap)).floor().max(1.0) as usize;
 
-                        egui::Grid::new("albums_grid")
-                            .spacing(Vec2::new(self.theme.card_gutter, self.theme.card_gutter))
-                            .show(ui, |ui| {
-                                for (idx, album) in self.albums.iter().enumerate() {
+                        for row_idx in row_range {
+                            let start = row_idx * cols;
+                            let end = (start + cols).min(self.albums.len());
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(gap, 0.0);
+
+                                for album in &self.albums[start..end] {
                                     let (rect, resp) = ui.allocate_exact_size(
                                         Vec2::new(card_w, card_h),
                                         Sense::click(),
@@ -413,8 +419,7 @@ impl<'a> AlbumsView<'a> {
                                     );
 
                                     // The album's cover, taken from the first
-                                    // track of the album. The grid used to
-                                    // paint a permanent placeholder disc.
+                                    // track of the album.
                                     let cover = self
                                         .album_covers
                                         .get(&(album.title.clone(), album.artist.clone()));
@@ -452,6 +457,39 @@ impl<'a> AlbumsView<'a> {
                                         );
                                     }
 
+                                    // Pre-aggregated summary lookup
+                                    let summary = self
+                                        .album_analyzer
+                                        .and_then(|a| a.get(&album.title, &album.artist));
+
+                                    // Optional quality badge overlay on cover
+                                    if let Some(badge) = summary.and_then(|s| s.quality_badge()) {
+                                        let badge_w = if badge == "HI-RES" { 42.0 } else { 50.0 };
+                                        let badge_rect = Rect::from_min_size(
+                                            Pos2::new(
+                                                cover_rect.max.x - badge_w - 4.0,
+                                                cover_rect.min.y + 4.0,
+                                            ),
+                                            Vec2::new(badge_w, 15.0),
+                                        );
+                                        p.rect_filled(
+                                            badge_rect,
+                                            CornerRadius::same(self.theme.radius_sm),
+                                            Color32::from_black_alpha(200),
+                                        );
+                                        p.text(
+                                            badge_rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            badge,
+                                            crate::theme::font(9.0),
+                                            if badge == "HI-RES" {
+                                                self.theme.accent_warm
+                                            } else {
+                                                self.theme.accent_highlight
+                                            },
+                                        );
+                                    }
+
                                     // Title & Artist
                                     let title_galley = truncated_galley(
                                         &p,
@@ -479,7 +517,15 @@ impl<'a> AlbumsView<'a> {
                                         self.theme.text_muted,
                                     );
 
-                                    let sub_str = format!("{} songs", album.track_count);
+                                    let sub_str = if let Some(s) = summary {
+                                        if let Some(yr) = s.year_display() {
+                                            format!("{} songs • {}", s.track_count, yr)
+                                        } else {
+                                            format!("{} songs", s.track_count)
+                                        }
+                                    } else {
+                                        format!("{} songs", album.track_count)
+                                    };
                                     p.text(
                                         Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 37.0),
                                         egui::Align2::LEFT_TOP,
@@ -492,12 +538,10 @@ impl<'a> AlbumsView<'a> {
                                         *self.selected_album =
                                             Some((album.title.clone(), album.artist.clone()));
                                     }
-
-                                    if (idx + 1) % cols == 0 {
-                                        ui.end_row();
-                                    }
                                 }
                             });
+                            ui.add_space(gap);
+                        }
                     });
             }
         }

@@ -4,6 +4,23 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-10-28
+
+*Released with audio-engine 1.11.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Multi-Zone Audio Playback & ZoneSwitch Routing (Phase 5).** Independent audio zones (`ZoneConfig`, `ZoneId`, `audio_zones`) with isolated queues, volume levels, mute controls, output device selection, and master-slave multi-room pairing.
+- **Sub-Millisecond Clock Drift Compensation.** Realtime drift tracking with quartz-oscillator phase micro-adjustments ($R = 1.0 + \frac{\text{drift\_pct}}{100.0}$) clamped to $\pm 0.05\%$ ($\pm 500\text{ ppm}$) to maintain continuous phase lock without pitch warble.
+- **Multi-Room Delay Alignment.** Configurable relative timing offsets ($-50.0\text{ ms} \dots +50.0\text{ ms}$) between linked zones to eliminate acoustic comb filtering across rooms.
+- **Dynamic ZoneSwitch Routing Rules.** Priority-ordered rule engine (`zone_switch_rules`) that automatically routes tracks based on sample rate, bit depth, channel count, format, or genre.
+- **Audio Zones & Multi-Room Hub UI.** Dedicated management modal with zone status cards, output selectors, volume sliders, delay alignment, clock drift readouts, and rule configuration. Accessible via NowPlaying transport card, center top bar status pill (`[🔊 Main Zone]`), and Command Palette (`PaletteAction::OpenZones`).
+- **High-Scale 100k Library Management & In-Memory Index (Phase 4).** Added `AlbumAnalyzer` for pre-aggregated $O(1)$ album metadata and cover art resolution; zero-allocation pre-folded UTF-8 collation keys (`sort_artist_folded`, `sort_title_folded`, `sort_album_folded`); database migration `V15` adding composite indexes on `tracks`.
+- **Audio Path 2.0 & Studio DSP Suite (Phases 1-3).** Enhanced parametric EQ, speaker acoustic alignment, calibrated crossfeed (Meier & Bauer), and listening environment simulation.
+
+### Performance & Hardening
+- **Optimized 100k Track Sorting.** Switched table sorting to pdqsort (`sort_unstable_by`) over pre-folded byte slice keys, reducing 100,000-track sort time from 195 ms to 39 ms and library rebuild time from 320 ms to 155 ms.
+
 ---
 
 ## [0.24.0] - 2026-10-28

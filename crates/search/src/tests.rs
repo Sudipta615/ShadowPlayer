@@ -48,6 +48,9 @@ mod unit {
             skip_count: 0,
             last_played_at: None,
             added_at: 1_700_000_000,
+            sort_artist_folded: None,
+            sort_title_folded: None,
+            sort_album_folded: None,
         }
     }
 

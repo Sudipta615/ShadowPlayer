@@ -119,6 +119,10 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         .unwrap_or_default()
         .as_secs() as i64;
 
+    let sort_artist_folded = Some(domain::text::fold_collation_key(&artist));
+    let sort_title_folded = Some(domain::text::fold_collation_key(&title));
+    let sort_album_folded = Some(domain::text::fold_collation_key(&album));
+
     let track = Track {
         id: track_id,
         path: path.to_path_buf(),
@@ -159,6 +163,9 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
         skip_count: 0,
         last_played_at: None,
         added_at: now,
+        sort_artist_folded,
+        sort_title_folded,
+        sort_album_folded,
     };
 
     // NOTE: lyrics are *not* read here. Scanning touches every changed file, and
@@ -289,6 +296,10 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             .and_then(|d| d.parse().ok())
             .or(audio_meta.track.year);
 
+        let sort_artist_folded = Some(domain::text::fold_collation_key(&artist));
+        let sort_title_folded = Some(domain::text::fold_collation_key(&title));
+        let sort_album_folded = Some(domain::text::fold_collation_key(&album));
+
         let track = Track {
             id: track_id,
             path: PathBuf::from(virtual_path),
@@ -328,6 +339,9 @@ pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, M
             skip_count: 0,
             last_played_at: None,
             added_at: now,
+            sort_artist_folded,
+            sort_title_folded,
+            sort_album_folded,
         };
 
         results.push(ExtractedMetadata {

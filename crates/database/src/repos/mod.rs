@@ -17,6 +17,7 @@ mod media;
 mod playlist;
 mod settings;
 mod track;
+mod zone_repo;
 
 pub use eq_presets::*;
 pub use history::*;
@@ -25,3 +26,4 @@ pub use media::*;
 pub use playlist::*;
 pub use settings::*;
 pub use track::*;
+pub use zone_repo::*;

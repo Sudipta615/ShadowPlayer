@@ -112,7 +112,8 @@ impl LoudnessService {
             return;
         }
 
-        let (tx, rx) = crossbeam::channel::unbounded();
+        // Bounded channel to prevent queue bloat while maintaining responsive progress
+        let (tx, rx) = crossbeam::channel::bounded(64);
         self.rx = Some(rx);
         self.running = true;
         self.cancel.store(false, Ordering::Relaxed);

@@ -91,6 +91,8 @@ pub struct ShadowPlayerApp {
     smart_playlist_repo: SmartPlaylistRepo,
     /// Durable EQ presets and their device/track bindings.
     eq_presets_repo: EqPresetsRepo,
+    zone_repo: database::ZoneRepo,
+    pub zone_coordinator: playback::ZoneCoordinator,
 
     artwork_service: ArtworkService,
     lyrics_service: LyricsService,
@@ -229,6 +231,14 @@ impl ShadowPlayerApp {
         let settings_repo = SettingsRepo::new(db.clone());
         let smart_playlist_repo = SmartPlaylistRepo::new(db.clone());
         let eq_presets_repo = EqPresetsRepo::new(db.clone());
+        let zone_repo = database::ZoneRepo::new(db.clone());
+        let stored_zones = zone_repo.list_zones().unwrap_or_default();
+        let stored_rules = zone_repo.list_rules().unwrap_or_default();
+        let zone_coordinator = if stored_zones.is_empty() {
+            playback::ZoneCoordinator::new(domain::zone::ZoneConfig::main_default())
+        } else {
+            playback::ZoneCoordinator::from_stored(stored_zones, stored_rules)
+        };
         let search_engine = SearchEngine::new(db.clone());
         let coordinator = PlaybackCoordinator::new(session.clone(), db.clone());
 
@@ -278,6 +288,8 @@ impl ShadowPlayerApp {
             settings_repo,
             smart_playlist_repo,
             eq_presets_repo,
+            zone_repo,
+            zone_coordinator,
 
             artwork_service,
             lyrics_service,

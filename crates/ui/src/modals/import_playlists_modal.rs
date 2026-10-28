@@ -223,6 +223,9 @@ mod tests {
             skip_count: 0,
             last_played_at: None,
             added_at: 0,
+            sort_artist_folded: None,
+            sort_title_folded: None,
+            sort_album_folded: None,
         }
     }
 

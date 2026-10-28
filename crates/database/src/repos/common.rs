@@ -129,12 +129,19 @@ pub(super) fn map_track(row: &Row<'_>) -> Result<Track> {
     let is_fav_int: i32 = row.get("is_favorite")?;
     let is_lossless_int: i32 = row.get("is_lossless")?;
 
+    let title: String = row.get("title")?;
+    let artist: String = row.get("artist")?;
+    let album: String = row.get("album")?;
+    let sort_artist_folded = Some(domain::text::fold_collation_key(&artist));
+    let sort_title_folded = Some(domain::text::fold_collation_key(&title));
+    let sort_album_folded = Some(domain::text::fold_collation_key(&album));
+
     Ok(Track {
         id: parse_id(&id_str, "tracks.id")?,
         path: decode_path_key(&path_str),
-        title: row.get("title")?,
-        artist: row.get("artist")?,
-        album: row.get("album")?,
+        title,
+        artist,
+        album,
         genre: row.get("genre")?,
         year: row.get("year")?,
         track_number: row.get("track_number")?,
@@ -167,5 +174,8 @@ pub(super) fn map_track(row: &Row<'_>) -> Result<Track> {
         play_count: row.get("play_count")?,
         last_played_at: row.get("last_played_at")?,
         added_at: row.get("added_at")?,
+        sort_artist_folded,
+        sort_title_folded,
+        sort_album_folded,
     })
 }

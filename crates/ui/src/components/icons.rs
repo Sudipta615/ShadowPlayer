@@ -359,3 +359,37 @@ pub fn draw_audio_path(ui: &Ui, rect: Rect, color: Color32) {
         Stroke::new(1.4, color),
     );
 }
+
+/// Multi-zone audio icon representing multi-room output distribution.
+pub fn draw_zones(ui: &Ui, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) * 0.42;
+    let p = ui.painter();
+    let stroke = Stroke::new(1.4, color);
+
+    // Center hub speaker/source
+    p.circle_filled(c, 2.8, color);
+
+    // Left and right concentric distribution lines
+    p.line_segment(
+        [
+            Pos2::new(c.x - r * 0.7, c.y - r * 0.5),
+            Pos2::new(c.x - r * 0.7, c.y + r * 0.5),
+        ],
+        stroke,
+    );
+    p.line_segment(
+        [
+            Pos2::new(c.x + r * 0.7, c.y - r * 0.5),
+            Pos2::new(c.x + r * 0.7, c.y + r * 0.5),
+        ],
+        stroke,
+    );
+    p.line_segment(
+        [
+            Pos2::new(c.x - r * 0.35, c.y),
+            Pos2::new(c.x + r * 0.35, c.y),
+        ],
+        stroke,
+    );
+}

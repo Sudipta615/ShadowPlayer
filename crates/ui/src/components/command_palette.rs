@@ -37,6 +37,8 @@ pub enum PaletteAction {
     OpenSpeakerSetup,
     /// Open the headphone crossfeed and spatializer studio.
     OpenCrossfeed,
+    /// Open the audio zones and multi-room playback hub.
+    OpenZones,
     /// Open the loudness inspector.
     OpenLoudness,
     /// Open the library statistics.

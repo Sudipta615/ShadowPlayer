@@ -13,6 +13,8 @@ pub struct NowPlayingEvents {
     pub open_eq_panel: bool,
     pub open_properties: bool,
     pub open_bit_perfect: bool,
+    /// Multi-zone audio hub was requested.
+    pub open_zones: bool,
     /// The loudness inspector was requested.
     pub open_loudness: bool,
     /// A sleep-timer choice was made.
@@ -66,6 +68,7 @@ impl<'a> NowPlayingCard<'a> {
             open_eq_panel: false,
             open_properties: false,
             open_bit_perfect: false,
+            open_zones: false,
             open_loudness: false,
             sleep_timer_request: None,
         };
@@ -618,6 +621,30 @@ impl<'a> NowPlayingCard<'a> {
                                     });
                                     if ap_resp.clicked() {
                                         events.open_bit_perfect = true;
+                                    }
+
+                                    // Audio Zones & Multi-Room Hub Button
+                                    let (zone_slot, zone_resp) = ui.allocate_exact_size(
+                                        Vec2::new(30.0, row_h),
+                                        Sense::click(),
+                                    );
+                                    let zone_rect = Rect::from_center_size(
+                                        zone_slot.center(),
+                                        Vec2::new(26.0, 26.0),
+                                    );
+                                    let zone_p = ui.painter_at(zone_rect);
+                                    let zone_bg = if zone_resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else {
+                                        self.theme.bg_pill
+                                    };
+                                    zone_p.rect_filled(zone_rect, CornerRadius::same(self.theme.radius_sm), zone_bg);
+                                    zone_p.rect_stroke(zone_rect, CornerRadius::same(self.theme.radius_sm), Stroke::new(1.0_f32, self.theme.border_subtle), egui::StrokeKind::Inside);
+                                    crate::components::icons::draw_zones(ui, zone_rect.shrink2(Vec2::new(3.0, 3.0)), self.theme.text_secondary);
+                                    zone_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Audio zones hub"));
+                                    let _ = zone_resp.clone().on_hover_text(tr!("Audio Zones & Multi-Room Hub"));
+                                    if zone_resp.clicked() {
+                                        events.open_zones = true;
                                     }
 
                                     // Loudness Inspector Button

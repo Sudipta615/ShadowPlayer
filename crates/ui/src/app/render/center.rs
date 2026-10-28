@@ -169,6 +169,31 @@ impl ShadowPlayerApp {
                                     self.theme.accent_warm,
                                     self.theme.text_secondary,
                                 );
+                                let active_zone_name = self
+                                    .zone_coordinator
+                                    .active_zone()
+                                    .map(|z| z.config.name.as_str())
+                                    .unwrap_or("Main Zone");
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(format!("🔊 {active_zone_name}"))
+                                                .size(11.0)
+                                                .color(self.theme.accent),
+                                        )
+                                        .fill(self.theme.accent.linear_multiply(0.12))
+                                        .stroke(egui::Stroke::new(1.0, self.theme.accent))
+                                        .corner_radius(
+                                            egui::CornerRadius::same(self.theme.radius_sm),
+                                        ),
+                                    )
+                                    .on_hover_text(
+                                        "Active Audio Zone — click to open Multi-Room Hub",
+                                    )
+                                    .clicked()
+                                {
+                                    self.app_state.zone_manager_modal.is_open = true;
+                                }
                             }
                         });
                     });

@@ -6,6 +6,7 @@ pub mod models;
 pub mod paths;
 pub mod smart;
 pub mod text;
+pub mod zone;
 
 pub use cue::*;
 pub use events::*;
@@ -15,6 +16,7 @@ pub use models::*;
 pub use paths::*;
 pub use smart::*;
 pub use text::*;
+pub use zone::*;
 
 #[cfg(test)]
 mod tests;
