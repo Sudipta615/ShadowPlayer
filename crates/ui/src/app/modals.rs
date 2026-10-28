@@ -26,8 +26,12 @@ impl ShadowPlayerApp {
         let preset_bind = eq_actions.preset_bind.take();
         let preset_bind_track = eq_actions.preset_bind_track.take();
         let preset_unbind_track = eq_actions.preset_unbind_track;
+        let want_speaker_setup = eq_actions.open_speaker_setup;
         self.dsp_state
             .handle_eq_panel_actions(&self.session, eq_actions);
+        if want_speaker_setup {
+            self.app_state.speaker_setup_modal.open();
+        }
         if want_import {
             self.preset_io.request_import();
         }
@@ -267,6 +271,13 @@ impl ShadowPlayerApp {
             current_track,
             &self.session,
             &mut self.dsp_state,
+            &self.theme,
+        );
+
+        show_speaker_setup_modal(
+            ctx,
+            &mut self.app_state.speaker_setup_modal,
+            &self.session,
             &self.theme,
         );
 

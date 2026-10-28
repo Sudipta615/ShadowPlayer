@@ -323,6 +323,15 @@ pub(in crate::components::settings_tab) fn render_mixbus_category(
             },
         );
 
+        ui.horizontal(|ui| {
+            if ui
+                .button(tr!("Acoustic Alignment & Distance Setup…"))
+                .clicked()
+            {
+                actions.open_speaker_setup = true;
+            }
+        });
+
         if state.bass_management.enabled {
             setting_item(
                 ui,

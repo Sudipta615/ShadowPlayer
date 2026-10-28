@@ -332,3 +332,30 @@ pub fn draw_mic(ui: &Ui, rect: Rect, color: Color32) {
         Stroke::new(1.5, color),
     );
 }
+
+/// A 3-node signal path diagram representing the Audio Path (Source -> Processing -> DAC).
+pub fn draw_audio_path(ui: &Ui, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) * 0.44;
+    let p = ui.painter();
+    let y = c.y;
+    let left_x = c.x - r * 0.85;
+    let mid_x = c.x;
+    let right_x = c.x + r * 0.85;
+    let stroke = Stroke::new(1.6, color);
+
+    // Horizontal connecting bus line
+    p.line_segment([Pos2::new(left_x, y), Pos2::new(right_x, y)], stroke);
+
+    // 3 Nodes: Input circle, Processing node, Output circle
+    p.circle_filled(Pos2::new(left_x, y), 2.4, color);
+    p.circle_filled(Pos2::new(mid_x, y), 3.2, color);
+    p.circle_filled(Pos2::new(right_x, y), 2.4, color);
+    p.line_segment(
+        [
+            Pos2::new(mid_x, y - r * 0.45),
+            Pos2::new(mid_x, y + r * 0.45),
+        ],
+        Stroke::new(1.4, color),
+    );
+}

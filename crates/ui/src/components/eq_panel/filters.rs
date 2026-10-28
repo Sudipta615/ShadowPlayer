@@ -8,8 +8,7 @@
 use super::controls::{custom_toggle_switch, gradient_horizontal_slider, render_footer_controls};
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
-use config::CrossfeedProfile;
-use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Margin, Stroke, Vec2};
 use std::ops::RangeInclusive;
 
 pub(super) fn render_filters_tab(
@@ -23,8 +22,35 @@ pub(super) fn render_filters_tab(
 
         render_crossfeed_card(ui, state, actions, theme);
         render_correction_card(ui, state, actions, theme);
+        render_speaker_setup_card(ui, actions, theme);
 
         render_footer_controls(ui, state, actions, theme, EqTab::Filters);
+    });
+}
+
+fn render_speaker_setup_card(ui: &mut egui::Ui, actions: &mut EqPanelActions, theme: &Theme) {
+    card(ui, theme, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(tr!("Speaker Setup & Alignment"))
+                    .font(crate::theme::font(14.0))
+                    .strong()
+                    .color(theme.text_primary),
+            );
+        });
+        ui.label(
+            egui::RichText::new(tr!(
+                "Calibrate speaker arrival delays, distances, channel trims, and subwoofer crossover."
+            ))
+            .font(crate::theme::font(11.0))
+            .color(theme.text_secondary),
+        );
+        if ui
+            .button(tr!("Open Speaker Setup & Alignment Wizard…"))
+            .clicked()
+        {
+            actions.open_speaker_setup = true;
+        }
     });
 }
 
@@ -34,90 +60,7 @@ fn render_crossfeed_card(
     actions: &mut EqPanelActions,
     theme: &Theme,
 ) {
-    card(ui, theme, |ui| {
-        header_with_toggle(
-            ui,
-            &tr!("Crossfeed"),
-            "crossfeed",
-            &crate::components::info_box::INFO_CROSSFEED,
-            &mut state.crossfeed_enabled,
-            &tr!("Enable Crossfeed"),
-            theme,
-            |enabled| actions.crossfeed_enabled_changed = Some(enabled),
-        );
-        ui.label(
-            egui::RichText::new(tr!(
-                "Models the interaural delay and shadowing that headphones remove."
-            ))
-            .font(crate::theme::font(11.0))
-            .color(theme.text_secondary),
-        );
-
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
-            for (profile, label) in [
-                (CrossfeedProfile::Bauer, tr!("Bauer")),
-                (CrossfeedProfile::ChuMoy, tr!("Chu Moy")),
-                (CrossfeedProfile::Jmeier, tr!("Jmeier")),
-                (CrossfeedProfile::Custom, tr!("Custom")),
-            ] {
-                let selected = state.crossfeed_profile == profile;
-                let button = egui::Button::new(
-                    egui::RichText::new(label)
-                        .font(crate::theme::font(10.5))
-                        .color(if selected {
-                            Color32::WHITE
-                        } else {
-                            theme.text_secondary
-                        }),
-                )
-                .fill(if selected {
-                    theme.accent
-                } else {
-                    theme.bg_pill
-                })
-                .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius::same(theme.radius_sm));
-                if ui.add(button).clicked() && !selected {
-                    state.crossfeed_profile = profile;
-                    actions.crossfeed_profile_changed = Some(profile);
-                }
-            }
-        });
-
-        if state.crossfeed_profile == CrossfeedProfile::Custom {
-            slider_row(
-                ui,
-                &tr!("Cutoff"),
-                &mut state.crossfeed_freq,
-                400.0..=1200.0,
-                700.0,
-                |v| format!("{v:.0} Hz"),
-                theme,
-                |_| actions.crossfeed_custom_changed = true,
-            );
-            slider_row(
-                ui,
-                &tr!("Q"),
-                &mut state.crossfeed_q,
-                0.1..=2.0,
-                0.707,
-                |v| format!("{v:.2}"),
-                theme,
-                |_| actions.crossfeed_custom_changed = true,
-            );
-            slider_row(
-                ui,
-                &tr!("Delay"),
-                &mut state.crossfeed_delay_ms,
-                0.0..=1.0,
-                0.3,
-                |v| format!("{v:.2} ms"),
-                theme,
-                |_| actions.crossfeed_custom_changed = true,
-            );
-        }
-    });
+    super::crossfeed::render_crossfeed_card(ui, state, actions, theme);
 }
 
 fn render_correction_card(

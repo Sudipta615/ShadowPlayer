@@ -465,6 +465,124 @@ pub fn custom_toggle_switch(
     changed
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab Switcher Navigation
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn is_tab_stage_active(tab: EqTab, state: &EqPanelState) -> bool {
+    match tab {
+        EqTab::Graphic => state.eq_enabled && state.eq_mode == config::EqMode::Graphic,
+        EqTab::Parametric => state.eq_enabled && state.eq_mode == config::EqMode::Parametric,
+        EqTab::Tone => {
+            state.bass_shelf_db.abs() > 0.05
+                || state.treble_shelf_db.abs() > 0.05
+                || (state.stereo_width - 1.0).abs() > 0.05
+                || state.balance.abs() > 0.05
+                || state.midside_eq
+        }
+        EqTab::Dynamics => state.limiter_enabled || state.compressor_enabled,
+        EqTab::Filters => state.crossfeed_enabled || state.correction_enabled,
+        EqTab::Effects => state.fx.any_enabled(),
+        EqTab::Advanced => false,
+    }
+}
+
+pub(super) fn render_tab_navigation(
+    ui: &mut egui::Ui,
+    state: &mut EqPanelState,
+    actions: &mut EqPanelActions,
+    theme: &Theme,
+) {
+    let tab_items = [
+        (EqTab::Graphic, tr!("Graphic EQ")),
+        (EqTab::Parametric, tr!("Parametric")),
+        (EqTab::Tone, tr!("Tone")),
+        (EqTab::Dynamics, tr!("Dynamics")),
+        (EqTab::Filters, tr!("Filters")),
+        (EqTab::Effects, tr!("Effects")),
+        (EqTab::Advanced, tr!("Advanced")),
+    ];
+
+    let spacing = 4.0;
+    let tab_h = 30.0;
+    let cols = tab_items.len() as f32;
+    let tab_w = ((ui.available_width() - 30.0 - spacing * (cols - 1.0)) / cols).clamp(62.0, 112.0);
+
+    egui::Frame::NONE
+        .fill(theme.bg_card)
+        .stroke(Stroke::new(1.0, theme.border_card))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
+        .inner_margin(Margin::symmetric(
+            theme.space_sm as i8,
+            theme.space_xs as i8,
+        ))
+        .show(ui, |ui| {
+            ui.add_enabled_ui(state.eq_enabled, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(spacing, spacing);
+
+                    for (tab, label) in tab_items {
+                        let is_sel = state.active_tab == tab;
+                        let is_active = is_tab_stage_active(tab, state);
+                        let (bg, text_col, font) = if is_sel {
+                            (theme.accent, Color32::WHITE, crate::theme::font(11.5))
+                        } else {
+                            (
+                                Color32::TRANSPARENT,
+                                theme.text_secondary,
+                                crate::theme::font(11.0),
+                            )
+                        };
+
+                        let btn = egui::Button::new(
+                            egui::RichText::new(label)
+                                .font(font)
+                                .strong()
+                                .color(text_col),
+                        )
+                        .fill(bg)
+                        .stroke(if is_sel {
+                            Stroke::new(1.0, theme.accent_highlight)
+                        } else {
+                            Stroke::NONE
+                        })
+                        .corner_radius(theme.control_radius())
+                        .min_size(Vec2::new(tab_w, tab_h));
+
+                        let resp = ui.add(btn);
+                        if is_active {
+                            let dot = Pos2::new(resp.rect.right() - 6.0, resp.rect.top() + 6.0);
+                            ui.painter().circle_filled(
+                                dot,
+                                2.5,
+                                if is_sel {
+                                    Color32::WHITE
+                                } else {
+                                    theme.accent_warm
+                                },
+                            );
+                        }
+                        if resp.clicked() {
+                            state.active_tab = tab;
+                            match tab {
+                                EqTab::Graphic => {
+                                    state.set_eq_mode(config::EqMode::Graphic);
+                                    actions.eq_mode_changed = true;
+                                }
+                                EqTab::Parametric => {
+                                    state.set_eq_mode(config::EqMode::Parametric);
+                                    actions.eq_mode_changed = true;
+                                    actions.eq_bands_changed = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                });
+            });
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use super::preamp_display_limit;

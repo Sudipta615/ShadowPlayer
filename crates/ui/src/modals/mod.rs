@@ -14,6 +14,7 @@ pub mod playlist_editor_modal;
 pub mod room_measurement_modal;
 pub mod scrobble_log_modal;
 pub mod smart_playlist_modal;
+pub mod speaker_setup_modal;
 pub mod track_dsp_modal;
 
 pub use crate::components::eq_panel::show_eq_panel;
@@ -40,3 +41,4 @@ pub use room_measurement_modal::{
 pub use smart_playlist_modal::{
     show_smart_playlist_editor, SmartPlaylistActions, SmartPlaylistEditorState,
 };
+pub use speaker_setup_modal::{show_speaker_setup_modal, SpeakerSetupModalState};

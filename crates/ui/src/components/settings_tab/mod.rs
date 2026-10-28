@@ -36,7 +36,7 @@ pub use state::{
     CrossfadePreviewContext, SettingsExtraContext, SettingsTabActions, SettingsTabState,
 };
 pub use widgets::{
-    card_header, card_header_with_info, dual_tone_slider, segment_picker, setting_card,
+    card_header, card_header_with_info, dual_tone_slider, pill_btn, segment_picker, setting_card,
     setting_item, setting_item_toggle, setting_item_with_info, toggle_switch,
 };
 

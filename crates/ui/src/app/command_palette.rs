@@ -127,6 +127,18 @@ impl ShadowPlayerApp {
         ));
         entries.push(PaletteEntry::new(
             "Panel",
+            "Speaker setup & acoustic alignment",
+            "calibrate arrival delays, distances, trims and crossover",
+            PaletteAction::OpenSpeakerSetup,
+        ));
+        entries.push(PaletteEntry::new(
+            "Audio",
+            "Headphone crossfeed & spatializer",
+            "models acoustic soundstage, binaural ITD and fatigue relief",
+            PaletteAction::OpenCrossfeed,
+        ));
+        entries.push(PaletteEntry::new(
+            "Panel",
             "Loudness inspector",
             "how loud this track is",
             PaletteAction::OpenLoudness,
@@ -292,6 +304,13 @@ impl ShadowPlayerApp {
             }
             PaletteAction::OpenBitPerfect => {
                 self.app_state.bit_perfect_modal_open = true;
+            }
+            PaletteAction::OpenSpeakerSetup => {
+                self.app_state.speaker_setup_modal.open();
+            }
+            PaletteAction::OpenCrossfeed => {
+                self.dsp_state.eq_panel.active_tab = crate::components::eq_panel::EqTab::Filters;
+                self.dsp_state.eq_panel.is_open = true;
             }
             PaletteAction::OpenLoudness => {
                 self.open_loudness_inspector();

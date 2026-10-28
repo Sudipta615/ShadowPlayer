@@ -475,11 +475,7 @@ pub fn segment_picker<T: Clone + PartialEq>(
     changed
 }
 
-pub(super) fn pill_btn(
-    label: impl Into<String>,
-    selected: bool,
-    theme: &Theme,
-) -> egui::Button<'static> {
+pub fn pill_btn(label: impl Into<String>, selected: bool, theme: &Theme) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(label.into())
             .font(crate::theme::font(11.5))

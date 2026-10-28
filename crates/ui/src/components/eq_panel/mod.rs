@@ -18,13 +18,14 @@
 
 use crate::theme::Theme;
 use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
-use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
+use eframe::egui::{self, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
 use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
 
 mod actions;
 mod advanced;
 mod controls;
+pub mod crossfeed;
 mod curve;
 mod dynamics;
 mod filters;
@@ -42,6 +43,7 @@ use graphic::render_graphic_eq_tab;
 use tone::render_tone_acoustics_tab;
 
 pub use actions::{EqPanelActions, PresetBindRequest, PresetSaveRequest};
+pub use crossfeed::{CalibratedCrossfeedPreset, CrossfeedViewMode};
 pub use persistence::PersistentEqState;
 
 pub use controls::custom_toggle_switch;
@@ -143,6 +145,7 @@ pub struct EqPanelState {
     pub crossfeed_freq: f32,
     pub crossfeed_q: f32,
     pub crossfeed_delay_ms: f32,
+    pub crossfeed_view_mode: CrossfeedViewMode,
 
     pub correction_enabled: bool,
     pub correction_depth: f32,
@@ -230,6 +233,7 @@ impl Default for EqPanelState {
             crossfeed_freq: 700.0,
             crossfeed_q: 0.707,
             crossfeed_delay_ms: 0.3,
+            crossfeed_view_mode: CrossfeedViewMode::default(),
 
             correction_enabled: false,
             correction_depth: 1.0,
@@ -476,7 +480,7 @@ pub fn show_eq_panel(
             render_header(ui, state, &mut actions, theme);
 
             // ── 2. Tab Switcher ──────────────────────────────────────────────
-            render_tab_navigation(ui, state, &mut actions, theme);
+            controls::render_tab_navigation(ui, state, &mut actions, theme);
 
             // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
             // The master switch is the one enable state for the entire studio.
@@ -677,105 +681,6 @@ fn render_header(
     // Remember that it was open, so the focus is moved into it once, on the
     // frame it opens.
     state.was_open = state.is_open;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. Tab Switcher Navigation
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn render_tab_navigation(
-    ui: &mut egui::Ui,
-    state: &mut EqPanelState,
-    actions: &mut EqPanelActions,
-    theme: &Theme,
-) {
-    let tab_items = [
-        (EqTab::Graphic, tr!("Graphic EQ")),
-        (EqTab::Parametric, tr!("Parametric")),
-        (EqTab::Tone, tr!("Tone")),
-        (EqTab::Dynamics, tr!("Dynamics")),
-        (EqTab::Filters, tr!("Filters")),
-        (EqTab::Effects, tr!("Effects")),
-        (EqTab::Advanced, tr!("Advanced")),
-    ];
-
-    let spacing = 4.0;
-    let tab_h = 30.0;
-    // Seven labels have to survive both the 760 px default and a user-resized
-    // narrow window. Short labels plus wrapping are what keep the strip from
-    // imposing a minimum width on the panel: at wide sizes all seven fit on
-    // one row, and at narrow sizes they flow onto a second row instead of
-    // forcing egui to re-expand the window.
-    let cols = tab_items.len() as f32;
-    let tab_w = ((ui.available_width() - 30.0 - spacing * (cols - 1.0)) / cols).clamp(62.0, 112.0);
-
-    egui::Frame::NONE
-        .fill(theme.bg_card)
-        .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(Margin::symmetric(
-            theme.space_sm as i8,
-            theme.space_xs as i8,
-        ))
-        .show(ui, |ui| {
-            // A bypassed EQ leaves the tab strip visible but inert, so the
-            // current page still has a name and the header switch is obvious.
-            ui.add_enabled_ui(state.eq_enabled, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(spacing, spacing);
-
-                    for (tab, label) in tab_items {
-                        let is_sel = state.active_tab == tab;
-                        let (bg, text_col, font) = if is_sel {
-                            (theme.accent, Color32::WHITE, crate::theme::font(11.5))
-                        } else {
-                            (
-                                Color32::TRANSPARENT,
-                                theme.text_secondary,
-                                crate::theme::font(11.0),
-                            )
-                        };
-
-                        let btn = egui::Button::new(
-                            egui::RichText::new(label)
-                                .font(font)
-                                .strong()
-                                .color(text_col),
-                        )
-                        .fill(bg)
-                        .stroke(if is_sel {
-                            Stroke::new(1.0, theme.accent_highlight)
-                        } else {
-                            Stroke::NONE
-                        })
-                        .corner_radius(theme.control_radius())
-                        .min_size(Vec2::new(tab_w, tab_h));
-
-                        if ui.add(btn).clicked() {
-                            state.active_tab = tab;
-                            // Graphic and Parametric are the two sources that
-                            // own the audible EQ stage; selecting their tab
-                            // selects that source. Tone/Dynamics/etc. leave the
-                            // current curve mode alone.
-                            match tab {
-                                EqTab::Graphic => {
-                                    state.set_eq_mode(EqMode::Graphic);
-                                    actions.eq_mode_changed = true;
-                                }
-                                EqTab::Parametric => {
-                                    state.set_eq_mode(EqMode::Parametric);
-                                    actions.eq_mode_changed = true;
-                                    actions.eq_bands_changed = true;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                });
-            });
-        });
 }
 
 #[cfg(test)]

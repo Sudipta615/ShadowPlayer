@@ -579,6 +579,47 @@ impl<'a> NowPlayingCard<'a> {
                                         events.open_eq_panel = true;
                                     }
 
+                                    // Audio Path / Bit-Perfect Inspector Button
+                                    let (ap_slot, ap_resp) = ui.allocate_exact_size(
+                                        Vec2::new(30.0, row_h),
+                                        Sense::click(),
+                                    );
+                                    let ap_rect = Rect::from_center_size(
+                                        ap_slot.center(),
+                                        Vec2::new(26.0, 26.0),
+                                    );
+                                    let ap_p = ui.painter_at(ap_rect);
+                                    let ap_active = self.bit_perfect;
+                                    let ap_bg = if ap_resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else if ap_active {
+                                        self.theme.bit_perfect_green.linear_multiply(0.12)
+                                    } else {
+                                        self.theme.bg_pill
+                                    };
+                                    let ap_border = if ap_active {
+                                        self.theme.bit_perfect_green
+                                    } else {
+                                        self.theme.border_subtle
+                                    };
+                                    let ap_color = if ap_active {
+                                        self.theme.bit_perfect_green
+                                    } else {
+                                        self.theme.text_secondary
+                                    };
+                                    ap_p.rect_filled(ap_rect, CornerRadius::same(self.theme.radius_sm), ap_bg);
+                                    ap_p.rect_stroke(ap_rect, CornerRadius::same(self.theme.radius_sm), Stroke::new(1.0_f32, ap_border), egui::StrokeKind::Inside);
+                                    crate::components::icons::draw_audio_path(ui, ap_rect.shrink2(Vec2::new(3.0, 3.0)), ap_color);
+                                    ap_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, ap_active, "Audio Path inspector"));
+                                    let _ = ap_resp.clone().on_hover_text(if ap_active {
+                                        tr!("Audio Path: 100% Bit-Perfect Direct — click to inspect signal flow")
+                                    } else {
+                                        tr!("Audio Path: DSP Alterations Active — click to inspect signal flow")
+                                    });
+                                    if ap_resp.clicked() {
+                                        events.open_bit_perfect = true;
+                                    }
+
                                     // Loudness Inspector Button
                                     let (ld_slot, ld_resp) = ui.allocate_exact_size(
                                         Vec2::new(30.0, row_h),

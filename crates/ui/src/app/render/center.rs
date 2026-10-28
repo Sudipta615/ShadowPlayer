@@ -415,6 +415,9 @@ impl ShadowPlayerApp {
                         if sv_actions.open_room_measurement {
                             self.room_measurement.open();
                         }
+                        if sv_actions.open_speaker_setup {
+                            self.app_state.speaker_setup_modal.open();
+                        }
                         if sv_actions.open_cd_ripper {
                             self.media_tools.open(MediaToolsTab::Cd);
                         }

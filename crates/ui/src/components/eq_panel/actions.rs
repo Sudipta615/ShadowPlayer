@@ -90,4 +90,6 @@ pub struct EqPanelActions {
     pub correction_enabled_changed: Option<bool>,
     pub correction_depth_changed: Option<f32>,
     pub load_correction_ir: bool,
+    /// Open the acoustic alignment and speaker setup wizard.
+    pub open_speaker_setup: bool,
 }

@@ -1,6 +1,6 @@
 //! Serialisable snapshot of the EQ studio for app persistence.
 
-use super::{CustomEqPreset, EqPanelState, EqPreset, EqTab, ParametricBand};
+use super::{CrossfeedViewMode, CustomEqPreset, EqPanelState, EqPreset, EqTab, ParametricBand};
 use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,8 @@ pub struct PersistentEqState {
     pub crossfeed_freq: f32,
     pub crossfeed_q: f32,
     pub crossfeed_delay_ms: f32,
+    #[serde(default)]
+    pub crossfeed_view_mode: CrossfeedViewMode,
     pub correction_enabled: bool,
     pub correction_depth: f32,
     pub correction_ir_path: String,
@@ -120,6 +122,7 @@ impl From<&EqPanelState> for PersistentEqState {
             crossfeed_freq: s.crossfeed_freq,
             crossfeed_q: s.crossfeed_q,
             crossfeed_delay_ms: s.crossfeed_delay_ms,
+            crossfeed_view_mode: s.crossfeed_view_mode,
             correction_enabled: s.correction_enabled,
             correction_depth: s.correction_depth,
             correction_ir_path: s.correction_ir_path.clone(),
@@ -212,6 +215,7 @@ impl PersistentEqState {
         state.crossfeed_freq = self.crossfeed_freq;
         state.crossfeed_q = self.crossfeed_q;
         state.crossfeed_delay_ms = self.crossfeed_delay_ms;
+        state.crossfeed_view_mode = self.crossfeed_view_mode;
         state.correction_enabled = self.correction_enabled;
         state.correction_depth = self.correction_depth;
         state.correction_ir_path = self.correction_ir_path.clone();

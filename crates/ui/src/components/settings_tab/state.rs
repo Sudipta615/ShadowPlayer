@@ -386,6 +386,8 @@ pub struct SettingsTabActions {
     pub audio_profile_changed: Option<domain::models::AudioProfileChoice>,
     pub precision_mode_changed: Option<PrecisionMode>,
     pub bass_management_changed: Option<BassManagementConfig>,
+    /// Open the acoustic alignment and speaker setup wizard.
+    pub open_speaker_setup: bool,
     pub lfe_changed: Option<LfeConfig>,
     pub channel_mix_changed: Option<ChannelMixConfig>,
     pub open_asio_panel: bool,

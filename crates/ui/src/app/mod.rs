@@ -22,9 +22,9 @@ use crate::modals::{
     show_artwork_fetch_modal, show_autoeq_modal, show_autotag_modal, show_bit_perfect_modal,
     show_duplicates_modal, show_edit_track_modal, show_eq_panel, show_media_tools_modal,
     show_organize_modal, show_playlist_editor, show_room_measurement_modal,
-    show_smart_playlist_editor, show_track_properties_modal, ArtworkFetchModalState,
-    AutotagModalState, DuplicateGroup, DuplicatesState, MediaToolsTab, OrganizeState,
-    RoomMeasurementState, SmartPlaylistEditorState,
+    show_smart_playlist_editor, show_speaker_setup_modal, show_track_properties_modal,
+    ArtworkFetchModalState, AutotagModalState, DuplicateGroup, DuplicatesState, MediaToolsTab,
+    OrganizeState, RoomMeasurementState, SmartPlaylistEditorState,
 };
 use crate::services::{
     ArtworkFetchService, ArtworkService, AutoEqCatalogService, AutotagService, BiographyService,

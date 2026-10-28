@@ -60,6 +60,8 @@ pub struct AppState {
     pub scrobble_log_open: bool,
     /// The import-from-other-players dialog.
     pub import_playlists_modal: crate::modals::import_playlists_modal::ImportPlaylistsModalState,
+    /// Acoustic alignment & speaker setup suite.
+    pub speaker_setup_modal: crate::modals::speaker_setup_modal::SpeakerSetupModalState,
     /// The command palette's own state: its query and the highlighted row.
     pub command_palette: crate::components::command_palette::CommandPaletteState,
     /// Single-window compact player mode.
@@ -125,6 +127,7 @@ impl Default for AppState {
             dsp_global_snapshot: None,
             scrobble_log_open: false,
             import_playlists_modal: Default::default(),
+            speaker_setup_modal: Default::default(),
             command_palette: Default::default(),
             mini_player: false,
             now_playing_full: false,

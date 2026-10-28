@@ -38,6 +38,8 @@ pub struct SettingsViewActions {
     pub biography_source_dir_changed: Option<String>,
     /// Open the room-measurement wizard.
     pub open_room_measurement: bool,
+    /// Open the speaker setup & acoustic alignment modal.
+    pub open_speaker_setup: bool,
     pub open_cd_ripper: bool,
     pub open_transcode_export: bool,
     pub open_update_check: bool,
@@ -162,6 +164,9 @@ pub fn render_settings_view(
         }
         if s_actions.open_room_measurement {
             view_actions.open_room_measurement = true;
+        }
+        if s_actions.open_speaker_setup {
+            view_actions.open_speaker_setup = true;
         }
         if s_actions.open_cd_ripper {
             view_actions.open_cd_ripper = true;

@@ -33,6 +33,10 @@ pub enum PaletteAction {
     OpenAutoEq,
     /// Open the bit-perfect inspector.
     OpenBitPerfect,
+    /// Open the acoustic alignment and speaker setup wizard.
+    OpenSpeakerSetup,
+    /// Open the headphone crossfeed and spatializer studio.
+    OpenCrossfeed,
     /// Open the loudness inspector.
     OpenLoudness,
     /// Open the library statistics.

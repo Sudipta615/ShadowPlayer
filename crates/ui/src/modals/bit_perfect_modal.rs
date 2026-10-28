@@ -218,7 +218,249 @@ pub fn show_bit_perfect_modal(
 
                 ui.add_space(2.0);
 
-                // 3. Detailed Signal Path Telemetry Table
+                // 3. Itemized Live Transformation Ledger
+                ui.label(
+                    egui::RichText::new(tr!("ACTIVE TRANSFORMATIONS & SIGNAL ALTERATIONS"))
+                        .font(crate::theme::font(11.0))
+                        .strong()
+                        .color(theme.text_muted),
+                );
+
+                let ledger_frame = egui::Frame::NONE
+                    .fill(theme.bg_card)
+                    .stroke(Stroke::new(1.0_f32, theme.border_subtle))
+                    .corner_radius(CornerRadius::same(theme.radius_md))
+                    .inner_margin(egui::Margin::symmetric(theme.space_2xl as i8, theme.space_md as i8));
+
+                ledger_frame.show(ui, |ui| {
+                    if is_bit_perfect {
+                        ui.horizontal(|ui| {
+                            paint_status_dot(ui, theme.bit_perfect_green, 4.0);
+                            ui.label(
+                                egui::RichText::new(tr!("Direct Signal Path: Bit-Perfect passthrough. Zero DSP coloration."))
+                                    .font(crate::theme::font(12.0))
+                                    .color(theme.bit_perfect_green),
+                            );
+                        });
+                    } else {
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
+                        let mut alterations: Vec<(String, String, &'static str)> = Vec::new();
+
+                        // 1. Digital Volume
+                        let vol = playback_info.volume;
+                        if (vol - 1.0).abs() > 0.001 {
+                            let gain_db = 20.0 * (vol + 1e-5).log10();
+                            alterations.push((
+                                tr!("Digital Volume / Attenuation"),
+                                format!("{gain_db:.1} dB attenuation"),
+                                "Software gain",
+                            ));
+                        }
+
+                        // 2. Equalizer
+                        if dsp_state.eq_panel.eq_enabled {
+                            let (name, details) = if dsp_state.eq_panel.eq_mode == config::EqMode::Graphic {
+                                let n = dsp_state.eq_panel.graphic_layout.num_bands();
+                                (
+                                    tr!("Graphic Equalizer"),
+                                    format!("{n}-band Graphic EQ ({:+.1} dB preamp)", dsp_state.eq_panel.graphic_preamp_db),
+                                )
+                            } else {
+                                let active = dsp_state.eq_panel.bands.iter().filter(|b| b.enabled && b.gain_db.abs() > 0.05).count();
+                                (
+                                    tr!("Parametric Equalizer"),
+                                    format!("{active} active filter bands ({:+.1} dB preamp)", dsp_state.eq_panel.preamp_db),
+                                )
+                            };
+                            alterations.push((name, details, "EQ filters"));
+                        }
+
+                        // 3. Tone controls
+                        let tone = &dsp_state.eq_panel;
+                        if tone.bass_shelf_db.abs() > 0.05
+                            || tone.treble_shelf_db.abs() > 0.05
+                            || (tone.stereo_width - 1.0).abs() > 0.05
+                            || tone.balance.abs() > 0.05
+                            || tone.midside_eq
+                        {
+                            let details = format!(
+                                "Bass {:+.1} dB, Treble {:+.1} dB, Width {:.0}%",
+                                tone.bass_shelf_db,
+                                tone.treble_shelf_db,
+                                tone.stereo_width * 100.0,
+                            );
+                            alterations.push((tr!("Tone Controls"), details, "Tone shaping"));
+                        }
+
+                        // 4. Headphone Crossfeed
+                        if dsp_state.eq_panel.crossfeed_enabled {
+                            let profile = match dsp_state.eq_panel.crossfeed_profile {
+                                config::CrossfeedProfile::Bauer => "Bauer standard",
+                                config::CrossfeedProfile::Jmeier => "Jan Meier natural",
+                                config::CrossfeedProfile::ChuMoy => "Chu Moy classic",
+                                config::CrossfeedProfile::Custom => "Custom parameters",
+                            };
+                            let details = format!(
+                                "{} ({:.0} Hz, {:.1} ms delay)",
+                                profile,
+                                dsp_state.eq_panel.crossfeed_freq,
+                                dsp_state.eq_panel.crossfeed_delay_ms,
+                            );
+                            alterations.push((tr!("Headphone Crossfeed"), details, "Binaural ITD"));
+                        }
+
+                        // 5. Dynamics (Limiter & Multiband Compressor)
+                        if dsp_state.eq_panel.limiter_enabled {
+                            let details = format!(
+                                "Ceiling {:.1} dBTP, Lookahead {:.1} ms",
+                                dsp_state.eq_panel.limiter_ceiling_db,
+                                dsp_state.eq_panel.limiter_lookahead_ms,
+                            );
+                            alterations.push((tr!("True-Peak Limiter"), details, "Brickwall guard"));
+                        }
+                        if dsp_state.eq_panel.compressor_enabled {
+                            alterations.push((
+                                tr!("Multiband Compressor"),
+                                "3-band RMS dynamics processor".to_string(),
+                                "Dynamic range",
+                            ));
+                        }
+
+                        // 6. Spatial Audio & Room Acoustics
+                        if dsp_state.settings_tab.spatial_enabled || dsp_state.settings_tab.room_enabled {
+                            let details = if dsp_state.settings_tab.room_enabled {
+                                format!("Acoustic room simulation (RT60: {:.0} ms)", dsp_state.settings_tab.room_rt60_ms)
+                            } else {
+                                "Binaural listener tracking & HRTF".to_string()
+                            };
+                            alterations.push((tr!("Spatial Audio & Room Acoustics"), details, "Spatial convolution"));
+                        }
+
+                        // 7. Creative Effects
+                        if dsp_state.eq_panel.fx.any_enabled() {
+                            let mut active_fx = Vec::new();
+                            if dsp_state.eq_panel.fx.chorus.enabled { active_fx.push("Chorus"); }
+                            if dsp_state.eq_panel.fx.flanger.enabled { active_fx.push("Flanger"); }
+                            if dsp_state.eq_panel.fx.phaser.enabled { active_fx.push("Phaser"); }
+                            if dsp_state.eq_panel.fx.delay.enabled { active_fx.push("Delay"); }
+                            if dsp_state.eq_panel.fx.distortion.enabled { active_fx.push("Saturation"); }
+                            alterations.push((tr!("Creative Effects (Insert)"), active_fx.join(", "), "FX insert"));
+                        }
+
+                        // 8. Resampler
+                        if let Some(stats) = engine_stats {
+                            if stats.resampler_active {
+                                let details = format!(
+                                    "{} Hz \u{2192} {} Hz ({})",
+                                    playback_info.sample_rate,
+                                    stats.output_sample_rate,
+                                    stats.resampler_quality,
+                                );
+                                alterations.push((tr!("Sample Rate Conversion (Resampler)"), details, "Sinc resampling"));
+                            }
+                        }
+
+                        // 9. Dither
+                        if dsp_state.settings_tab.dither_enabled || dsp_state.eq_panel.dither_enabled {
+                            alterations.push((tr!("Dither & Noise Shaping"), "TPDF triangular dither active".to_string(), "Quantization"));
+                        }
+
+                        if alterations.is_empty() {
+                            ui.horizontal(|ui| {
+                                paint_status_dot(ui, theme.accent_highlight, 3.5);
+                                ui.label(
+                                    egui::RichText::new("DSP processing active in audio pipeline")
+                                        .font(crate::theme::font(11.5))
+                                        .color(theme.text_secondary),
+                                );
+                            });
+                        } else {
+                            for (name, details, impact) in &alterations {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+                                    paint_status_dot(ui, theme.accent_highlight, 3.0);
+                                    ui.label(
+                                        egui::RichText::new(name)
+                                            .font(crate::theme::font(12.0))
+                                            .strong()
+                                            .color(theme.text_primary),
+                                    );
+
+                                    ui.label(
+                                        egui::RichText::new(details)
+                                            .font(crate::theme::font(11.5))
+                                            .color(theme.text_secondary),
+                                    );
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.label(
+                                            egui::RichText::new(*impact)
+                                                .font(crate::theme::mono_font(10.5))
+                                                .color(theme.accent_warm),
+                                        );
+                                    });
+                                });
+                            }
+                        }
+                    }
+                });
+
+                ui.add_space(theme.space_sm);
+
+                // 4. Graph Latency Breakdown
+                if let Some(stats) = engine_stats {
+                    let rep = &stats.latency_report;
+                    if rep.total_latency_ms > 0.01 {
+                        ui.label(
+                            egui::RichText::new(tr!("AUDIO LATENCY BREAKDOWN"))
+                                .font(crate::theme::font(11.0))
+                                .strong()
+                                .color(theme.text_muted),
+                        );
+
+                        let lat_frame = egui::Frame::NONE
+                            .fill(theme.bg_card)
+                            .stroke(Stroke::new(1.0_f32, theme.border_subtle))
+                            .corner_radius(CornerRadius::same(theme.radius_md))
+                            .inner_margin(egui::Margin::symmetric(theme.space_2xl as i8, theme.space_md as i8));
+
+                        lat_frame.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(tr!("Total End-to-End Latency"))
+                                        .font(crate::theme::font(12.0))
+                                        .color(theme.text_secondary),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("{:.1} ms", rep.total_latency_ms))
+                                        .font(crate::theme::mono_font(12.0))
+                                        .strong()
+                                        .color(theme.accent_highlight),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let pills = [
+                                        ("Device", rep.output_device_latency_ms),
+                                        ("Resampler", rep.resampler_latency_ms),
+                                        ("Limiter", rep.limiter_lookahead_ms),
+                                        ("Crossfeed", rep.crossfeed_delay_ms),
+                                    ];
+                                    for (lbl, val) in pills {
+                                        if val > 0.05 {
+                                            ui.label(
+                                                egui::RichText::new(format!("{lbl}: {val:.1}ms"))
+                                                    .font(crate::theme::mono_font(10.5))
+                                                    .color(theme.text_muted),
+                                            );
+                                        }
+                                    }
+                                });
+                            });
+                        });
+
+                        ui.add_space(theme.space_sm);
+                    }
+                }
+
+                // 5. Detailed Signal Path Telemetry Table
                 ui.label(
                     egui::RichText::new(tr!("SIGNAL SPECIFICATIONS"))
                         .font(crate::theme::font(11.0))
@@ -263,7 +505,7 @@ pub fn show_bit_perfect_modal(
 
                 ui.add_space(theme.space_lg);
 
-                // 4. Negotiated output facts. This is the same list Settings
+                // 6. Negotiated output facts. This is the same list Settings
                 // renders; the modal does not assemble an independent opinion
                 // about exclusive access or the device.
                 ui.label(
@@ -280,28 +522,53 @@ pub fn show_bit_perfect_modal(
 
                 ui.add_space(6.0);
 
-                // 5. Action Row: 1-Click Bit-Perfect Pure Direct Mode
+                // 7. Action Row: 1-Click Bit-Perfect Pure Direct Mode & DSP Studio Link
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+                    let is_pure = dsp_state.is_pure_direct();
+                    let (btn_label, btn_col) = if is_pure {
+                        (tr!("Exit Pure Direct (Restore DSP Chain)"), theme.accent_highlight)
+                    } else {
+                        (tr!("Enable Bit-Perfect Pure Direct"), theme.bit_perfect_green)
+                    };
+
                     let pure_direct_btn = egui::Button::new(
-                        egui::RichText::new(tr!("Enable Bit-Perfect Pure Direct"))
-                            .font(crate::theme::font(12.5))
+                        egui::RichText::new(btn_label)
+                            .font(crate::theme::font(12.0))
                             .strong()
                             .color(Color32::WHITE),
                     )
-                    .fill(theme.bit_perfect_green)
+                    .fill(btn_col)
                     .corner_radius(CornerRadius::same(theme.radius_md))
-                    .min_size(Vec2::new(ui.available_width() - 90.0, 32.0));
+                    .min_size(Vec2::new(175.0, 32.0));
 
                     if ui.add(pure_direct_btn).clicked() {
-                        // One owner for the bypass: it snapshots the chain,
-                        // neutralises every stage, and mirrors the state so
-                        // the studio cannot re-enable a bypassed stage.
-                        dsp_state.enter_pure_direct(session);
+                        if is_pure {
+                            dsp_state.exit_pure_direct(session);
+                        } else {
+                            dsp_state.enter_pure_direct(session);
+                        }
                     }
 
-                    if ui.button(tr!(Msg::S5E8250FB85D64C23)).clicked() {
-                        close_clicked = true;
+                    let dsp_btn = egui::Button::new(
+                        egui::RichText::new(tr!("Configure DSP Studio"))
+                            .font(crate::theme::font(12.0))
+                            .color(theme.text_primary),
+                    )
+                    .fill(theme.bg_pill)
+                    .stroke(Stroke::new(1.0, theme.border_subtle))
+                    .corner_radius(CornerRadius::same(theme.radius_md))
+                    .min_size(Vec2::new(135.0, 32.0));
+
+                    if ui.add(dsp_btn).clicked() {
+                        dsp_state.eq_panel.is_open = true;
                     }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(tr!(Msg::S5E8250FB85D64C23)).clicked() {
+                            close_clicked = true;
+                        }
+                    });
                 });
                 });
         },
