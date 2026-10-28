@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 pub struct PersistentEqState {
     pub is_open: bool,
     pub window_pos: Option<[f32; 2]>,
+    /// The last size the user dragged the studio to. `None` means the default.
+    pub window_size: Option<[f32; 2]>,
     pub active_tab: EqTab,
     pub eq_enabled: bool,
     /// `None` in state written before the mode existed; `apply_to` infers it
@@ -76,6 +78,7 @@ impl From<&EqPanelState> for PersistentEqState {
         Self {
             is_open: s.is_open,
             window_pos: s.window_pos,
+            window_size: s.window_size,
             active_tab: s.active_tab,
             eq_enabled: s.eq_enabled,
             eq_mode: Some(s.eq_mode),
@@ -134,7 +137,12 @@ impl Default for PersistentEqState {
 impl PersistentEqState {
     pub fn apply_to(&self, state: &mut EqPanelState) {
         state.is_open = self.is_open;
-        state.window_pos = self.window_pos;
+        state.window_pos = self
+            .window_pos
+            .filter(|[x, y]| x.is_finite() && y.is_finite());
+        state.window_size = self
+            .window_size
+            .filter(|[w, h]| w.is_finite() && h.is_finite() && *w > 0.0 && *h > 0.0);
         state.active_tab = self.active_tab;
         // Before the explicit mode existed the header master was the OR of
         // the two layer flags. A persisted graphic layer that was on is
@@ -147,6 +155,15 @@ impl PersistentEqState {
             EqMode::Parametric
         });
         state.graphic_enabled = state.eq_enabled && state.eq_mode == EqMode::Graphic;
+        // Graphic and Parametric are the two tabs that own a curve mode. A
+        // snapshot written before the mode existed can pair the wrong tab with
+        // the audible stage; reconcile it so the selected page always describes
+        // what the engine is playing.
+        match (state.active_tab, state.eq_mode) {
+            (EqTab::Graphic, EqMode::Parametric) => state.active_tab = EqTab::Parametric,
+            (EqTab::Parametric, EqMode::Graphic) => state.active_tab = EqTab::Graphic,
+            _ => {}
+        }
         state.graphic_layout = self.graphic_layout.clone();
         for (i, &g) in self.graphic_gains.iter().take(64).enumerate() {
             state.graphic_gains[i] = g;

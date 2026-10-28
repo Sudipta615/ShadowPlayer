@@ -125,6 +125,9 @@ pub struct DsdTransportReport {
     pub wire_format: Option<DsdWireFormat>,
     /// DSD bit rate of the source, when known.
     pub bit_rate: Option<u32>,
+    /// Decimation filter applied when `actual == PcmConversion`. `None` when
+    /// the bitstream reached the DAC without decimation.
+    pub noise_filter: Option<config::DsdNoiseFilter>,
 }
 
 impl DsdTransportReport {
@@ -135,6 +138,7 @@ impl DsdTransportReport {
             fallback_steps: Vec::new(),
             wire_format: None,
             bit_rate: None,
+            noise_filter: None,
         }
     }
 
@@ -149,15 +153,22 @@ impl DsdTransportReport {
 
     /// One-line summary for diagnostics.
     pub fn summary(&self) -> String {
+        let filter = match (self.actual, self.noise_filter) {
+            (DsdTransport::PcmConversion, Some(filter)) => {
+                format!(" (noise filter: {})", filter.label())
+            }
+            _ => String::new(),
+        };
         if self.fell_back() {
             format!(
-                "{} → {} ({})",
+                "{} → {} ({}){}",
                 self.requested.label(),
                 self.actual.label(),
-                self.fallback_steps.join(" → ")
+                self.fallback_steps.join(" → "),
+                filter
             )
         } else {
-            self.actual.label().to_string()
+            format!("{}{}", self.actual.label(), filter)
         }
     }
 }

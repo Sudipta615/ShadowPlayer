@@ -15,7 +15,7 @@ use std::sync::Arc;
 use instance::{InstanceLock, LockOutcome};
 
 use audio_session::AudioSession;
-use database::{Database, QueueRepo, SettingsRepo, TrackRepo};
+use database::{Database, QueueRepo, ScrobbleRepo, SettingsRepo, TrackRepo};
 use eframe::egui::Vec2;
 use log::info;
 use ui::services::{ControlService, MprisCommand, MprisSnapshot};
@@ -55,6 +55,48 @@ fn purge_legacy_demo_data(db: &Database, data_dir: &std::path::Path) {
     if let Err(e) = settings.set_value(KEY, "1") {
         log::warn!("Could not record the legacy demo purge: {e}");
     }
+}
+
+/// Remove synthetic rows written by the screenshot/evaluation fixtures.
+///
+/// These rows describe `/eval/track_*.flac` files that never existed. They
+/// were written straight through `TrackRepo` by older eval builds, so a
+/// screenshot run against the real profile left unplayable songs in the
+/// library. The purge runs on every launch and is idempotent: it touches only
+/// rows under the reserved `/eval` prefix, keeps real imports untouched, and
+/// removes the queue entries and scrobbles that point at those rows before the
+/// tracks (and their cascades) disappear.
+fn purge_eval_fixture_data(db: &Database) {
+    let prefix = std::path::Path::new("/eval");
+
+    if let Err(e) = QueueRepo::new(db.clone()).purge_path_prefix(prefix) {
+        log::warn!("Could not purge evaluation queue entries: {e}");
+    }
+    if let Err(e) = ScrobbleRepo::new(db.clone()).purge_track_path_prefix(prefix) {
+        log::warn!("Could not purge evaluation scrobbles: {e}");
+    }
+    match TrackRepo::new(db.clone()).delete_by_path_prefix(prefix) {
+        Ok(n) if n > 0 => info!("Removed {n} evaluation fixture track(s)"),
+        Err(e) => log::warn!("Could not purge evaluation fixture tracks: {e}"),
+        _ => {}
+    }
+}
+
+/// A data directory for the development evaluation hooks.
+///
+/// Screenshot runs seed synthetic tracks and scrobbles. If they use the real
+/// profile, those rows survive the process and appear in the user's library as
+/// songs whose files do not exist. When `SHADOWPLAYER_EVAL` is set, redirect
+/// the whole run to a temporary profile; the real database is never opened.
+#[cfg(feature = "eval-tools")]
+fn eval_mode_data_dir() -> Option<PathBuf> {
+    std::env::var_os("SHADOWPLAYER_EVAL")?;
+    Some(std::env::temp_dir().join("shadowplayer-eval"))
+}
+
+#[cfg(not(feature = "eval-tools"))]
+fn eval_mode_data_dir() -> Option<PathBuf> {
+    None
 }
 
 /// The smallest normal window. The responsive shell keeps all three primary
@@ -353,11 +395,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Resolve persistent app data directory. The environment override keeps
-    // tests and portable runs off the real user profile; both the app and
-    // `shadowplayer-remote` honour it.
-    let data_dir = std::env::var_os("SHADOWPLAYER_DATA_DIR")
-        .map(PathBuf::from)
+    // Resolve persistent app data directory. Evaluation mode wins over every
+    // other source so a screenshot run cannot write fixtures into a real
+    // library. The environment override then keeps tests and portable runs
+    // off the real user profile; both the app and `shadowplayer-remote`
+    // honour it.
+    let data_dir = eval_mode_data_dir()
+        .or_else(|| std::env::var_os("SHADOWPLAYER_DATA_DIR").map(PathBuf::from))
         .or_else(|| dirs::data_local_dir().map(|d| d.join("shadowplayer")))
         .unwrap_or_else(|| PathBuf::from("."));
 
@@ -379,6 +423,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("Starting ShadowPlayer - Audiophile Local Desktop Music Player");
+    if eval_mode_data_dir().is_some() {
+        info!(
+            "Evaluation mode: using isolated data directory {}",
+            data_dir.display()
+        );
+    }
 
     // The data directory was resolved above, before the logger was built, so
     // the log file could live inside it.
@@ -418,8 +468,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     info!("Opening database at {:?}", db_path);
     let db = Database::open(&db_path)?;
 
-    // Strip any demo data left behind by earlier development builds.
+    // Strip any demo data left behind by earlier development builds, and any
+    // synthetic eval fixtures that an older screenshot run wrote here.
     purge_legacy_demo_data(&db, &data_dir);
+    purge_eval_fixture_data(&db);
 
     // The user's own settings decide the engine profile and the window size.
     // This used to force `Fidelity` on every launch — silently overriding the
@@ -657,5 +709,51 @@ mod tests {
         assert!(tracks.get_by_id(&real_id).unwrap().is_some());
 
         let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// The eval purge removes the unplayable fixture rows and everything that
+    /// pointed at them, while leaving real imports and their history alone.
+    #[test]
+    fn the_eval_purge_removes_fixture_tracks_queue_and_scrobbles_only() {
+        let db = Database::in_memory().unwrap();
+        let tracks = TrackRepo::new(db.clone());
+        let queue = QueueRepo::new(db.clone());
+        let scrobbles = ScrobbleRepo::new(db.clone());
+
+        let eval_id = domain::ids::TrackId::new();
+        let eval = sample_track(eval_id, std::path::Path::new("/eval/track_0.flac"));
+        let real_id = domain::ids::TrackId::new();
+        let real = sample_track(real_id, std::path::Path::new("/music/real.flac"));
+        for track in [&eval, &real] {
+            tracks.upsert(track).unwrap();
+            scrobbles.record_at(track, 1_700_000_000, 90.0).unwrap();
+        }
+        queue.save_queue(&[eval_id, real_id]).unwrap();
+
+        purge_eval_fixture_data(&db);
+
+        assert!(
+            tracks.get_by_id(&eval_id).unwrap().is_none(),
+            "fixture row removed"
+        );
+        assert!(
+            tracks.get_by_id(&real_id).unwrap().is_some(),
+            "real row kept"
+        );
+        let queued: Vec<_> = queue
+            .load_queue()
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(queued, vec![real_id], "only the real queue entry survives");
+
+        let history = scrobbles.list_all().unwrap();
+        assert_eq!(history.len(), 1, "only the real scrobble survives");
+        assert_eq!(history[0].track_id, Some(real_id));
+
+        // The purge is safe to repeat; the second pass finds nothing.
+        purge_eval_fixture_data(&db);
+        assert!(tracks.get_by_id(&real_id).unwrap().is_some());
     }
 }

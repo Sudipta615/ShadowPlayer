@@ -345,32 +345,12 @@ impl<'a> NowPlayingFull<'a> {
                             events.previous = true;
                         }
 
-                        let (play_slot, play_resp) =
-                            ui.allocate_exact_size(Vec2::splat(48.0), Sense::click());
-                        let painter = ui.painter_at(play_slot);
-                        let fill = if play_resp.hovered() {
-                            theme.accent.gamma_multiply(1.18)
-                        } else {
-                            theme.accent
-                        };
-                        painter.circle_filled(play_slot.center(), 24.0, fill);
-                        painter.circle_stroke(
-                            play_slot.center(),
-                            24.0,
-                            Stroke::new(1.0_f32, theme.accent_highlight.gamma_multiply(0.55)),
+                        let play_resp = crate::components::play_button::play_button(
+                            ui,
+                            48.0,
+                            self.is_playing,
+                            theme,
                         );
-                        let icon_rect =
-                            Rect::from_center_size(play_slot.center(), Vec2::splat(18.0));
-                        if self.is_playing {
-                            crate::components::icons::draw_pause(ui, icon_rect, Color32::WHITE);
-                        } else {
-                            crate::components::icons::draw_play(
-                                ui,
-                                icon_rect,
-                                Color32::WHITE,
-                                true,
-                            );
-                        }
                         let _ = play_resp.clone().on_hover_text(if self.is_playing {
                             "Pause"
                         } else {

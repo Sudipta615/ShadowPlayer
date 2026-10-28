@@ -7,12 +7,21 @@ use crate::dsp::{
 /// Dither and output quantization node.
 pub struct DitherNode {
     pub dither: Dither,
+    dither_type: DitherType,
 }
 
 impl DitherNode {
     pub fn new(sample_rate: f32) -> Self {
+        Self::with_type(crate::dsp::dither::configured_dither_type(), sample_rate)
+    }
+
+    /// Construct with an explicit dither family. The graph's dither node is
+    /// the 16-bit reference node; the production integer boundary is the
+    /// output converter, which reads the same configured default.
+    pub fn with_type(dither_type: DitherType, sample_rate: f32) -> Self {
         Self {
-            dither: Dither::with_sample_rate(DitherType::Triangular, 16, sample_rate as u32),
+            dither: Dither::with_sample_rate(dither_type, 16, sample_rate as u32),
+            dither_type,
         }
     }
 }
@@ -40,7 +49,7 @@ impl DspNode for DitherNode {
     }
 
     fn prepare(&mut self, sample_rate: f32, _max_channels: usize) {
-        self.dither = Dither::with_sample_rate(DitherType::Triangular, 16, sample_rate as u32);
+        self.dither = Dither::with_sample_rate(self.dither_type, 16, sample_rate as u32);
     }
 
     fn process_block_f32(&mut self, planes: &mut [&mut [f32]]) {

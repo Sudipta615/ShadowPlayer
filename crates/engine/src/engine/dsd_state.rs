@@ -3,6 +3,7 @@
 use crate::buffer::DsdByteBuffer;
 use crate::decode::dsd::DsdWireFormat;
 use crate::decode::DsdTransportReport;
+use crate::dsp::sdm::{SdmOutput, SdmRatePlan};
 use std::sync::Arc;
 
 /// Build the reason text for why DoP cannot engage because the output is not
@@ -67,6 +68,19 @@ pub(crate) struct DsdTransportState {
     /// Explicit DSD transport negotiation report (§7): requested vs actual
     /// transport plus ordered fallback steps (native → DoP → PCM).
     pub(crate) dsd_transport_report: DsdTransportReport,
+
+    /// True while a PCM source is being converted to native DSD by the
+    /// engine's own modulator. Distinct from `native_dsd_active`: the DSP
+    /// chain still runs at the working rate, and the transport is native DSD.
+    pub(crate) sdm_active: bool,
+    /// The per-channel interpolation + modulation + packing stage. `None`
+    /// when PCM output is active.
+    pub(crate) sdm_output: Option<SdmOutput>,
+    /// Negotiated PCM→SDM rate plan (working rate, DSD rate, factor).
+    pub(crate) sdm_plan: Option<SdmRatePlan>,
+    /// Why a requested PCM→SDM conversion did not engage. Preserved across
+    /// the whole track so the UI can explain the PCM fallback.
+    pub(crate) sdm_fallback_reason: Option<String>,
 }
 
 impl Default for DsdTransportState {
@@ -79,6 +93,10 @@ impl Default for DsdTransportState {
             dsd_byte_buffer: None,
             dsd_pack_scratch: Vec::with_capacity(1 << 16),
             dsd_transport_report: DsdTransportReport::default(),
+            sdm_active: false,
+            sdm_output: None,
+            sdm_plan: None,
+            sdm_fallback_reason: None,
         }
     }
 }

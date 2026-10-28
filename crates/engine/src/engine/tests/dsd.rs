@@ -683,3 +683,50 @@ fn test_native_dsd_chunk_route_bypasses_pipeline_and_preserves_bytes() {
     assert!(engine.dsd.dsd_byte_buffer.is_some());
     let _ = std::fs::remove_file(&path);
 }
+
+/// The PCM-conversion path must report the decimation filter that actually
+/// ran; native/DoP transport must report none (it never decimates).
+#[test]
+fn test_pcm_conversion_reports_the_selected_noise_filter() {
+    let path = write_test_dsf();
+    let mut config = EngineConfig::default();
+    config.dsd_output = config::DsdOutput::PcmConvert;
+    config.dsd_noise_filter = config::DsdNoiseFilter::HighOrder;
+    let mut engine = AudioEngine::new(config).unwrap();
+
+    engine.load_track(&path).expect("load DSF");
+    let report = &engine.dsd.dsd_transport_report;
+    assert_eq!(report.actual, crate::decode::DsdTransport::PcmConversion);
+    assert_eq!(
+        report.noise_filter,
+        Some(config::DsdNoiseFilter::HighOrder),
+        "report must name the filter that ran"
+    );
+    assert!(
+        report.summary().contains("high-order"),
+        "summary must carry the filter: {}",
+        report.summary()
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_dop_transport_reports_no_decimation_filter() {
+    let path = write_test_dsf();
+    let mut config = EngineConfig::default();
+    config.dsd_output = config::DsdOutput::DoP;
+    config.dsd_noise_filter = config::DsdNoiseFilter::Brickwall;
+    let mut engine = AudioEngine::new(config).unwrap();
+
+    engine.load_track(&path).expect("load DSF");
+    let report = &engine.dsd.dsd_transport_report;
+    // Without an exclusive I32 output DoP falls back to PCM, which *does*
+    // decimate; only a real DoP session may report no filter.
+    if report.actual == crate::decode::DsdTransport::PcmConversion {
+        assert!(report.noise_filter.is_some());
+    } else {
+        assert_eq!(report.actual, crate::decode::DsdTransport::Dop);
+        assert_eq!(report.noise_filter, None);
+    }
+    let _ = std::fs::remove_file(&path);
+}

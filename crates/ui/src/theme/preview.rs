@@ -180,24 +180,14 @@ pub fn render_theme_preview(
                             ))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    // Mini play button
-                                    let btn_frame = egui::Frame::NONE
-                                        .fill(preview_theme.accent)
-                                        .corner_radius(CornerRadius::same(
-                                            preview_theme.radius_pill,
-                                        ))
-                                        .inner_margin(Margin::symmetric(
-                                            preview_theme.space_md as i8,
-                                            preview_theme.space_xs as i8,
-                                        ));
-                                    btn_frame.show(ui, |ui| {
-                                        ui.label(
-                                            egui::RichText::new("PLAY")
-                                                .font(crate::theme::mono_font(10.0))
-                                                .strong()
-                                                .color(Color32::WHITE),
-                                        );
-                                    });
+                                    // Mini play button, honouring the theme's
+                                    // transport silhouette.
+                                    crate::components::play_button::play_button(
+                                        ui,
+                                        26.0,
+                                        false,
+                                        preview_theme,
+                                    );
 
                                     ui.add_space(preview_theme.space_sm);
 

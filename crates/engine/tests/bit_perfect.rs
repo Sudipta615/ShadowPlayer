@@ -417,6 +417,7 @@ fn every_cause_code_is_stable_and_round_trips_through_its_display_form() {
         ),
         (BitPerfectCause::DitherActive, "dither_active"),
         (BitPerfectCause::CrossfadeActive, "crossfade_active"),
+        (BitPerfectCause::SdmConversion, "sdm_conversion"),
     ];
     for (cause, code) in cases {
         assert_eq!(cause.code(), code, "cause code for {cause:?}");

@@ -160,8 +160,6 @@ impl ConvolutionEngine {
             .max(64);
         let fft_size = block_size * 2;
         let spectrum_len = fft_size / 2 + 1;
-        let max_partitions = max_ir_length.div_ceil(block_size);
-        let max_partitions = max_partitions.max(1);
 
         let mut planner_f32 = RealFftPlanner::<f32>::new();
         let fft_forward = planner_f32.plan_fft_forward(fft_size);
@@ -174,16 +172,14 @@ impl ConvolutionEngine {
         let fft_out_len = fft_forward.make_output_vec().len();
         let ifft_out_len = fft_inverse.make_output_vec().len();
 
-        let mut input_spectra_left = Vec::with_capacity(max_partitions);
-        let mut input_spectra_right = Vec::with_capacity(max_partitions);
-        let mut input_spectra_left_f64 = Vec::with_capacity(max_partitions);
-        let mut input_spectra_right_f64 = Vec::with_capacity(max_partitions);
-        for _ in 0..max_partitions {
-            input_spectra_left.push(vec![Complex::new(0.0f32, 0.0f32); spectrum_len]);
-            input_spectra_right.push(vec![Complex::new(0.0f32, 0.0f32); spectrum_len]);
-            input_spectra_left_f64.push(vec![Complex::new(0.0f64, 0.0f64); spectrum_len]);
-            input_spectra_right_f64.push(vec![Complex::new(0.0f64, 0.0f64); spectrum_len]);
-        }
+        // The history is grown on the (control-path) IR load to the actual
+        // partition count. Preallocating `max_ir_length / block_size` slots
+        // here made every route reserve its full 262,144-sample budget even
+        // when a 2,048-sample crossover IR was loaded.
+        let input_spectra_left = Vec::new();
+        let input_spectra_right = Vec::new();
+        let input_spectra_left_f64 = Vec::new();
+        let input_spectra_right_f64 = Vec::new();
 
         Self {
             enabled: false,
@@ -762,6 +758,46 @@ impl ConvolutionEngine {
         }
     }
 
+    /// Process a mono sample through the partitioned engine.
+    ///
+    /// This is the path used by sparse matrix-FIR routes, which convolve one
+    /// source into one destination. A stereo engine would run a second FFT and
+    /// a second output channel for a signal that is discarded. The left
+    /// history, IR partitions, and latency are identical to [`Self::process`];
+    /// do not alternate between the two methods on one engine because the
+    /// right-channel history is intentionally not advanced here.
+    #[inline]
+    pub fn process_mono(&mut self, sample: f32) -> f32 {
+        if !self.enabled || !self.ir_loaded {
+            return sample;
+        }
+
+        self.input_buffer_left[self.input_count] = sample;
+        self.input_count += 1;
+        if self.input_count >= self.block_size {
+            self.process_partition_block_mono();
+        }
+
+        if self.output_available > 0 {
+            let out = self.output_fifo_left[self.output_read_pos];
+            self.output_read_pos += 1;
+            self.output_available -= 1;
+            if self.output_available == 0 {
+                self.output_read_pos = 0;
+            }
+            if (self.current_wet_mix - self.wet_mix).abs() > 1e-5 {
+                self.current_wet_mix += 0.001 * (self.wet_mix - self.current_wet_mix);
+            } else {
+                self.current_wet_mix = self.wet_mix;
+            }
+            let mix = self.current_wet_mix;
+            sample * (1.0 - mix) + out * mix
+        } else {
+            let mix = self.current_wet_mix;
+            sample * (1.0 - mix)
+        }
+    }
+
     /// Process a stereo sample pair via native f64 uniform partitioned convolution.
     #[inline]
     pub fn process_f64(&mut self, left: f64, right: f64) -> (f64, f64) {
@@ -972,6 +1008,94 @@ impl ConvolutionEngine {
         self.output_read_pos = 0;
         self.output_available = bs;
 
+        self.input_spectrum_idx = (self.input_spectrum_idx + 1) % p_count;
+        self.input_count = 0;
+    }
+
+    /// Mono form of [`Self::process_partition_block`]. Only the left FFT,
+    /// left spectrum, left partition MACs, and left inverse FFT run. This is
+    /// the same arithmetic as the left channel of the stereo path, so a mono
+    /// route is bit-identical while spending roughly half the FFT work.
+    fn process_partition_block_mono(&mut self) {
+        let bs = self.block_size;
+        let fft_size = self.fft_size;
+        let p_count = self.num_partitions;
+        let spec_len = fft_size / 2 + 1;
+
+        self.fft_workspace_input_left[..bs].copy_from_slice(&self.input_buffer_left[..bs]);
+        self.fft_workspace_input_left[bs..fft_size].fill(0.0);
+
+        let fft_forward = self.fft_forward.as_ref();
+        let forward = fft_forward.process(
+            &mut self.fft_workspace_input_left,
+            &mut self.fft_workspace_output_left,
+        );
+        let cur_idx = self.input_spectrum_idx;
+        match forward {
+            Ok(()) => {
+                self.input_spectra_left[cur_idx][..spec_len]
+                    .copy_from_slice(&self.fft_workspace_output_left[..spec_len]);
+            }
+            Err(error) => {
+                self.input_spectra_left[cur_idx][..spec_len].fill(Complex::new(0.0, 0.0));
+                self.note_fft_failure("forward (mono)", &error.to_string());
+            }
+        }
+
+        self.acc_spectrum_left.fill(Complex::new(0.0, 0.0));
+        for p in 0..p_count {
+            let hist_idx = (cur_idx + p_count - p) % p_count;
+            let x_l = &self.input_spectra_left[hist_idx];
+            let h_l = &self.ir_partitions_left[p];
+            // SAFETY: Complex<f32> is #[repr(C)] with fields (re: f32, im:
+            // f32), exactly two consecutive f32 values; slices are >= spec_len.
+            unsafe {
+                let acc_l_floats = core::slice::from_raw_parts_mut(
+                    self.acc_spectrum_left.as_mut_ptr() as *mut f32,
+                    spec_len * 2,
+                );
+                let x_l_floats =
+                    core::slice::from_raw_parts(x_l.as_ptr() as *const f32, spec_len * 2);
+                let h_l_floats =
+                    core::slice::from_raw_parts(h_l.as_ptr() as *const f32, spec_len * 2);
+                crate::dsp::simd::dispatch::dispatch_complex_mac(
+                    acc_l_floats,
+                    x_l_floats,
+                    h_l_floats,
+                    spec_len,
+                );
+            }
+        }
+
+        let fft_inverse = self.fft_inverse.as_ref();
+        let copy_len = spec_len.min(self.ifft_workspace_spectrum_left.len());
+        self.ifft_workspace_spectrum_left[..copy_len]
+            .copy_from_slice(&self.acc_spectrum_left[..copy_len]);
+        let inverse = fft_inverse.process(
+            &mut self.ifft_workspace_spectrum_left,
+            &mut self.ifft_workspace_output_left,
+        );
+        match inverse {
+            Ok(()) => {
+                let scale = 1.0 / fft_size as f32;
+                for s in self.ifft_workspace_output_left.iter_mut() {
+                    *s *= scale;
+                }
+                for i in 0..bs {
+                    let out = self.ifft_workspace_output_left[i] + self.tail_left[i];
+                    self.output_fifo_left[i] = out;
+                    self.tail_left[i] = self.ifft_workspace_output_left[bs + i];
+                }
+            }
+            Err(error) => {
+                self.output_fifo_left[..bs].fill(0.0);
+                self.tail_left[..bs].fill(0.0);
+                self.note_fft_failure("inverse (mono)", &error.to_string());
+            }
+        }
+
+        self.output_read_pos = 0;
+        self.output_available = bs;
         self.input_spectrum_idx = (self.input_spectrum_idx + 1) % p_count;
         self.input_count = 0;
     }
@@ -1401,6 +1525,32 @@ mod tests {
         let engine = ConvolutionEngine::new(44100.0, 1024);
         assert!(!engine.is_enabled());
         assert!(!engine.is_ir_loaded());
+    }
+
+    #[test]
+    fn mono_processing_matches_the_stereo_left_channel() {
+        let ir: Vec<(f32, f32)> = (0..1000)
+            .map(|i| {
+                let value = (-(i as f32) / 180.0).exp() * (i as f32 * 0.05).cos();
+                (value, value)
+            })
+            .collect();
+        let mut stereo = ConvolutionEngine::new(48_000.0, 2048);
+        stereo.set_enabled(true);
+        stereo.load_ir_from_samples(&ir).unwrap();
+        let mut mono = ConvolutionEngine::new(48_000.0, 2048);
+        mono.set_enabled(true);
+        mono.load_ir_from_samples(&ir).unwrap();
+
+        for frame in 0..4_096 {
+            let sample = (frame as f32 * 0.031).sin() * 0.4;
+            let (left, _) = stereo.process(sample, 0.0);
+            let mono_out = mono.process_mono(sample);
+            assert_eq!(
+                mono_out, left,
+                "mono path diverged from the stereo left channel at frame {frame}"
+            );
+        }
     }
 
     #[test]

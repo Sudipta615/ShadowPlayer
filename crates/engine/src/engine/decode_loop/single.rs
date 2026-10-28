@@ -30,16 +30,19 @@ impl AudioEngine {
             && !self.scratch.pending_multichannel.is_empty()
         {
             let ch = self.scratch.pending_multichannel_channels;
-            let frames_written = self.push_to_sink(&self.scratch.pending_multichannel, ch);
+            // Take the buffer so the sink can borrow `self` mutably; the Vec
+            // is returned below, so this is a move, not an allocation.
+            let mut pending = std::mem::take(&mut self.scratch.pending_multichannel);
+            let frames_written = self.push_to_sink(&pending, ch);
             if frames_written > 0 {
-                self.scratch
-                    .pending_multichannel
-                    .drain(..frames_written * ch);
+                pending.drain(..frames_written * ch);
             }
-            if !self.scratch.pending_multichannel.is_empty() {
+            if !pending.is_empty() {
                 // Ring still full — retry on the next tick.
+                self.scratch.pending_multichannel = pending;
                 return;
             }
+            self.scratch.pending_multichannel = pending;
             self.scratch.pending_multichannel_channels = 0;
         }
 
@@ -298,6 +301,18 @@ impl AudioEngine {
             Some(v) => v,
             None => return,
         };
+
+        // Analyse the decoded *source* before any DSP. This is the decode
+        // thread, and the detector is fixed-size, so it adds no allocation or
+        // lock to the path. Native-DSD chunks carry no f32 samples; the
+        // detector simply sees an empty block and leaves the count alone.
+        if !chunk.samples.is_empty() {
+            self.apodizing.analyze_interleaved(
+                &chunk.samples,
+                chunk.channels,
+                chunk.sample_rate as f32,
+            );
+        }
 
         // ── Native DSD path (§7): raw 1-bit payload never enters the f32
         // DSP pipeline. Pack the normalized channel bytes into the

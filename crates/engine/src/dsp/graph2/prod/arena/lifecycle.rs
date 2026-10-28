@@ -99,6 +99,10 @@ impl DspGraph {
         // envelope's normalized progress is preserved, mirroring
         // `TrackMixer::rescale_sample_rate`).
         self.mix_mut().rescale_sample_rate(old_rate, sample_rate);
+        // A DAC profile is rate-keyed: select the profile rendered for the
+        // new output rate, on this control path, rather than leaving a
+        // stale-rate IR in the bank.
+        self.reload_dac_correction();
     }
 
     /// Reset internal state across all nodes.

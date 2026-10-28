@@ -1,14 +1,15 @@
 //! Rubato-backed resampler algorithm and generic dispatch.
 
+use super::polyphase::{PolyphaseResampler, ResamplerFilterMetadata};
 use super::types::{
     ResamplerError, CHANNELS, CHUNK_SIZE, MAX_OUTPUT_BUFFER_FRAMES, MAX_REBUILD_FAILURES,
 };
-use config::ResamplerQuality;
+use config::{ResamplerFilter, ResamplerQuality};
 use num_traits::Float;
 use rubato::audioadapter_buffers::direct::SequentialSliceOfVecs;
 use rubato::{Fft, FixedSync, Resampler, WindowFunction};
 
-enum ResamplerInner<T: rubato::Sample + Send + Sync + 'static = f32> {
+enum ResamplerInner<T: rubato::Sample + Float + Default + Send + Sync + 'static = f32> {
     /// High quality: Fft with a longer filter for better anti-aliasing
     HighQuality(Fft<T>),
     /// Ultra: Fft with the longest filter (single sub-chunk, so the
@@ -18,15 +19,18 @@ enum ResamplerInner<T: rubato::Sample + Send + Sync + 'static = f32> {
     Balanced(Fft<T>),
     /// Fast: Fft with minimal processing (fixed input+output chunk sizes)
     Fast(Fft<T>),
+    /// The engine's own rational polyphase bank (P1.2 filter shapes).
+    Polyphase(PolyphaseResampler<T>),
 }
 
-impl<T: rubato::Sample + Send + Sync + 'static> ResamplerInner<T> {
+impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> ResamplerInner<T> {
     fn input_frames_next(&self) -> usize {
         match self {
             Self::HighQuality(r) => r.input_frames_next(),
             Self::Ultra(r) => r.input_frames_next(),
             Self::Balanced(r) => r.input_frames_next(),
             Self::Fast(r) => r.input_frames_next(),
+            Self::Polyphase(r) => r.input_frames_next(),
         }
     }
 
@@ -37,6 +41,7 @@ impl<T: rubato::Sample + Send + Sync + 'static> ResamplerInner<T> {
             Self::Ultra(r) => r.output_frames_max(),
             Self::Balanced(r) => r.output_frames_max(),
             Self::Fast(r) => r.output_frames_max(),
+            Self::Polyphase(r) => r.output_frames_max(),
         }
     }
 
@@ -47,6 +52,7 @@ impl<T: rubato::Sample + Send + Sync + 'static> ResamplerInner<T> {
             Self::Ultra(r) => r.output_frames_next(),
             Self::Balanced(r) => r.output_frames_next(),
             Self::Fast(r) => r.output_frames_next(),
+            Self::Polyphase(r) => r.output_frames_next(),
         }
     }
 
@@ -58,6 +64,7 @@ impl<T: rubato::Sample + Send + Sync + 'static> ResamplerInner<T> {
             Self::Ultra(r) => r.output_delay(),
             Self::Balanced(r) => r.output_delay(),
             Self::Fast(r) => r.output_delay(),
+            Self::Polyphase(r) => r.output_delay(),
         }
     }
 
@@ -77,7 +84,30 @@ impl<T: rubato::Sample + Send + Sync + 'static> ResamplerInner<T> {
             Self::Ultra(r) => r.process_into_buffer(buffer_in, buffer_out, None),
             Self::Balanced(r) => r.process_into_buffer(buffer_in, buffer_out, None),
             Self::Fast(r) => r.process_into_buffer(buffer_in, buffer_out, None),
+            Self::Polyphase(_) => unreachable!("polyphase is processed by process_planar"),
         }
+    }
+
+    /// Resample one planar chunk. The rubato engines are wrapped in the same
+    /// allocation-free adapters as before; the polyphase engine writes the
+    /// planar buffers directly, so it never pays for an adapter dispatch.
+    fn process_planar(
+        &mut self,
+        input: &[Vec<T>],
+        output: &mut [Vec<T>],
+        out_frames: usize,
+    ) -> Result<usize, String> {
+        if let Self::Polyphase(p) = self {
+            return Ok(p.process(input, output, out_frames));
+        }
+        let in_frames = input[0].len();
+        let in_adapter =
+            SequentialSliceOfVecs::new(input, CHANNELS, in_frames).map_err(|e| e.to_string())?;
+        let mut out_adapter = SequentialSliceOfVecs::new_mut(output, CHANNELS, out_frames)
+            .map_err(|e| e.to_string())?;
+        self.process_into_buffer(&in_adapter, &mut out_adapter)
+            .map(|(_consumed, produced)| produced)
+            .map_err(|e| e.to_string())
     }
 
     fn quality(&self) -> ResamplerQuality {
@@ -86,6 +116,27 @@ impl<T: rubato::Sample + Send + Sync + 'static> ResamplerInner<T> {
             Self::Ultra(_) => ResamplerQuality::Ultra,
             Self::Balanced(_) => ResamplerQuality::Balanced,
             Self::Fast(_) => ResamplerQuality::Fast,
+            Self::Polyphase(r) => r.quality(),
+        }
+    }
+
+    /// The filter family this engine actually runs.
+    fn filter(&self) -> ResamplerFilter {
+        match self {
+            Self::HighQuality(_) | Self::Ultra(_) | Self::Balanced(_) | Self::Fast(_) => {
+                ResamplerFilter::Fft
+            }
+            Self::Polyphase(r) => r.filter(),
+        }
+    }
+
+    /// Measured metadata for the polyphase bank; `None` for the rubato engine,
+    /// whose realized filter is measured by the fidelity tests instead of
+    /// introspected here.
+    fn metadata(&self) -> Option<ResamplerFilterMetadata> {
+        match self {
+            Self::Polyphase(r) => Some(r.metadata().clone()),
+            _ => None,
         }
     }
 }
@@ -101,6 +152,10 @@ pub struct AudioResampler<T: rubato::Sample + Float + Default + Send + Sync + 's
     /// The quality profile the caller requested (may differ from the
     /// effective one if construction fell back, e.g. HighQuality → Fast).
     requested_quality: ResamplerQuality,
+    /// The filter family the caller requested. Kept across rate/speed
+    /// rebuilds; [`Self::effective_filter`] reports the family actually
+    /// running when construction had to fall back.
+    filter: ResamplerFilter,
     /// Playback speed multiplier (1.0 = normal)
     speed: f32,
     /// Input buffer for accumulating samples before processing
@@ -148,9 +203,19 @@ pub type AudioResamplerF32 = AudioResampler<f32>;
 pub type AudioResamplerF64 = AudioResampler<f64>;
 
 impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler<T> {
-    /// Create a new resampler with the given quality profile and sample rates.
+    /// Create a new resampler with the existing rubato FFT engine.
     pub fn new(
         quality: ResamplerQuality,
+        source_rate: f32,
+        output_rate: f32,
+    ) -> Result<Self, ResamplerError> {
+        Self::new_with_filter(quality, ResamplerFilter::Fft, source_rate, output_rate)
+    }
+
+    /// Create a new resampler with an explicit filter family and sample rates.
+    pub fn new_with_filter(
+        quality: ResamplerQuality,
+        filter: ResamplerFilter,
         source_rate: f32,
         output_rate: f32,
     ) -> Result<Self, ResamplerError> {
@@ -183,13 +248,14 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
                 output_rate: out,
             });
         }
-        let inner = Self::create_resampler(quality, src, out)?;
+        let inner = Self::create_resampler(quality, filter, src, out)?;
         let rebuilt_quality = inner.quality();
         let mut resampler = Self {
             inner,
             source_rate: src,
             output_rate: out,
             requested_quality: quality,
+            filter,
             speed: 1.0,
             input_buffers: [Vec::new(), Vec::new()],
             input_pos: 0,
@@ -215,13 +281,32 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         Ok(resampler)
     }
 
-    /// Create the appropriate rubato resampler for the quality profile.
-    /// Falls back to Fast if HighQuality or Balanced fails.
+    /// Create the requested engine, falling back explicitly and visibly.
+    ///
+    /// A polyphase family that cannot be built for this ratio (the prototype
+    /// would exceed [`super::polyphase::MAX_PROTOTYPE_TAPS`]) falls back to the
+    /// rubato FFT engine at the same quality tier. If rubato also fails, the
+    /// existing Fast fallback applies. Both fallbacks are logged; callers can
+    /// compare [`Self::requested_filter`] with [`Self::effective_filter`].
     fn create_resampler(
         quality: ResamplerQuality,
+        filter: ResamplerFilter,
         source_rate: usize,
         output_rate: usize,
     ) -> Result<ResamplerInner<T>, ResamplerError> {
+        if filter.is_polyphase() {
+            match PolyphaseResampler::new(filter, quality, source_rate as u32, output_rate as u32) {
+                Ok(p) => return Ok(ResamplerInner::Polyphase(p)),
+                Err(err) => log::warn!(
+                    "Polyphase {:?} resampler unavailable for {} -> {} Hz, \
+                     falling back to the FFT engine: {}",
+                    filter,
+                    source_rate,
+                    output_rate,
+                    err
+                ),
+            }
+        }
         Self::create_resampler_exact(quality, source_rate, output_rate).or_else(|orig_err| {
             if quality != ResamplerQuality::Fast {
                 log::warn!(
@@ -649,18 +734,12 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         let write_start = self.output_available;
         let space_available = capacity - write_start;
 
-        let in_adapter = SequentialSliceOfVecs::new(&self.input_buffers[..], CHANNELS, needed)
-            .expect("input buffers are sized in allocate_buffers");
-        let mut out_adapter =
-            SequentialSliceOfVecs::new_mut(&mut self.scratch[..], CHANNELS, out_frames)
-                .expect("scratch buffers are sized in allocate_buffers");
-
-        let result = self
-            .inner
-            .process_into_buffer(&in_adapter, &mut out_adapter);
+        let result =
+            self.inner
+                .process_planar(&self.input_buffers[..], &mut self.scratch[..], out_frames);
 
         match result {
-            Ok((_in_consumed, produced)) => {
+            Ok(produced) => {
                 let frames_to_add = produced.min(space_available);
                 if frames_to_add < produced {
                     // Cannot happen while `capacity >= output_frames_max()`;
@@ -794,6 +873,18 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         }
     }
 
+    /// Set the filter family (triggers a rebuild).
+    ///
+    /// The running engine keeps its buffered output across the rebuild and
+    /// crossfades into the new filter, so changing the family mid-stream is a
+    /// control-path operation rather than a hard reset.
+    pub fn set_filter(&mut self, filter: ResamplerFilter) {
+        if filter != self.filter {
+            self.filter = filter;
+            self.needs_rebuild = true;
+        }
+    }
+
     /// The quality profile the caller requested. If construction of the
     /// requested profile failed, the resampler silently fell back to
     /// [`Self::effective_quality`] — see [`Self::quality_fell_back`].
@@ -811,6 +902,30 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
     /// for (a silent quality downgrade occurred).
     pub fn quality_fell_back(&self) -> bool {
         self.requested_quality != self.inner.quality()
+    }
+
+    /// The filter family the caller requested.
+    pub fn requested_filter(&self) -> ResamplerFilter {
+        self.filter
+    }
+
+    /// The filter family actually running. Differs from
+    /// [`Self::requested_filter`] only after an announced fallback (an
+    /// extreme ratio that cannot build the polyphase prototype).
+    pub fn effective_filter(&self) -> ResamplerFilter {
+        self.inner.filter()
+    }
+
+    /// True when the polyphase request fell back to the FFT engine.
+    pub fn filter_fell_back(&self) -> bool {
+        self.filter != self.inner.filter()
+    }
+
+    /// Measured shape of the running filter, when the engine can introspect
+    /// it. The rubato FFT path returns `None`; its realized latency is pinned
+    /// by the fidelity tests instead.
+    pub fn filter_metadata(&self) -> Option<ResamplerFilterMetadata> {
+        self.inner.metadata()
     }
 
     /// Set the source sample rate (triggers rebuild)
@@ -850,11 +965,12 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         let effective_source_f32 = self.source_rate as f32 * self.speed;
         let effective_source = (effective_source_f32.round() as usize).max(1);
         let quality = self.pending_quality.unwrap_or_else(|| self.inner.quality());
+        let filter = self.filter;
         let output_rate = self.output_rate;
 
         let (tx, rx) = crossbeam::channel::bounded(1);
         std::thread::spawn(move || {
-            let result = Self::create_resampler(quality, effective_source, output_rate);
+            let result = Self::create_resampler(quality, filter, effective_source, output_rate);
             let _ = tx.send(result);
         });
 
@@ -1083,6 +1199,15 @@ impl GenericResampler {
         }
     }
 
+    /// Set the filter family on either precision path (triggers a rebuild).
+    #[inline]
+    pub fn set_filter(&mut self, filter: ResamplerFilter) {
+        match self {
+            Self::F32(r) => r.set_filter(filter),
+            Self::F64(r) => r.set_filter(filter),
+        }
+    }
+
     /// Requested quality profile (the one the caller asked for).
     #[inline]
     pub fn requested_quality(&self) -> ResamplerQuality {
@@ -1109,6 +1234,42 @@ impl GenericResampler {
         match self {
             Self::F32(r) => r.quality_fell_back(),
             Self::F64(r) => r.quality_fell_back(),
+        }
+    }
+
+    /// Filter family the caller requested.
+    #[inline]
+    pub fn requested_filter(&self) -> ResamplerFilter {
+        match self {
+            Self::F32(r) => r.requested_filter(),
+            Self::F64(r) => r.requested_filter(),
+        }
+    }
+
+    /// Filter family actually running.
+    #[inline]
+    pub fn effective_filter(&self) -> ResamplerFilter {
+        match self {
+            Self::F32(r) => r.effective_filter(),
+            Self::F64(r) => r.effective_filter(),
+        }
+    }
+
+    /// True when a polyphase request fell back to the FFT engine.
+    #[inline]
+    pub fn filter_fell_back(&self) -> bool {
+        match self {
+            Self::F32(r) => r.filter_fell_back(),
+            Self::F64(r) => r.filter_fell_back(),
+        }
+    }
+
+    /// Measured filter metadata, if the running engine can introspect it.
+    #[inline]
+    pub fn filter_metadata(&self) -> Option<ResamplerFilterMetadata> {
+        match self {
+            Self::F32(r) => r.filter_metadata(),
+            Self::F64(r) => r.filter_metadata(),
         }
     }
 

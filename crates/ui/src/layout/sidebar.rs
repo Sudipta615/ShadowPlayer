@@ -48,24 +48,49 @@ pub fn render_sidebar(
             let mut delete_smart_id = None;
             let mut edit_smart_id = None;
 
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    SideBar::new(
-                        active_nav,
-                        playlists,
-                        smart_playlists,
-                        theme,
-                        rail,
-                        |nav| nav_to_select = Some(nav),
-                        || create_playlist_req = true,
-                        || create_smart_req = true,
-                        |id| delete_playlist_id = Some(id),
-                        |id| delete_smart_id = Some(id),
-                        |id| edit_smart_id = Some(id),
+            {
+                let mut bar = SideBar::new(
+                    active_nav,
+                    playlists,
+                    smart_playlists,
+                    theme,
+                    rail,
+                    |nav| nav_to_select = Some(nav),
+                    || create_playlist_req = true,
+                    || create_smart_req = true,
+                    |id| delete_playlist_id = Some(id),
+                    |id| delete_smart_id = Some(id),
+                    |id| edit_smart_id = Some(id),
+                );
+
+                // Pin Settings and Help to the bottom of the sidebar. They live
+                // outside the scroll area, so a long playlist cannot push them
+                // off-screen.
+                egui::Panel::bottom("sidebar_nav_footer")
+                    .resizable(false)
+                    .frame(
+                        egui::Frame::NONE
+                            .fill(theme.bg_sidebar)
+                            .inner_margin(Margin {
+                                left: 0,
+                                right: 0,
+                                top: 8,
+                                bottom: 0,
+                            }),
                     )
-                    .show(ui);
-                });
+                    .show(ui, |ui| {
+                        ui.separator();
+                        ui.add_space(4.0);
+                        bar.show_footer(ui);
+                    });
+
+                egui::ScrollArea::vertical()
+                    .id_salt("sidebar_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        bar.show(ui);
+                    });
+            }
 
             if let Some(nav) = nav_to_select {
                 on_select_nav(nav);

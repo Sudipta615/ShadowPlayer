@@ -2,6 +2,7 @@ pub mod contrast;
 pub mod editor;
 pub mod fonts;
 pub mod gallery;
+pub mod glass;
 pub mod manager;
 pub mod preview;
 pub mod schema;
@@ -12,6 +13,7 @@ pub use contrast::*;
 pub use editor::*;
 pub use fonts::*;
 pub use gallery::*;
+pub use glass::*;
 pub use manager::*;
 pub use preview::*;
 pub use schema::*;
@@ -63,5 +65,39 @@ mod tests {
                 if theme.is_light { "light" } else { "dark/oled" }
             );
         }
+    }
+
+    #[test]
+    fn reduced_motion_snaps_timed_animations() {
+        let mut theme = Theme::dark();
+        assert_eq!(theme.motion_time(0.12), 0.12);
+        theme.reduce_motion = true;
+        assert_eq!(theme.motion_time(0.12), 0.0);
+
+        // Toggling the palette is a theme switch, not a preference reset.
+        theme.frosted = true;
+        theme.toggle();
+        assert!(theme.is_light);
+        assert!(theme.reduce_motion);
+        assert!(theme.frosted);
+    }
+
+    #[test]
+    fn frosted_content_uses_a_legible_scrim() {
+        let mut theme = Theme::dark();
+        theme.frosted = true;
+        let dark_alpha = theme.content_panel_fill().a();
+        assert!(
+            (120..255).contains(&dark_alpha),
+            "the frosted scrim should keep the backdrop visible but legible, got alpha {dark_alpha}"
+        );
+
+        let mut light = Theme::light();
+        light.frosted = true;
+        let light_alpha = light.content_panel_fill().a();
+        assert!(
+            light_alpha > dark_alpha,
+            "light content needs a stronger white scrim ({light_alpha}) than dark ({dark_alpha})"
+        );
     }
 }

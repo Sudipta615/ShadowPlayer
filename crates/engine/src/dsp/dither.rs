@@ -12,6 +12,8 @@
 //! | `Triangular`         | 16-bit / 24-bit integer output (default)             |
 //! | `HighPassTriangular` | 16-bit; pushes dither noise to high frequencies      |
 //! | `Shibata`            | 16-bit; minimum perceptual noise (psychoacoustic)    |
+//! | `Ns5` / `Ns9`        | High-order high-pass shaping for 16/24-bit           |
+//! | `Lns15`              | 15th-order, gently weighted shaping at high rates    |
 //! | `Rectangular`        | Debug / measurement only                              |
 //! | `NoiseShaped`        | **DEPRECATED** — use `Triangular` instead            |
 //!
@@ -21,6 +23,12 @@
 //! and dither MUST NOT be applied (it would add audible noise for no benefit).
 //! Call [`Dither::set_output_is_float`] with `true` in this case to engage
 //! the automatic bypass.
+
+// The coefficient tables are copied at full published precision; truncating
+// them to the shortest f32 spelling would alter the fitted response and make
+// the measured NTF disagree with the design. The extra digits are meaningful
+// for the design source even though the runtime type is f32.
+#![allow(clippy::excessive_precision)]
 
 /// Dither mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,6 +70,108 @@ pub enum DitherType {
     NoiseShaped20,
     /// 24-bit subtle high-order noise shaping for reference dynamic range.
     NoiseShaped24,
+    /// 5th-order high-pass noise shaping (engine-designed, 44.1–192 kHz).
+    ///
+    /// The noise transfer function is fitted against a high-pass target that
+    /// starts above the audible band. Measured from the final coefficient
+    /// set at 44.1 kHz: 1 kHz −19.1 dB, 10 kHz +2.9 dB, maximum +7.5 dB.
+    /// Coefficients are selected per design rate; an unlisted rate reuses the
+    /// nearest table and logs once (see [`Dither::with_sample_rate`]).
+    Ns5,
+    /// 9th-order high-pass noise shaping (engine-designed, 44.1–192 kHz).
+    ///
+    /// Longer shaping tail than [`Self::Ns5`]; measured at 44.1 kHz:
+    /// 1 kHz −17.0 dB, 10 kHz +2.6 dB, maximum +8.5 dB. The 1 kHz figure is
+    /// bounded by the one-sample error-feedback delay, not by the order: a
+    /// deeper notch would require a larger high-frequency boost.
+    Ns9,
+    /// 15th-order "low-noise shaping" (engine-designed, 44.1–192 kHz).
+    ///
+    /// The gentlest high-frequency rise of the three (measured +7.0 dB
+    /// maximum and +2.5 dB at 10 kHz at 44.1 kHz) with the longest shaping
+    /// tail. At 44.1 kHz it measures −16.3 dB at 1 kHz; at 192 kHz the same
+    /// family measures −29.7 dB at 1 kHz with a +6.6 dB maximum. Intended for
+    /// high-rate output where the shaped band sits above the audible range.
+    Lns15,
+}
+
+/// Design rates for the engine's high-order shapers. Each family has a table
+/// for every rate here; the nearest table is reused elsewhere, exactly like
+/// the Shibata designs. The designs are the engine's own, not HQPlayer's
+/// proprietary coefficient sets.
+const SHAPER_DESIGN_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
+
+impl DitherType {
+    /// Map the user-facing configuration enum onto the implementation type.
+    pub fn from_noise_shaper(shaper: config::NoiseShaper) -> Self {
+        match shaper {
+            config::NoiseShaper::Tpdf => Self::Triangular,
+            config::NoiseShaper::Shibata => Self::Shibata,
+            config::NoiseShaper::Ns5 => Self::Ns5,
+            config::NoiseShaper::Ns9 => Self::Ns9,
+            config::NoiseShaper::Lns15 => Self::Lns15,
+        }
+    }
+
+    /// Stable implementation name for diagnostics.
+    #[allow(deprecated)]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Rectangular => "rectangular",
+            Self::Triangular => "tpdf",
+            Self::HighPassTriangular => "high_pass_tpdf",
+            Self::Shibata => "shibata",
+            Self::NoiseShaped => "noise_shaped",
+            Self::NoiseShaped16 => "noise_shaped_16",
+            Self::NoiseShaped20 => "noise_shaped_20",
+            Self::NoiseShaped24 => "noise_shaped_24",
+            Self::Ns5 => "ns5",
+            Self::Ns9 => "ns9",
+            Self::Lns15 => "lns15",
+        }
+    }
+}
+
+/// Construction-time default for output backends.
+///
+/// The engine has one global dither policy (`EngineConfig::dither_enabled`)
+/// and one global shaper (`EngineConfig::noise_shaper`); per-endpoint
+/// overrides are not part of the config surface yet. Output converters are
+/// constructed on their own render/control threads, so this is an atomic
+/// process configuration value read at construction — never on the audio
+/// thread and never per sample. A change takes effect on the next stream
+/// open, which is exactly when a converter is rebuilt.
+static CONFIGURED_NOISE_SHAPER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Select the shaper new output converters use.
+pub fn set_configured_noise_shaper(shaper: config::NoiseShaper) {
+    use std::sync::atomic::Ordering;
+    let code = match shaper {
+        config::NoiseShaper::Tpdf => 0,
+        config::NoiseShaper::Shibata => 1,
+        config::NoiseShaper::Ns5 => 2,
+        config::NoiseShaper::Ns9 => 3,
+        config::NoiseShaper::Lns15 => 4,
+    };
+    CONFIGURED_NOISE_SHAPER.store(code, Ordering::Relaxed);
+}
+
+/// The shaper new output converters will use.
+pub fn configured_noise_shaper() -> config::NoiseShaper {
+    use std::sync::atomic::Ordering;
+    match CONFIGURED_NOISE_SHAPER.load(Ordering::Relaxed) {
+        1 => config::NoiseShaper::Shibata,
+        2 => config::NoiseShaper::Ns5,
+        3 => config::NoiseShaper::Ns9,
+        4 => config::NoiseShaper::Lns15,
+        _ => config::NoiseShaper::Tpdf,
+    }
+}
+
+/// [`DitherType`] for [`configured_noise_shaper`].
+pub fn configured_dither_type() -> DitherType {
+    DitherType::from_noise_shaper(configured_noise_shaper())
 }
 
 /// Shibata F-weighted noise shaping coefficients for 44.1 kHz (9-tap IIR error feedback).
@@ -143,6 +253,501 @@ const NOISE_SHAPING_20: [f32; 3] = [1.5, -0.8, 0.1];
 /// High-order subtle 2-tap noise shaping coefficients for 24-bit word length.
 const NOISE_SHAPING_24: [f32; 2] = [1.0, -0.25];
 
+// ── High-order shapers (NS5 / NS9 / LNS15) ───────────────────────────────
+//
+// Each table is a causal FIR error-feedback filter C(z). The realised noise
+// transfer function is NTF(z) = 1 − C(z); positive coefficients therefore
+// suppress the band where C is close to 1. The designs were fitted by
+// weighted least squares against a high-pass target with a transition above
+// the audible band, then characterised from the final quantised coefficient
+// set. They are *not* copies of HQPlayer's proprietary tables; the measured
+// numbers in the README and in the module tests are this engine's.
+//
+// `f32` is deliberate: this runs once per output sample on the audio thread,
+// and the error history is already f32 in the integer-quantization path.
+
+const NS5_44100: [f32; 11] = [
+    0.877138417,
+    0.243680333,
+    -0.237547683,
+    0.227532042,
+    -0.213863141,
+    0.197030485,
+    -0.177589740,
+    0.156368383,
+    -0.134220614,
+    0.112173294,
+    -0.091128331,
+];
+const NS5_48000: [f32; 11] = [
+    0.841361250,
+    0.313634637,
+    -0.302864579,
+    0.285617343,
+    -0.262791958,
+    0.235658619,
+    -0.205586570,
+    0.174153800,
+    -0.142866075,
+    0.113249575,
+    -0.086544265,
+];
+const NS5_88200: [f32; 11] = [
+    0.607078474,
+    0.738934950,
+    -0.617832170,
+    0.468169084,
+    -0.333035569,
+    0.232911481,
+    -0.166338687,
+    0.122834546,
+    -0.092147527,
+    0.066906659,
+    -0.044015098,
+];
+const NS5_96000: [f32; 11] = [
+    0.584812705,
+    0.775410204,
+    -0.635873982,
+    0.469031629,
+    -0.325286257,
+    0.224157317,
+    -0.159386129,
+    0.117537449,
+    -0.088170542,
+    0.064121079,
+    -0.041970526,
+];
+const NS5_176400: [f32; 11] = [
+    0.470281188,
+    0.948817007,
+    -0.695237623,
+    0.445892548,
+    -0.279196047,
+    0.185341085,
+    -0.130829477,
+    0.095652683,
+    -0.071593956,
+    0.052944585,
+    -0.034120339,
+];
+const NS5_192000: [f32; 11] = [
+    0.459191076,
+    0.964279727,
+    -0.698228764,
+    0.441970470,
+    -0.274864283,
+    0.182228119,
+    -0.128520383,
+    0.093932594,
+    -0.070298791,
+    0.052056791,
+    -0.033534755,
+];
+
+const NS9_44100: [f32; 19] = [
+    0.885312738,
+    0.228588229,
+    -0.226219957,
+    0.222394167,
+    -0.217201068,
+    0.210835772,
+    -0.203420783,
+    0.195141729,
+    -0.186073937,
+    0.176330200,
+    -0.165906209,
+    0.154851027,
+    -0.143134480,
+    0.130833467,
+    -0.118004215,
+    0.104859539,
+    -0.091618291,
+    0.078649700,
+    -0.066286462,
+];
+const NS9_48000: [f32; 19] = [
+    0.853905760,
+    0.290804755,
+    -0.286652448,
+    0.279877238,
+    -0.270642009,
+    0.259281335,
+    -0.246154729,
+    0.231762332,
+    -0.216548964,
+    0.200978891,
+    -0.185327106,
+    0.169782612,
+    -0.154309013,
+    0.138841229,
+    -0.123234194,
+    0.107509623,
+    -0.091793047,
+    0.076483259,
+    -0.062066351,
+];
+const NS9_88200: [f32; 19] = [
+    0.645621525,
+    0.690507466,
+    -0.639676742,
+    0.566543814,
+    -0.483895068,
+    0.403019844,
+    -0.331131910,
+    0.271191847,
+    -0.223055506,
+    0.184991596,
+    -0.154814038,
+    0.130737959,
+    -0.111325262,
+    0.095270168,
+    -0.081628931,
+    0.069989169,
+    -0.059280023,
+    0.047484422,
+    -0.033950174,
+];
+const NS9_96000: [f32; 19] = [
+    0.625635229,
+    0.727262131,
+    -0.668029838,
+    0.584233335,
+    -0.491641727,
+    0.403448581,
+    -0.327301443,
+    0.265446463,
+    -0.216769005,
+    0.178899259,
+    -0.149229137,
+    0.125680668,
+    -0.106810482,
+    0.091357327,
+    -0.078223926,
+    0.066997576,
+    -0.056854339,
+    0.045683557,
+    -0.032471327,
+];
+const NS9_176400: [f32; 19] = [
+    0.522827658,
+    0.910627973,
+    -0.795847239,
+    0.648236438,
+    -0.505019202,
+    0.386943139,
+    -0.297947484,
+    0.233101088,
+    -0.185808280,
+    0.150805124,
+    -0.124303871,
+    0.103891521,
+    -0.087775410,
+    0.074761930,
+    -0.064092290,
+    0.054802653,
+    -0.046611615,
+    0.038214168,
+    -0.026719829,
+];
+const NS9_192000: [f32; 19] = [
+    0.512859269,
+    0.927831998,
+    -0.806572798,
+    0.652206982,
+    -0.504419230,
+    0.384268714,
+    -0.294738718,
+    0.230033409,
+    -0.183064607,
+    0.148412160,
+    -0.122247493,
+    0.102106619,
+    -0.086250850,
+    0.073441313,
+    -0.062956572,
+    0.053853388,
+    -0.045792543,
+    0.037613819,
+    -0.026288154,
+];
+
+const LNS15_44100: [f32; 31] = [
+    0.963434946,
+    0.073033032,
+    -0.072731628,
+    0.072239323,
+    -0.071550010,
+    0.070682343,
+    -0.069636176,
+    0.068435767,
+    -0.067084871,
+    0.065608943,
+    -0.064010107,
+    0.062310315,
+    -0.060508126,
+    0.058623887,
+    -0.056657871,
+    0.054635412,
+    -0.052563239,
+    0.050471356,
+    -0.048365596,
+    0.046266510,
+    -0.044161065,
+    0.042043673,
+    -0.039873089,
+    0.037620766,
+    -0.035235475,
+    0.032697645,
+    -0.029986268,
+    0.027130661,
+    -0.024169942,
+    0.021193807,
+    -0.018289801,
+];
+const LNS15_48000: [f32; 31] = [
+    0.953760248,
+    0.092286853,
+    -0.091704721,
+    0.090759366,
+    -0.089463870,
+    0.087854372,
+    -0.085947325,
+    0.083779440,
+    -0.081369444,
+    0.078760792,
+    -0.075982727,
+    0.073088853,
+    -0.070112562,
+    0.067101514,
+    -0.064073089,
+    0.061053805,
+    -0.058042813,
+    0.055058639,
+    -0.052105145,
+    0.049213466,
+    -0.046396869,
+    0.043679773,
+    -0.041044368,
+    0.038461741,
+    -0.035852924,
+    0.033143415,
+    -0.030248447,
+    0.027142492,
+    -0.023842284,
+    0.020454669,
+    -0.017123762,
+];
+const LNS15_88200: [f32; 31] = [
+    0.889131723,
+    0.219252465,
+    -0.212058836,
+    0.200896215,
+    -0.186814821,
+    0.170996630,
+    -0.154549886,
+    0.138392003,
+    -0.123160995,
+    0.109243332,
+    -0.096800783,
+    0.085843627,
+    -0.076274016,
+    0.067964912,
+    -0.060760259,
+    0.054507139,
+    -0.049065051,
+    0.044326468,
+    -0.040171864,
+    0.036509611,
+    -0.033274643,
+    0.030403713,
+    -0.027810344,
+    0.025467630,
+    -0.023346135,
+    0.021351872,
+    -0.019417250,
+    0.017577540,
+    -0.015631201,
+    0.013054598,
+    -0.009693523,
+];
+const LNS15_96000: [f32; 31] = [
+    0.882900921,
+    0.231275665,
+    -0.222848479,
+    0.209873972,
+    -0.193692964,
+    0.175774427,
+    -0.157442830,
+    0.139737197,
+    -0.123335414,
+    0.108593667,
+    -0.095606572,
+    0.084320931,
+    -0.074580376,
+    0.066198770,
+    -0.058987599,
+    0.052778316,
+    -0.047402668,
+    0.042737843,
+    -0.038673653,
+    0.035106471,
+    -0.031953928,
+    0.029170699,
+    -0.026674117,
+    0.024409096,
+    -0.022362116,
+    0.020465866,
+    -0.018615413,
+    0.016841065,
+    -0.015013321,
+    0.012584980,
+    -0.009290316,
+];
+const LNS15_176400: [f32; 31] = [
+    0.850812473,
+    0.292377090,
+    -0.275502785,
+    0.250718346,
+    -0.221792466,
+    0.192218470,
+    -0.164499058,
+    0.139982408,
+    -0.119080754,
+    0.101632491,
+    -0.087203755,
+    0.075306147,
+    -0.065466617,
+    0.057297649,
+    -0.050468131,
+    0.044721386,
+    -0.039853052,
+    0.035694617,
+    -0.032122250,
+    0.029029867,
+    -0.026328654,
+    0.023965655,
+    -0.021860203,
+    0.019991138,
+    -0.018295916,
+    0.016731656,
+    -0.015289845,
+    0.013833460,
+    -0.012379850,
+    0.010613737,
+    -0.007705328,
+];
+const LNS15_192000: [f32; 31] = [
+    0.847700837,
+    0.298221957,
+    -0.280331245,
+    0.254186795,
+    -0.223887310,
+    0.193162085,
+    -0.164610831,
+    0.139565584,
+    -0.118367159,
+    0.100779068,
+    -0.086304611,
+    0.074415529,
+    -0.064613812,
+    0.056494607,
+    -0.049722036,
+    0.044030814,
+    -0.039216547,
+    0.035109938,
+    -0.031583035,
+    0.028535879,
+    -0.025873296,
+    0.023546884,
+    -0.021476971,
+    0.019636299,
+    -0.017974339,
+    0.016435871,
+    -0.015022199,
+    0.013598640,
+    -0.012167949,
+    0.010453405,
+    -0.007585369,
+];
+
+/// The high-order family a [`DitherType`] selects, if any.
+fn high_order_coefficients(dither_type: DitherType, sample_rate: u32) -> Option<&'static [f32]> {
+    let table = |rates: [u32; 6], tables: [&'static [f32]; 6]| {
+        let rate = nearest_design_rate(sample_rate, rates);
+        tables[rates.iter().position(|r| *r == rate).unwrap()]
+    };
+    match dither_type {
+        DitherType::NoiseShaped16 => Some(&NOISE_SHAPING_16),
+        DitherType::NoiseShaped20 => Some(&NOISE_SHAPING_20),
+        DitherType::NoiseShaped24 => Some(&NOISE_SHAPING_24),
+        DitherType::Ns5 => Some(table(
+            SHAPER_DESIGN_RATES,
+            [
+                &NS5_44100,
+                &NS5_48000,
+                &NS5_88200,
+                &NS5_96000,
+                &NS5_176400,
+                &NS5_192000,
+            ],
+        )),
+        DitherType::Ns9 => Some(table(
+            SHAPER_DESIGN_RATES,
+            [
+                &NS9_44100,
+                &NS9_48000,
+                &NS9_88200,
+                &NS9_96000,
+                &NS9_176400,
+                &NS9_192000,
+            ],
+        )),
+        DitherType::Lns15 => Some(table(
+            SHAPER_DESIGN_RATES,
+            [
+                &LNS15_44100,
+                &LNS15_48000,
+                &LNS15_88200,
+                &LNS15_96000,
+                &LNS15_176400,
+                &LNS15_192000,
+            ],
+        )),
+        _ => None,
+    }
+}
+
+/// Nearest design rate by absolute distance; ties pick the lower rate. Rates
+/// outside the published set are reported by
+/// [`warn_high_order_approximation_once`].
+fn nearest_design_rate(sample_rate: u32, rates: [u32; 6]) -> u32 {
+    let mut best = rates[0];
+    let mut best_distance = u64::MAX;
+    for rate in rates {
+        let distance = sample_rate.abs_diff(rate) as u64;
+        if distance < best_distance {
+            best_distance = distance;
+            best = rate;
+        }
+    }
+    best
+}
+
+static HIGH_ORDER_APPROX_WARNED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn warn_high_order_approximation_once(sample_rate: u32, design_rate: u32) {
+    use std::sync::atomic::Ordering;
+    if !HIGH_ORDER_APPROX_WARNED.swap(true, Ordering::Relaxed) {
+        log::warn!(
+            "dither: no high-order noise-shaping design exists for {sample_rate} Hz; \
+             reusing the {design_rate} Hz coefficients (designs: 44100, 48000, 88200, \
+             96000, 176400, 192000)"
+        );
+    }
+}
+
 /// Dither processor.
 ///
 /// Owned by [`crate::output::format_converter::AudioFormatConverter`] which
@@ -179,10 +784,14 @@ pub struct Dither {
     shibata_coeffs: [f32; 9],
     /// The rate `shibata_coeffs` was selected for.
     sample_rate: u32,
-    // Generic noise shaping error history (16/20/24-bit)
-    ns_err_left: [f32; 8],
-    ns_err_right: [f32; 8],
-    ns_err_pos: usize,
+    /// Active high-order error-feedback coefficients, if the selected
+    /// [`DitherType`] is a noise shaper. Empty for every other mode.
+    shaper_coeffs: &'static [f32],
+    /// High-order error history. Sized for the longest design (LNS15, 31
+    /// taps), so every shaper fits without a per-sample bounds check.
+    shaper_err_left: [f32; 32],
+    shaper_err_right: [f32; 32],
+    shaper_err_pos: usize,
 }
 
 impl Dither {
@@ -209,11 +818,16 @@ impl Dither {
     pub fn with_sample_rate(dither_type: DitherType, bit_depth: u32, sample_rate: u32) -> Self {
         let design_rate = shibata_design_rate(sample_rate);
         let shibata_coeffs = shibata_coefficients_for(design_rate);
+        let shaper_coeffs = high_order_coefficients(dither_type, sample_rate).unwrap_or(&[]);
         if matches!(dither_type, DitherType::Shibata)
             && sample_rate != 44_100
             && sample_rate != 48_000
         {
             warn_shibata_approximation_once(sample_rate, design_rate);
+        }
+        if !shaper_coeffs.is_empty() && !SHAPER_DESIGN_RATES.contains(&sample_rate) {
+            let nearest = nearest_design_rate(sample_rate, SHAPER_DESIGN_RATES);
+            warn_high_order_approximation_once(sample_rate, nearest);
         }
         Self {
             dither_type,
@@ -231,9 +845,10 @@ impl Dither {
             shibata_err_pos: 0,
             shibata_coeffs,
             sample_rate,
-            ns_err_left: [0.0; 8],
-            ns_err_right: [0.0; 8],
-            ns_err_pos: 0,
+            shaper_coeffs,
+            shaper_err_left: [0.0; 32],
+            shaper_err_right: [0.0; 32],
+            shaper_err_pos: 0,
         }
     }
 
@@ -293,15 +908,25 @@ impl Dither {
         sum
     }
 
-    /// Compute generic noise-shaping error-feedback value for one channel (16/20/24-bit).
+    /// Compute high-order error-feedback for one channel.
+    ///
+    /// `err` is a ring of 32 samples and `pos` is the next write position, so
+    /// the newest error is at `pos - 1`. Every published design is at most 31
+    /// taps, which is why the ring is a fixed array rather than a `Vec`.
     #[inline]
-    fn generic_ns_feedback(coeffs: &[f32], err: &[f32; 8], pos: usize) -> f32 {
+    fn shaper_feedback(coeffs: &[f32], err: &[f32; 32], pos: usize) -> f32 {
         let mut sum = 0.0f32;
         for (k, &c) in coeffs.iter().enumerate() {
-            let idx = (pos + 8 - 1 - k) % 8;
+            let idx = (pos + 32 - 1 - k) % 32;
             sum += c * err[idx];
         }
         sum
+    }
+
+    /// Whether the selected mode is handled by the generic high-order path.
+    #[inline]
+    fn is_high_order(&self) -> bool {
+        !self.shaper_coeffs.is_empty()
     }
 
     fn random_seed() -> u64 {
@@ -436,13 +1061,13 @@ impl Dither {
                 return (q_l.clamp(-1.0, 1.0), q_r.clamp(-1.0, 1.0));
             }
 
-            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
-                let coeffs: &[f32] = match self.dither_type {
-                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
-                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
-                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
-                    _ => unreachable!(),
-                };
+            DitherType::NoiseShaped16
+            | DitherType::NoiseShaped20
+            | DitherType::NoiseShaped24
+            | DitherType::Ns5
+            | DitherType::Ns9
+            | DitherType::Lns15 => {
+                debug_assert!(self.is_high_order());
                 let noise_l = (Self::next_random_f32(&mut self.rng_state_left)
                     + Self::next_random_f32(&mut self.rng_state_left))
                     * half_lsb;
@@ -450,9 +1075,11 @@ impl Dither {
                     + Self::next_random_f32(&mut self.rng_state_right))
                     * half_lsb;
 
-                let pos = self.ns_err_pos;
-                let feedback_l = Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos);
-                let feedback_r = Self::generic_ns_feedback(coeffs, &self.ns_err_right, pos);
+                let pos = self.shaper_err_pos;
+                let feedback_l =
+                    Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_left, pos);
+                let feedback_r =
+                    Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_right, pos);
 
                 let shaped_l = left + noise_l - feedback_l;
                 let shaped_r = right + noise_r - feedback_r;
@@ -460,9 +1087,9 @@ impl Dither {
                 let q_l = (shaped_l * quant_steps_f).round() / quant_steps_f;
                 let q_r = (shaped_r * quant_steps_f).round() / quant_steps_f;
 
-                self.ns_err_left[pos] = q_l - shaped_l;
-                self.ns_err_right[pos] = q_r - shaped_r;
-                self.ns_err_pos = (pos + 1) % 8;
+                self.shaper_err_left[pos] = q_l - shaped_l;
+                self.shaper_err_right[pos] = q_r - shaped_r;
+                self.shaper_err_pos = (pos + 1) % 32;
 
                 return (q_l.clamp(-1.0, 1.0), q_r.clamp(-1.0, 1.0));
             }
@@ -555,13 +1182,13 @@ impl Dither {
                 return (q_l.clamp(-1.0, 1.0), q_r.clamp(-1.0, 1.0));
             }
 
-            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
-                let coeffs: &[f32] = match self.dither_type {
-                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
-                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
-                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
-                    _ => unreachable!(),
-                };
+            DitherType::NoiseShaped16
+            | DitherType::NoiseShaped20
+            | DitherType::NoiseShaped24
+            | DitherType::Ns5
+            | DitherType::Ns9
+            | DitherType::Lns15 => {
+                debug_assert!(self.is_high_order());
                 let noise_l = (Self::next_random_f64(&mut self.rng_state_left)
                     + Self::next_random_f64(&mut self.rng_state_left))
                     * half_lsb;
@@ -569,9 +1196,11 @@ impl Dither {
                     + Self::next_random_f64(&mut self.rng_state_right))
                     * half_lsb;
 
-                let pos = self.ns_err_pos;
-                let feedback_l = Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos) as f64;
-                let feedback_r = Self::generic_ns_feedback(coeffs, &self.ns_err_right, pos) as f64;
+                let pos = self.shaper_err_pos;
+                let feedback_l =
+                    Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_left, pos) as f64;
+                let feedback_r =
+                    Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_right, pos) as f64;
 
                 let shaped_l = left + noise_l - feedback_l;
                 let shaped_r = right + noise_r - feedback_r;
@@ -579,9 +1208,9 @@ impl Dither {
                 let q_l = (shaped_l * quant_steps_f).round() / quant_steps_f;
                 let q_r = (shaped_r * quant_steps_f).round() / quant_steps_f;
 
-                self.ns_err_left[pos] = (q_l - shaped_l) as f32;
-                self.ns_err_right[pos] = (q_r - shaped_r) as f32;
-                self.ns_err_pos = (pos + 1) % 8;
+                self.shaper_err_left[pos] = (q_l - shaped_l) as f32;
+                self.shaper_err_right[pos] = (q_r - shaped_r) as f32;
+                self.shaper_err_pos = (pos + 1) % 32;
 
                 return (q_l.clamp(-1.0, 1.0), q_r.clamp(-1.0, 1.0));
             }
@@ -706,13 +1335,13 @@ impl Dither {
                 }
             }
 
-            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
-                let coeffs: &[f32] = match self.dither_type {
-                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
-                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
-                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
-                    _ => unreachable!(),
-                };
+            DitherType::NoiseShaped16
+            | DitherType::NoiseShaped20
+            | DitherType::NoiseShaped24
+            | DitherType::Ns5
+            | DitherType::Ns9
+            | DitherType::Lns15 => {
+                debug_assert!(self.is_high_order());
                 for i in 0..n {
                     let noise_l = (Self::next_random_f32(&mut self.rng_state_left)
                         + Self::next_random_f32(&mut self.rng_state_left))
@@ -721,9 +1350,11 @@ impl Dither {
                         + Self::next_random_f32(&mut self.rng_state_right))
                         * half_lsb;
 
-                    let pos = self.ns_err_pos;
-                    let feedback_l = Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos);
-                    let feedback_r = Self::generic_ns_feedback(coeffs, &self.ns_err_right, pos);
+                    let pos = self.shaper_err_pos;
+                    let feedback_l =
+                        Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_left, pos);
+                    let feedback_r =
+                        Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_right, pos);
 
                     let shaped_l = left[i] + noise_l - feedback_l;
                     let shaped_r = right[i] + noise_r - feedback_r;
@@ -731,9 +1362,9 @@ impl Dither {
                     let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
                     let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
 
-                    self.ns_err_left[pos] = q_l - shaped_l;
-                    self.ns_err_right[pos] = q_r - shaped_r;
-                    self.ns_err_pos = (pos + 1) % 8;
+                    self.shaper_err_left[pos] = q_l - shaped_l;
+                    self.shaper_err_right[pos] = q_r - shaped_r;
+                    self.shaper_err_pos = (pos + 1) % 32;
 
                     left[i] = q_l.clamp(-1.0, 1.0);
                     right[i] = q_r.clamp(-1.0, 1.0);
@@ -856,13 +1487,13 @@ impl Dither {
                 }
             }
 
-            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
-                let coeffs: &[f32] = match self.dither_type {
-                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
-                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
-                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
-                    _ => unreachable!(),
-                };
+            DitherType::NoiseShaped16
+            | DitherType::NoiseShaped20
+            | DitherType::NoiseShaped24
+            | DitherType::Ns5
+            | DitherType::Ns9
+            | DitherType::Lns15 => {
+                debug_assert!(self.is_high_order());
                 for i in 0..n {
                     let noise_l = (Self::next_random_f64(&mut self.rng_state_left)
                         + Self::next_random_f64(&mut self.rng_state_left))
@@ -871,11 +1502,13 @@ impl Dither {
                         + Self::next_random_f64(&mut self.rng_state_right))
                         * half_lsb;
 
-                    let pos = self.ns_err_pos;
+                    let pos = self.shaper_err_pos;
                     let feedback_l =
-                        Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos) as f64;
+                        Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_left, pos)
+                            as f64;
                     let feedback_r =
-                        Self::generic_ns_feedback(coeffs, &self.ns_err_right, pos) as f64;
+                        Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_right, pos)
+                            as f64;
 
                     let shaped_l = left[i] + noise_l - feedback_l;
                     let shaped_r = right[i] + noise_r - feedback_r;
@@ -883,9 +1516,9 @@ impl Dither {
                     let q_l = (shaped_l * quant_steps_f).round() * recip_quant_steps_f;
                     let q_r = (shaped_r * quant_steps_f).round() * recip_quant_steps_f;
 
-                    self.ns_err_left[pos] = (q_l - shaped_l) as f32;
-                    self.ns_err_right[pos] = (q_r - shaped_r) as f32;
-                    self.ns_err_pos = (pos + 1) % 8;
+                    self.shaper_err_left[pos] = (q_l - shaped_l) as f32;
+                    self.shaper_err_right[pos] = (q_r - shaped_r) as f32;
+                    self.shaper_err_pos = (pos + 1) % 32;
 
                     left[i] = q_l.clamp(-1.0, 1.0);
                     right[i] = q_r.clamp(-1.0, 1.0);
@@ -945,22 +1578,23 @@ impl Dither {
                 self.shape_left = q - shaped + self.shape_left * 0.5;
                 q.clamp(-1.0, 1.0)
             }
-            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
-                let coeffs: &[f32] = match self.dither_type {
-                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
-                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
-                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
-                    _ => unreachable!(),
-                };
+            DitherType::NoiseShaped16
+            | DitherType::NoiseShaped20
+            | DitherType::NoiseShaped24
+            | DitherType::Ns5
+            | DitherType::Ns9
+            | DitherType::Lns15 => {
+                debug_assert!(self.is_high_order());
                 let noise = (Self::next_random_f32(&mut self.rng_state_left)
                     + Self::next_random_f32(&mut self.rng_state_left))
                     * half_lsb;
-                let pos = self.ns_err_pos;
-                let feedback = Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos);
+                let pos = self.shaper_err_pos;
+                let feedback =
+                    Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_left, pos);
                 let shaped = sample + noise - feedback;
                 let q = (shaped * quant_steps_f).round() / quant_steps_f;
-                self.ns_err_left[pos] = q - shaped;
-                self.ns_err_pos = (pos + 1) % 8;
+                self.shaper_err_left[pos] = q - shaped;
+                self.shaper_err_pos = (pos + 1) % 32;
                 q.clamp(-1.0, 1.0)
             }
         }
@@ -1017,22 +1651,23 @@ impl Dither {
                 self.shape_left = (q - shaped + (self.shape_left as f64) * 0.5) as f32;
                 q.clamp(-1.0, 1.0)
             }
-            DitherType::NoiseShaped16 | DitherType::NoiseShaped20 | DitherType::NoiseShaped24 => {
-                let coeffs: &[f32] = match self.dither_type {
-                    DitherType::NoiseShaped16 => &NOISE_SHAPING_16,
-                    DitherType::NoiseShaped20 => &NOISE_SHAPING_20,
-                    DitherType::NoiseShaped24 => &NOISE_SHAPING_24,
-                    _ => unreachable!(),
-                };
+            DitherType::NoiseShaped16
+            | DitherType::NoiseShaped20
+            | DitherType::NoiseShaped24
+            | DitherType::Ns5
+            | DitherType::Ns9
+            | DitherType::Lns15 => {
+                debug_assert!(self.is_high_order());
                 let noise = (Self::next_random_f64(&mut self.rng_state_left)
                     + Self::next_random_f64(&mut self.rng_state_left))
                     * half_lsb;
-                let pos = self.ns_err_pos;
-                let feedback = Self::generic_ns_feedback(coeffs, &self.ns_err_left, pos) as f64;
+                let pos = self.shaper_err_pos;
+                let feedback =
+                    Self::shaper_feedback(self.shaper_coeffs, &self.shaper_err_left, pos) as f64;
                 let shaped = sample + noise - feedback;
                 let q = (shaped * quant_steps_f).round() / quant_steps_f;
-                self.ns_err_left[pos] = (q - shaped) as f32;
-                self.ns_err_pos = (pos + 1) % 8;
+                self.shaper_err_left[pos] = (q - shaped) as f32;
+                self.shaper_err_pos = (pos + 1) % 32;
                 q.clamp(-1.0, 1.0)
             }
         }
@@ -1062,6 +1697,9 @@ impl Dither {
         self.shibata_err_left = [0.0; 9];
         self.shibata_err_right = [0.0; 9];
         self.shibata_err_pos = 0;
+        self.shaper_err_left = [0.0; 32];
+        self.shaper_err_right = [0.0; 32];
+        self.shaper_err_pos = 0;
         self.rng_state_left = Self::random_seed();
         self.rng_state_right = Self::random_seed().wrapping_add(0xDEADBEEF_12345678);
     }
@@ -1252,6 +1890,222 @@ mod tests {
         for i in 0..n {
             assert_eq!(sample_l[i], block_l[i], "mismatch at sample {i} for left");
             assert_eq!(sample_r[i], block_r[i], "mismatch at sample {i} for right");
+        }
+    }
+
+    /// Magnitude of the realised noise transfer function at normalised
+    /// frequency `x` (0 = DC, 1 = Nyquist).
+    fn ntf_magnitude(coeffs: &[f32], x: f64) -> f64 {
+        use std::f64::consts::PI;
+        let mut re = 1.0f64;
+        let mut im = 0.0f64;
+        for (n, &c) in coeffs.iter().enumerate() {
+            let phase = PI * x * (n + 1) as f64;
+            re -= c as f64 * phase.cos();
+            im += c as f64 * phase.sin();
+        }
+        re.hypot(im)
+    }
+
+    fn ntf_stats(coeffs: &[f32], rate: u32) -> (f64, f64, f64) {
+        let dc = ntf_magnitude(coeffs, 0.0);
+        let one_k = ntf_magnitude(coeffs, 1_000.0 / (rate as f64 / 2.0));
+        let mut max = 0.0f64;
+        for k in 0..=4_000 {
+            max = max.max(ntf_magnitude(coeffs, k as f64 / 4_000.0));
+        }
+        (dc, one_k, max)
+    }
+
+    #[test]
+    fn high_order_shapers_have_the_measured_noise_transfer_shape() {
+        // The DC and 1 kHz figures are the design goal; the maximum is the
+        // stability-relevant high-frequency boost. These bounds are wide
+        // enough for the f32 tables but tight enough to catch a swapped or
+        // truncated coefficient set. The 1 kHz bound includes the unavoidable
+        // one-sample error-feedback delay: −16.3 dB is the floor with this
+        // structure, so the test does not demand a physically impossible
+        // deeper notch.
+        for (family, max_gain_db) in [
+            (DitherType::Ns5, 10.0),
+            (DitherType::Ns9, 11.0),
+            (DitherType::Lns15, 10.0),
+        ] {
+            for rate in SHAPER_DESIGN_RATES {
+                let coeffs = high_order_coefficients(family, rate)
+                    .unwrap_or_else(|| panic!("{} at {rate} has no table", family.as_str()));
+                let (dc, one_k, max) = ntf_stats(coeffs, rate);
+                assert!(
+                    dc < 0.08,
+                    "{} at {rate}: DC NTF {dc:.4} is not suppressed",
+                    family.as_str()
+                );
+                assert!(
+                    one_k < 0.17,
+                    "{} at {rate}: 1 kHz NTF {one_k:.4} is not suppressed",
+                    family.as_str()
+                );
+                let max_db = 20.0 * max.log10();
+                assert!(
+                    max_db <= max_gain_db,
+                    "{} at {rate}: {max_db:.1} dB boost exceeds {max_gain_db} dB",
+                    family.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_design_rate_selects_its_own_table_and_nearest_fallback_is_explicit() {
+        for (family, tables) in [
+            (
+                DitherType::Ns5,
+                [
+                    &NS5_44100[..],
+                    &NS5_48000[..],
+                    &NS5_88200[..],
+                    &NS5_96000[..],
+                    &NS5_176400[..],
+                    &NS5_192000[..],
+                ],
+            ),
+            (
+                DitherType::Ns9,
+                [
+                    &NS9_44100[..],
+                    &NS9_48000[..],
+                    &NS9_88200[..],
+                    &NS9_96000[..],
+                    &NS9_176400[..],
+                    &NS9_192000[..],
+                ],
+            ),
+            (
+                DitherType::Lns15,
+                [
+                    &LNS15_44100[..],
+                    &LNS15_48000[..],
+                    &LNS15_88200[..],
+                    &LNS15_96000[..],
+                    &LNS15_176400[..],
+                    &LNS15_192000[..],
+                ],
+            ),
+        ] {
+            for (rate, table) in SHAPER_DESIGN_RATES.iter().zip(tables) {
+                assert_eq!(
+                    high_order_coefficients(family, *rate),
+                    Some(table),
+                    "{} at {rate} selected the wrong table",
+                    family.as_str()
+                );
+            }
+        }
+        assert_eq!(nearest_design_rate(44_050, SHAPER_DESIGN_RATES), 44_100);
+        assert_eq!(nearest_design_rate(50_000, SHAPER_DESIGN_RATES), 48_000);
+        assert_eq!(nearest_design_rate(100_000, SHAPER_DESIGN_RATES), 96_000);
+        assert_eq!(nearest_design_rate(200_000, SHAPER_DESIGN_RATES), 192_000);
+    }
+
+    #[test]
+    fn high_order_shapers_are_bounded_and_stable() {
+        for dither_type in [DitherType::Ns5, DitherType::Ns9, DitherType::Lns15] {
+            for depth in [16u32, 24] {
+                for rate in [44_100u32, 96_000] {
+                    let mut dither = Dither::with_sample_rate(dither_type, depth, rate);
+                    dither.set_random_seed(0x1234_5678_9ABC_DEF0);
+                    for i in 0..100_000 {
+                        let phase = i as f64 / rate as f64;
+                        let sample = (2.0 * std::f64::consts::PI * 997.0 * phase).sin() * 0.2;
+                        let (l, r) = dither.process(sample as f32, -sample as f32);
+                        assert!(
+                            l.is_finite() && r.is_finite(),
+                            "{} produced a non-finite sample",
+                            dither_type.as_str()
+                        );
+                        assert!(
+                            l.abs() <= 1.0 && r.abs() <= 1.0,
+                            "{} produced an out-of-range sample",
+                            dither_type.as_str()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn high_order_block_and_sample_paths_are_identical() {
+        for dither_type in [
+            DitherType::Ns5,
+            DitherType::Ns9,
+            DitherType::Lns15,
+            DitherType::NoiseShaped16,
+            DitherType::NoiseShaped20,
+            DitherType::NoiseShaped24,
+        ] {
+            let mut sample = Dither::with_sample_rate(dither_type, 16, 48_000);
+            sample.set_random_seed(0xDEAD_BEEF_1234_5678);
+            let mut block = Dither::with_sample_rate(dither_type, 16, 48_000);
+            block.set_random_seed(0xDEAD_BEEF_1234_5678);
+
+            let n = 257;
+            let mut sl = vec![0.12345f32; n];
+            let mut sr = vec![-0.6789f32; n];
+            for i in 0..n {
+                let (l, r) = sample.process(sl[i], sr[i]);
+                sl[i] = l;
+                sr[i] = r;
+            }
+            let mut bl = vec![0.12345f32; n];
+            let mut br = vec![-0.6789f32; n];
+            block.process_block(&mut bl, &mut br);
+            assert_eq!(sl, bl, "{} left block mismatch", dither_type.as_str());
+            assert_eq!(sr, br, "{} right block mismatch", dither_type.as_str());
+        }
+    }
+
+    #[test]
+    fn float_output_bypass_survives_every_noise_shaper() {
+        for shaper in config::NoiseShaper::ALL {
+            let mut dither =
+                Dither::with_sample_rate(DitherType::from_noise_shaper(shaper), 24, 96_000);
+            dither.set_output_is_float(true);
+            assert!(!dither.is_enabled());
+            let (l, r) = dither.process(0.123_456, -0.654_321);
+            assert_eq!((l, r), (0.123_456, -0.654_321));
+            let mut block_l = [0.25f32; 8];
+            let mut block_r = [-0.25f32; 8];
+            dither.process_block(&mut block_l, &mut block_r);
+            assert_eq!(block_l, [0.25f32; 8]);
+            assert_eq!(block_r, [-0.25f32; 8]);
+        }
+    }
+
+    #[test]
+    fn configuration_enum_maps_to_the_implementation_type() {
+        assert_eq!(
+            DitherType::from_noise_shaper(config::NoiseShaper::Tpdf),
+            DitherType::Triangular
+        );
+        assert_eq!(
+            DitherType::from_noise_shaper(config::NoiseShaper::Shibata),
+            DitherType::Shibata
+        );
+        assert_eq!(
+            DitherType::from_noise_shaper(config::NoiseShaper::Ns5),
+            DitherType::Ns5
+        );
+        assert_eq!(
+            DitherType::from_noise_shaper(config::NoiseShaper::Ns9),
+            DitherType::Ns9
+        );
+        assert_eq!(
+            DitherType::from_noise_shaper(config::NoiseShaper::Lns15),
+            DitherType::Lns15
+        );
+        for shaper in config::NoiseShaper::ALL {
+            assert!(!shaper.as_str().is_empty());
         }
     }
 }

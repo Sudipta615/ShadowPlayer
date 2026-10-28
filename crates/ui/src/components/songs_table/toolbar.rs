@@ -79,12 +79,12 @@ pub(super) fn render_toolbar(ui: &mut Ui, toolbar: &mut TableToolbar<'_, '_>) {
             let grid_t = ui.ctx().animate_bool_with_time(
                 ui.make_persistent_id("view_mode_grid"),
                 is_grid_view,
-                0.16,
+                theme.motion_time(0.16),
             );
             let list_t = ui.ctx().animate_bool_with_time(
                 ui.make_persistent_id("view_mode_list"),
                 !is_grid_view,
-                0.16,
+                theme.motion_time(0.16),
             );
             let grid_bg = crate::theme::lerp_color(theme.bg_pill, theme.accent, grid_t);
             let list_bg = crate::theme::lerp_color(theme.bg_pill, theme.accent, list_t);
@@ -229,10 +229,10 @@ pub(super) fn render_toolbar(ui: &mut Ui, toolbar: &mut TableToolbar<'_, '_>) {
             } else {
                 theme.bg_pill
             };
-            sp.rect_filled(sort_rect, CornerRadius::same(theme.radius_pill), sort_bg);
+            sp.rect_filled(sort_rect, theme.control_radius(), sort_bg);
             sp.rect_stroke(
                 sort_rect,
-                CornerRadius::same(theme.radius_pill),
+                theme.control_radius(),
                 Stroke::new(1.0_f32, theme.border_subtle),
                 egui::StrokeKind::Inside,
             );
@@ -399,7 +399,7 @@ pub(super) fn render_toolbar(ui: &mut Ui, toolbar: &mut TableToolbar<'_, '_>) {
             let chip_t = ui.ctx().animate_bool_with_time(
                 ui.make_persistent_id(("chip", label)),
                 is_active,
-                0.16,
+                theme.motion_time(0.16),
             );
             let resp = ui.add(
                 egui::Button::new(

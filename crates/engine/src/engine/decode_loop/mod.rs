@@ -41,6 +41,8 @@ impl AudioEngine {
             {
                 info!("Crossfade transition complete; incoming track is now active");
                 self.clock.reset_track(incoming_decoder.info().sample_rate);
+                self.apodizing
+                    .reset(incoming_decoder.info().sample_rate as f32);
                 self.duration_secs = incoming_decoder.duration_secs();
                 self.scratch.crossfade_triggered = false;
                 self.recovery.consecutive_decode_errors = 0;

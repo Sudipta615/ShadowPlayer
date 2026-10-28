@@ -761,6 +761,77 @@ fn test_dsd_filter_passband_and_ultrasonic_rejection() {
     assert!(stopband < 0.01, "100 kHz rejection was only {stopband}");
 }
 
+/// Every selectable decimation filter must keep the audio band and reject
+/// ultrasonic noise. The thresholds are the published per-family contract:
+/// the steep designs (`standard`, `low`, `high-order`, `brickwall`) reach
+/// 40 dB at 100 kHz (DSD64); the deliberately gentle `slow-*` pair only
+/// promises 26 dB there, and the test refuses to claim more.
+#[test]
+fn test_every_noise_filter_keeps_the_audio_band_and_rejects_ultrasonics() {
+    for filter in config::DsdNoiseFilter::ALL {
+        let decimator = DsdToPcmDecimator::new_with_filter(2, filter);
+        assert_eq!(decimator.noise_filter(), filter);
+
+        for stage in &decimator.stages[0] {
+            let dc: f32 = stage.coeffs.iter().sum();
+            assert!(
+                (dc - 1.0).abs() < 1e-3,
+                "{filter:?}: stage DC gain was {dc}"
+            );
+        }
+
+        let passband = response_at(&decimator, 20_000.0);
+        assert!(
+            passband > 0.80,
+            "{filter:?}: 20 kHz passband gain was only {passband}"
+        );
+
+        let stopband = response_at(&decimator, 100_000.0);
+        let limit = match filter {
+            config::DsdNoiseFilter::SlowLp | config::DsdNoiseFilter::SlowMp => 0.05,
+            _ => 0.01,
+        };
+        assert!(
+            stopband < limit,
+            "{filter:?}: 100 kHz rejection was {stopband} (want < {limit})"
+        );
+    }
+}
+
+/// `SlowMp` is the minimum-phase counterpart of `SlowLp`: same length and
+/// magnitude, but the impulse response is no longer symmetric and its energy
+/// is concentrated at the front.
+#[test]
+fn test_minimum_phase_filter_is_causal_and_not_symmetric() {
+    let linear = DsdToPcmDecimator::new_with_filter(1, config::DsdNoiseFilter::SlowLp);
+    let minimum = DsdToPcmDecimator::new_with_filter(1, config::DsdNoiseFilter::SlowMp);
+
+    let lp = &linear.stages[0][0].coeffs;
+    let mp = &minimum.stages[0][0].coeffs;
+    assert_eq!(lp.len(), mp.len());
+
+    let symmetric = lp
+        .iter()
+        .zip(lp.iter().rev())
+        .all(|(a, b)| (a - b).abs() < 1e-6);
+    assert!(symmetric, "SlowLp must stay linear phase");
+    let minimum_symmetric = mp
+        .iter()
+        .zip(mp.iter().rev())
+        .all(|(a, b)| (a - b).abs() < 1e-6);
+    assert!(!minimum_symmetric, "SlowMp must not be symmetric");
+
+    // Minimum phase: the first half of the impulse carries the bulk of the
+    // energy (a linear-phase design splits it evenly).
+    let energy: f32 = mp.iter().map(|c| c * c).sum();
+    let front: f32 = mp[..mp.len() / 2].iter().map(|c| c * c).sum();
+    assert!(
+        front / energy > 0.5,
+        "minimum-phase energy in the front half was only {:.2}",
+        front / energy
+    );
+}
+
 #[test]
 fn test_dsd_cascade_quantitative_response() {
     let grid = [

@@ -70,11 +70,12 @@ mod topology;
 
 pub use arena::nodes::{
     AutomationPoint, AutomationTarget, AuxBusNode, BalanceNode, ClapPluginHostNode,
-    ConvolutionNode, CorrectionNode, CorrectionNodeInfo, CrossfeedNode, DitherNode, DuckState,
-    DynamicsNode, EqNode, GainNode, LimiterNode, LoudnessNode, MixBusNode, MixInput, MixInputCmd,
-    MixTransitionCmd, PanLaw, PluginHostNode, PluginProcessSandbox, ResamplerNode, RoutingNode,
-    SandboxedPluginInstance, SeekFadeNode, SpatialNode, StereoNode, TimeStretchNode,
-    MAX_AUTOMATION_POINTS, MAX_DUCK_TARGETS, MAX_MIX_SLOTS, MAX_PLUGIN_SLOTS, MAX_SANDBOX_CHANNELS,
+    ConvolutionNode, CorrectionNode, CorrectionNodeInfo, CrossfeedNode, DacCorrectionNodeInfo,
+    DitherNode, DuckState, DynamicsNode, EqNode, GainNode, LimiterNode, LoudnessNode, MixBusNode,
+    MixInput, MixInputCmd, MixTransitionCmd, PanLaw, PluginHostNode, PluginProcessSandbox,
+    ResamplerNode, RoutingNode, SandboxedPluginInstance, SeekFadeNode, SpatialNode, StereoNode,
+    TimeStretchNode, MAX_AUTOMATION_POINTS, MAX_DUCK_TARGETS, MAX_MIX_SLOTS, MAX_PLUGIN_SLOTS,
+    MAX_SANDBOX_CHANNELS,
 };
 pub use arena::{DspGraph, DspNode, GraphControlHandle, GraphGeneration, GraphScratch};
 pub use control::Graph2ControlHandle;
@@ -254,6 +255,12 @@ impl Graph2Engine {
         set: std::sync::Arc<crate::dsp::correction::CorrectionIrSet>,
     ) {
         self.inner.load_correction_ir(set);
+    }
+
+    /// Set the output-device identity used to select a DAC correction
+    /// profile, then reload the profile bank on the control path.
+    pub fn set_dac_device(&mut self, device: Option<String>) {
+        self.inner.set_dac_device(device);
     }
 
     /// The cloneable cross-thread control surface.

@@ -18,10 +18,11 @@ pub mod routing_node;
 pub mod spatial_node;
 pub mod stereo_node;
 pub mod timestretch_node;
+pub mod ultrasonic_node;
 
 pub use aux_node::AuxBusNode;
 pub use convolution_node::ConvolutionNode;
-pub use correction_node::{CorrectionNode, CorrectionNodeInfo};
+pub use correction_node::{CorrectionNode, CorrectionNodeInfo, DacCorrectionNodeInfo};
 pub use crossfeed_node::CrossfeedNode;
 pub use dither_node::DitherNode;
 pub use dynamics_node::DynamicsNode;
@@ -45,6 +46,7 @@ pub use routing_node::RoutingNode;
 pub use spatial_node::SpatialNode;
 pub use stereo_node::StereoNode;
 pub use timestretch_node::TimeStretchNode;
+pub use ultrasonic_node::UltrasonicNode;
 
 use super::GraphNode;
 use crate::dsp::{graph2::prod::arena::node::DspNode, pipeline::DspStageCapability};
@@ -71,6 +73,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.capability(),
             GraphNode::Spatial(n) => n.capability(),
             GraphNode::PluginHost(n) => n.capability(),
+            GraphNode::Ultrasonic(n) => n.capability(),
         }
     }
 
@@ -95,6 +98,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.is_active(),
             GraphNode::Spatial(n) => n.is_active(),
             GraphNode::PluginHost(n) => n.is_active(),
+            GraphNode::Ultrasonic(n) => n.is_active(),
         }
     }
 
@@ -119,6 +123,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.latency_samples(),
             GraphNode::Spatial(n) => n.latency_samples(),
             GraphNode::PluginHost(n) => n.latency_samples(),
+            GraphNode::Ultrasonic(n) => n.latency_samples(),
         }
     }
 
@@ -143,6 +148,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.tail_samples(),
             GraphNode::Spatial(n) => n.tail_samples(),
             GraphNode::PluginHost(n) => n.tail_samples(),
+            GraphNode::Ultrasonic(n) => n.tail_samples(),
         }
     }
 
@@ -167,6 +173,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.reset(),
             GraphNode::Spatial(n) => n.reset(),
             GraphNode::PluginHost(n) => n.reset(),
+            GraphNode::Ultrasonic(n) => n.reset(),
         }
     }
 
@@ -191,6 +198,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.prepare(sample_rate, max_channels),
             GraphNode::Spatial(n) => n.prepare(sample_rate, max_channels),
             GraphNode::PluginHost(n) => n.prepare(sample_rate, max_channels),
+            GraphNode::Ultrasonic(n) => n.prepare(sample_rate, max_channels),
         }
     }
 
@@ -215,6 +223,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.process_block_f32(planes),
             GraphNode::Spatial(n) => n.process_block_f32(planes),
             GraphNode::PluginHost(n) => n.process_block_f32(planes),
+            GraphNode::Ultrasonic(n) => n.process_block_f32(planes),
         }
     }
 
@@ -239,6 +248,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.process_block_f64(planes),
             GraphNode::Spatial(n) => n.process_block_f64(planes),
             GraphNode::PluginHost(n) => n.process_block_f64(planes),
+            GraphNode::Ultrasonic(n) => n.process_block_f64(planes),
         }
     }
 
@@ -276,6 +286,7 @@ impl DspNode for GraphNode {
             GraphNode::Correction(n) => n.persistent_bytes(),
             GraphNode::Spatial(n) => n.persistent_bytes(),
             GraphNode::PluginHost(n) => n.persistent_bytes(),
+            GraphNode::Ultrasonic(n) => n.persistent_bytes(),
         }
     }
 }

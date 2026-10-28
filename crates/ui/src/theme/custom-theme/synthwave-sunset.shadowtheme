@@ -70,6 +70,7 @@
     "radius_pill": 28,
     "frame_radius": 20
   },
+  "play_button": "pill",
   "fonts": {
     "display": "Space Grotesk",
     "body": "Space Grotesk",

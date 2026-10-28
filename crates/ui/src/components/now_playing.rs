@@ -1,8 +1,6 @@
 use crate::components::visualizer::VisualizerWidget;
 use crate::theme::Theme;
-use eframe::egui::{
-    self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
-};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2};
 
 pub struct NowPlayingEvents {
     pub toggle_play: bool,
@@ -448,54 +446,16 @@ impl<'a> NowPlayingCard<'a> {
                                 events.prev_track = true;
                             }
 
-                            // Play/Pause Big Circular Button, sized from the
-                            // artwork so the two stay in proportion.
-                            let play_size = Vec2::splat((art_size.x * 0.30).clamp(32.0, 48.0));
-                            let (play_rect, play_resp) =
-                                ui.allocate_exact_size(play_size, Sense::click());
-                            let painter = ui.painter_at(play_rect);
-                            let pc = play_rect.center();
-                            let pr = play_size.x * 0.5;
-
-                            let play_fill = if play_resp.hovered() {
-                                self.theme.accent.gamma_multiply(1.18)
-                            } else {
-                                self.theme.accent
-                            };
-                            painter.circle_filled(pc, pr, play_fill);
-                            painter.circle_stroke(
-                                pc,
-                                pr,
-                                Stroke::new(
-                                    1.0_f32,
-                                    self.theme.accent_highlight.gamma_multiply(0.55),
-                                ),
+                            // Play/Pause: one shared control so every theme's
+                            // silhouette (circle, rounded, pill, square) is
+                            // honoured here as well as in the mini/full views.
+                            let play_size = (art_size.x * 0.30).clamp(32.0, 48.0);
+                            let play_resp = crate::components::play_button::play_button(
+                                ui,
+                                play_size,
+                                self.is_playing,
+                                self.theme,
                             );
-
-                            let inner_icon_rect = Rect::from_center_size(
-                                pc,
-                                Vec2::splat(if dense {
-                                    13.0
-                                } else if compact {
-                                    16.0
-                                } else {
-                                    18.0
-                                }),
-                            );
-                            if self.is_playing {
-                                crate::components::icons::draw_pause(
-                                    ui,
-                                    inner_icon_rect,
-                                    Color32::WHITE,
-                                );
-                            } else {
-                                crate::components::icons::draw_play(
-                                    ui,
-                                    inner_icon_rect,
-                                    Color32::WHITE,
-                                    true,
-                                );
-                            }
                             let _ = play_resp.clone().on_hover_text(if self.is_playing {
                                 "Pause"
                             } else {
@@ -757,7 +717,14 @@ impl<'a> NowPlayingCard<'a> {
                 });
             });
         });
-        let _ = card_response;
+        if self.theme.frosted {
+            crate::theme::glass::paint_glass_sheen(
+                ui,
+                card_response.response.rect,
+                CornerRadius::same(self.theme.radius_xl),
+                self.theme,
+            );
+        }
 
         events
     }

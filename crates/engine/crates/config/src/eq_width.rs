@@ -269,7 +269,7 @@ mod tests {
         }
         // A shallower slope is a lower Q, a steeper one (still ≤ 1) a higher Q.
         assert!(q_from_slope(0.5, 6.0) < q_from_slope(1.0, 6.0));
-        assert!(q_from_slope(0.7071, 6.0) > q_from_slope(0.5, 6.0));
+        assert!(q_from_slope(std::f64::consts::FRAC_1_SQRT_2, 6.0) > q_from_slope(0.5, 6.0));
     }
 
     /// Every Q up to `1/√2` is a ripple-free shelf slope, and the two forms

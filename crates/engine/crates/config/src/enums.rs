@@ -147,6 +147,93 @@ pub enum PerformanceMode {
     LegacyLowPower,
 }
 
+/// Resampler filter family.
+///
+/// This is the filter shape axis, independent of [`ResamplerQuality`]'s
+/// length/cost tier. [`Self::Fft`] keeps the existing rubato FFT engine
+/// (linear phase); the other variants select the engine's own rational
+/// polyphase windowed-sinc bank:
+///
+/// - [`Self::Kaiser`] — linear-phase Kaiser-windowed sinc.
+/// - [`Self::BlackmanHarris`] — linear-phase Blackman-Harris sinc with the
+///   lowest sidelobes of the short windows.
+/// - [`Self::MinimumPhase`] — the `Kaiser` passband converted to minimum phase
+///   with the real-cepstrum method: no pre-ringing, and a much smaller latency
+///   at the cost of frequency-dependent group delay. The cepstral tail is
+///   tapered to fit the polyphase branch, so its realized stopband is measured
+///   and is typically shallower than the linear design's.
+/// - [`Self::Apodizing`] — a longer, steeper linear-phase filter whose
+///   stopband starts just above the source Nyquist, for suppressing the
+///   ringing left by an ADC's anti-alias filter.
+/// - [`Self::SincM`] — a very long Kaiser sinc (twice the tier's taps) for
+///   reference/offline conversion.
+///
+/// The realized tap count, measured passband ripple, stopband attenuation and
+/// group delay are published per instance in
+/// `dsp::resampler::ResamplerFilterMetadata`; they are measured from the
+/// coefficients the engine actually runs, not asserted here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ResamplerFilter {
+    /// Existing rubato FFT resampler (linear phase, quality-tier length).
+    #[default]
+    Fft,
+    /// Rational polyphase Kaiser-windowed sinc (linear phase).
+    Kaiser,
+    /// Rational polyphase Blackman-Harris-windowed sinc (linear phase).
+    BlackmanHarris,
+    /// Real-cepstrum minimum-phase conversion of the Kaiser design.
+    MinimumPhase,
+    /// Long, steep linear-phase filter with the stopband at the source Nyquist.
+    Apodizing,
+    /// Very long Kaiser sinc for reference conversion.
+    SincM,
+}
+
+impl ResamplerFilter {
+    /// Stable label for reports, config dumps and hosts.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Fft => "fft",
+            Self::Kaiser => "kaiser",
+            Self::BlackmanHarris => "blackman-harris",
+            Self::MinimumPhase => "minimum-phase",
+            Self::Apodizing => "apodizing",
+            Self::SincM => "sinc-m",
+        }
+    }
+
+    /// Whether the realized filter has (approximately) constant group delay.
+    pub fn is_linear_phase(&self) -> bool {
+        !matches!(self, Self::MinimumPhase)
+    }
+
+    /// Whether this family uses the engine's own polyphase bank rather than
+    /// rubato's FFT engine.
+    pub fn is_polyphase(&self) -> bool {
+        !matches!(self, Self::Fft)
+    }
+
+    /// Taps per polyphase branch for a quality tier.
+    ///
+    /// These deliberately mirror the measured FFT tap ladder (320 / 640 /
+    /// 1120 / 2240) so switching shape does not silently halve the filter
+    /// length. `Apodizing` and `SincM` double it; `Fft` has no polyphase
+    /// branch count and returns 0.
+    pub fn taps_per_phase(&self, quality: ResamplerQuality) -> usize {
+        let base = match quality {
+            ResamplerQuality::Fast => 320,
+            ResamplerQuality::Balanced => 640,
+            ResamplerQuality::HighQuality => 1120,
+            ResamplerQuality::Ultra => 2240,
+        };
+        match self {
+            Self::Fft => 0,
+            Self::Apodizing | Self::SincM => base * 2,
+            Self::Kaiser | Self::BlackmanHarris | Self::MinimumPhase => base,
+        }
+    }
+}
+
 impl PerformanceMode {
     /// Returns true if this mode represents reduced CPU / power consumption.
     pub fn is_low_power(&self) -> bool {
@@ -339,6 +426,211 @@ pub enum DsdOutput {
     NativeDsd,
 }
 
+/// DSD→PCM decimation filter.
+///
+/// DSD carries a large amount of ultrasonic noise by construction (the
+/// modulator's shaped quantization noise above the audio band). The
+/// decimation filter decides how much of that noise survives into the PCM
+/// output: a gentler filter keeps more of the audio band and more of the
+/// noise, an aggressive one trades bandwidth for a cleaner ultrasonic
+/// spectrum.
+///
+/// Every variant is a real, measured five-stage 2:1 FIR cascade — the
+/// response figures in the engine README are produced by
+/// `decode::dsd::tests`, not asserted here. The default [`Self::Standard`]
+/// reproduces the historical 63-tap design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DsdNoiseFilter {
+    /// 63-tap Blackman half-band cascade, linear phase. The default: flat to
+    /// 20 kHz and > 40 dB rejection at 100 kHz for DSD64.
+    #[default]
+    Standard,
+    /// Lower corner frequency with 95 taps, giving a flatter ultrasonic noise
+    /// profile at the cost of a little bandwidth.
+    Low,
+    /// Higher-order (127-tap Kaiser) cascade for material produced with
+    /// high-order modulators; deeper stopband.
+    HighOrder,
+    /// 191-tap Kaiser cascade with a very steep transition, rejecting nearly
+    /// all out-of-band noise at the cost of the most CPU.
+    Brickwall,
+    /// 31-tap linear-phase Hanning cascade: gentle roll-off, short latency,
+    /// more ultrasonic leakage.
+    SlowLp,
+    /// The same gentle magnitude response as [`Self::SlowLp`], converted to
+    /// minimum phase (no pre-ringing, all energy after the impulse).
+    SlowMp,
+}
+
+impl DsdNoiseFilter {
+    /// Stable, human-readable name (diagnostics and UI).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Low => "low",
+            Self::HighOrder => "high-order",
+            Self::Brickwall => "brickwall",
+            Self::SlowLp => "slow-lp",
+            Self::SlowMp => "slow-mp",
+        }
+    }
+
+    /// Every selectable filter, in UI order.
+    pub const ALL: [DsdNoiseFilter; 6] = [
+        Self::Standard,
+        Self::Low,
+        Self::HighOrder,
+        Self::Brickwall,
+        Self::SlowLp,
+        Self::SlowMp,
+    ];
+}
+
+/// Optional ultrasonic low-pass at the output.
+///
+/// Audiophile sources can carry out-of-band energy (DSD noise shaping, ADC
+/// artifacts, 24/192 transfers from analogue tape). Some tweeters, class-D
+/// amplifiers, and NOS/first-order DACs misbehave in its presence. This is a
+/// deliberate user filter, not a correction: it is bypassed in bit-perfect
+/// mode like every other sample-altering stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum UltrasonicFilter {
+    /// No filter (bit-exact bypass).
+    #[default]
+    Off,
+    /// 4th-order (24 dB/oct) low-pass at 20 kHz: the sharp metering filter.
+    Cut20k,
+    /// 2nd-order (12 dB/oct) gentle low-pass at 30 kHz.
+    Cut30k,
+    /// 2nd-order gentle low-pass at 40 kHz.
+    Cut40k,
+    /// 2nd-order gentle low-pass at 50 kHz, for ADC/DSD noise-shaping
+    /// residue.
+    Cut50k,
+    /// 8th-order (48 dB/oct) low-pass at 2× the output base rate.
+    X2,
+    /// 8th-order low-pass at 4× the output base rate.
+    X4,
+    /// 8th-order low-pass at 8× the output base rate.
+    X8,
+}
+
+impl UltrasonicFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Cut20k => "20 kHz",
+            Self::Cut30k => "30 kHz",
+            Self::Cut40k => "40 kHz",
+            Self::Cut50k => "50 kHz",
+            Self::X2 => "2x",
+            Self::X4 => "4x",
+            Self::X8 => "8x",
+        }
+    }
+
+    pub const ALL: [UltrasonicFilter; 8] = [
+        Self::Off,
+        Self::Cut20k,
+        Self::Cut30k,
+        Self::Cut40k,
+        Self::Cut50k,
+        Self::X2,
+        Self::X4,
+        Self::X8,
+    ];
+}
+
+/// One-bit delta-sigma modulator used for PCM→SDM output.
+///
+/// These are ShadowPlayer's own modulators, not clones of any vendor's
+/// proprietary designs. Each is a real fifth- or seventh-order CRFB
+/// (cascade-of-resonators, feedback) one-bit modulator with an optimized
+/// noise transfer function; the realized idle noise floor is measured by
+/// `dsp::sdm::tests`, not asserted in this table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SdmModulator {
+    /// Fifth-order one-bit modulator. Best match for DACs with a simple
+    /// analog reconstruction filter (e.g. single-bit / one-switching-element
+    /// converters).
+    #[default]
+    FifthOrder,
+    /// Seventh-order one-bit modulator. Deeper in-band noise shaping; needs
+    /// a DAC whose analog stage tolerates more out-of-band energy.
+    SeventhOrder,
+}
+
+impl SdmModulator {
+    /// The modulator order (5 or 7).
+    pub fn order(self) -> usize {
+        match self {
+            Self::FifthOrder => 5,
+            Self::SeventhOrder => 7,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FifthOrder => "5th order",
+            Self::SeventhOrder => "7th order",
+        }
+    }
+
+    pub const ALL: [SdmModulator; 2] = [Self::FifthOrder, Self::SeventhOrder];
+}
+
+/// Requested SDM output rate, as a multiple of the output base rate.
+///
+/// The real rate is always the source clock family (44.1 kHz or 48 kHz)
+/// times the selected multiple, and is only advertised when the output
+/// device actually accepts it. `Auto` asks for the highest multiple the
+/// device reports and the PCM rate divides integrally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SdmRate {
+    /// Highest rate the device supports (DSD512 → DSD256 → … → DSD64).
+    #[default]
+    Auto,
+    /// 64 × base rate (2.8224 / 3.072 MHz).
+    Dsd64,
+    /// 128 × base rate (5.6448 / 6.144 MHz).
+    Dsd128,
+    /// 256 × base rate (11.2896 / 12.288 MHz).
+    Dsd256,
+    /// 512 × base rate (22.5792 / 24.576 MHz).
+    Dsd512,
+}
+
+impl SdmRate {
+    /// Fixed multiple of the base rate, or `None` for [`Self::Auto`].
+    pub fn multiple(self) -> Option<u32> {
+        match self {
+            Self::Auto => None,
+            Self::Dsd64 => Some(64),
+            Self::Dsd128 => Some(128),
+            Self::Dsd256 => Some(256),
+            Self::Dsd512 => Some(512),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Dsd64 => "DSD64",
+            Self::Dsd128 => "DSD128",
+            Self::Dsd256 => "DSD256",
+            Self::Dsd512 => "DSD512",
+        }
+    }
+
+    pub const ALL: [SdmRate; 5] = [
+        Self::Auto,
+        Self::Dsd64,
+        Self::Dsd128,
+        Self::Dsd256,
+        Self::Dsd512,
+    ];
+}
+
 /// Per-channel routing policy for multichannel sources.
 ///
 /// ## Architectural limitation
@@ -429,17 +721,68 @@ pub enum VolumeMode {
 
 /// Per-output dither policy (spec §10 profile: "Dither: Off / TPDF").
 /// `FollowGlobal` uses the engine-wide `config.dither_enabled`; the force
-/// variants override it for a specific device profile (e.g. always-on TPDF
-/// for a noisy 16-bit DAC, always-off for a 24-bit reference DAC).
+/// variants override it for a specific device profile (e.g. always-on for a
+/// noisy 16-bit DAC, always-off for a 24-bit reference DAC). The policy only
+/// decides *whether* dither runs; [`NoiseShaper`] decides *which* shaper it
+/// uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DitherPolicy {
     /// Use the engine-wide `dither_enabled` setting.
     #[default]
     FollowGlobal,
-    /// Force TPDF dither at the integer-quantization boundary.
+    /// Force dither on at the integer-quantization boundary, using the
+    /// configured [`NoiseShaper`].
     ForceOn,
     /// Force dither off for this device.
     ForceOff,
+}
+
+/// Noise-shaping / dither family applied at the integer-quantization
+/// boundary.
+///
+/// This is deliberately separate from [`DitherPolicy`]: the policy decides
+/// *whether* dither runs for a device, this decides *which* shaper runs.
+/// `Tpdf` is the engine's historical behaviour and remains the default, so a
+/// config written before this field existed round-trips unchanged.
+///
+/// The designs are the engine's own, not HQPlayer's proprietary coefficient
+/// sets. They are named by order and weighting intent:
+///
+/// - `Shibata`: the existing 9-tap F-weighted design at 44.1/48 kHz.
+/// - `Ns5` / `Ns9`: 5th/9th-order error-feedback shapers with a rising
+///   high-frequency noise transfer function.
+/// - `Lns15`: a gentler 15th-order "low-noise shaping" design for high-rate
+///   output, where the audible band is a small fraction of Nyquist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum NoiseShaper {
+    /// Triangular-PDF dither with no noise shaping (the historical default).
+    #[default]
+    Tpdf,
+    /// Shibata F-weighted 9-tap noise shaping (44.1/48 kHz designs).
+    Shibata,
+    /// 5th-order high-pass noise shaping.
+    Ns5,
+    /// 9th-order high-pass noise shaping.
+    Ns9,
+    /// 15th-order, low-noise high-pass noise shaping.
+    Lns15,
+}
+
+impl NoiseShaper {
+    /// Stable configuration-file spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tpdf => "Tpdf",
+            Self::Shibata => "Shibata",
+            Self::Ns5 => "Ns5",
+            Self::Ns9 => "Ns9",
+            Self::Lns15 => "Lns15",
+        }
+    }
+
+    /// Every variant, in configuration order. Used by tests and the settings
+    /// surface to prove the enum is fully described.
+    pub const ALL: [Self; 5] = [Self::Tpdf, Self::Shibata, Self::Ns5, Self::Ns9, Self::Lns15];
 }
 
 /// Fallback strategy when the exact desired sample rate is not supported by the hardware device.

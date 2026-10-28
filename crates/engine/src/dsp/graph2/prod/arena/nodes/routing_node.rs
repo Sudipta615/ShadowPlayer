@@ -42,7 +42,27 @@ impl DspNode for RoutingNode {
         self.trimmer.is_active(self.channel_count)
     }
 
-    fn reset(&mut self) {}
+    fn persistent_bytes(&self) -> usize {
+        std::mem::size_of_val(self)
+            + self
+                .scratch
+                .iter()
+                .map(|plane| plane.capacity() * std::mem::size_of::<f32>())
+                .sum::<usize>()
+            + self.trimmer.matrix_fir_heap_bytes()
+    }
+
+    fn latency_samples(&self) -> usize {
+        if self.is_active() {
+            self.trimmer.latency_samples()
+        } else {
+            0
+        }
+    }
+
+    fn reset(&mut self) {
+        self.trimmer.reset();
+    }
 
     fn prepare(&mut self, sample_rate: f32, max_channels: usize) {
         self.channel_count = max_channels;

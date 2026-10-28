@@ -13,7 +13,7 @@ impl ShadowPlayerApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::NONE
-                    .fill(self.theme.bg_app)
+                    .fill(self.theme.content_panel_fill())
                     .inner_margin(Margin {
                         left: 10,
                         right: 18,
@@ -23,29 +23,6 @@ impl ShadowPlayerApp {
             )
             .show(ui, |root_ui| {
                 let full_rect = root_ui.available_rect_before_wrap();
-                // Ambient artwork bloom behind translucent glass panels
-                if self.theme.bg_card.a() < 255 {
-                    if let Some(art) = playback
-                        .current_track
-                        .and_then(|t| self.artwork_service.get_texture(&t.id))
-                    {
-                        let bloom_size =
-                            Vec2::splat(full_rect.height().max(full_rect.width()) * 0.75);
-                        let bloom_rect = Rect::from_center_size(
-                            Pos2::new(
-                                full_rect.right() - bloom_size.x * 0.35,
-                                full_rect.center().y,
-                            ),
-                            bloom_size,
-                        );
-                        root_ui.painter().image(
-                            art.id(),
-                            bloom_rect,
-                            Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                            crate::theme::with_alpha(egui::Color32::WHITE, 36),
-                        );
-                    }
-                }
                 let avail_w = full_rect.width();
                 let avail_h = full_rect.height();
                 let is_help_view = self.app_state.active_nav == NavItem::Help;
@@ -382,6 +359,10 @@ impl ShadowPlayerApp {
                             self.sync_effective_theme();
                             self.settings_dirty = true;
                         }
+                        if sv_actions.reduce_motion_changed.is_some() {
+                            self.sync_effective_theme();
+                            self.settings_dirty = true;
+                        }
                         if sv_actions.import_theme {
                             if let Some(paths) = rfd::FileDialog::new()
                                 .set_title("Import ShadowPlayer Theme")
@@ -421,10 +402,6 @@ impl ShadowPlayerApp {
                                     ));
                                 }
                             }
-                        }
-                        if sv_actions.open_custom_themes_folder {
-                            self.theme_manager.open_custom_themes_folder();
-                            self.toasts.info("Opened custom-theme folder");
                         }
                         if sv_actions.open_artwork_fetch {
                             let missing_count = self

@@ -62,9 +62,15 @@ impl AudioEngine {
         // policy is PCM/DoP (including a DSD→PCM transition); otherwise a raw
         // decoder would be paired with a stale native render thread and the
         // PCM ring would never reach the DAC.
-        let wants_native =
-            decoder.is_dsd() && self.config.dsd_output == config::DsdOutput::NativeDsd;
-        if self.dsd.native_dsd_active && !wants_native {
+        // PCM→SDM is its own opt-in: a PCM source does not consult
+        // `dsd_output` (which selects the transport for *DSD sources*).
+        // If native DSD is unavailable the engine stays on PCM and records
+        // the reason, exactly as for an explicit request.
+        let wants_sdm = !decoder.is_dsd() && self.config.sdm.enabled;
+        let wants_native = (decoder.is_dsd()
+            && self.config.dsd_output == config::DsdOutput::NativeDsd)
+            || wants_sdm;
+        if (self.dsd.native_dsd_active || self.dsd.sdm_active) && !wants_native {
             let output_rate = {
                 let output = self.audio_output.as_mut().ok_or_else(|| {
                     EngineError::Output(OutputError::StreamError(
@@ -81,11 +87,26 @@ impl AudioEngine {
             self.dsd.native_dsd_active = false;
             self.dsd.dsd_wire_format = None;
             self.dsd.dsd_byte_buffer = None;
+            self.dsd.sdm_active = false;
+            self.dsd.sdm_output = None;
+            self.dsd.sdm_plan = None;
             self.graph.set_dop_bypass(false);
         }
 
         // ── DSD output mode selection (§7) ─────────────────────────────────
         let mut native_dsd_active = false;
+        // A new track always starts with a clean PCM→SDM stage. The output
+        // transport (if it was already native DSD) is reconfigured below.
+        self.dsd.sdm_active = false;
+        self.dsd.sdm_output = None;
+        self.dsd.sdm_plan = None;
+        self.dsd.sdm_fallback_reason = None;
+        // The decimation filter only matters on the PCM-conversion path, but
+        // selecting it here (before any decode) keeps the cascade in sync with
+        // the config for the whole track.
+        if decoder.is_dsd() {
+            decoder.set_dsd_noise_filter(self.config.dsd_noise_filter);
+        }
         let mut dsd_report = if decoder.is_dsd() {
             let requested = match self.config.dsd_output {
                 config::DsdOutput::NativeDsd => crate::decode::DsdTransport::Native,
@@ -122,6 +143,60 @@ impl AudioEngine {
                 }
             }
         }
+        let mut sdm_active = false;
+        if wants_sdm {
+            match self.negotiate_sdm(&decoder) {
+                Ok((plan, format, buffer)) => {
+                    let channels = decoder.info().channels;
+                    match crate::dsp::sdm::SdmOutput::new(
+                        plan,
+                        channels,
+                        format,
+                        self.config.sdm.modulator.order(),
+                    ) {
+                        Some(stage) => {
+                            sdm_active = true;
+                            self.dsd.sdm_output = Some(stage);
+                            self.dsd.sdm_plan = Some(plan);
+                            self.dsd.dsd_wire_format = Some(format);
+                            self.dsd.dsd_byte_buffer = Some(buffer);
+                            // The PCM DSP chain runs at the working rate; the
+                            // resampler below converts the source to it.
+                            self.output_sample_rate = plan.working_rate;
+                            self.graph.update_sample_rate(plan.working_rate as f32);
+                            info!(
+                                "PCM→SDM active: {} modulator, {} ch, {} Hz → {} bps \
+                                 (working {} Hz, ×{}, {} wire)",
+                                self.config.sdm.modulator.label(),
+                                channels,
+                                plan.pcm_rate,
+                                plan.dsd_rate,
+                                plan.working_rate,
+                                plan.stage_factor,
+                                format.label(),
+                            );
+                        }
+                        None => {
+                            let reason = format!(
+                                "could not build the {} modulator for {} channels",
+                                self.config.sdm.modulator.label(),
+                                channels
+                            );
+                            warn!("PCM→SDM unavailable: {reason}; staying on PCM");
+                            self.dsd.sdm_fallback_reason = Some(reason);
+                            if let Some(output) = self.audio_output.as_mut() {
+                                let _ = output.set_native_dsd(None);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("PCM→SDM unavailable ({e}); staying on PCM");
+                    self.dsd.sdm_fallback_reason = Some(e.to_string());
+                }
+            }
+        }
+
         if !native_dsd_active
             && decoder.is_dsd()
             && self.config.dsd_output != config::DsdOutput::PcmConvert
@@ -198,9 +273,15 @@ impl AudioEngine {
         if native_dsd_active {
             decoder.set_native_dsd_mode(true);
         }
+        // Record the filter that actually ran: only the PCM-conversion path
+        // decimates, so native/DoP transport reports no filter.
+        if dsd_report.actual == crate::decode::DsdTransport::PcmConversion {
+            dsd_report.noise_filter = decoder.dsd_noise_filter();
+        }
         self.dsd.dop_active = dop_active;
         self.dsd.dop_rate = if dop_active { dop_rate.unwrap_or(0) } else { 0 };
         self.dsd.native_dsd_active = native_dsd_active;
+        self.dsd.sdm_active = sdm_active;
         self.dsd.dsd_transport_report = dsd_report;
         if dop_active || native_dsd_active {
             self.graph.set_dop_bypass(true);
@@ -224,10 +305,11 @@ impl AudioEngine {
         let info = decoder.info().clone();
         self.clock.reset_track(info.sample_rate);
         self.analyzer.set_sample_rate(info.sample_rate);
+        self.apodizing.reset(info.sample_rate as f32);
         self.duration_secs = info.duration_secs;
         self.recovery.consecutive_decode_errors = 0;
 
-        if !dop_active && !native_dsd_active {
+        if !dop_active && !native_dsd_active && !sdm_active {
             if let Some(ref mut output) = self.audio_output {
                 let caps = output.capabilities();
                 let target_rate =
@@ -251,6 +333,7 @@ impl AudioEngine {
         } else {
             recovery::build_resampler(
                 self.config.resampler_quality,
+                self.config.resampler_filter,
                 self.clock.source_sample_rate as f32,
                 self.output_sample_rate as f32,
                 resample_speed,
@@ -347,6 +430,8 @@ impl AudioEngine {
                 speed,
                 dop_active,
                 native_dsd_active,
+                sdm_active,
+                sdm: self.sdm_report(),
                 dsd_transport,
                 dsd_transport_report: dsd_transport_report.clone(),
                 volume: old.volume,
@@ -549,6 +634,27 @@ impl AudioEngine {
         ),
         OutputError,
     > {
+        let bit_rate = decoder
+            .dsd_bit_rate()
+            .ok_or_else(|| OutputError::StreamError("not a DSD source".to_string()))?;
+        let channels = decoder.info().channels as u16;
+        self.negotiate_native_dsd_for(bit_rate, channels)
+    }
+
+    /// Negotiate native-DSD transport for an explicit bit rate and channel
+    /// count. Shared by DSD sources (which derive the rate from the decoder)
+    /// and PCM→SDM output (which derives it from the SDM rate plan).
+    fn negotiate_native_dsd_for(
+        &mut self,
+        bit_rate: u32,
+        channels: u16,
+    ) -> Result<
+        (
+            crate::decode::dsd::DsdWireFormat,
+            std::sync::Arc<crate::buffer::DsdByteBuffer>,
+        ),
+        OutputError,
+    > {
         let out_info = {
             let Some(output) = self.audio_output.as_mut() else {
                 return Err(OutputError::StreamError(
@@ -610,10 +716,6 @@ impl AudioEngine {
         // constraints. The exact stream is still verified by set_native_dsd;
         // this prevents choosing DSD_U8 merely because it was first in a
         // legacy format list when a DSD128+ endpoint exposes another format.
-        let bit_rate = decoder
-            .dsd_bit_rate()
-            .ok_or_else(|| OutputError::StreamError("not a DSD source".to_string()))?;
-        let channels = decoder.info().channels as u16;
         let wire_format = caps
             .iter()
             .find(|cap| cap.supports(bit_rate, channels))
@@ -668,6 +770,68 @@ impl AudioEngine {
         Ok((format, buffer))
     }
 
+    /// Negotiate a PCM→SDM native-DSD transport.
+    ///
+    /// Tries every rate the configuration and device allow, highest first
+    /// for `Auto`, and returns the first transport the backend actually
+    /// accepts. A failure is explicit and leaves the caller free to fall
+    /// back to PCM; the backend is returned to PCM mode before the error is
+    /// propagated so a failed attempt cannot strand it in DSD mode.
+    fn negotiate_sdm(
+        &mut self,
+        decoder: &Decoder,
+    ) -> Result<
+        (
+            crate::dsp::sdm::SdmRatePlan,
+            crate::decode::dsd::DsdWireFormat,
+            std::sync::Arc<crate::buffer::DsdByteBuffer>,
+        ),
+        OutputError,
+    > {
+        let info = decoder.info();
+        let channels = info.channels as u16;
+        let supported = {
+            let output = self.audio_output.as_ref().ok_or_else(|| {
+                OutputError::StreamError("no output device is active".to_string())
+            })?;
+            let mut rates = Vec::new();
+            for cap in output.native_dsd_capability_matrix() {
+                rates.extend(cap.bit_rates);
+            }
+            rates
+        };
+        let plans = crate::dsp::sdm::candidates(info.sample_rate, self.config.sdm.rate, &supported);
+        if plans.is_empty() {
+            return Err(OutputError::StreamError(format!(
+                "native DSD has no supported rate for a {} Hz PCM source (requested {})",
+                info.sample_rate,
+                self.config.sdm.rate.label()
+            )));
+        }
+
+        let mut last_error = None;
+        for plan in plans {
+            match self.negotiate_native_dsd_for(plan.dsd_rate, channels) {
+                Ok((wire_format, buffer)) => return Ok((plan, wire_format, buffer)),
+                Err(e) => {
+                    warn!(
+                        "PCM→SDM: backend refused {} bps ({}); trying the next rate",
+                        plan.dsd_rate, e
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        // Do not leave the backend holding a half-opened DSD stream.
+        if let Some(output) = self.audio_output.as_mut() {
+            let _ = output.set_native_dsd(None);
+        }
+        Err(last_error.unwrap_or_else(|| {
+            OutputError::StreamError("no native DSD rate could be negotiated".to_string())
+        }))
+    }
+
     /// Sample-accurate gapless handoff to the next track.
     ///
     /// Unlike [`Self::load_track`] — which rebuilds the resampler and resets
@@ -711,6 +875,7 @@ impl AudioEngine {
             self.flush_resampler_tail(resampler);
             let r = recovery::build_resampler(
                 self.config.resampler_quality,
+                self.config.resampler_filter,
                 info.sample_rate as f32,
                 self.output_sample_rate as f32,
                 self.speed,
@@ -749,6 +914,7 @@ impl AudioEngine {
 
         self.clock.reset_track(info.sample_rate);
         self.analyzer.set_sample_rate(info.sample_rate);
+        self.apodizing.reset(info.sample_rate as f32);
         self.duration_secs = info.duration_secs;
         self.recovery.consecutive_decode_errors = 0;
         self.scratch.crossfade_triggered = false;
@@ -878,6 +1044,7 @@ impl AudioEngine {
             self.flush_resampler_tail(resampler);
             let r = recovery::build_resampler(
                 self.config.resampler_quality,
+                self.config.resampler_filter,
                 info.sample_rate as f32,
                 self.output_sample_rate as f32,
                 self.speed,
@@ -919,6 +1086,7 @@ impl AudioEngine {
 
         self.clock.reset_track(info.sample_rate);
         self.analyzer.set_sample_rate(info.sample_rate);
+        self.apodizing.reset(info.sample_rate as f32);
         self.duration_secs = info.duration_secs;
         self.recovery.consecutive_decode_errors = 0;
         self.scratch.crossfade_triggered = false;

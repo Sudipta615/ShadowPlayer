@@ -20,7 +20,15 @@ impl DspGraph {
                 (false, 0.0, 0.0)
             } else {
                 match cap.name {
-                    "channel_trim" => (self.routing().trimmer.is_active(mc_channels), 0.0, 0.0),
+                    "channel_trim" => {
+                        let trimmer = &self.routing().trimmer;
+                        let latency_ms = if self.sample_rate > 0.0 {
+                            trimmer.latency_samples() as f32 / self.sample_rate * 1000.0
+                        } else {
+                            0.0
+                        };
+                        (trimmer.is_active(mc_channels), latency_ms, 0.0)
+                    }
                     "channel_eq" | "bass_management" | "channel_mix" => (false, 0.0, 0.0),
                     "out_preamp" => (self.out_preamp().is_active(), 0.0, 0.0),
                     "in_preamp" => (self.in_preamp().is_active(), 0.0, 0.0),
@@ -91,6 +99,7 @@ impl DspGraph {
                         };
                         (active, lookahead, tail)
                     }
+                    "ultrasonic" => (self.ultrasonic().is_active(), 0.0, 0.0),
                     "resampler" | "dither" => (false, 0.0, 0.0),
                     _ => (false, 0.0, 0.0),
                 }
@@ -100,6 +109,7 @@ impl DspGraph {
                 active,
                 latency_ms,
                 tail_ms,
+                channel_support: cap.channel_support,
             });
         }
         nodes
@@ -159,6 +169,14 @@ impl DspGraph {
         if self.correction().is_active() {
             total += self.correction().latency_ms(self.sample_rate);
         }
+        if self
+            .routing()
+            .trimmer
+            .is_active(self.multichannel_layout.channel_count())
+            && self.sample_rate > 0.0
+        {
+            total += self.routing().trimmer.latency_samples() as f32 / self.sample_rate * 1000.0;
+        }
         total
     }
 }
@@ -202,6 +220,16 @@ impl DspGraph {
         } else {
             0.0
         };
+        let routing_latency_ms = if self.sample_rate > 0.0
+            && self
+                .routing()
+                .trimmer
+                .is_active(self.multichannel_layout.channel_count())
+        {
+            self.routing().trimmer.latency_samples() as f32 / self.sample_rate * 1000.0
+        } else {
+            0.0
+        };
         let correction_latency_ms = if self.correction().is_active() {
             self.correction().latency_ms(self.sample_rate)
         } else {
@@ -220,6 +248,7 @@ impl DspGraph {
         let total_latency_ms = limiter_lookahead_ms
             + limiter_detector_delay_ms
             + convolution_latency_ms
+            + routing_latency_ms
             + correction_latency_ms
             + crossfeed_delay_ms
             + timestretch_latency_ms
@@ -231,6 +260,7 @@ impl DspGraph {
             limiter_lookahead_ms,
             limiter_detector_delay_ms,
             convolution_latency_ms,
+            routing_latency_ms,
             correction_latency_ms,
             crossfeed_delay_ms,
             timestretch_latency_ms,

@@ -59,6 +59,42 @@ impl AudioSession {
         self.send(EngineCommand::SetPrecisionMode(mode));
     }
 
+    /// Select how DSD sources reach the DAC. Applies on the next stream open.
+    pub fn set_dsd_output(&self, output: config::DsdOutput) {
+        self.send(EngineCommand::SetDsdOutput(output));
+    }
+
+    /// Select the DSD→PCM decimation filter. Applies on the next DSD stream.
+    pub fn set_dsd_noise_filter(&self, filter: config::DsdNoiseFilter) {
+        self.send(EngineCommand::SetDsdNoiseFilter(filter));
+    }
+
+    /// Select the output-domain ultrasonic low-pass. Applies live.
+    pub fn set_ultrasonic_filter(&self, filter: config::UltrasonicFilter) {
+        self.send(EngineCommand::SetUltrasonicFilter(filter));
+    }
+
+    /// Select the polyphase resampler filter family. Rebuilds active
+    /// resamplers on the control path.
+    pub fn set_resampler_filter(&self, filter: config::ResamplerFilter) {
+        self.send(EngineCommand::SetResamplerFilter(filter));
+    }
+
+    /// Select the final quantization noise shaper. Applies on the next stream.
+    pub fn set_noise_shaper(&self, shaper: config::NoiseShaper) {
+        self.send(EngineCommand::SetNoiseShaper(shaper));
+    }
+
+    /// Configure PCM→SDM native-DSD output. Applies on the next stream open.
+    pub fn set_sdm_config(&self, cfg: config::SdmConfig) {
+        self.send(EngineCommand::SetSdmConfig(cfg));
+    }
+
+    /// Replace the device/rate-keyed DAC correction profiles. Applies live.
+    pub fn set_dac_correction(&self, cfg: config::DacCorrectionConfig) {
+        self.send(EngineCommand::SetDacCorrection(cfg));
+    }
+
     /// Round-trip output latency reported by the backend, in milliseconds.
     pub fn latency_ms(&self) -> f32 {
         self.handle.latency_ms()

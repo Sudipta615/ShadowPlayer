@@ -126,6 +126,38 @@ pub struct DspNodeInfo {
     /// Tail: audio the stage still emits after its input stops (ms), 0 when
     /// inactive.
     pub tail_ms: f32,
+    /// Channel scope of the stage. `StereoOnly` is a real limitation in a
+    /// `>2`-channel stream: the stage processes the front L/R pair and leaves
+    /// the other channels untouched. Consumers must show that, never infer
+    /// it from the stage name.
+    pub channel_support: StageChannelSupport,
+}
+
+impl DspNodeInfo {
+    /// Whether this stage only processes the front L/R pair.
+    pub fn is_front_pair_only(&self) -> bool {
+        self.channel_support == StageChannelSupport::StereoOnly
+    }
+}
+
+/// Names of the stages that are active but only process the front L/R pair.
+///
+/// Empty for a stereo stream (where "front pair" is the whole stream) and for
+/// a bypassed chain. A non-empty list is the exact set of stages a
+/// multichannel listener must be told about: their settings do not affect the
+/// centre, surrounds, or LFE.
+pub fn front_pair_only_active_stages(
+    nodes: &[DspNodeInfo],
+    multichannel: bool,
+) -> Vec<&'static str> {
+    if !multichannel {
+        return Vec::new();
+    }
+    nodes
+        .iter()
+        .filter(|node| node.active && node.is_front_pair_only())
+        .map(|node| node.name)
+        .collect()
 }
 
 pub static DSP_STAGE_CAPABILITIES: &[DspStageCapability] = &[
@@ -330,6 +362,16 @@ pub static DSP_STAGE_CAPABILITIES: &[DspStageCapability] = &[
         precision: StagePrecision::Any,
     },
     DspStageCapability {
+        name: "ultrasonic",
+        channel_support: StageChannelSupport::AllChannels,
+        position: "output domain",
+        stateful: true,
+        realtime_safe: true,
+        bit_perfect_compatible: false,
+        sample_rate_sensitive: true,
+        precision: StagePrecision::F32,
+    },
+    DspStageCapability {
         name: "limiter",
         channel_support: StageChannelSupport::AllChannels,
         position: "output domain",
@@ -379,6 +421,8 @@ pub struct DspPipeline {
     // Final safety stage — runs in the output domain (after resampling and
     // crossfade mixing), not as part of the post-mix chain above.
     pub limiter: LookaheadLimiter,
+    /// Optional output ultrasonic low-pass, applied before the limiter.
+    pub ultrasonic: crate::dsp::ultrasonic::UltrasonicStage,
 
     /// Multichannel management stage: per-channel gain/delay/polarity trim,
     /// routing, LFE management, mains high-pass, and per-channel EQ. Runs on
@@ -430,6 +474,8 @@ impl DspPipeline {
         let loudness_out = LoudnessNormalizer::new(sample_rate);
         let loudness_in = LoudnessNormalizer::new(sample_rate);
         let limiter = LookaheadLimiter::new(sample_rate);
+        let ultrasonic =
+            crate::dsp::ultrasonic::UltrasonicStage::new(config.ultrasonic_filter, sample_rate);
         let stereo_enhancer = StereoEnhancer::new();
         let bass_enhancer = BassEnhancer::new(sample_rate);
         let crossfeed = Crossfeed::new(sample_rate);
@@ -462,6 +508,7 @@ impl DspPipeline {
             bass_enhancer,
             timestretcher,
             limiter,
+            ultrasonic,
             channel_trim,
             multichannel_layout: ChannelLayout::Stereo,
             volume,
@@ -561,6 +608,9 @@ impl DspPipeline {
             config.loudness.max_boost_db,
             config.loudness.max_attenuation_db,
         );
+
+        self.ultrasonic
+            .configure(config.ultrasonic_filter, self.sample_rate);
 
         self.limiter.set_enabled(config.limiter.enabled);
         self.limiter.set_lookahead(config.limiter.lookahead_ms);

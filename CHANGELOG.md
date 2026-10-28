@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.24.0] - 2026-10-28
+
+*Released with audio-engine 1.11.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **DSD transport and decimation controls.** PCM conversion, DSD over PCM, and native DSD transport selection; Standard/Low/High-Order/Brickwall and slow linear/minimum-phase decimation filters. Changes apply on the next DSD stream and the negotiated fallback is reported.
+- **Output ultrasonic filtering.** Live off/20/30/40/50 kHz and rate-relative 2x/4x/8x low-pass selections, with an explicit bypass and an inactive report when a rate-relative corner cannot exist.
+- **Polyphase resampler families and high-order noise shaping.** FFT, Kaiser, Blackman-Harris, minimum-phase, apodizing, and Sinc-M families; TPDF, Shibata, NS5, NS9, and LNS15 shapers. Active resamplers rebuild on the control path; a new shaper applies when the output stream opens.
+- **Native DSD modulation (PCM→SDM).** Fifth- and seventh-order f64 modulators, Auto or fixed DSD64/128/256/512 rate requests, and device-negotiated reporting.
+- **Sparse matrix FIR routing with a worker pool.** Up to 16 multichannel routes, per-route gain/delay/IR, partition latency reporting, and bit-identical parallel summation above four routes.
+- **Apodizing guidance.** Read-only near-Nyquist burst counting and a per-track recommendation, surfaced in the output settings without silently switching filters.
+- **Device/rate DAC correction.** A separate FIR bank keyed by output device and session rate, with a desktop profile editor, live reload, and distinct reporting from room correction.
+
+---
+
 ## [0.23.0] - 2026-10-27
 
 *Released with audio-engine 1.10.0. The player and the engine are versioned separately and released

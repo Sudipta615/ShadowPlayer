@@ -42,10 +42,15 @@ fn fixture() -> common::TempFile {
 /// The returned tuple is the handle a host would hold and the flag that stops
 /// the tick thread.
 fn start_engine() -> (EngineHandle, Receiver<EngineEvent>, Arc<AtomicBool>) {
-    let config = EngineConfig {
-        output_backend: AudioBackend::Null,
-        ..EngineConfig::default()
-    };
+    start_engine_with(EngineConfig::default())
+}
+
+/// An engine on the null backend with a caller-supplied config, tick thread
+/// running. `output_backend` is forced to Null.
+fn start_engine_with(
+    mut config: EngineConfig,
+) -> (EngineHandle, Receiver<EngineEvent>, Arc<AtomicBool>) {
+    config.output_backend = AudioBackend::Null;
     let mut engine = AudioEngine::new(config).expect("the engine must be constructible");
     engine.start().expect("the null backend must start");
 
@@ -383,6 +388,52 @@ fn opening_a_file_that_does_not_exist_reports_an_error_instead_of_playing() {
         }
     }
     assert!(saw_report, "the engine must report a file it cannot open");
+
+    running.store(false, Ordering::Relaxed);
+}
+
+/// PCM→SDM is an explicit request, and a request the endpoint cannot honour
+/// must be reported and fall back to PCM — never silently claim DSD.
+#[test]
+fn a_pcm_to_sdm_request_falls_back_to_pcm_when_native_dsd_is_unavailable() {
+    let file = fixture();
+    let config = EngineConfig {
+        sdm: config::SdmConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..EngineConfig::default()
+    };
+    let (handle, events, running) = start_engine_with(config);
+
+    handle.open_file(file.path());
+    wait_for(&events, "SourceOpened", |event| {
+        matches!(event, EngineEvent::SourceOpened { .. })
+    });
+    wait_until("the engine to report the SDM fallback", || {
+        handle.playback_info().sdm.fallback_reason.is_some()
+    });
+
+    let info = handle.playback_info();
+    assert!(
+        !info.sdm_active,
+        "the null backend has no native DSD, so SDM must not be reported active"
+    );
+    assert!(!info.native_dsd_active);
+    let reason = info
+        .sdm
+        .fallback_reason
+        .clone()
+        .expect("the fallback must be explained");
+    assert!(
+        reason.contains("native DSD unavailable"),
+        "the fallback reason must name the missing capability, got {reason:?}"
+    );
+
+    // The PCM path must still work after the refused conversion.
+    wait_until("the PCM playhead to advance", || {
+        handle.playback_info().position_secs > 0.0
+    });
 
     running.store(false, Ordering::Relaxed);
 }

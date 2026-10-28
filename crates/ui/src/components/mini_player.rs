@@ -150,25 +150,14 @@ impl MiniPlayer<'_> {
         }
         // Play/pause
         let play_rect = Rect::from_center_size(Pos2::new(left + 38.0, cy), Vec2::splat(30.0));
-        let play_resp = actions.interact(
+        let play_id = actions.scope_id().with("mini_play");
+        let play_resp = crate::components::play_button::play_button_at(
+            &mut actions,
             play_rect,
-            actions.scope_id().with("mini_play"),
-            Sense::click(),
+            play_id,
+            self.is_playing,
+            self.theme,
         );
-        let play_color = if play_resp.hovered() {
-            self.theme.accent.gamma_multiply(1.18)
-        } else {
-            self.theme.accent
-        };
-        actions
-            .painter()
-            .circle_filled(play_rect.center(), 15.0, play_color);
-        let icon_rect = Rect::from_center_size(play_rect.center(), Vec2::splat(12.0));
-        if self.is_playing {
-            crate::components::icons::draw_pause(&actions, icon_rect, Color32::WHITE);
-        } else {
-            crate::components::icons::draw_play(&actions, icon_rect, Color32::WHITE, true);
-        }
         let _ = play_resp
             .clone()
             .on_hover_text(if self.is_playing { "Pause" } else { "Play" });

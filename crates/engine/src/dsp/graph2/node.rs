@@ -184,6 +184,8 @@ pub enum ProdStage {
     /// The creative-effects insert — chorus, flanger, phaser, delay and
     /// saturation (post-stereo, pre-timestretch).
     CreativeFx,
+    /// Output ultrasonic low-pass (output domain, before the limiter).
+    Ultrasonic,
 }
 
 impl ProdStage {
@@ -209,11 +211,12 @@ impl ProdStage {
             ProdStage::Spatial => 16,
             ProdStage::PluginHost => 17,
             ProdStage::CreativeFx => 18,
+            ProdStage::Ultrasonic => 19,
         }
     }
 
     /// Every production stage, in arena-slot order.
-    pub const ALL: [ProdStage; 19] = [
+    pub const ALL: [ProdStage; 20] = [
         ProdStage::MixBus,
         ProdStage::Eq,
         ProdStage::Dynamics,
@@ -233,6 +236,7 @@ impl ProdStage {
         ProdStage::Spatial,
         ProdStage::PluginHost,
         ProdStage::CreativeFx,
+        ProdStage::Ultrasonic,
     ];
 
     /// The stage that occupies `slot`, or `None` when the slot is not a
@@ -267,6 +271,7 @@ impl ProdStage {
             ProdStage::Spatial => "spatial",
             ProdStage::PluginHost => "plugin_host",
             ProdStage::CreativeFx => "creative_fx",
+            ProdStage::Ultrasonic => "ultrasonic",
         }
     }
 
@@ -282,6 +287,7 @@ impl ProdStage {
                 | ProdStage::Routing
                 | ProdStage::Spatial
                 | ProdStage::PluginHost
+                | ProdStage::Ultrasonic
         )
     }
 }

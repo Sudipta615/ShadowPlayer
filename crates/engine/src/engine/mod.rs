@@ -124,6 +124,9 @@ pub struct AudioEngine {
     /// Real-time level/spectrum analyzer fed from the decode loop. Hosts
     /// share the same `Arc` via [`Self::analyzer`] or the handle.
     analyzer: Arc<AudioAnalyzer>,
+    /// Per-track source apodizing-need counter. Fed from the decode thread;
+    /// published on the telemetry cadence so the output callback never sees it.
+    apodizing: crate::dsp::apodizing::ApodizingDetector,
     config: EngineConfig,
     /// The result of validating `config` at construction.
     ///

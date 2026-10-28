@@ -140,6 +140,8 @@ pub struct EngineSettings {
     /// All DSP stages bypassed; only volume and seek fades preserved.
     pub bit_perfect: bool,
     pub dither_enabled: bool,
+    /// Noise-shaping family selected for the next PCM output stream.
+    pub noise_shaper: config::NoiseShaper,
     pub resampler_quality: config::ResamplerQuality,
     pub sample_rate_policy: config::SampleRatePolicy,
     pub volume_mode: config::VolumeMode,
@@ -244,6 +246,7 @@ impl Default for EngineSettings {
             precision_mode: config::PrecisionMode::Performance,
             bit_perfect: false,
             dither_enabled: true,
+            noise_shaper: config::NoiseShaper::Tpdf,
             resampler_quality: config::ResamplerQuality::Balanced,
             sample_rate_policy: config::SampleRatePolicy::FollowTrack,
             volume_mode: config::VolumeMode::SoftwareOnly,
@@ -402,6 +405,7 @@ impl crate::engine::AudioEngine {
             precision_mode: cfg.precision_mode,
             bit_perfect: self.playback_info.load().bit_perfect,
             dither_enabled: cfg.dither_enabled,
+            noise_shaper: cfg.noise_shaper,
             resampler_quality: cfg.resampler_quality,
             sample_rate_policy: cfg.sample_rate_policy.clone(),
             volume_mode: cfg.volume_mode,

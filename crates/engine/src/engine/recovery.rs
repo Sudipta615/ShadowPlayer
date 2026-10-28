@@ -113,6 +113,37 @@ impl AudioEngine {
         new_output.set_dither_enabled(self.config.dither_enabled);
         let mut actual_rate = new_output.sample_rate();
 
+        // Re-negotiate PCM→SDM first: it also uses the native-DSD transport,
+        // but unlike a DSD source it has its own rate plan and a live
+        // modulator stage. A failed restore is an explicit PCM fallback.
+        let mut needs_start = true;
+        let mut sdm_was_disabled = false;
+        if self.dsd.sdm_active {
+            match self.try_restore_sdm(new_output.as_mut()) {
+                Ok(rate) => {
+                    actual_rate = rate;
+                    needs_start = false;
+                    new_output.set_dither_enabled(false);
+                    info!(
+                        "PCM→SDM native DSD transport restored during recovery (working {} Hz)",
+                        rate
+                    );
+                }
+                Err(e) => {
+                    warn!("PCM→SDM recovery failed ({e}); falling back to PCM");
+                    self.dsd.sdm_active = false;
+                    self.dsd.sdm_output = None;
+                    self.dsd.sdm_plan = None;
+                    self.dsd.sdm_fallback_reason = Some(format!(
+                        "output device changed during PCM→SDM; PCM fallback ({e})"
+                    ));
+                    sdm_was_disabled = true;
+                    let _ = new_output.set_native_dsd(None);
+                    actual_rate = new_output.sample_rate();
+                }
+            }
+        }
+
         // Re-negotiate native DSD before starting the replacement output.
         // Starting a PCM stream while the decoder is still emitting raw DSD
         // would either lose the bitstream or feed it into the wrong transport.
@@ -121,7 +152,6 @@ impl AudioEngine {
         let mut dop_was_disabled = false;
         let mut dop_restored = false;
         let mut native_failure_reason: Option<String> = None;
-        let mut needs_start = true;
         if self.dsd.native_dsd_active {
             let native_result = self.active_native_dsd_params();
             match native_result {
@@ -299,7 +329,7 @@ impl AudioEngine {
         // match: the source rate changed (DoP rate → PCM rate) and the
         // resampler must be rebuilt from the decoder's current info.
         let sample_rate_changed =
-            actual_rate != old_rate || dop_was_disabled || native_was_disabled;
+            actual_rate != old_rate || dop_was_disabled || native_was_disabled || sdm_was_disabled;
 
         // A normal device/rate transition keeps source-domain decoder chunks,
         // output-domain FIFOs, the ring-buffered audio, and DSP state alive.
@@ -307,7 +337,7 @@ impl AudioEngine {
         // preserves their pending input/output and blends the old filter tail
         // into the new ratio. Only a DoP→PCM encoding transition must flush
         // encoded samples, because DoP words cannot be mixed with PCM frames.
-        if dop_was_disabled || native_was_disabled {
+        if dop_was_disabled || native_was_disabled || sdm_was_disabled {
             self.sample_sink.reset();
             self.scratch.pending_output_frames.clear();
             self.scratch.pending_multichannel.clear();
@@ -385,7 +415,7 @@ impl AudioEngine {
         // A DSD transport fallback changed the decoder's source format, so
         // rebuild only the affected resampler(s) after encoded/raw FIFOs have
         // been flushed.
-        if dop_was_disabled || native_was_disabled {
+        if dop_was_disabled || native_was_disabled || sdm_was_disabled {
             // Rebuild resampler(s) if we have an active stream.
             #[cfg(feature = "resample")]
             if let Some(ref mut stream) = self.stream {
@@ -394,6 +424,7 @@ impl AudioEngine {
                         let source_rate = decoder.info().sample_rate;
                         *resampler = build_resampler(
                             self.config.resampler_quality,
+                            self.config.resampler_filter,
                             source_rate as f32,
                             actual_rate as f32,
                             self.speed,
@@ -426,6 +457,7 @@ impl AudioEngine {
                         let out_rate = outgoing_decoder.info().sample_rate;
                         *outgoing_resampler = build_resampler(
                             self.config.resampler_quality,
+                            self.config.resampler_filter,
                             out_rate as f32,
                             actual_rate as f32,
                             self.speed,
@@ -435,6 +467,7 @@ impl AudioEngine {
                         let in_rate = incoming_decoder.info().sample_rate;
                         *incoming_resampler = build_resampler(
                             self.config.resampler_quality,
+                            self.config.resampler_filter,
                             in_rate as f32,
                             actual_rate as f32,
                             self.speed,
@@ -459,6 +492,14 @@ impl AudioEngine {
                 }
             }
         }
+
+        // Publish the SDM outcome (active with a restored transport, or the
+        // explicit PCM fallback) alongside the other transport state.
+        let sdm_report = self.sdm_report();
+        self.write_playback_info(|pb| {
+            pb.sdm_active = sdm_report.active;
+            pb.sdm = sdm_report.clone();
+        });
 
         self.recovery.successful_playback_ticks = 0; // Reset the stability timer on recovery
         self.recovery.stream_recovery_attempts = 0;
@@ -494,6 +535,58 @@ impl AudioEngine {
         }
         ((frames as u128 * new_rate as u128 + (old_rate as u128 / 2)) / old_rate as u128)
             .min(usize::MAX as u128) as usize
+    }
+
+    /// Restore a PCM→SDM native-DSD transport on a replacement output.
+    ///
+    /// Reuses the negotiated wire format, rate plan, and byte ring. The stage
+    /// is reset because the output device discontinuity has already broken
+    /// sample continuity; carrying stale modulator state would only add a
+    /// click.
+    fn try_restore_sdm(
+        &mut self,
+        new_output: &mut dyn crate::output::Output,
+    ) -> Result<u32, crate::output::OutputError> {
+        let plan = self.dsd.sdm_plan.ok_or_else(|| {
+            crate::output::OutputError::StreamError("missing PCM→SDM rate plan".to_string())
+        })?;
+        let wire_format = self.dsd.dsd_wire_format.ok_or_else(|| {
+            crate::output::OutputError::StreamError("missing PCM→SDM wire format".to_string())
+        })?;
+        let buffer = self.dsd.dsd_byte_buffer.clone().ok_or_else(|| {
+            crate::output::OutputError::StreamError("missing PCM→SDM byte ring".to_string())
+        })?;
+        let channels = self.sdm_channel_count().ok_or_else(|| {
+            crate::output::OutputError::StreamError("no active PCM source for SDM".to_string())
+        })?;
+        buffer.reset();
+        let params = crate::output::NativeDsdParams {
+            wire_format,
+            bit_rate: plan.dsd_rate,
+            channels,
+            buffer,
+        };
+        let actual = new_output.set_native_dsd(Some(params))?;
+        let actual = actual.ok_or_else(|| {
+            crate::output::OutputError::StreamError(
+                "backend returned PCM while PCM→SDM native DSD was requested".to_string(),
+            )
+        })?;
+        self.dsd.dsd_wire_format = Some(actual);
+        if let Some(stage) = self.dsd.sdm_output.as_mut() {
+            stage.reset();
+        }
+        Ok(plan.working_rate)
+    }
+
+    /// Channel count of the active PCM stream (used to restore SDM).
+    fn sdm_channel_count(&self) -> Option<u16> {
+        match self.stream.as_ref()? {
+            PlaybackStream::Single { decoder, .. } => Some(decoder.info().channels as u16),
+            PlaybackStream::Transitioning {
+                outgoing_decoder, ..
+            } => Some(outgoing_decoder.info().channels as u16),
+        }
     }
 
     /// Return the active native-DSD negotiation context used when rebuilding
@@ -744,6 +837,7 @@ impl AudioEngine {
 #[cfg(feature = "resample")]
 pub(super) fn build_resampler(
     quality: config::ResamplerQuality,
+    filter: config::ResamplerFilter,
     source_rate: f32,
     output_rate: f32,
     speed: f32,
@@ -751,7 +845,8 @@ pub(super) fn build_resampler(
 ) -> Option<GenericResampler> {
     match precision {
         config::PrecisionMode::Performance => {
-            match AudioResampler::<f32>::new(quality, source_rate, output_rate) {
+            match AudioResampler::<f32>::new_with_filter(quality, filter, source_rate, output_rate)
+            {
                 Ok(mut r) => {
                     if (speed - 1.0).abs() > 0.001 {
                         r.set_speed(speed);
@@ -765,7 +860,8 @@ pub(super) fn build_resampler(
             }
         }
         config::PrecisionMode::Quality => {
-            match AudioResampler::<f64>::new(quality, source_rate, output_rate) {
+            match AudioResampler::<f64>::new_with_filter(quality, filter, source_rate, output_rate)
+            {
                 Ok(mut r) => {
                     if (speed - 1.0).abs() > 0.001 {
                         r.set_speed(speed);

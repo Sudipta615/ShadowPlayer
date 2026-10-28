@@ -1061,3 +1061,48 @@ fn test_pipeline_bass_enhancer_processing() {
     assert!(left.iter().all(|s| s.is_finite()));
     assert!(right.iter().all(|s| s.is_finite()));
 }
+
+/// P0.3: a multichannel stream must be told which active stages only touch
+/// the front L/R pair. The list is derived from the capability table, so it
+/// cannot drift from what the DSP actually does.
+#[test]
+fn front_pair_only_stages_are_reported_for_multichannel_streams() {
+    let mut pipeline = DspPipeline::from_config(&EngineConfig::default(), 48_000.0);
+    pipeline.eq.set_enabled(true);
+    pipeline.crossfeed.set_enabled(true);
+    pipeline.set_multichannel_layout(&crate::decode::ChannelLayout::FivePointOne);
+
+    let nodes = pipeline.graph_nodes();
+    let warnings = front_pair_only_active_stages(&nodes, true);
+
+    assert!(
+        warnings.contains(&"eq"),
+        "an active stereo-only EQ must be reported: {warnings:?}"
+    );
+    assert!(
+        warnings.contains(&"crossfeed"),
+        "an active stereo-only crossfeed must be reported: {warnings:?}"
+    );
+    assert!(
+        !warnings.contains(&"volume"),
+        "the all-channel volume stage must not be reported: {warnings:?}"
+    );
+
+    // A stereo stream has no front-pair limitation to report: the pair is
+    // the whole stream.
+    assert!(front_pair_only_active_stages(&nodes, false).is_empty());
+
+    // Bit-perfect bypass: nothing is active, so nothing is warned about.
+    pipeline.set_bit_perfect(true);
+    let bypassed = pipeline.graph_nodes();
+    assert!(front_pair_only_active_stages(&bypassed, true).is_empty());
+
+    // The metadata itself is carried per node, not inferred from the name.
+    let eq = nodes.iter().find(|n| n.name == "eq").expect("eq row");
+    assert!(eq.is_front_pair_only());
+    let volume = nodes
+        .iter()
+        .find(|n| n.name == "volume")
+        .expect("volume row");
+    assert!(!volume.is_front_pair_only());
+}

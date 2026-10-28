@@ -22,9 +22,10 @@ pub use dsp_config::{
     BandConfig, BassEnhancerConfig, BassManagementConfig, CaptureConfig, ChannelEqConfig,
     ChannelEqEntry, ChannelMixConfig, ChannelMixTemplate, ChannelRoutingConfig, ChannelTrimConfig,
     ChannelTrimEntry, ConvolutionConfig, CorrectionConfig, CorrectionPhaseMode, CorrectionTarget,
-    CrossfadeConfig, CrossfeedConfig, CrossoverFilterType, CrossoverSlope, DynamicEqBandConfig,
-    DynamicEqConfig, EqBandConfig, EqConfig, EqMode, EqPreset, GraphicEqConfig, GraphicEqLayout,
-    LfeConfig, LimiterConfig, LoudnessConfig, MultibandCompressorConfig, StereoEnhancerConfig,
+    CrossfadeConfig, CrossfeedConfig, CrossoverFilterType, CrossoverSlope, DacCorrectionConfig,
+    DacCorrectionProfileConfig, DynamicEqBandConfig, DynamicEqConfig, EqBandConfig, EqConfig,
+    EqMode, EqPreset, GraphicEqConfig, GraphicEqLayout, LfeConfig, LimiterConfig, LoudnessConfig,
+    MatrixFirRouteConfig, MultibandCompressorConfig, SdmConfig, StereoEnhancerConfig,
 };
 pub use engine_config::{
     AuxBusConfig, ConfigIssue, ConfigIssueKind, ConfigSeverity, ConfigValidation, EndpointConfig,
@@ -33,10 +34,10 @@ pub use engine_config::{
 };
 pub use enums::{
     AudioBackend, ChannelPolicy, CompressorDetector, CrossfadeCurve, CrossfeedProfile,
-    DitherPolicy, DsdOutput, FallbackPolicy, FilterType, LoudnessMode, OutputAccessMode,
-    OutputAccessState, PerformanceMode, PrecisionMode, QualityLatencyProfile, RateFallbackPolicy,
-    ResamplerQuality, ResamplerQualityInfo, SpeedMode, TimeStretchQuality, TransitionMode,
-    VolumeMode,
+    DitherPolicy, DsdNoiseFilter, DsdOutput, FallbackPolicy, FilterType, LoudnessMode, NoiseShaper,
+    OutputAccessMode, OutputAccessState, PerformanceMode, PrecisionMode, QualityLatencyProfile,
+    RateFallbackPolicy, ResamplerFilter, ResamplerQuality, ResamplerQualityInfo, SdmModulator,
+    SdmRate, SpeedMode, TimeStretchQuality, TransitionMode, UltrasonicFilter, VolumeMode,
 };
 pub use eq_text::{
     parse_curve, write_graphic, write_parametric, EqTextError, ImportedCurve, MAX_FREQ_HZ,

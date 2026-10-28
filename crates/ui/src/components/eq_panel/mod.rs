@@ -76,8 +76,13 @@ pub struct EqPanelState {
     pub selected_custom_preset_idx: Option<usize>,
     pub is_saving_preset: bool,
     pub new_preset_name: String,
-    pub extended_range: bool,         // Extended ±24 dB range toggle
-    pub window_pos: Option<[f32; 2]>, // Persisted center or user placed position
+    pub extended_range: bool, // Extended ±24 dB range toggle
+    /// User-placed window origin, persisted across launches.
+    pub window_pos: Option<[f32; 2]>,
+    /// User-resized window size, persisted across launches. Without this a
+    /// shrunk panel reopened at the default size and egui's content-driven
+    /// auto-expansion made it look like the resize had been ignored.
+    pub window_size: Option<[f32; 2]>,
 
     // Parametric (legacy / AutoEQ targets)
     /// The single master switch. The graphic and parametric layers are both
@@ -231,6 +236,7 @@ impl Default for EqPanelState {
             correction_ir_path: String::new(),
             fx: config::FxConfig::default(),
             window_pos: None,
+            window_size: None,
         }
     }
 }
@@ -323,6 +329,9 @@ impl EqPanelState {
         if curve.is_graphic() {
             self.eq_mode = EqMode::Graphic;
             self.graphic_enabled = true;
+            // The tab owns the model it renders; importing a curve of the other
+            // kind must move the user to the page that now describes the sound.
+            self.active_tab = EqTab::Graphic;
             let freqs = self.graphic_layout.frequencies();
             let (source_freqs, source_gains): (Vec<f32>, Vec<f32>) =
                 curve.graphic.iter().copied().unzip();
@@ -341,6 +350,7 @@ impl EqPanelState {
         } else {
             self.eq_mode = EqMode::Parametric;
             self.graphic_enabled = false;
+            self.active_tab = EqTab::Parametric;
             self.bands = curve
                 .bands
                 .iter()
@@ -414,10 +424,26 @@ pub fn show_eq_panel(
     let screen = ctx
         .input(|i| i.raw.screen_rect)
         .unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 830.0)));
-    let default_w = 760.0_f32.min((screen.width() - 40.0).max(400.0));
-    let default_h = 560.0_f32.min((screen.height() - 40.0).max(350.0));
-    let default_x = ((screen.width() - default_w) / 2.0).max(10.0);
-    let default_y = ((screen.height() - default_h) / 2.0).max(10.0);
+    let min_size = crate::dialog::min_dialog_size();
+    let max_size = Vec2::new(
+        880.0_f32.min((screen.width() - 20.0).max(min_size.x)),
+        (screen.height() - 40.0).max(min_size.y),
+    );
+    let default_w = 760.0_f32.min(max_size.x);
+    let default_h = 560.0_f32.min(max_size.y);
+    // Restore the size the user last dragged to. Clamp it to the current
+    // screen so a monitor change cannot open the panel off-screen.
+    let initial_size = state
+        .window_size
+        .map(|[w, h]| {
+            Vec2::new(
+                w.clamp(min_size.x, max_size.x),
+                h.clamp(min_size.y, max_size.y),
+            )
+        })
+        .unwrap_or(Vec2::new(default_w, default_h));
+    let default_x = ((screen.width() - initial_size.x) / 2.0).max(10.0);
+    let default_y = ((screen.height() - initial_size.y) / 2.0).max(10.0);
     let initial_pos = state
         .window_pos
         .map(|[x, y]| Pos2::new(x, y))
@@ -430,9 +456,9 @@ pub fn show_eq_panel(
         .collapsible(false)
         .title_bar(false)
         .default_pos(initial_pos)
-        .default_size(Vec2::new(default_w, default_h))
-        .min_size(crate::dialog::min_dialog_size())
-        .max_size(Vec2::new(880.0, (screen.height() - 40.0).max(500.0)))
+        .default_size(initial_size)
+        .min_size(min_size)
+        .max_size(max_size)
         .frame(
             egui::Frame::window(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
@@ -449,22 +475,18 @@ pub fn show_eq_panel(
             // ── 1. Top Header Bar (Always Enabled) ───────────────────────────
             render_header(ui, state, &mut actions, theme);
 
-            // ── 2. Tab Switcher: [ 🎚 Graphic Equalizer ]   [ 🎛 Tone & Acoustics ]   [ ⚙ Advanced ]
-            render_tab_navigation(ui, state, theme);
+            // ── 2. Tab Switcher ──────────────────────────────────────────────
+            render_tab_navigation(ui, state, &mut actions, theme);
 
             // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
-            // The effects, dynamics and filters tabs are not the equalizer:
-            // their stages have independent masters and can still be active
-            // while the EQ curve is bypassed. Greying them out behind an
-            // "Equalizer Bypassed" overlay hid live processing.
+            // The master switch is the one enable state for the entire studio.
+            // Every tab describes a stage that runs through the EQ graph, so a
+            // bypassed EQ greys all of them out together instead of leaving
+            // Dynamics, Filters and Effects looking editable.
             let eq_active = state.eq_enabled;
-            let independent_tab = matches!(
-                state.active_tab,
-                EqTab::Effects | EqTab::Dynamics | EqTab::Filters
-            );
             let content_start_y = ui.cursor().top();
 
-            ui.add_enabled_ui(eq_active || independent_tab, |ui| {
+            ui.add_enabled_ui(eq_active, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
                 egui::ScrollArea::vertical()
@@ -476,14 +498,11 @@ pub fn show_eq_panel(
                             EqTab::Graphic => {
                                 render_graphic_eq_tab(ui, state, &mut actions, theme);
                             }
+                            EqTab::Parametric => {
+                                parametric::render_parametric_tab(ui, state, &mut actions, theme);
+                            }
                             EqTab::Tone => {
                                 render_tone_acoustics_tab(ui, state, &mut actions, theme);
-                            }
-                            EqTab::Parametric => {
-                                // The explicit mode selector lives in the
-                                // Graphic tab; an old saved tab id still lands
-                                // on a usable editor instead of a blank page.
-                                render_graphic_eq_tab(ui, state, &mut actions, theme);
                             }
                             EqTab::Dynamics => {
                                 render_dynamics_tab(ui, state, &mut actions, theme);
@@ -505,8 +524,8 @@ pub fn show_eq_panel(
                     });
             });
 
-            // Only EQ-owned tabs get the bypass overlay.
-            if !eq_active && !independent_tab {
+            // The whole studio is bypassed, so cover the content and say why.
+            if !eq_active {
                 let rect = ui.min_rect();
                 let overlay_rect = Rect::from_min_max(
                     Pos2::new(rect.left(), content_start_y),
@@ -555,6 +574,17 @@ pub fn show_eq_panel(
         } else if (rect.min.x - default_x).abs() > 2.0 || (rect.min.y - default_y).abs() > 2.0 {
             // User moved window away from initial center position
             state.window_pos = Some([rect.min.x, rect.min.y]);
+        }
+
+        // Remember a user resize. This is what makes the next launch open at
+        // the width the user chose instead of the default 760 px.
+        let current_size = rect.size();
+        let changed = state
+            .window_size
+            .map(|[w, h]| (w - current_size.x).abs() > 1.0 || (h - current_size.y).abs() > 1.0)
+            .unwrap_or(true);
+        if changed {
+            state.window_size = Some([current_size.x, current_size.y]);
         }
     }
 
@@ -655,298 +685,98 @@ fn render_header(
 // 3. Tab Switcher Navigation
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn render_tab_navigation(ui: &mut egui::Ui, state: &mut EqPanelState, theme: &Theme) {
-    ui.vertical_centered(|ui| {
-        let tab_items = [
-            (EqTab::Graphic, tr!("Graphic Equalizer")),
-            (EqTab::Tone, tr!("Tone & Acoustics")),
-            (EqTab::Dynamics, tr!("Dynamics")),
-            (EqTab::Filters, tr!("Filters")),
-            (EqTab::Effects, tr!("Effects")),
-            (EqTab::Advanced, tr!("Advanced")),
-        ];
+fn render_tab_navigation(
+    ui: &mut egui::Ui,
+    state: &mut EqPanelState,
+    actions: &mut EqPanelActions,
+    theme: &Theme,
+) {
+    let tab_items = [
+        (EqTab::Graphic, tr!("Graphic EQ")),
+        (EqTab::Parametric, tr!("Parametric")),
+        (EqTab::Tone, tr!("Tone")),
+        (EqTab::Dynamics, tr!("Dynamics")),
+        (EqTab::Filters, tr!("Filters")),
+        (EqTab::Effects, tr!("Effects")),
+        (EqTab::Advanced, tr!("Advanced")),
+    ];
 
-        let spacing = 5.0;
-        let tab_h = 32.0;
-        // Six tabs must still fit the default 760 px studio. The old fixed
-        // 142 px buttons would have forced a horizontal scrollbar that hid
-        // Dynamics and Filters entirely.
-        let tab_w =
-            ((ui.available_width() - 26.0 - spacing * (tab_items.len().saturating_sub(1)) as f32)
-                / tab_items.len() as f32)
-                .clamp(80.0, 128.0);
-        let total_w =
-            (tab_items.len() as f32 * tab_w) + ((tab_items.len() - 1) as f32 * spacing) + 10.0;
+    let spacing = 4.0;
+    let tab_h = 30.0;
+    // Seven labels have to survive both the 760 px default and a user-resized
+    // narrow window. Short labels plus wrapping are what keep the strip from
+    // imposing a minimum width on the panel: at wide sizes all seven fit on
+    // one row, and at narrow sizes they flow onto a second row instead of
+    // forcing egui to re-expand the window.
+    let cols = tab_items.len() as f32;
+    let tab_w = ((ui.available_width() - 30.0 - spacing * (cols - 1.0)) / cols).clamp(62.0, 112.0);
 
-        ui.allocate_ui_with_layout(
-            Vec2::new(total_w, tab_h + 8.0),
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                egui::Frame::NONE
-                    .fill(theme.bg_card)
-                    .stroke(Stroke::new(1.0, theme.border_card))
-                    .corner_radius(CornerRadius::same(theme.radius_lg))
-                    .inner_margin(Margin::symmetric(
-                        theme.space_sm as i8,
-                        theme.space_xs as i8,
-                    ))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(spacing, 0.0);
+    egui::Frame::NONE
+        .fill(theme.bg_card)
+        .stroke(Stroke::new(1.0, theme.border_card))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
+        .inner_margin(Margin::symmetric(
+            theme.space_sm as i8,
+            theme.space_xs as i8,
+        ))
+        .show(ui, |ui| {
+            // A bypassed EQ leaves the tab strip visible but inert, so the
+            // current page still has a name and the header switch is obvious.
+            ui.add_enabled_ui(state.eq_enabled, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(spacing, spacing);
 
-                            for (tab, label) in tab_items {
-                                let is_sel = state.active_tab == tab;
-                                let (bg, text_col, font) = if is_sel {
-                                    (theme.accent, Color32::WHITE, crate::theme::font(11.5))
-                                } else {
-                                    (
-                                        Color32::TRANSPARENT,
-                                        theme.text_secondary,
-                                        crate::theme::font(11.0),
-                                    )
-                                };
+                    for (tab, label) in tab_items {
+                        let is_sel = state.active_tab == tab;
+                        let (bg, text_col, font) = if is_sel {
+                            (theme.accent, Color32::WHITE, crate::theme::font(11.5))
+                        } else {
+                            (
+                                Color32::TRANSPARENT,
+                                theme.text_secondary,
+                                crate::theme::font(11.0),
+                            )
+                        };
 
-                                let btn = egui::Button::new(
-                                    egui::RichText::new(label)
-                                        .font(font)
-                                        .strong()
-                                        .color(text_col),
-                                )
-                                .fill(bg)
-                                .stroke(Stroke::NONE)
-                                .corner_radius(CornerRadius::same(theme.radius_lg))
-                                .min_size(Vec2::new(tab_w, tab_h));
+                        let btn = egui::Button::new(
+                            egui::RichText::new(label)
+                                .font(font)
+                                .strong()
+                                .color(text_col),
+                        )
+                        .fill(bg)
+                        .stroke(if is_sel {
+                            Stroke::new(1.0, theme.accent_highlight)
+                        } else {
+                            Stroke::NONE
+                        })
+                        .corner_radius(theme.control_radius())
+                        .min_size(Vec2::new(tab_w, tab_h));
 
-                                if ui.add(btn).clicked() {
-                                    state.active_tab = tab;
+                        if ui.add(btn).clicked() {
+                            state.active_tab = tab;
+                            // Graphic and Parametric are the two sources that
+                            // own the audible EQ stage; selecting their tab
+                            // selects that source. Tone/Dynamics/etc. leave the
+                            // current curve mode alone.
+                            match tab {
+                                EqTab::Graphic => {
+                                    state.set_eq_mode(EqMode::Graphic);
+                                    actions.eq_mode_changed = true;
                                 }
+                                EqTab::Parametric => {
+                                    state.set_eq_mode(EqMode::Parametric);
+                                    actions.eq_mode_changed = true;
+                                    actions.eq_bands_changed = true;
+                                }
+                                _ => {}
                             }
-                        });
-                    });
-            },
-        );
-    });
+                        }
+                    }
+                });
+            });
+        });
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use engine::dsp::equalizer::EqFilterType;
-
-    #[test]
-    fn layout_change_interpolates_the_visible_curve_and_clears_stale_bands() {
-        let mut state = EqPanelState::default();
-        state.graphic_gains[..10]
-            .copy_from_slice(&[4.0, 3.0, 2.5, 0.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0]);
-        state.graphic_gains[10] = 99.0; // stale slot outside the 10-band layout
-
-        state.set_graphic_layout(GraphicEqLayout::ThirtyOneBand);
-
-        assert_eq!(state.graphic_layout, GraphicEqLayout::ThirtyOneBand);
-        let freqs = state.graphic_layout.frequencies();
-        for (freq, expected) in [
-            (31.5, 4.0),
-            (63.0, 3.0),
-            (125.0, 2.5),
-            (500.0, -1.0),
-            (1000.0, -2.0),
-            (16000.0, 4.0),
-        ] {
-            let index = freqs.iter().position(|f| (*f - freq).abs() < 1e-3).unwrap();
-            assert!(
-                (state.graphic_gains[index] - expected).abs() < 0.05,
-                "{freq} Hz should survive the layout change, got {} dB",
-                state.graphic_gains[index]
-            );
-        }
-        assert!(
-            state.graphic_gains[31..].iter().all(|g| *g == 0.0),
-            "bands beyond the new layout must not keep stale gains"
-        );
-
-        state.set_graphic_layout(GraphicEqLayout::TenBand);
-        assert_eq!(
-            &state.graphic_gains[..10],
-            &[4.0, 3.0, 2.5, 0.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0]
-        );
-        assert!(state.graphic_gains[10..].iter().all(|g| *g == 0.0));
-    }
-
-    #[test]
-    fn legacy_persisted_state_infers_graphic_only_from_the_legacy_flag() {
-        let legacy = PersistentEqState {
-            eq_enabled: true,
-            eq_mode: None,
-            graphic_enabled: true,
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        legacy.apply_to(&mut state);
-        assert_eq!(state.eq_mode, EqMode::Graphic);
-        assert!(state.graphic_enabled);
-
-        let active_legacy_graphic = PersistentEqState {
-            eq_enabled: false,
-            eq_mode: None,
-            graphic_enabled: true,
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        active_legacy_graphic.apply_to(&mut state);
-        assert!(state.eq_enabled, "the legacy graphic layer was audible");
-        assert!(state.graphic_enabled);
-
-        let parametric = PersistentEqState {
-            eq_enabled: true,
-            eq_mode: None,
-            graphic_enabled: false,
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        parametric.apply_to(&mut state);
-        assert_eq!(state.eq_mode, EqMode::Parametric);
-        assert!(!state.graphic_enabled);
-
-        // An explicit mode is authoritative even if the old layer flag still
-        // says the graphic EQ used to be active.
-        let explicit = PersistentEqState {
-            eq_enabled: true,
-            eq_mode: Some(EqMode::Parametric),
-            graphic_enabled: true,
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        explicit.apply_to(&mut state);
-        assert_eq!(state.eq_mode, EqMode::Parametric);
-        assert!(!state.graphic_enabled);
-    }
-
-    #[test]
-    fn persisted_extreme_graphic_gain_widens_the_visible_range() {
-        let saved = PersistentEqState {
-            eq_mode: Some(EqMode::Graphic),
-            graphic_gains: vec![18.0; 10],
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        saved.apply_to(&mut state);
-        assert!(state.extended_range);
-        assert!((state.graphic_gains[0] - 18.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn persisted_preamp_prefers_the_shared_field_and_backfills_the_mirror() {
-        let saved = PersistentEqState {
-            eq_mode: Some(EqMode::Parametric),
-            preamp_db: -3.0,
-            graphic_preamp_db: -8.0,
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        saved.apply_to(&mut state);
-        assert_eq!(state.preamp_db, -3.0);
-        assert_eq!(state.graphic_preamp_db, -3.0);
-
-        let legacy_graphic = PersistentEqState {
-            eq_mode: None,
-            graphic_enabled: true,
-            preamp_db: 0.0,
-            graphic_preamp_db: -6.0,
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        legacy_graphic.apply_to(&mut state);
-        assert_eq!(state.eq_mode, EqMode::Graphic);
-        assert_eq!(state.preamp_db, -6.0);
-        assert_eq!(state.graphic_preamp_db, -6.0);
-
-        let inert_graphic = PersistentEqState {
-            eq_mode: None,
-            preamp_db: 0.0,
-            graphic_preamp_db: -6.0,
-            ..Default::default()
-        };
-        let mut state = EqPanelState::default();
-        inert_graphic.apply_to(&mut state);
-        assert_eq!(state.eq_mode, EqMode::Parametric);
-        assert_eq!(state.preamp_db, 0.0);
-    }
-
-    #[test]
-    fn preamp_is_clamped_to_the_range_the_engine_can_represent() {
-        let mut state = EqPanelState::default();
-        state.set_preamp(45.0);
-        assert_eq!(state.preamp_db, 30.0);
-        assert_eq!(state.graphic_preamp_db, 30.0);
-        state.set_preamp(-45.0);
-        assert_eq!(state.preamp_db, -30.0);
-        state.set_preamp(f32::NAN);
-        assert_eq!(state.preamp_db, -30.0);
-    }
-
-    #[test]
-    fn parametric_import_installs_every_band_its_preamp_and_the_mode() {
-        let text = "\
-Preamp: -5.0 dB
-Filter 1: ON LSC Fc 105 Hz Gain 4.0 dB Q 0.70
-Filter 2: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.20
-Filter 3: ON HSC Fc 10000 Hz Gain 2.0 dB Q 0.70
-";
-        let curve = config::parse_curve("imported", text).unwrap();
-        let mut state = EqPanelState {
-            eq_enabled: false,
-            auto_headroom: true,
-            ..Default::default()
-        };
-
-        assert!(state.apply_imported_curve(&curve));
-
-        assert!(state.eq_enabled);
-        assert_eq!(state.eq_mode, EqMode::Parametric);
-        assert!(!state.graphic_enabled);
-        assert_eq!(state.bands.len(), 3);
-        assert_eq!(state.bands[0].filter_type, EqFilterType::LowShelf);
-        assert!((state.preamp_db + 5.0).abs() < 1e-6);
-        assert!(
-            !state.auto_headroom,
-            "an imported curve carries its own level; attenuating it twice is wrong"
-        );
-    }
-
-    #[test]
-    fn graphic_import_lands_on_the_active_ladder_without_dropping_points() {
-        let text = "GraphicEQ: 31.5 4.0; 1000 -2.0; 16000 3.0";
-        let curve = config::parse_curve("graphic", text).unwrap();
-        let mut state = EqPanelState {
-            graphic_layout: GraphicEqLayout::ThirtyOneBand,
-            ..Default::default()
-        };
-
-        assert!(!state.apply_imported_curve(&curve));
-
-        assert_eq!(state.eq_mode, EqMode::Graphic);
-        let freqs = state.graphic_layout.frequencies();
-        let low = freqs.iter().position(|f| (*f - 31.5).abs() < 0.01).unwrap();
-        let mid = freqs
-            .iter()
-            .position(|f| (*f - 1000.0).abs() < 0.01)
-            .unwrap();
-        assert!((state.graphic_gains[low] - 4.0).abs() < 0.1);
-        assert!((state.graphic_gains[mid] + 2.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn exported_parametric_text_reimports_to_the_same_curve() {
-        let text = "Preamp: -2.0 dB\nFilter 1: ON PK Fc 500 Hz Gain -4.0 dB Q 1.00";
-        let curve = config::parse_curve("exported", text).unwrap();
-        let mut state = EqPanelState::default();
-        state.apply_imported_curve(&curve);
-
-        let (name, exported) = state.export_curve_text();
-        assert!(name.ends_with(".txt"));
-        let reparsed = config::parse_curve("reimported", &exported).unwrap();
-        assert_eq!(reparsed.bands.len(), 1);
-        assert!((reparsed.preamp_db + 2.0).abs() < 1e-6);
-        assert!((reparsed.bands[0].gain_db + 4.0).abs() < 1e-6);
-    }
-}
+mod tests;

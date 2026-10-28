@@ -53,7 +53,7 @@ impl<'a> RightPanel<'a> {
             save_lyrics: false,
         };
 
-        ui.vertical(|ui| {
+        let card_rect = ui.vertical(|ui| {
             ui.set_width(ui.available_width().max(220.0));
 
             // 1. Container Card for Queue/Lyrics (fits 8 items + Clear Queue button)
@@ -72,7 +72,7 @@ impl<'a> RightPanel<'a> {
                     self.theme.space_2xl as i8,
                 ));
 
-            card_frame.show(ui, |ui| {
+            let card_response = card_frame.show(ui, |ui| {
                 // Tab Switcher Pill — 2-way: Queue | Lyrics (matching mockup)
                 ui.horizontal(|ui| {
                     let switch_w = ui.available_width();
@@ -120,7 +120,7 @@ impl<'a> RightPanel<'a> {
                     let pill_t = ui.ctx().animate_bool_with_time(
                         ui.make_persistent_id("right_tab_pill"),
                         self.active_tab == RightTab::Lyrics,
-                        0.16,
+                        self.theme.motion_time(0.16),
                     );
                     let active_pill = Rect::from_min_size(
                         Pos2::new(
@@ -861,7 +861,18 @@ impl<'a> RightPanel<'a> {
                     }
                 }
             });
-        });
+            card_response.response.rect
+        })
+        .inner;
+
+        if self.theme.frosted {
+            crate::theme::glass::paint_glass_sheen(
+                ui,
+                card_rect,
+                CornerRadius::same(self.theme.radius_xl),
+                self.theme,
+            );
+        }
 
         action
     }

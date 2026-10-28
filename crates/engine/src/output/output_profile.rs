@@ -416,6 +416,7 @@ mod tests {
                 vec![0.0, 1.0, 0.0],
                 vec![0.0, 0.0, 1.0],
             ],
+            fir_routes: Vec::new(),
         });
         p.dsd_policy = Some(DsdOutput::DoP);
         p.volume_mode = Some(VolumeMode::HardwarePreferred);

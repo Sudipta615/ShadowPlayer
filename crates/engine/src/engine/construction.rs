@@ -89,6 +89,9 @@ impl AudioEngine {
                 }
             }
         }
+        // The output converters are built on their own threads at stream open;
+        // publish the configured shaper before any of them can be constructed.
+        crate::dsp::dither::set_configured_noise_shaper(config.noise_shaper);
         let (cmd_tx, cmd_rx) = channel::bounded(256);
         let (event_tx, event_rx) = channel::bounded(256);
         #[cfg(feature = "audio-output")]
@@ -158,6 +161,7 @@ impl AudioEngine {
             stream: None,
             playlist: Playlist::new(),
             analyzer: Arc::new(crate::dsp::AudioAnalyzer::new_default()),
+            apodizing: crate::dsp::apodizing::ApodizingDetector::new(output_sample_rate as f32),
             config,
             config_validation,
             duration_secs: 0.0,
@@ -272,12 +276,64 @@ impl AudioEngine {
     /// and multichannel interleaved push routes through here. It also feeds
     /// the real-time analyzer and professional meters.
     #[inline]
-    pub(crate) fn push_to_sink(&self, samples: &[f32], channels: usize) -> usize {
+    pub(crate) fn push_to_sink(&mut self, samples: &[f32], channels: usize) -> usize {
         self.analyzer.update(samples, channels);
         if self.meters.is_enabled() {
             self.meters.process_interleaved(samples, channels);
         }
+        if self.dsd.sdm_active {
+            return self.push_sdm(samples, channels);
+        }
         self.sample_sink.push_interleaved(samples, channels)
+    }
+
+    /// Route a working-rate PCM block through the PCM→SDM stage and into the
+    /// native-DSD byte ring.
+    ///
+    /// Backpressure is honoured in input frames: the stage only advances for
+    /// frames whose packed DSD words fit in the ring, and the caller retries
+    /// the rest. The free-space check reserves one whole wire frame so a
+    /// partial word carried over from the previous block cannot overflow.
+    #[inline]
+    fn push_sdm(&mut self, samples: &[f32], channels: usize) -> usize {
+        let Some(stage) = self.dsd.sdm_output.as_mut() else {
+            return 0;
+        };
+        let Some(buffer) = self.dsd.dsd_byte_buffer.as_ref() else {
+            return 0;
+        };
+        if channels == 0 || channels != stage.channels() {
+            return 0;
+        }
+        let frames = samples.len() / channels;
+        if frames == 0 {
+            return 0;
+        }
+        let bytes_per_frame = stage.bytes_per_input_frame();
+        if bytes_per_frame == 0 {
+            return 0;
+        }
+        let frame_width = channels * stage.wire().bytes_per_word();
+        let free = buffer.free_bytes().saturating_sub(frame_width);
+        let max_frames = free / bytes_per_frame;
+        let n = frames.min(max_frames);
+        if n == 0 {
+            return 0;
+        }
+        let block = stage.process_block(&samples[..n * channels], &mut self.dsd.dsd_pack_scratch);
+        let pushed = buffer.push_frames(
+            &self.dsd.dsd_pack_scratch[..block.output_bytes],
+            frame_width,
+        );
+        // The free-space pre-check reserves a whole frame, so the consumer
+        // (which only drains) cannot make this fail. If it ever does, the
+        // stage has advanced for bytes that were dropped — surface it in
+        // debug builds rather than hiding it.
+        debug_assert!(
+            block.output_bytes == 0 || pushed > 0,
+            "native DSD ring rejected a pre-checked block"
+        );
+        n
     }
 
     #[cfg(feature = "audio-output")]

@@ -132,8 +132,11 @@ mod node_id {
     /// saturation (post-stereo, pre-timestretch). Every effect off = the
     /// stage is transparent.
     pub const FX: usize = 18;
+    /// The output ultrasonic low-pass (output domain, before the limiter).
+    /// Disabled = bit-exact.
+    pub const ULTRASONIC: usize = 19;
     /// Number of canonical node slots (also the first non-node `NodeId`).
-    pub const NODE_COUNT: usize = 19;
+    pub const NODE_COUNT: usize = 20;
 }
 
 /// The number of canonical node slots in a generation.
@@ -176,6 +179,7 @@ pub(crate) enum GraphNode {
     Spatial(SpatialNode),
     PluginHost(PluginHostNode),
     Fx(FxNode),
+    Ultrasonic(UltrasonicNode),
 }
 
 const VOLUME_RAMP_DURATION_MS: f32 = 10.0;
@@ -233,6 +237,11 @@ pub struct DspGraph {
     performance_mode: PerformanceMode,
     bit_perfect: bool,
     dop_bypass: bool,
+    /// Device-specific DAC correction profiles and the active device key.
+    /// Control-path state: a profile is selected/loaded only on config apply,
+    /// device change, or output-rate change; never in `prepare` or a block.
+    dac_config: config::DacCorrectionConfig,
+    dac_device: Option<String>,
 
     // ── Pre-allocated Scratch Arena ──
     scratch: GraphScratch,

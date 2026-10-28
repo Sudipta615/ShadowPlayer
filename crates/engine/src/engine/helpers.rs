@@ -60,6 +60,37 @@ impl AudioEngine {
         });
     }
 
+    /// Build the PCM→SDM telemetry snapshot from the live stage.
+    ///
+    /// Reads the modulator counters and the negotiated plan; never invents a
+    /// number when the stage is inactive. Control path only.
+    pub(super) fn sdm_report(&self) -> crate::playback_info::SdmReport {
+        let mut report = crate::playback_info::SdmReport {
+            active: self.dsd.sdm_active,
+            modulator: Some(self.config.sdm.modulator),
+            requested_rate: Some(self.config.sdm.rate),
+            fallback_reason: self.dsd.sdm_fallback_reason.clone(),
+            ..Default::default()
+        };
+        if let Some(plan) = self.dsd.sdm_plan {
+            report.dsd_rate = plan.dsd_rate;
+            report.working_rate = plan.working_rate;
+            report.source_rate = plan.pcm_rate;
+            report.stage_factor = plan.stage_factor;
+            report.multiple = plan.multiple;
+        }
+        if let Some(stage) = self.dsd.sdm_output.as_ref() {
+            let t = stage.telemetry();
+            report.clips = t.clips;
+            report.state_recoveries = t.state_recoveries;
+            report.input_peak = t.input_peak;
+            report.ones_ratio = t.ones_ratio;
+            report.interpolator_delay_ms = t.interpolator_delay_ms;
+            report.modulation_depth = t.modulation_depth;
+        }
+        report
+    }
+
     /// Helper for short one-field writes to PlaybackInfo.
     pub(super) fn write_playback_info<F: FnMut(&mut PlaybackInfo)>(&self, mut f: F) {
         self.playback_info.rcu(|old| {

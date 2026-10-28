@@ -393,6 +393,21 @@ impl DsdReader {
         self.decimator.reset();
     }
 
+    /// Replace the PCM decimation filter. Only meaningful in
+    /// PCM-conversion mode (native/DoP transport never decimates). Rebuilds
+    /// the cascade, so any decode state is discarded — call it before
+    /// decoding starts.
+    pub fn set_noise_filter(&mut self, filter: config::DsdNoiseFilter) {
+        if self.decimator.noise_filter() != filter {
+            self.decimator = DsdToPcmDecimator::new_with_filter(self.channels, filter);
+        }
+    }
+
+    /// The active PCM decimation filter.
+    pub fn noise_filter(&self) -> config::DsdNoiseFilter {
+        self.decimator.noise_filter()
+    }
+
     /// DSD frames per channel consumed so far.
     pub fn position_dsd_frames(&self) -> u64 {
         self.frames_consumed

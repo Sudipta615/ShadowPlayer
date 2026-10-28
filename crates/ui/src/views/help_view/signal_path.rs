@@ -177,11 +177,11 @@ pub(super) fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBloc
                 "Implemented with lock-free crossbeam atomic primitives. Decouples the variable-latency file I/O thread from the ultra-strict real-time audio thread to guarantee zero jitter and zero thread-locking priority inversions.".to_string(),
             ),
             SignalBlock::Resampler => (
-                "Stage 3: Polyphase FIR Sinc Resampler (Rubato)",
+                "Stage 3: Selectable Rate-Conversion Filter (FFT / Polyphase)",
                 "Input track sample rate (e.g. 44.1 kHz CD audio, 96 kHz Hi-Res)",
                 "Hardware DAC target sample rate (or Follow Track exact rate)",
                 "Changes the speed of the digital clock if your soundcard doesn't match the song's native recording rate.",
-                "Employs Rubato's band-limited Sinc polyphase interpolation with windowed Chebyshev filter designs. Delivers >160 dB Signal-to-Noise Ratio (SNR) with zero aliasing artifacts into the audible band.".to_string(),
+                "Offers the historical Rubato FFT bank plus Kaiser, Blackman-Harris, minimum-phase, apodizing, and reference Sinc-M polyphase families. The prototype is designed in f64; the runtime bank follows the precision mode (f32 in Performance, f64 in Quality), and the negotiated family is always reported.".to_string(),
             ),
             SignalBlock::Equalizer => (
                 "Stage 4: 64-bit DSP Filter Rack & Acoustic Shaping",
@@ -198,11 +198,11 @@ pub(super) fn render_signal_block_inspector(ui: &mut egui::Ui, block: SignalBloc
                 "A look-ahead brickwall limiter delays the signal by the lookahead time and computes gain reduction from future peaks. True-peak mode oversamples to catch inter-sample overs. The optional static auto-headroom stage is separate: it applies a fixed attenuation equal to the curve's peak boost and is off by default.".to_string(),
             ),
             SignalBlock::Dither => (
-                "Stage 6: TPDF Triangular Probability Dithering",
+                "Stage 6: Selectable Quantization Noise Shaping",
                 "High-precision 64-bit floating point audio",
                 "Bit-depth matched PCM samples (16-bit or 24-bit integer)",
-                "Adds an ultra-quiet, completely inaudible microscopic hiss that prevents digital distortion when music fades into quiet silence.",
-                "Generates high-pass filtered Triangular Probability Density Function (TPDF) noise. Eliminates quantization harmonic distortion and truncation artifacts when down-converting from 64-bit float to 16/24-bit DAC depth.".to_string(),
+                "Shapes the unavoidable quantization noise so it is either perceptually flat or pushed outside the audible band.",
+                "TPDF is unshaped triangular noise. Shibata, NS5, NS9, and LNS15 are high-order error-feedback designs. Quantization arithmetic runs in f64, while the shaper's error history and coefficients are f32. A new shaper applies the next time the output stream opens.".to_string(),
             ),
             SignalBlock::AudioBackend => (
                 "Stage 7: Exclusive Kernel-Level Driver Interface",

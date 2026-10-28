@@ -78,7 +78,7 @@ impl<'a> SideBar<'a> {
         }
     }
 
-    pub fn show(mut self, ui: &mut Ui) {
+    pub fn show(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.set_width(if self.rail {
                 40.0
@@ -273,13 +273,25 @@ impl<'a> SideBar<'a> {
                 }
             }
 
-            // 5. Settings and Help follow the content rather than being
-            // absolutely anchored. In short windows the sidebar scrolls, so an
-            // anchor would simply overlap the playlists.
-            ui.add_space(if self.rail { 8.0 } else { 16.0 });
+            // 5. Settings and Help are pinned to the bottom by the layout
+            // (`SideBar::show_footer`), so they stay reachable no matter how
+            // long the playlist list grows.
+            ui.add_space(8.0);
+        });
+    }
+
+    /// The bottom-anchored navigation footer. The layout renders this in its
+    /// own bottom panel, outside the scrolling playlist column.
+    pub fn show_footer(&mut self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.set_width(if self.rail {
+                40.0
+            } else {
+                ui.available_width().max(120.0)
+            });
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, if self.rail { 6.0 } else { 4.0 });
             self.render_nav_item(ui, NavItem::Settings, "Settings");
             self.render_nav_item(ui, NavItem::Help, "Help & Feedback");
-            ui.add_space(4.0);
         });
     }
 
@@ -591,24 +603,29 @@ impl<'a> SideBar<'a> {
 
         // The active fill fades in rather than snapping. The id is the item's
         // label, so there is one animation state per navigation item.
-        let active_t =
-            ui.ctx()
-                .animate_bool_with_time(ui.make_persistent_id(("nav", label)), is_active, 0.16);
+        let active_t = ui.ctx().animate_bool_with_time(
+            ui.make_persistent_id(("nav", label)),
+            is_active,
+            self.theme.motion_time(0.16),
+        );
+        let hover_t = ui.ctx().animate_bool_with_time(
+            ui.make_persistent_id(("nav_hover", label)),
+            is_hovered && !is_active,
+            self.theme.motion_time(0.12),
+        );
         let fill = if is_active {
             crate::theme::lerp_color(self.theme.bg_card_hover, self.theme.accent, active_t)
-        } else if is_hovered {
-            self.theme.bg_card_hover
         } else {
-            Color32::TRANSPARENT
+            crate::theme::lerp_color(Color32::TRANSPARENT, self.theme.bg_card_hover, hover_t)
         };
         if fill != Color32::TRANSPARENT {
             painter.rect_filled(rect, CornerRadius::same(self.theme.radius_md), fill);
         }
 
-        let text_color = if is_active || is_hovered {
+        let text_color = if is_active {
             self.theme.text_primary
         } else {
-            self.theme.text_secondary
+            crate::theme::lerp_color(self.theme.text_secondary, self.theme.text_primary, hover_t)
         };
 
         // Render Icon
@@ -672,7 +689,7 @@ impl<'a> SideBar<'a> {
         let active_t = ui.ctx().animate_bool_with_time(
             ui.make_persistent_id(("badge", label)),
             is_active,
-            0.16,
+            self.theme.motion_time(0.16),
         );
         let fill = if is_active {
             crate::theme::lerp_color(

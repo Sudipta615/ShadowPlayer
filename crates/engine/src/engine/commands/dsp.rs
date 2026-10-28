@@ -162,6 +162,97 @@ impl AudioEngine {
         info!("Resampler quality set to {:?}", quality);
     }
 
+    /// Select how DSD sources reach the DAC.
+    ///
+    /// The transport is negotiated when the stream is opened, so this updates
+    /// the engine config and takes effect on the next DSD stream. The current
+    /// stream is deliberately left alone: switching transport mid-bitstream
+    /// would tear down the device while the UI claims it is still playing.
+    pub(super) fn handle_set_dsd_output(&mut self, output: config::DsdOutput) {
+        self.config.dsd_output = output;
+        info!("DSD output transport set to {:?} (next stream)", output);
+    }
+
+    /// Select the DSD→PCM decimation filter.
+    ///
+    /// The decimator is constructed with the decoder, so this applies to the
+    /// next DSD stream. The UI labels it accordingly.
+    pub(super) fn handle_set_dsd_noise_filter(&mut self, filter: config::DsdNoiseFilter) {
+        self.config.dsd_noise_filter = filter;
+        info!(
+            "DSD decimation filter set to {:?} (next DSD stream)",
+            filter
+        );
+    }
+
+    /// Select the output-domain ultrasonic low-pass. The stage is outside the
+    /// generation plan, so this can apply live without a graph rebuild.
+    pub(super) fn handle_set_ultrasonic_filter(&mut self, filter: config::UltrasonicFilter) {
+        self.config.ultrasonic_filter = filter;
+        self.graph
+            .with_graph(|graph| graph.set_ultrasonic_filter(filter));
+        info!("Ultrasonic filter set to {:?}", filter);
+    }
+
+    /// Select the polyphase resampler filter family.
+    ///
+    /// Every active resampler (decode-domain and per-endpoint) rebuilds on its
+    /// own control path; the rebuild keeps the buffered tail and crossfades,
+    /// so this is safe while playing.
+    pub(super) fn handle_set_resampler_filter(&mut self, filter: config::ResamplerFilter) {
+        self.config.resampler_filter = filter;
+        #[cfg(feature = "resample")]
+        match &mut self.stream {
+            Some(PlaybackStream::Single {
+                resampler: Some(ref mut r),
+                ..
+            }) => r.set_filter(filter),
+            Some(PlaybackStream::Transitioning {
+                outgoing_resampler,
+                incoming_resampler,
+                ..
+            }) => {
+                if let Some(ref mut r) = outgoing_resampler {
+                    r.set_filter(filter);
+                }
+                if let Some(ref mut r) = incoming_resampler {
+                    r.set_filter(filter);
+                }
+            }
+            _ => {}
+        }
+        #[cfg(feature = "audio-output")]
+        for endpoint in &mut self.endpoints {
+            endpoint.set_resampler_filter(filter);
+        }
+        info!("Resampler filter family set to {:?}", filter);
+    }
+
+    /// Select the final quantization noise shaper.
+    ///
+    /// A converter's dither design is built when the device stream opens, so
+    /// this arms the next stream. Updating the process-wide construction
+    /// default keeps host-created converters consistent with this choice.
+    pub(super) fn handle_set_noise_shaper(&mut self, shaper: config::NoiseShaper) {
+        self.config.noise_shaper = shaper;
+        crate::dsp::dither::set_configured_noise_shaper(shaper);
+        info!("Noise shaper set to {:?} (next stream)", shaper);
+    }
+
+    /// Configure PCM→SDM native-DSD output. The modulator and rate are part of
+    /// device negotiation, so this applies on the next stream open.
+    pub(super) fn handle_set_sdm_config(&mut self, cfg: config::SdmConfig) {
+        self.config.sdm = cfg;
+        info!("SDM config updated (next stream)");
+    }
+
+    /// Replace the DAC correction profile table and reload the matching bank.
+    pub(super) fn handle_set_dac_correction(&mut self, cfg: config::DacCorrectionConfig) {
+        self.config.dac_correction = cfg.clone();
+        self.graph.with_graph(|graph| graph.set_dac_correction(cfg));
+        info!("DAC correction profiles updated");
+    }
+
     pub(super) fn handle_set_crossfade_config(&mut self, cfg: config::CrossfadeConfig) {
         info!(
             "Crossfade config updated: enabled={}, duration={}ms, curve={:?}",

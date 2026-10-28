@@ -14,7 +14,6 @@ use std::sync::Arc;
 
 use super::types::*;
 use crate::buffer::{DsdByteBuffer, FixedFrameBuffer, UnderrunState, MAX_CHANNELS};
-use crate::dsp::dither::DitherType;
 use crate::output::format_converter::{AudioFormatConverter, TargetFormat};
 
 /// Shared state passed to the ASIO callback handler.
@@ -140,7 +139,7 @@ impl AsioRenderContext {
             declick: UnsafeCell::new(UnderrunState::new(sample_rate)),
             converter: UnsafeCell::new(AudioFormatConverter::new_at_rate(
                 target_format_for(sample_type),
-                DitherType::Triangular,
+                crate::dsp::dither::configured_dither_type(),
                 sample_rate,
             )),
             // `DSD_BYTES_PER_WORD_HEADROOM` covers DSD64 (1 byte per 8 frames

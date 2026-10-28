@@ -2,7 +2,8 @@
 //! language, smart playlists, instances, and file organisation.
 
 use super::super::widgets::{
-    badge_label, card_header, language_label, pill_btn, setting_card, setting_item, toggle_switch,
+    badge_label, card_header, language_label, pill_btn, setting_card, setting_item,
+    setting_item_toggle, toggle_switch,
 };
 use super::super::{SettingsCategory, SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
@@ -49,6 +50,16 @@ pub(in crate::components::settings_tab) fn render_library_category(
                     });
             },
         );
+
+        if setting_item_toggle(
+            ui,
+            &tr!("Reduce Motion"),
+            &tr!("Disable hover and transition animations across the interface"),
+            theme,
+            &mut state.reduce_motion,
+        ) {
+            actions.reduce_motion_changed = Some(state.reduce_motion);
+        }
     });
 
     // Card 2: Smart Playlists

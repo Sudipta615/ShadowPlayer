@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::contrast::{validate_contrast, ContrastError};
 use super::fonts::ThemeFonts;
-use super::tokens::{parse_hex_color, Theme};
+use super::tokens::{parse_hex_color, PlayButtonShape, Theme};
 
 /// Macro iterating over every required colour token.
 /// This serves as the single source of truth for mandatory theme tokens.
@@ -193,6 +193,11 @@ pub struct ThemeFile {
     #[serde(default)]
     pub radii: HashMap<String, u8>,
 
+    /// Optional transport play-button silhouette (`circle`, `rounded`, `pill`,
+    /// or `square`). Missing means the default circle.
+    #[serde(default)]
+    pub play_button: Option<PlayButtonShape>,
+
     /// Optional per-role font-family declarations (`display`, `body`, `mono`).
     #[serde(default, skip_serializing_if = "ThemeFonts::is_empty")]
     pub fonts: ThemeFonts,
@@ -361,6 +366,8 @@ pub struct LoadedTheme {
     pub metadata: ThemeMetadata,
     pub colors: HashMap<String, Color32>,
     pub radii: HashMap<String, u8>,
+    /// Optional transport button silhouette requested by this theme.
+    pub play_button: PlayButtonShape,
     /// Optional typeface roles requested by this theme.
     pub fonts: ThemeFonts,
     /// The schema version declared in the source file.  1 = legacy, 2 = current.
@@ -412,6 +419,7 @@ impl LoadedTheme {
             metadata,
             colors,
             radii: theme_file.radii,
+            play_button: theme_file.play_button.unwrap_or_default(),
             fonts: theme_file.fonts,
             schema_version: theme_file.schema_version,
         })
@@ -454,6 +462,7 @@ impl LoadedTheme {
         apply_radius!(radius_pill);
         apply_radius!(frame_radius);
 
+        theme.play_button_shape = self.play_button;
         theme.is_light = self.metadata.is_light;
         theme
     }
@@ -553,6 +562,35 @@ mod tests {
         let serialized = serde_json::to_string(&theme_file).unwrap();
         let round_tripped: ThemeFile = serde_json::from_str(&serialized).unwrap();
         assert_eq!(round_tripped.fonts, theme_file.fonts);
+    }
+
+    #[test]
+    fn play_button_shape_parses_round_trips_and_defaults_to_circle() {
+        let shaped_json = r##"{
+            "schema_version": 2,
+            "metadata": { "name": "Shaped" },
+            "colors": {},
+            "play_button": "pill"
+        }"##;
+        let theme_file: ThemeFile = serde_json::from_str(shaped_json).unwrap();
+        assert_eq!(theme_file.play_button, Some(PlayButtonShape::Pill));
+
+        let serialized = serde_json::to_string(&theme_file).unwrap();
+        let round_tripped: ThemeFile = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(round_tripped.play_button, Some(PlayButtonShape::Pill));
+
+        // Themes written before the token existed must keep the round default.
+        let legacy_json = r##"{
+            "schema_version": 2,
+            "metadata": { "name": "Legacy" },
+            "colors": {}
+        }"##;
+        let legacy: ThemeFile = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(legacy.play_button, None);
+        assert_eq!(
+            legacy.play_button.unwrap_or_default(),
+            PlayButtonShape::Circle
+        );
     }
 
     #[test]

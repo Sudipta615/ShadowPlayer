@@ -3,6 +3,7 @@
 pub mod aelog;
 pub mod analysis;
 pub mod analyzer;
+pub mod apodizing;
 pub mod autoeq;
 pub mod bass_enhancer;
 pub mod biquad;
@@ -33,15 +34,20 @@ pub mod pipeline;
 pub mod resampler;
 pub mod resampler_handle;
 pub mod safety;
+pub mod sdm;
 pub mod simd;
 pub mod smoother;
 pub mod stereo;
 pub mod timeline;
 pub mod timestretch;
 pub mod true_peak;
+pub mod ultrasonic;
 
 pub use analysis::{AnalysisEngine, AnalysisSnapshot};
 pub use analyzer::{AnalyzerSnapshot, AudioAnalyzer, ANALYZER_FFT_SIZE, ANALYZER_UPDATE_HZ};
+pub use apodizing::{
+    ApodizingDetector, ApodizingRecommendation, ApodizingReport, APODIZING_RECOMMENDATION_THRESHOLD,
+};
 pub use autoeq::{AutoEq, AutoEqParams, AutoEqResult, FrequencyResponse, TargetCurve};
 pub use bass_enhancer::{BassEnhancer, BassEnhancerParams};
 pub use biquad::{

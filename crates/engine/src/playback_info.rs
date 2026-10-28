@@ -22,6 +22,69 @@ pub enum PlaybackState {
     Buffering,
 }
 
+/// Telemetry for the PCM→SDM (native DSD) output stage.
+///
+/// Every field is measured by the running modulator, not inferred from the
+/// request: `dsd_rate` is the rate the transport actually accepted, `clips`
+/// and `state_recoveries` are counters from the modulator, and
+/// `fallback_reason` is set when native DSD was requested but the engine
+/// stayed on PCM.
+#[derive(Debug, Clone)]
+pub struct SdmReport {
+    /// True only while PCM is being modulated to native DSD.
+    pub active: bool,
+    /// Modulator design actually in use.
+    pub modulator: Option<config::SdmModulator>,
+    /// Rate the user requested (`Auto` or a fixed multiple).
+    pub requested_rate: Option<config::SdmRate>,
+    /// Negotiated native-DSD bit rate (0 when inactive).
+    pub dsd_rate: u32,
+    /// Rate the PCM DSP chain and the SDM input run at.
+    pub working_rate: u32,
+    /// Source PCM rate.
+    pub source_rate: u32,
+    /// Interpolation factor from the working rate to the DSD rate.
+    pub stage_factor: u32,
+    /// Negotiated DSD multiple (64/128/256/512).
+    pub multiple: u32,
+    /// Samples the modulator clamped at the digital full scale.
+    pub clips: u64,
+    /// Times the safety leash rescued the loop state.
+    pub state_recoveries: u64,
+    /// Peak absolute modulator input (post-interpolation).
+    pub input_peak: f64,
+    /// Fraction of one bits emitted (≈0.5 for silence).
+    pub ones_ratio: f64,
+    /// Group delay of the SDM stage's interpolation filter.
+    pub interpolator_delay_ms: f64,
+    /// Input attenuation applied to keep the one-bit loop stable (0.5 = 50 %).
+    pub modulation_depth: f64,
+    /// Why native DSD was requested but the engine stayed on PCM.
+    pub fallback_reason: Option<String>,
+}
+
+impl Default for SdmReport {
+    fn default() -> Self {
+        Self {
+            active: false,
+            modulator: None,
+            requested_rate: None,
+            dsd_rate: 0,
+            working_rate: 0,
+            source_rate: 0,
+            stage_factor: 0,
+            multiple: 0,
+            clips: 0,
+            state_recoveries: 0,
+            input_peak: 0.0,
+            ones_ratio: 0.0,
+            interpolator_delay_ms: 0.0,
+            modulation_depth: 0.0,
+            fallback_reason: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PlaybackInfo {
     pub state: PlaybackState,
@@ -112,6 +175,16 @@ pub struct PlaybackInfo {
     /// bitstream to a DSD-capable DAC, entire f32 DSP path structurally
     /// bypassed.
     pub native_dsd_active: bool,
+    /// True while a PCM source is being converted to native DSD by the
+    /// engine's own delta-sigma modulator (not DoP, not a DSD source).
+    pub sdm_active: bool,
+    /// Measured PCM→SDM stage telemetry and any fallback reason.
+    pub sdm: SdmReport,
+    /// Per-track source apodizing-need counter. This is a guidance heuristic
+    /// (near-Nyquist energy bursts), not a converter measurement; the report
+    /// names the threshold and says whether an apodizing filter is
+    /// recommended.
+    pub apodizing: crate::dsp::apodizing::ApodizingReport,
     /// The DSD transport actually in use for the current track.
     pub dsd_transport: crate::decode::DsdTransport,
     /// Full DSD transport negotiation report (§7, §28): requested vs actual
@@ -153,6 +226,9 @@ pub struct PlaybackInfo {
     /// telemetry cadence (enabled, phase mode, IR length, added latency,
     /// per-channel max gain, depth).
     pub correction: CorrectionInfo,
+    /// Device-specific DAC correction telemetry, distinct from
+    /// [`Self::correction`] (room/headphone correction).
+    pub dac_correction: DacCorrectionInfo,
     /// Spatial master output telemetry: the `SpatialNode`'s
     /// per-ear output meters (peak/RMS dBFS) and its live voice-budget plan
     /// (full / degraded / dropped voice counts), mirrored on the telemetry
@@ -278,6 +354,44 @@ pub struct CorrectionInfo {
     pub max_gain_db: f32,
 }
 
+/// Device-specific DAC correction telemetry. Deliberately a separate type
+/// from [`CorrectionInfo`]: a converter profile is not a room measurement and
+/// must not be labelled as one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DacCorrectionInfo {
+    /// The config requested DAC correction.
+    pub enabled: bool,
+    /// The bank is loaded and processing.
+    pub active: bool,
+    /// Matched profile device key.
+    pub profile: Option<String>,
+    /// Wet/dry depth in [0, 1].
+    pub depth: f32,
+    /// Latency already present in the profile IRs (ms).
+    pub latency_ms: f32,
+    /// Loaded IR length (samples); 0 when inactive.
+    pub ir_len_samples: usize,
+    /// Peak gain of the loaded set (dB).
+    pub max_gain_db: f32,
+    /// Why the requested correction is inactive, if it is.
+    pub reason: Option<String>,
+}
+
+impl Default for DacCorrectionInfo {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            active: false,
+            profile: None,
+            depth: 1.0,
+            latency_ms: 0.0,
+            ir_len_samples: 0,
+            max_gain_db: 0.0,
+            reason: None,
+        }
+    }
+}
+
 impl Default for CorrectionInfo {
     fn default() -> Self {
         Self {
@@ -366,6 +480,9 @@ impl Default for PlaybackInfo {
             bit_perfect: false,
             dop_active: false,
             native_dsd_active: false,
+            sdm_active: false,
+            sdm: SdmReport::default(),
+            apodizing: crate::dsp::apodizing::ApodizingReport::default(),
             dsd_transport: crate::decode::DsdTransport::PcmConversion,
             dsd_transport_report: crate::decode::DsdTransportReport::default(),
             active_output_profile: None,
@@ -383,6 +500,7 @@ impl Default for PlaybackInfo {
             aux_insert_enabled: false,
             aux_insert_wet_mix: 0.5,
             correction: CorrectionInfo::default(),
+            dac_correction: DacCorrectionInfo::default(),
             // Always present (matches `correction`): an inactive stage at
             // rest, overwritten with live values on the telemetry cadence
             // while the spatial master is processing.

@@ -47,7 +47,7 @@
 
 use std::hint::black_box;
 
-use config::ResamplerQuality;
+use config::{ResamplerFilter, ResamplerQuality};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use engine::dsp::resampler::AudioResampler;
 
@@ -94,6 +94,54 @@ fn bench_resampler(c: &mut Criterion) {
             resampler.latency_ms(),
         );
         group.bench_with_input(BenchmarkId::from_parameter(tier.as_str()), &tier, |b, _| {
+            b.iter(|| {
+                for i in 0..CHUNK {
+                    resampler.feed(black_box(pl[i]), black_box(pr[i]));
+                }
+                let mut frames = 0usize;
+                let mut acc = 0.0f32;
+                while let Some((l, r)) = resampler.read() {
+                    acc += l + r;
+                    frames += 1;
+                }
+                black_box((frames, acc));
+            });
+        });
+    }
+    group.finish();
+
+    // P1.2's own rational polyphase engine. These numbers are per 100 ms of
+    // source audio at 44.1 kHz; the filter metadata is printed so the cost can
+    // be read next to the realized stopband and group delay.
+    let mut group = c.benchmark_group("resampler/polyphase_f32_44k1_to_48k");
+    group.throughput(Throughput::Elements(CHUNK as u64));
+    for (filter, tier) in [
+        (ResamplerFilter::Kaiser, ResamplerQuality::Fast),
+        (ResamplerFilter::Kaiser, ResamplerQuality::Balanced),
+        (ResamplerFilter::BlackmanHarris, ResamplerQuality::Balanced),
+        (ResamplerFilter::MinimumPhase, ResamplerQuality::Balanced),
+        (ResamplerFilter::Apodizing, ResamplerQuality::Balanced),
+    ] {
+        let mut resampler =
+            AudioResampler::<f32>::new_with_filter(tier, filter, SRC_RATE, DST_RATE)
+                .expect("44.1 -> 48 kHz polyphase conversion");
+        for i in 0..CHUNK {
+            resampler.feed(pl[i], pr[i]);
+        }
+        while resampler.read().is_some() {}
+        if let Some(m) = resampler.filter_metadata() {
+            eprintln!(
+                "[resampler] {} {tier:?}: {:.1} dB stopband, {:.3} dB ripple, \
+                 group delay {:.2} ms ({:.0} output frames)",
+                filter.as_str(),
+                m.stopband_attenuation_db,
+                m.passband_ripple_db,
+                m.group_delay_output_frames / DST_RATE as f64 * 1000.0,
+                m.group_delay_output_frames,
+            );
+        }
+        let id = format!("{}_{}", filter.as_str(), tier.as_str());
+        group.bench_with_input(BenchmarkId::new("polyphase", &id), &id, |b, _| {
             b.iter(|| {
                 for i in 0..CHUNK {
                     resampler.feed(black_box(pl[i]), black_box(pr[i]));

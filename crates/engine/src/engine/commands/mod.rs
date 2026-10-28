@@ -513,6 +513,13 @@ impl AudioEngine {
                 makeup_gain_db,
             ),
             EngineCommand::SetPrecisionMode(mode) => self.handle_set_precision_mode(mode),
+            EngineCommand::SetDsdOutput(output) => self.handle_set_dsd_output(output),
+            EngineCommand::SetDsdNoiseFilter(filter) => self.handle_set_dsd_noise_filter(filter),
+            EngineCommand::SetUltrasonicFilter(filter) => self.handle_set_ultrasonic_filter(filter),
+            EngineCommand::SetResamplerFilter(filter) => self.handle_set_resampler_filter(filter),
+            EngineCommand::SetNoiseShaper(shaper) => self.handle_set_noise_shaper(shaper),
+            EngineCommand::SetSdmConfig(cfg) => self.handle_set_sdm_config(cfg),
+            EngineCommand::SetDacCorrection(cfg) => self.handle_set_dac_correction(cfg),
             EngineCommand::SetBitPerfect(enabled) => self.handle_set_bit_perfect(enabled),
             EngineCommand::SetLimiterMode(mode) => self.handle_set_limiter_mode(mode),
             EngineCommand::SetLimiterTruePeak(enabled) => {

@@ -1,6 +1,6 @@
 //! The Appearance category: theme gallery and editor.
 
-use super::super::widgets::{card_header, setting_card, setting_item, toggle_switch};
+use super::super::widgets::{card_header, setting_card, setting_item_toggle};
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
 use eframe::egui;
@@ -39,19 +39,13 @@ pub(in crate::components::settings_tab) fn render_appearance_category(
             theme,
         );
 
-        let prev = state.frosted_glass_enabled;
-        setting_item(
+        if setting_item_toggle(
             ui,
             "Frosted Glass Surfaces",
             "Render cards and panels with authentic translucency, micro-bevel specular rims, and ambient artwork bloom across any active theme",
             theme,
-            |ui| {
-                if toggle_switch(ui, &mut state.frosted_glass_enabled, theme) {
-                    actions.frosted_glass_changed = Some(state.frosted_glass_enabled);
-                }
-            },
-        );
-        if prev != state.frosted_glass_enabled && actions.frosted_glass_changed.is_none() {
+            &mut state.frosted_glass_enabled,
+        ) {
             actions.frosted_glass_changed = Some(state.frosted_glass_enabled);
         }
     });
@@ -95,14 +89,34 @@ pub(in crate::components::settings_tab) fn render_appearance_category(
         if let Some(app_id) = g_actions.apply_theme {
             actions.apply_theme = Some(app_id);
         }
+        if g_actions.cancel_preview {
+            actions.cancel_theme_preview = true;
+        }
         if g_actions.reload_themes {
             actions.reload_themes = true;
         }
         if g_actions.import_theme {
             actions.import_theme = true;
         }
-        if g_actions.open_custom_themes_folder {
-            actions.open_custom_themes_folder = true;
+        if let Some(edit_id) = g_actions.open_editor {
+            let card = manager
+                .all_theme_cards()
+                .into_iter()
+                .find(|card| card.id == edit_id);
+            let display_name = card
+                .as_ref()
+                .map(|card| card.name.clone())
+                .unwrap_or_else(|| edit_id.clone());
+            let base = manager.resolve_theme(&edit_id, theme.is_light);
+            // A clone keeps everything the gallery card advertises, including
+            // the typeface roles the editor would otherwise overwrite on save.
+            let fonts = card
+                .as_ref()
+                .map(|card| card.fonts.clone())
+                .unwrap_or_default();
+            state
+                .theme_editor
+                .request_load_for_customizing(&base, &display_name, &edit_id, fonts);
         }
 
         if has_errs {
@@ -120,10 +134,42 @@ pub(in crate::components::settings_tab) fn render_appearance_category(
 
     ui.add_space(theme.space_md);
 
-    // Card 4: In-App Theme Editor
-    let e_actions =
-        crate::theme::editor::render_theme_editor(ui, &mut state.theme_editor, manager, theme);
-    if let Some(saved_id) = e_actions.theme_saved {
+    // Card 3: In-App Theme Editor
+    let mut saved_theme = None;
+    let editor_open = state.theme_editor.is_open;
+    let editor_dirty = editor_open && state.theme_editor.is_dirty();
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_palette,
+            "Theme Editor",
+            "Tune colors, radii, typography and the transport silhouette with a live preview",
+            Some((
+                if editor_dirty {
+                    "UNSAVED"
+                } else if editor_open {
+                    "OPEN"
+                } else {
+                    "READY"
+                },
+                theme.bg_pill,
+                if editor_dirty {
+                    theme.accent_warm
+                } else if editor_open {
+                    theme.accent_highlight
+                } else {
+                    theme.text_muted
+                },
+            )),
+            theme,
+        );
+
+        let e_actions =
+            crate::theme::editor::render_theme_editor(ui, &mut state.theme_editor, manager, theme);
+        saved_theme = e_actions.theme_saved;
+    });
+
+    if let Some(saved_id) = saved_theme {
         actions.reload_themes = true;
         actions.apply_theme = Some(saved_id);
     }

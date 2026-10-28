@@ -39,6 +39,7 @@ impl AudioEngine {
                     self.config.effective_output_buffer_frames(),
                     self.output_sample_rate,
                     self.config.resampler_quality,
+                    self.config.resampler_filter,
                     self.config.precision_mode,
                 )
                 .map_err(|e| EngineError::Config(format!("Endpoint open: {e}")))?,
@@ -113,6 +114,16 @@ impl AudioEngine {
         self.running.store(true, Ordering::Release);
         self.graph
             .update_sample_rate(self.output_sample_rate as f32);
+        // The actual device name is the key for a DAC correction profile.
+        // Fall back to the configured device identity when the backend does
+        // not report a friendly name.
+        let dac_device = self
+            .audio_output
+            .as_ref()
+            .map(|output| output.output_info().device_name)
+            .filter(|name| !name.is_empty())
+            .or_else(|| self.config.output_device.clone());
+        self.graph.set_dac_device(dac_device);
         self.update_playback_state(PlaybackState::Stopped);
         self.recovery.stream_recovery_attempts = 0;
         self.recovery.stream_recovery_burst_start = None;
@@ -264,6 +275,10 @@ impl AudioEngine {
         self.dsd.native_dsd_active = false;
         self.dsd.dsd_wire_format = None;
         self.dsd.dsd_byte_buffer = None;
+        self.dsd.sdm_active = false;
+        self.dsd.sdm_output = None;
+        self.dsd.sdm_plan = None;
+        self.dsd.sdm_fallback_reason = None;
         self.dsd.dsd_transport_report = crate::decode::DsdTransportReport::default();
         self.graph.set_dop_bypass(false);
         // Keep the published playhead consistent with the reset internal

@@ -70,6 +70,7 @@
     "radius_pill": 12,
     "frame_radius": 8
   },
+  "play_button": "pill",
   "fonts": {
     "display": "Bricolage Grotesque",
     "body": "DM Sans",

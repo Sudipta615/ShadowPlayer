@@ -25,8 +25,8 @@ pub struct SettingsViewActions {
     pub cancel_theme_preview: bool,
     pub reload_themes: bool,
     pub import_theme: bool,
-    pub open_custom_themes_folder: bool,
     pub frosted_glass_changed: Option<bool>,
+    pub reduce_motion_changed: Option<bool>,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
     /// Play or stop the crossfade audition.
@@ -120,6 +120,7 @@ pub fn render_settings_view(
                 .as_ref()
                 .and_then(|i| i.actual_backend),
             output_info: playback_info.output_info.as_ref(),
+            apodizing: Some(&playback_info.apodizing),
             output_devices: &dsp_state.output_devices,
             graph_build_ms: session.graph_build_stats().0,
             graph_builds: session.graph_build_stats().1,
@@ -150,11 +151,11 @@ pub fn render_settings_view(
         if s_actions.import_theme {
             view_actions.import_theme = true;
         }
-        if s_actions.open_custom_themes_folder {
-            view_actions.open_custom_themes_folder = true;
-        }
         if let Some(enabled) = s_actions.frosted_glass_changed {
             view_actions.frosted_glass_changed = Some(enabled);
+        }
+        if let Some(enabled) = s_actions.reduce_motion_changed {
+            view_actions.reduce_motion_changed = Some(enabled);
         }
         if s_actions.open_artwork_fetch {
             view_actions.open_artwork_fetch = true;

@@ -13,6 +13,7 @@ Midnight) or custom user themes loaded from `.shadowtheme` files.
 The theming engine is organized into modular components under `crates/ui/src/theme/`:
 
 * **`tokens.rs`**: Defines the `Theme` value as a plain, `Copy` data struct without heap allocations in the rendering loop. Provides alpha blending (`with_alpha`) and color utilities.
+* **`glass.rs`**: Paints the defocused artwork backdrop and specular sheen used by frosted-glass surfaces. The backdrop is a cached 64×64 blur built from artwork the player has already decoded.
 * **`fonts.rs`**: Theme typeface declarations, the bundled OFL font registry, role resolution with an always-available Inter fallback, and egui font-atlas installation.
 * **`system.rs`**: Built-in system theme presets:
   - `dark()` — *Obsidian Jade*: Deep obsidian surfaces with jade (#0F766E) and mint (#5EEAD4) highlights.
@@ -22,8 +23,8 @@ The theming engine is organized into modular components under `crates/ui/src/the
 * **`schema.rs`**: Theme file serialization supporting the `.shadowtheme` format.
 * **`manager.rs`**: Filesystem discovery across the `themes/` directory, active theme selection, and staged live preview lifecycle.
 * **`preview.rs`**: Sandbox rendering a mini playback shell with simulated album artwork, 3-track playlist table, transport controls, volume slider, and VU meters.
-* **`gallery.rs`**: Responsive card grid with search, category filtering (All, Dark, Light, OLED, Custom), and active state indicators.
-* **`editor.rs`**: In-app color customizer with grouped pickers, real-time WCAG AA compliance validation, auto-fix button, and JSON file export.
+* **`gallery.rs`**: Responsive compact card wall with search, category filtering (All, Dark, Light, OLED, Custom), per-card preview/apply/edit actions, an **Edit Active Theme** shortcut, and a staged-preview strip with a global clear action. Extra width becomes more columns rather than oversized cards.
+* **`editor/`**: In-app theme editor split into `mod.rs` (layout), `state.rs` (draft snapshot, dirtiness, save safety), and `widgets.rs` (preview and token controls). It offers grouped color pickers, a live player preview, transport silhouette selection, radii and font controls, real-time WCAG AA validation, auto-fix, and JSON file export.
 
 ---
 
@@ -137,6 +138,7 @@ Themes are stored in JSON files under the `themes/` directory:
 | `author` | No | Author credit string. |
 | `description` | No | Short one-line summary. |
 | `is_light` | No | `true` for a light-background theme; defaults to `false`. |
+| `play_button` | No | Optional transport silhouette: `circle` (default), `rounded`, `pill`, or `square`. |
 | `colors` | Yes | Flat map of `token_name → "#RRGGBB"` or `"#RRGGBBAA"` strings. |
 | `radii` | No | Optional radius overrides (`radius_xs`, `radius_sm`, …). |
 | `fonts` | No | Optional role → family map. Roles are `display`, `body`, and `mono`; omitted text roles use Inter, omitted `mono` uses JetBrains Mono. |
@@ -149,6 +151,7 @@ Themes are stored in JSON files under the `themes/` directory:
   "author": "Community",
   "description": "Arctic, north-bluish clean aesthetic",
   "is_light": false,
+  "play_button": "rounded",
   "fonts": {
     "display": "Fraunces",
     "body": "DM Sans",
@@ -241,6 +244,8 @@ ShadowPlayer includes an automated migration pipeline (`schema::migrate_theme_fi
 ## 5. UI Integration, Custom Themes & Live Staged Previews
 
 ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
+* **Surface Material**: **Frosted Glass Surfaces** turns cards, panels, and inputs into translucent panes over a defocused album-art backdrop, with a specular top sheen and bevel. Dense content (the songs table, Settings, and the gallery) sits on a stronger `content_panel_fill` scrim so the backdrop stays visible without putting moving artwork directly behind row text. The backdrop is only painted while the effect is enabled; disabling it restores the opaque theme surfaces.
+* **Reduce Motion**: **Library & App → Interface & Language → Reduce Motion** zeros the duration of hover and transition fades. Explicitly timed animations call `Theme::motion_time`, and egui's own `style.animation_time` is set to zero, so the preference reaches both the player chrome and the Settings surfaces.
 * **Custom Themes Folder (`themes/custom-theme/`)**: Custom user themes reside inside `<data_dir>/themes/custom-theme/`. The theme manager monitors this directory and loads all `.shadowtheme` and `.json` files.
 * **Bundled Custom Themes**: Thirty-two schema-v2 themes ship in `crates/ui/src/theme/custom-theme/`. They are embedded in the binary and written into `<data_dir>/themes/custom-theme/` on first launch, so a packaged build shows the same gallery as a source checkout. Existing files are never overwritten.
 
@@ -287,10 +292,10 @@ pill-shaped theme such as *Lilac Air*.
 * **Optimized Import & Invalidation**: Importing a `.shadowtheme` file immediately registers and stages the theme in-memory without expensive full-disk rescans, with dirty-flag cache invalidation (`reload_if_dirty`) managing cache freshness.
 * **Import Theme Button**: In Settings → Appearance, clicking **Import Theme…** opens the system's native file picker (`rfd`, XDG portal / native OS dialog) allowing users to select `.shadowtheme` files from anywhere on their storage. Imported themes are validated, copied into `themes/custom-theme/`, and immediately staged or applied.
 * **Open Folder Button**: Directly opens `<data_dir>/themes/custom-theme/` in the OS file manager (Nautilus, Dolphin, Finder, Explorer) with a single click.
-* **Gallery**: Filter and search through installed and system themes. Each card displays author, theme version (or `built-in`), color swatches, description, and tag chips (`#dark`, `#oled`, etc.). Cards for themes with unbundled typefaces show a font-fallback warning below the tags. Selecting a card stages it for live preview.
+* **Gallery**: Filter and search through installed and system themes. Settings search also reaches card headings such as **Theme Gallery** and **Theme Editor**, and jumps to the card rather than pretending a section is a row. Each compact card shows a live palette sample, the theme's transport silhouette, author, version, and description, with per-card **Preview**, **Apply**, and **Edit** actions. The active card shows only **Edit** because it is already applied. A staged theme also gets a strip above the wall with **Apply** and **Clear Preview**, so reverting never requires finding the card again.
 * **Sandbox Preview**: Real-time rendering of mini transport controls, volume slider, VU meter, and track listing, including the candidate theme's typefaces once staged.
-* **Apply / Revert**: Staged themes are visually previewed instantly and only persist when applied. Reverting restores the active theme's colors and fonts.
-* **Theme Editor**: Direct parameter tuning — colors, radii, and the three font roles — with instant saving into `themes/custom-theme/`. Uses `for_each_required_color_token` as the single source of truth for color token definitions.
+* **Apply / Revert**: Staged themes are visually previewed instantly and only persist when applied. Reverting restores the active theme's colors and fonts without applying anything.
+* **Theme Editor**: Direct parameter tuning — colors, radii, transport silhouette, and the three font roles — with a live player preview and saving into `themes/custom-theme/`. The **Edit** action on any gallery card (or **Edit Active Theme** above the wall) clones that theme into the editor. The editor derives dirtiness by comparing the draft with a saved snapshot, shows an `UNSAVED` badge, asks before closing or replacing a dirty draft, confirms before overwriting an existing file, and offers **Save as New** with a unique `_copy` identifier. Uses `for_each_required_color_token` as the single source of truth for color token definitions.
 
 ---
 
@@ -300,6 +305,7 @@ A theme supplies values, not arbitrary UI code or behavior:
 * It may not paint colours outside the token set (enforced by `theme_purity.rs`).
 * It may not embed font files, change the global type scale, or bypass the bundled-family registry. It may name any family; unknown families fall back to Inter and are flagged in the gallery.
 * It may not choose arbitrary numeric margins or radii outside the spacing scale (`spacing_scale.rs`).
+* It may not invent transport silhouettes; `play_button` selects one of the four shipped shapes.
 * It may not bypass WCAG AA contrast standards.
 * It may not alter playback or audio processing pipelines.
 

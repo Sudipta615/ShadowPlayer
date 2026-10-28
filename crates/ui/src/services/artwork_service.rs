@@ -17,6 +17,14 @@ const UPLOAD_MAX_EDGE: u32 = 160;
 /// the library size.
 const MAX_RESIDENT_TEXTURES: usize = 256;
 
+/// Maximum number of blurred backdrops kept on the GPU. Only the current track
+/// needs one, plus a little history for quick A/B track changes.
+const MAX_BACKDROPS: usize = 4;
+
+/// The side of the tiny source image kept for the frosted backdrop. Blurring a
+/// 64×64 image is effectively free and yields a beautifully soft colour field.
+const BACKDROP_SOURCE_EDGE: u32 = 64;
+
 /// Service managing album art extraction, caching, and egui TextureHandle
 /// generation.
 ///
@@ -32,6 +40,13 @@ pub struct ArtworkService {
     order: VecDeque<TrackId>,
     /// Tracks whose art could not be resolved (avoids per-frame retries).
     missing: HashSet<TrackId>,
+    /// Tiny colour sources used to build the frosted-glass backdrop. These are
+    /// prepared while the artwork is decoded, so the backdrop costs no extra
+    /// disk I/O or decode later.
+    backdrop_sources: HashMap<TrackId, egui::ColorImage>,
+    /// Blurred GPU copies, generated on demand for the current track.
+    backdrop_textures: HashMap<TrackId, TextureHandle>,
+    backdrop_order: VecDeque<TrackId>,
 }
 
 impl Default for ArtworkService {
@@ -51,6 +66,9 @@ impl ArtworkService {
             texture_cache: HashMap::new(),
             order: VecDeque::new(),
             missing: HashSet::new(),
+            backdrop_sources: HashMap::new(),
+            backdrop_textures: HashMap::new(),
+            backdrop_order: VecDeque::new(),
         }
     }
 
@@ -65,6 +83,41 @@ impl ArtworkService {
 
     pub fn get_texture(&self, track_id: &TrackId) -> Option<&TextureHandle> {
         self.texture_cache.get(track_id)
+    }
+
+    /// The blurred backdrop for this track, generated once from the tiny
+    /// colour source captured at artwork-load time.
+    ///
+    /// Returns a clone of the texture handle so callers can paint while the
+    /// service continues to be borrowed mutably for other work.
+    pub fn backdrop_texture(
+        &mut self,
+        ctx: &egui::Context,
+        track_id: &TrackId,
+    ) -> Option<TextureHandle> {
+        if let Some(texture) = self.backdrop_textures.get(track_id) {
+            if let Some(pos) = self.backdrop_order.iter().position(|id| id == track_id) {
+                self.backdrop_order.remove(pos);
+            }
+            self.backdrop_order.push_back(*track_id);
+            return Some(texture.clone());
+        }
+
+        let source = self.backdrop_sources.get(track_id)?;
+        let blurred = blur_color_image(source, 4);
+        let texture = ctx.load_texture(
+            format!("art_backdrop_{track_id}"),
+            blurred,
+            egui::TextureOptions::LINEAR,
+        );
+        self.backdrop_textures.insert(*track_id, texture.clone());
+        self.backdrop_order.push_back(*track_id);
+        while self.backdrop_order.len() > MAX_BACKDROPS {
+            if let Some(oldest) = self.backdrop_order.pop_front() {
+                self.backdrop_textures.remove(&oldest);
+            }
+        }
+        Some(texture)
     }
 
     /// Read-only view of the texture cache (used where on-demand loading is not
@@ -91,8 +144,13 @@ impl ArtworkService {
     pub fn invalidate_track(&mut self, track_id: &TrackId) {
         self.missing.remove(track_id);
         self.texture_cache.remove(track_id);
+        self.backdrop_sources.remove(track_id);
+        self.backdrop_textures.remove(track_id);
         if let Some(pos) = self.order.iter().position(|id| id == track_id) {
             self.order.remove(pos);
+        }
+        if let Some(pos) = self.backdrop_order.iter().position(|id| id == track_id) {
+            self.backdrop_order.remove(pos);
         }
     }
 
@@ -210,6 +268,22 @@ impl ArtworkService {
             egui::TextureOptions::LINEAR,
         );
 
+        // Keep a tiny colour source for the frosted-glass backdrop. Doing this
+        // now costs one fast thumbnail of an image we have already decoded, and
+        // avoids a second disk read when the track starts playing.
+        let tiny = img.thumbnail(BACKDROP_SOURCE_EDGE, BACKDROP_SOURCE_EDGE);
+        let tiny = tiny.to_rgba8();
+        let source = egui::ColorImage::from_rgba_unmultiplied(
+            [tiny.width() as usize, tiny.height() as usize],
+            tiny.as_raw(),
+        );
+        self.backdrop_sources.insert(id, source);
+        // The source changed, so any previous blurred copy is stale.
+        self.backdrop_textures.remove(&id);
+        if let Some(pos) = self.backdrop_order.iter().position(|entry| entry == &id) {
+            self.backdrop_order.remove(pos);
+        }
+
         self.insert(id, texture);
         true
     }
@@ -224,7 +298,77 @@ impl ArtworkService {
         while self.order.len() > MAX_RESIDENT_TEXTURES {
             if let Some(oldest) = self.order.pop_front() {
                 self.texture_cache.remove(&oldest);
+                self.backdrop_sources.remove(&oldest);
+                self.backdrop_textures.remove(&oldest);
+                if let Some(pos) = self.backdrop_order.iter().position(|id| id == &oldest) {
+                    self.backdrop_order.remove(pos);
+                }
             }
         }
     }
+}
+
+/// Separable box blur over a tiny RGBA image. Two passes are enough to erase
+/// album-art detail while keeping the palette and light distribution, which is
+/// exactly what a frosted pane transmits.
+fn blur_color_image(source: &egui::ColorImage, radius: usize) -> egui::ColorImage {
+    let [w, h] = source.size;
+    if w == 0 || h == 0 || radius == 0 {
+        return source.clone();
+    }
+    let mut horizontal = vec![egui::Color32::TRANSPARENT; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let mut r = 0u32;
+            let mut g = 0u32;
+            let mut b = 0u32;
+            let mut a = 0u32;
+            let mut n = 0u32;
+            let lo = x.saturating_sub(radius);
+            let hi = (x + radius).min(w - 1);
+            for sx in lo..=hi {
+                let c = source.pixels[y * w + sx];
+                r += c.r() as u32;
+                g += c.g() as u32;
+                b += c.b() as u32;
+                a += c.a() as u32;
+                n += 1;
+            }
+            horizontal[y * w + x] = egui::Color32::from_rgba_unmultiplied(
+                (r / n) as u8,
+                (g / n) as u8,
+                (b / n) as u8,
+                (a / n) as u8,
+            );
+        }
+    }
+
+    let mut out = vec![egui::Color32::TRANSPARENT; w * h];
+    for y in 0..h {
+        let lo = y.saturating_sub(radius);
+        let hi = (y + radius).min(h - 1);
+        for x in 0..w {
+            let mut r = 0u32;
+            let mut g = 0u32;
+            let mut b = 0u32;
+            let mut a = 0u32;
+            let mut n = 0u32;
+            for sy in lo..=hi {
+                let c = horizontal[sy * w + x];
+                r += c.r() as u32;
+                g += c.g() as u32;
+                b += c.b() as u32;
+                a += c.a() as u32;
+                n += 1;
+            }
+            out[y * w + x] = egui::Color32::from_rgba_unmultiplied(
+                (r / n) as u8,
+                (g / n) as u8,
+                (b / n) as u8,
+                (a / n) as u8,
+            );
+        }
+    }
+
+    egui::ColorImage::new([w, h], out)
 }

@@ -1,6 +1,54 @@
 use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, TextStyle, Vec2};
+use serde::{Deserialize, Serialize};
 
 use super::fonts::{font, mono_font};
+
+/// The silhouette of the primary transport play/pause button.
+///
+/// Themes can use this to express a little personality without changing the
+/// control's size or hit target: a sharp square for a blueprint, a pill for a
+/// retro or synthwave palette, and the default circle everywhere else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlayButtonShape {
+    #[default]
+    Circle,
+    Rounded,
+    Pill,
+    Square,
+}
+
+impl PlayButtonShape {
+    pub const ALL: [PlayButtonShape; 4] = [
+        PlayButtonShape::Circle,
+        PlayButtonShape::Rounded,
+        PlayButtonShape::Pill,
+        PlayButtonShape::Square,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Circle => "Circle",
+            Self::Rounded => "Rounded",
+            Self::Pill => "Pill",
+            Self::Square => "Square",
+        }
+    }
+
+    /// Corner radius for a painted silhouette of `size` in this theme.
+    ///
+    /// Circle and Pill follow the shorter dimension, so a pill stays a
+    /// capsule rather than rounding into a circle.
+    pub fn corner_radius(self, size: Vec2, theme: &Theme) -> CornerRadius {
+        let radius = match self {
+            Self::Circle => size.x.min(size.y) * 0.5,
+            Self::Rounded => theme.radius_lg.max(theme.radius_md) as f32,
+            Self::Pill => size.y * 0.5,
+            Self::Square => theme.radius_xs as f32,
+        };
+        CornerRadius::same(radius.clamp(0.0, 255.0) as u8)
+    }
+}
 
 /// Blend two colours, for animated state changes.
 pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
@@ -112,6 +160,18 @@ pub struct Theme {
     pub spectrum_gradient_lo: Color32,
     pub spectrum_gradient_hi: Color32,
 
+    // Theme personality
+    /// Silhouette used by the primary play/pause transport control.
+    pub play_button_shape: PlayButtonShape,
+    /// True when the translucent frosted-glass surface treatment is active.
+    /// Components use this to add specular sheens and a live backdrop.
+    pub frosted: bool,
+    /// True when the user has asked for reduced motion. Components use
+    /// [`Theme::motion_time`] so hover and transition fades snap instead of
+    /// animating; egui's own animations follow the style set in
+    /// [`Theme::apply`].
+    pub reduce_motion: bool,
+
     // Layout tokens
     pub radius_xs: u8,
     pub radius_pill: u8,
@@ -145,10 +205,16 @@ impl Default for Theme {
 impl Theme {
     /// Toggle between dark and light themes.
     pub fn toggle(&mut self) {
-        if self.is_light {
-            *self = Self::dark();
+        let frosted = self.frosted;
+        let reduce_motion = self.reduce_motion;
+        *self = if self.is_light {
+            Self::dark()
         } else {
-            *self = Self::light();
+            Self::light()
+        };
+        self.reduce_motion = reduce_motion;
+        if frosted {
+            *self = self.with_frosted_glass(true);
         }
     }
 
@@ -160,6 +226,65 @@ impl Theme {
     /// Returns true if this theme is Obsidian Jade (standard dark mode).
     pub fn is_obsidian(&self) -> bool {
         !self.is_light && !self.is_oled()
+    }
+
+    /// A motion duration that honours the reduced-motion preference.
+    ///
+    /// egui has no global "disable animations" switch for explicitly timed
+    /// fades, so every hover/transition animation asks here first.
+    pub fn motion_time(&self, seconds: f32) -> f32 {
+        if self.reduce_motion {
+            0.0
+        } else {
+            seconds
+        }
+    }
+
+    /// Corner radius for compact controls: search fields, navigation tabs,
+    /// filter chips, and other pills that are not the transport button.
+    ///
+    /// `radius_pill` is a deliberate capsule request, not a universal
+    /// default. The theme's declared transport silhouette is the strongest
+    /// signal: a pill transport gets pill controls, a square transport gets
+    /// square controls, and a rounded transport gets the theme's normal
+    /// rounded scale. Themes that never declared a silhouette fall back to
+    /// their radius scale, so a high-radius custom theme can still ask for a
+    /// capsule while a boxy one keeps its tight corners. This is what stops
+    /// every theme from being forced into the same pill shape.
+    pub fn control_radius(&self) -> CornerRadius {
+        let radius = match self.play_button_shape {
+            PlayButtonShape::Pill => self.radius_pill,
+            PlayButtonShape::Square => self.radius_sm,
+            PlayButtonShape::Rounded => self.radius_md,
+            PlayButtonShape::Circle => {
+                if self.radius_md <= 4 {
+                    // A tight scale is a boxy theme even when its pill token
+                    // is proportionally large; rounding it into a capsule
+                    // would fight the rest of the surface.
+                    self.radius_sm
+                } else if u32::from(self.radius_pill) >= 2 * u32::from(self.radius_md) {
+                    self.radius_pill
+                } else {
+                    self.radius_md
+                }
+            }
+        };
+        CornerRadius::same(radius)
+    }
+
+    /// The fill behind dense content (tables, settings cards) in the central
+    /// content area.
+    ///
+    /// Frosted mode keeps the backdrop visible at the window edges, but a
+    /// fully transparent content panel puts a moving/blurred image directly
+    /// behind row text. This scrim sits between the backdrop and the cards:
+    /// the glass still reads as glass, while the table stays legible.
+    pub fn content_panel_fill(&self) -> Color32 {
+        if self.frosted {
+            with_alpha(self.bg_app, if self.is_light { 196 } else { 172 })
+        } else {
+            self.bg_app
+        }
     }
 
     /// Apply theme styles to egui context.
@@ -213,6 +338,18 @@ impl Theme {
         style.spacing.window_margin = Margin::same(20);
         style.spacing.button_padding = Vec2::new(14.0, 8.0);
         style.spacing.interact_size.y = 36.0;
+        // Reserve a gutter between scrollable content and the scrollbar.
+        // egui's floating scrollbars are painted over the content area by
+        // default, so cards ended up underneath the handle. The margin moves
+        // the content inwards (right for vertical bars, bottom for horizontal
+        // ones) and keeps the bar legible without changing every call site.
+        style.spacing.scroll.content_margin = Margin {
+            left: 0,
+            right: 10,
+            top: 0,
+            bottom: 10,
+        };
+        style.animation_time = self.motion_time(0.2);
         style.text_styles = [
             (TextStyle::Small, font(10.5)),
             (TextStyle::Body, font(13.0)),
@@ -226,43 +363,102 @@ impl Theme {
 
     /// Return a copy of this theme with translucent frosted glass surfaces
     /// and optical specular edge highlights applied across cards and panels.
+    ///
+    /// This only supplies the *surface* half of the effect. The app paints a
+    /// blurred artwork backdrop behind the shell whenever [`Theme::frosted`]
+    /// is true, so these alpha values reveal a soft, defocused image instead
+    /// of the desktop or a flat panel colour.
     pub fn with_frosted_glass(&self, enabled: bool) -> Self {
+        let mut theme = *self;
+        theme.frosted = enabled;
         if !enabled {
-            return *self;
+            return theme;
         }
 
-        let mut theme = *self;
-
-        // Translucent frosted glass surface opacities:
-        // Sidebar: ~84% opacity (215/255)
-        // Cards/Panels: ~70% opacity (180/255)
-        // Card hover/active: elevated opacities
-        // Search/Inputs: ~84% opacity (215/255) to preserve input contrast
-        let frost_alpha = |c: Color32, target: u8| -> Color32 {
-            let a = if c.a() < target { c.a() } else { target };
-            Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+        // Translucent surface opacities. Sidebar and inputs stay a little more
+        // opaque than cards so navigation and text remain comfortably legible;
+        // cards are the most transparent because they sit directly over the
+        // blurred artwork.
+        let (sidebar_a, card_a, hover_a, active_a, pill_a, pill_hover_a, input_a) = if self.is_light
+        {
+            (212, 168, 194, 214, 176, 202, 204)
+        } else {
+            (204, 148, 178, 202, 160, 190, 188)
         };
 
-        theme.bg_sidebar = frost_alpha(self.bg_sidebar, 215);
-        theme.bg_card = frost_alpha(self.bg_card, 180);
-        theme.bg_card_hover = frost_alpha(self.bg_card_hover, 205);
-        theme.bg_card_active = frost_alpha(self.bg_card_active, 225);
-        theme.bg_pill = frost_alpha(self.bg_pill, 185);
-        theme.bg_pill_hover = frost_alpha(self.bg_pill_hover, 215);
-        theme.bg_input = frost_alpha(self.bg_input, 215);
+        theme.bg_sidebar = with_alpha(self.bg_sidebar, sidebar_a);
+        theme.bg_card = with_alpha(self.bg_card, card_a);
+        theme.bg_card_hover = with_alpha(self.bg_card_hover, hover_a);
+        theme.bg_card_active = with_alpha(self.bg_card_active, active_a);
+        theme.bg_pill = with_alpha(self.bg_pill, pill_a);
+        theme.bg_pill_hover = with_alpha(self.bg_pill_hover, pill_hover_a);
+        theme.bg_input = with_alpha(self.bg_input, input_a);
+        theme.bg_active_row = with_alpha(self.bg_active_row, hover_a);
 
-        // Specular rim / micro-bevel highlights:
-        // Glass edges catch light creating a delicate 1px specular contour.
+        // Specular rim / micro-bevel highlights: glass edges catch light and
+        // create a delicate 1 px contour. A stronger shadow lifts the pane off
+        // the blurred backdrop instead of letting it dissolve into it.
         if self.is_light {
-            theme.border_card = Color32::from_rgba_unmultiplied(0, 0, 0, 36);
-            theme.border_subtle = Color32::from_rgba_unmultiplied(0, 0, 0, 20);
-            theme.shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 60);
+            theme.border_card = Color32::from_rgba_unmultiplied(255, 255, 255, 176);
+            theme.border_subtle = Color32::from_rgba_unmultiplied(255, 255, 255, 132);
+            theme.border_input = Color32::from_rgba_unmultiplied(55, 72, 68, 150);
+            theme.shadow = Color32::from_rgba_unmultiplied(31, 46, 43, 76);
         } else {
-            theme.border_card = Color32::from_rgba_unmultiplied(255, 255, 255, 38);
-            theme.border_subtle = Color32::from_rgba_unmultiplied(255, 255, 255, 22);
-            theme.shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 110);
+            theme.border_card = Color32::from_rgba_unmultiplied(255, 255, 255, 46);
+            theme.border_subtle = Color32::from_rgba_unmultiplied(255, 255, 255, 28);
+            theme.border_input = Color32::from_rgba_unmultiplied(190, 214, 209, 96);
+            theme.shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 150);
         }
 
         theme
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_radius_follows_the_declared_theme_style() {
+        let mut theme = Theme::dark();
+        theme.play_button_shape = PlayButtonShape::Rounded;
+        assert_eq!(theme.control_radius(), CornerRadius::same(theme.radius_md));
+
+        theme.play_button_shape = PlayButtonShape::Square;
+        assert_eq!(theme.control_radius(), CornerRadius::same(theme.radius_sm));
+
+        theme.play_button_shape = PlayButtonShape::Pill;
+        assert_eq!(
+            theme.control_radius(),
+            CornerRadius::same(theme.radius_pill)
+        );
+
+        // A custom theme that never declared a silhouette still keeps its
+        // high-radius capsule when the pill token is deliberately large.
+        theme.play_button_shape = PlayButtonShape::Circle;
+        theme.radius_md = 10;
+        theme.radius_pill = 30;
+        theme.radius_sm = 6;
+        assert_eq!(
+            theme.control_radius(),
+            CornerRadius::same(theme.radius_pill)
+        );
+
+        // ...and a boxy scale stays square.
+        theme.radius_md = 3;
+        theme.radius_pill = 6;
+        theme.radius_sm = 1;
+        assert_eq!(theme.control_radius(), CornerRadius::same(theme.radius_sm));
+    }
+
+    #[test]
+    fn default_themes_keep_transport_and_controls_out_of_a_pill() {
+        for theme in [Theme::dark(), Theme::light(), Theme::oled()] {
+            assert_eq!(theme.play_button_shape, PlayButtonShape::Rounded);
+            assert!(
+                theme.control_radius() == CornerRadius::same(theme.radius_md),
+                "default controls should use the rounded control scale"
+            );
+        }
     }
 }

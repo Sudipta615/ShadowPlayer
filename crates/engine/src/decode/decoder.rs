@@ -491,6 +491,26 @@ impl Decoder {
         }
     }
 
+    /// Select the DSD→PCM decimation filter on a DSD source (no-op otherwise).
+    ///
+    /// Only the PCM-conversion path decimates; native and DoP transports carry
+    /// the bitstream and ignore the selection (the transport report records
+    /// which path actually ran).
+    pub fn set_dsd_noise_filter(&mut self, filter: config::DsdNoiseFilter) {
+        if let Self::Dsd(d) = self {
+            d.set_noise_filter(filter);
+        }
+    }
+
+    /// The active DSD→PCM decimation filter for a DSD source; `None` for
+    /// non-DSD sources.
+    pub fn dsd_noise_filter(&self) -> Option<config::DsdNoiseFilter> {
+        match self {
+            Self::Dsd(d) => Some(d.noise_filter()),
+            _ => None,
+        }
+    }
+
     /// The DSD bit rate for a DSD source (e.g. 2_822_400 for DSD64); `None`
     /// for non-DSD sources.
     pub fn dsd_bit_rate(&self) -> Option<u32> {

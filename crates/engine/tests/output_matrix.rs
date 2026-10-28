@@ -131,6 +131,7 @@ fn each_endpoint_applies_its_own_trim() {
             8192,
             SR,
             engine::ResamplerQuality::Balanced,
+            config::ResamplerFilter::Fft,
             config::PrecisionMode::Performance,
         )
         .unwrap_or_else(|e| panic!("the null endpoint must open: {e}"));
@@ -173,6 +174,7 @@ fn an_endpoint_with_a_unity_trim_is_a_passthrough() {
         8192,
         SR,
         engine::ResamplerQuality::Balanced,
+        config::ResamplerFilter::Fft,
         config::PrecisionMode::Performance,
     )
     .expect("the null endpoint must open");
@@ -200,6 +202,7 @@ fn an_endpoint_reports_its_own_counters() {
         8192,
         SR,
         engine::ResamplerQuality::Balanced,
+        config::ResamplerFilter::Fft,
         config::PrecisionMode::Performance,
     )
     .expect("the null endpoint must open");

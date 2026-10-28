@@ -61,11 +61,13 @@ pub struct LaneTrack {
 impl LaneTrack {
     /// Open a lane for `source` on `slot`. Resampler construction mirrors the
     /// primary path's `build_resampler` helper. Control path.
+    #[allow(clippy::too_many_arguments)]
     pub fn open(
         slot: usize,
         source: AudioSource,
         decoder: Decoder,
         #[cfg(feature = "resample")] quality: config::ResamplerQuality,
+        #[cfg(feature = "resample")] filter: config::ResamplerFilter,
         #[cfg(feature = "resample")] output_rate: f32,
         #[cfg(feature = "resample")] speed: f32,
         #[cfg(feature = "resample")] precision: config::PrecisionMode,
@@ -73,6 +75,7 @@ impl LaneTrack {
         #[cfg(feature = "resample")]
         let resampler = crate::engine::recovery::build_resampler(
             quality,
+            filter,
             decoder.info().sample_rate as f32,
             output_rate,
             speed,

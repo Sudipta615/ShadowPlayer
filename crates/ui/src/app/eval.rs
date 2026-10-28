@@ -607,6 +607,33 @@ impl ShadowPlayerApp {
                     self.dsp_state.settings_tab.frosted_glass_enabled = true;
                     self.sync_effective_theme();
                 }
+                if std::env::var("SHADOWPLAYER_EVAL_THEME_EDITOR").is_ok() {
+                    self.app_state.active_nav = crate::components::sidebar::NavItem::Settings;
+                    self.dsp_state.settings_tab.active_category =
+                        crate::components::settings_tab::SettingsCategory::Appearance;
+                    let active_id = self.theme_manager.active_id().to_string();
+                    let card = self
+                        .theme_manager
+                        .all_theme_cards()
+                        .into_iter()
+                        .find(|card| card.id == active_id);
+                    let name = card
+                        .as_ref()
+                        .map(|card| card.name.clone())
+                        .unwrap_or_else(|| active_id.clone());
+                    let fonts = card
+                        .as_ref()
+                        .map(|card| card.fonts.clone())
+                        .unwrap_or_default();
+                    let base = self
+                        .theme_manager
+                        .resolve_theme(&active_id, self.theme.is_light);
+                    self.dsp_state
+                        .settings_tab
+                        .theme_editor
+                        .request_load_for_customizing(&base, &name, &active_id, fonts);
+                    crate::components::settings_tab::request_settings_jump("Theme Editor");
+                }
             }
             if self.app_state.frame_count == 1 && std::env::var("SHADOWPLAYER_EVAL_HELP").is_ok() {
                 self.app_state.active_nav = crate::components::sidebar::NavItem::Help;

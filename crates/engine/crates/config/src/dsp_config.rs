@@ -571,6 +571,29 @@ impl Default for LimiterConfig {
     }
 }
 
+/// PCM→SDM (delta-sigma) output configuration.
+///
+/// When enabled **and** `dsd_output = "NativeDsd"`, a PCM source is converted
+/// to a one-bit DSD bitstream at the negotiated native-DSD rate instead of
+/// being sent as PCM. This is a real modulator, not DoP framing: DoP is used
+/// only for DSD *sources* (see [`DsdOutput`]).
+///
+/// The conversion is honest about its limits: it requires an output device
+/// that advertises native DSD and a PCM rate that divides the chosen DSD rate
+/// integrally (44.1 kHz family → 44.1 kHz-family DSD; 48 kHz family → 48 kHz
+/// family). When either condition fails, the engine falls back to PCM and
+/// records the reason in the playback telemetry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SdmConfig {
+    /// Convert PCM sources to a one-bit SDM bitstream for native DSD output.
+    pub enabled: bool,
+    /// Modulator order and design.
+    pub modulator: crate::SdmModulator,
+    /// Requested DSD multiple, or auto-negotiate with the device.
+    pub rate: crate::SdmRate,
+}
+
 fn default_knee_db() -> f32 {
     6.0
 }
@@ -677,18 +700,57 @@ pub struct ChannelTrimConfig {
     pub entries: Vec<ChannelTrimEntry>,
 }
 
+/// One matrix FIR route: convolve `source` with a mono impulse response and
+/// add the result to `destination`.
+///
+/// The IR is read on the control path when the routing configuration is
+/// applied; it is never decoded or resampled on the audio thread. A missing
+/// or unreadable file is logged and leaves the route inactive rather than
+/// silently passing audio through.
+///
+/// `gain_db` is applied to the convolver output. `delay_ms` is applied to the
+/// source before convolution, so the route's total latency is
+/// `delay_ms` plus the convolver's partition block (reported by the engine).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct MatrixFirRouteConfig {
+    /// 0-based source channel index (post-matrix, post-trim signal).
+    pub source: usize,
+    /// 0-based destination channel index (FIR output is added here).
+    pub destination: usize,
+    /// Path to a mono (or stereo, first channel used) WAV/FLAC impulse
+    /// response. The file's declared rate is honoured and resampled on the
+    /// control path when it differs from the stream rate.
+    pub ir_path: Option<String>,
+    /// Gain in dB applied to the convolved signal (0.0 = unity).
+    pub gain_db: f32,
+    /// Delay in milliseconds applied to the source before convolution,
+    /// clamped to `MAX_MATRIX_FIR_DELAY_MS`.
+    pub delay_ms: f32,
+}
+
 /// Source→destination routing matrix for the multichannel passthrough path.
 ///
 /// `matrix[src][dst]` is the gain from input channel `src` to output channel
 /// `dst`. The matrix must be square and its width must equal the active
 /// channel count to be applied; any other shape is rejected (with a warning)
-/// and routing is bypassed rather than guessing. All channels stay in place
-/// when `enabled` is false.
+/// and the scalar matrix is bypassed rather than guessing. All channels stay
+/// in place when `enabled` is false.
+///
+/// `fir_routes` adds sparse per-route convolution on top of the scalar matrix.
+/// They require `enabled = true` but do not require a square matrix: a profile
+/// can use an empty matrix (identity) and only FIR routes. When both act on
+/// the same source/destination the results sum; a FIR route's partition
+/// latency is not automatically compensated against the direct path, so a
+/// profile that wants FIR only should leave that matrix entry at zero.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ChannelRoutingConfig {
     pub enabled: bool,
     #[serde(default)]
     pub matrix: Vec<Vec<f32>>,
+    /// Sparse FIR routes applied after the scalar matrix and trims.
+    #[serde(default)]
+    pub fir_routes: Vec<MatrixFirRouteConfig>,
 }
 
 /// LFE management: an extra gain applied to channels whose semantic role is
@@ -956,6 +1018,67 @@ pub struct CorrectionConfig {
     /// Wet/dry depth in [0, 1] (1.0 = fully corrected).
     #[serde(default = "default_correction_depth")]
     pub depth: f32,
+}
+
+/// One pre-rendered DAC correction profile, selected by output device and
+/// output rate.
+///
+/// A DAC correction is not a room measurement: it is a device-specific
+/// correction supplied for a particular converter and rate. The engine does
+/// not synthesise it from a measurement; it loads the profile's already
+/// rendered FIR files and runs them in a bank **distinct from** the room /
+/// headphone correction, so a host can label the two separately.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DacCorrectionProfileConfig {
+    /// Output-device identity to match against the active device name. An
+    /// empty string or `*` matches every device. Matching is a
+    /// case-insensitive substring test, so `"RME ADI-2"` also matches a
+    /// device reported as `"RME ADI-2 DAC (USB)"`.
+    pub dac: String,
+    /// Output rate this profile is rendered for (Hz). `0` matches any rate.
+    /// A profile whose IR sample rate differs from the actual session rate
+    /// is rejected (the node stays inactive) rather than silently resampled.
+    pub sample_rate: u32,
+    /// One pre-rendered FIR per channel, or a single multichannel WAV. Empty
+    /// = no DAC correction.
+    pub ir_paths: Vec<String>,
+    /// Latency already present in the profile's IRs (ms), reported in the
+    /// graph latency budget. The partitioned convolution itself adds its
+    /// own 512-sample block latency.
+    pub latency_ms: f32,
+    /// Wet/dry depth in [0, 1].
+    #[serde(default = "default_correction_depth")]
+    pub depth: f32,
+}
+
+impl Default for DacCorrectionProfileConfig {
+    fn default() -> Self {
+        Self {
+            dac: String::new(),
+            sample_rate: 0,
+            ir_paths: Vec::new(),
+            latency_ms: 0.0,
+            depth: 1.0,
+        }
+    }
+}
+
+/// Device-specific DAC correction profile table.
+///
+/// Disabled by default. When enabled, the correction node picks the first
+/// profile matching the output device and session rate, loads its pre-rendered
+/// IRs on the control path, and reports the selection through
+/// `DacCorrectionInfo`. It is a separate bank from [`CorrectionConfig`], so
+/// room correction and DAC correction can both run, and both are labelled
+/// distinctly in telemetry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct DacCorrectionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub profiles: Vec<DacCorrectionProfileConfig>,
 }
 
 /// Capture (recording) state, read back by hosts via `EngineSettings`.

@@ -62,6 +62,11 @@ pub(super) fn render_grid(ui: &mut Ui, rows: &mut RowEnv<'_>, action: &mut Songs
     let total_rows = tracks.len().div_ceil(cols.max(1));
     let band_h = card_h + gap;
 
+    // `show_rows` computes its stride from the spacing that is current when
+    // it is called, before the closure runs. Rows paint with zero vertical
+    // spacing, so leaving the default in place makes the virtualizer scroll
+    // faster than the table and cuts the visible row count.
+    ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
     egui::ScrollArea::vertical()
         .id_salt("songs_grid_scroll")
         .auto_shrink([false, false])
@@ -121,6 +126,7 @@ pub(super) fn render_list(
     let artwork = &mut *rows.artwork;
     let art_budget = &mut *rows.art_budget;
 
+    ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
     egui::ScrollArea::vertical()
         .id_salt("songs_table_scroll")
         .auto_shrink([false, false])

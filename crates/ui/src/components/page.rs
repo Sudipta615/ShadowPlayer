@@ -235,7 +235,7 @@ pub fn tab_strip_wrapping(
                     let hover_t = ui.ctx().animate_bool_with_time(
                         ui.scope_id().with((id_salt, "tab-hover", index)),
                         resp.hovered(),
-                        0.12,
+                        theme.motion_time(0.12),
                     );
 
                     let bg = if is_active {

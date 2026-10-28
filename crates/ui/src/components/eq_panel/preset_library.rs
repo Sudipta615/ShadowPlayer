@@ -14,7 +14,9 @@ use crate::theme::{font, Theme};
 use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
 
 /// Height of one preset row. Uniform because the scroll area virtualizes on it.
-const ROW_HEIGHT: f32 = 26.0;
+/// Two lines: the identity/actions and the metadata/device actions. That keeps
+/// a row usable at the panel's minimum width instead of forcing it wider.
+const ROW_HEIGHT: f32 = 46.0;
 
 pub(super) fn render_preset_library(
     ui: &mut egui::Ui,
@@ -98,11 +100,12 @@ pub(super) fn render_preset_library(
     }
 
     let library = &mut state.library;
-    let width = ui.available_width();
-    ui.add(
-        egui::TextEdit::singleline(&mut library.search)
-            .hint_text(tr!("Search presets"))
-            .desired_width(width),
+    crate::components::search_field::search_field_with_width(
+        ui,
+        &mut library.search,
+        tr!("Search presets"),
+        theme,
+        f32::INFINITY,
     );
 
     if !library.loaded {
@@ -139,82 +142,114 @@ pub(super) fn render_preset_library(
         .show_rows(ui, ROW_HEIGHT, filtered.len(), |ui, range| {
             for row in range {
                 let preset = &library.presets[filtered[row]];
-                ui.horizontal(|ui| {
-                    ui.set_min_height(ROW_HEIGHT);
-                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
+                let meta = format!("{} · {}", preset.curve.point_count(), preset.source_label());
+                let device = preset.output_pattern.as_deref();
 
-                    let apply = egui::Button::new(
-                        egui::RichText::new(tr!("Apply"))
-                            .font(font(10.5))
-                            .color(theme.text_primary),
-                    )
-                    .fill(theme.bg_pill)
-                    .stroke(Stroke::NONE)
-                    .corner_radius(CornerRadius::same(theme.radius_sm))
-                    .min_size(Vec2::new(44.0, 20.0));
-                    if ui.add(apply).clicked() {
-                        apply_id = Some(preset.id.clone());
-                    }
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), ROW_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 2.0);
 
-                    let name = egui::RichText::new(&preset.name).font(font(11.0)).color(
-                        if preset.is_default {
-                            theme.accent
-                        } else {
-                            theme.text_primary
-                        },
-                    );
-                    ui.add(egui::Label::new(name).truncate());
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
 
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} · {}",
-                            preset.curve.point_count(),
-                            preset.source_label()
-                        ))
-                        .font(font(9.5))
-                        .color(theme.text_muted),
-                    );
+                            let apply = egui::Button::new(
+                                egui::RichText::new(tr!("Apply"))
+                                    .font(font(10.5))
+                                    .color(theme.text_primary),
+                            )
+                            .fill(theme.bg_pill)
+                            .stroke(Stroke::NONE)
+                            .corner_radius(CornerRadius::same(theme.radius_sm))
+                            .min_size(Vec2::new(44.0, 20.0));
+                            if ui.add(apply).clicked() {
+                                apply_id = Some(preset.id.clone());
+                            }
 
-                    if let Some(pattern) = preset.output_pattern.as_deref() {
-                        ui.label(
-                            egui::RichText::new(pattern)
+                            // Reserve the button column before drawing the
+                            // name: `Label::truncate` consumes the width it is
+                            // offered, so a later right-to-left group would
+                            // otherwise have no room left.
+                            let buttons_w = 58.0;
+                            let name_w =
+                                (ui.available_width() - buttons_w - theme.space_xs).max(48.0);
+                            let name = egui::RichText::new(&preset.name).font(font(11.0)).color(
+                                if preset.is_default {
+                                    theme.accent
+                                } else {
+                                    theme.text_primary
+                                },
+                            );
+                            ui.add_sized(
+                                Vec2::new(name_w, 20.0),
+                                egui::Label::new(name).truncate(),
+                            )
+                            .on_hover_text(&preset.name);
+
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .small_button("×")
+                                        .on_hover_text(tr!("Delete this preset"))
+                                        .clicked()
+                                    {
+                                        delete_id = Some(preset.id.clone());
+                                    }
+                                    let star = if preset.is_default { "★" } else { "☆" };
+                                    if ui
+                                        .small_button(star)
+                                        .on_hover_text(tr!("Make this the global default"))
+                                        .clicked()
+                                    {
+                                        default_id = Some(preset.id.clone());
+                                    }
+                                },
+                            );
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
+
+                            let actions_w = 126.0;
+                            let meta_w =
+                                (ui.available_width() - actions_w - theme.space_sm).max(48.0);
+                            let meta_label = egui::RichText::new(meta)
                                 .font(font(9.5))
-                                .color(theme.text_secondary),
-                        )
-                        .on_hover_text(tr!("Applied automatically when this device is selected"));
-                    }
+                                .color(theme.text_muted);
+                            let response = ui.add_sized(
+                                Vec2::new(meta_w, 18.0),
+                                egui::Label::new(meta_label).truncate(),
+                            );
+                            if let Some(pattern) = device {
+                                response.on_hover_text(format!(
+                                    "{}: {pattern}",
+                                    tr!("Applied automatically when this device is selected")
+                                ));
+                            }
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("×")
-                            .on_hover_text(tr!("Delete this preset"))
-                            .clicked()
-                        {
-                            delete_id = Some(preset.id.clone());
-                        }
-                        let star = if preset.is_default { "★" } else { "☆" };
-                        if ui
-                            .small_button(star)
-                            .on_hover_text(tr!("Make this the global default"))
-                            .clicked()
-                        {
-                            default_id = Some(preset.id.clone());
-                        }
-                        if ui.small_button(tr!("Bind")).clicked() {
-                            bind_row = Some((
-                                preset.id.clone(),
-                                preset.output_pattern.clone().unwrap_or_default(),
-                            ));
-                        }
-                        if ui
-                            .small_button(tr!("This track"))
-                            .on_hover_text(tr!("Use this preset for the current track"))
-                            .clicked()
-                        {
-                            bind_track_id = Some(preset.id.clone());
-                        }
-                    });
-                });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .small_button(tr!("This track"))
+                                        .on_hover_text(tr!("Use this preset for the current track"))
+                                        .clicked()
+                                    {
+                                        bind_track_id = Some(preset.id.clone());
+                                    }
+                                    if ui.small_button(tr!("Bind")).clicked() {
+                                        bind_row = Some((
+                                            preset.id.clone(),
+                                            preset.output_pattern.clone().unwrap_or_default(),
+                                        ));
+                                    }
+                                },
+                            );
+                        });
+                    },
+                );
             }
         });
 
@@ -251,17 +286,15 @@ fn render_save_box(
             theme.space_sm as i8,
         ))
         .show(ui, |ui| {
+            // Name and the default flag on one line; the device pattern gets
+            // its own line so neither field is squeezed at the minimum width.
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+                let name_w = (ui.available_width() * 0.5).clamp(120.0, 220.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut library.save_name)
                         .hint_text(tr!("Preset Name:"))
-                        .desired_width(150.0),
-                );
-                ui.add(
-                    egui::TextEdit::singleline(&mut library.save_pattern)
-                        .hint_text(tr!("Device pattern"))
-                        .desired_width(120.0),
+                        .desired_width(name_w),
                 );
                 ui.checkbox(
                     &mut library.save_default,
@@ -270,8 +303,15 @@ fn render_save_box(
                         .color(theme.text_secondary),
                 );
             });
-            ui.add_space(theme.space_xs);
             ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut library.save_pattern)
+                        .hint_text(tr!("Device pattern"))
+                        .desired_width(ui.available_width()),
+                );
+            });
+            ui.add_space(theme.space_xs);
+            ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                 let save = egui::Button::new(
                     egui::RichText::new(tr!("Confirm Save")).color(Color32::WHITE),
@@ -321,7 +361,7 @@ fn render_binding_editor(
             theme.space_xs as i8,
         ))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                 ui.label(
                     egui::RichText::new(tr!("Device pattern"))
@@ -331,7 +371,7 @@ fn render_binding_editor(
                 ui.add(
                     egui::TextEdit::singleline(&mut library.binding_draft)
                         .hint_text(tr!("e.g. USB DAC"))
-                        .desired_width(150.0),
+                        .desired_width((ui.available_width() - 150.0).clamp(100.0, 180.0)),
                 );
                 if ui.small_button(tr!("Bind")).clicked() {
                     let pattern = library.binding_draft.trim();

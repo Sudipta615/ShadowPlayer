@@ -270,6 +270,10 @@ pub struct LatencyReport {
     pub limiter_detector_delay_ms: f32,
     /// Uniform partitioned convolution delay (ms).
     pub convolution_latency_ms: f32,
+    /// Multichannel routing/matrix-FIR latency (ms): the longest trim delay
+    /// plus the matrix convolver's partition block. 0 when the routing stage
+    /// is inactive or has no FIR routes.
+    pub routing_latency_ms: f32,
     /// Room/headphone correction latency (ms) — the correction IR set's
     /// Declared phase-mode group delay; 0 when inactive.
     pub correction_latency_ms: f32,

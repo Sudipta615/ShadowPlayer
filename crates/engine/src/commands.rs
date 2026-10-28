@@ -448,6 +448,34 @@ pub enum EngineCommand {
     /// Set the DSP processing precision (f32 Performance or f64 Quality).
     SetPrecisionMode(crate::dsp::pipeline::PrecisionMode),
 
+    /// Select how DSD sources reach the DAC (PCM conversion, DoP, native DSD).
+    /// Takes effect on the next stream open; the current stream keeps the
+    /// transport it negotiated.
+    SetDsdOutput(config::DsdOutput),
+
+    /// Select the DSD→PCM decimation filter. Takes effect on the next DSD
+    /// stream; a stream already decoding keeps its current filter.
+    SetDsdNoiseFilter(config::DsdNoiseFilter),
+
+    /// Select the output-domain ultrasonic low-pass. Applies live.
+    SetUltrasonicFilter(config::UltrasonicFilter),
+
+    /// Select the polyphase resampler filter family. Rebuilds the active
+    /// decode and endpoint resamplers on the control path.
+    SetResamplerFilter(config::ResamplerFilter),
+
+    /// Select the final quantization noise shaper. Takes effect on the next
+    /// stream open; the active converter keeps its current design.
+    SetNoiseShaper(config::NoiseShaper),
+
+    /// Configure PCM→SDM native-DSD output. Takes effect on the next stream
+    /// open, because the modulator and rate are negotiated with the device.
+    SetSdmConfig(config::SdmConfig),
+
+    /// Replace the device/rate-keyed DAC correction profile table. Applies
+    /// live: the correction node reloads the matching bank on the control path.
+    SetDacCorrection(config::DacCorrectionConfig),
+
     /// Enable or disable bit-perfect mode.
     /// When enabled, all DSP stages are bypassed; only volume and seek fades
     /// are preserved.

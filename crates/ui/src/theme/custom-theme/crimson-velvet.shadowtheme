@@ -70,6 +70,7 @@
     "radius_pill": 24,
     "frame_radius": 16
   },
+  "play_button": "rounded",
   "fonts": {
     "display": "Instrument Serif",
     "body": "DM Sans",

@@ -26,7 +26,17 @@ pub struct EngineConfig {
     pub output_backend: AudioBackend,
     pub output_device: Option<String>,
     pub dither_enabled: bool,
+    /// Noise-shaping family applied when a stream is quantized to integer
+    /// PCM. Read when the output stream is opened; changing it takes effect
+    /// on the next stream open. `Tpdf` preserves the historical behaviour.
+    #[serde(default)]
+    pub noise_shaper: crate::NoiseShaper,
     pub resampler_quality: ResamplerQuality,
+    /// Filter shape for the resampler. `Fft` (default) keeps the existing
+    /// rubato engine; the other families use the engine's rational polyphase
+    /// bank and publish measured metadata. See [`crate::ResamplerFilter`].
+    #[serde(default)]
+    pub resampler_filter: crate::ResamplerFilter,
     pub crossfade: CrossfadeConfig,
     pub performance_mode: PerformanceMode,
     pub precision_mode: PrecisionMode,
@@ -52,6 +62,20 @@ pub struct EngineConfig {
     pub timestretch_quality: TimeStretchQuality,
     #[serde(default)]
     pub dsd_output: DsdOutput,
+    /// DSD→PCM decimation filter used when `dsd_output` is
+    /// [`DsdOutput::PcmConvert`]. Ignored for native/DoP transport, where the
+    /// bitstream is not decimated; the negotiated transport report says which
+    /// filter (if any) ran.
+    #[serde(default)]
+    pub dsd_noise_filter: crate::DsdNoiseFilter,
+    /// Optional output ultrasonic low-pass (20/30/40/50 kHz or 2x/4x/8x the
+    /// output base rate). Runs in the output domain before the limiter.
+    #[serde(default)]
+    pub ultrasonic_filter: crate::UltrasonicFilter,
+    /// PCM→SDM output (native DSD only). Disabled by default; see
+    /// [`crate::SdmConfig`].
+    #[serde(default)]
+    pub sdm: crate::SdmConfig,
     #[serde(default)]
     pub channel_policy: ChannelPolicy,
     #[serde(default)]
@@ -78,6 +102,10 @@ pub struct EngineConfig {
     pub aux: AuxBusConfig,
     #[serde(default)]
     pub correction: CorrectionConfig,
+    /// Device-specific, pre-rendered DAC correction profiles. Disabled by
+    /// default and kept distinct from room/headphone [`Self::correction`].
+    #[serde(default)]
+    pub dac_correction: crate::DacCorrectionConfig,
     /// Capture state. New in 0.9.2 with the portable input backend, so a
     /// config file written before it round-trips unchanged.
     #[serde(default)]
@@ -518,7 +546,9 @@ impl Default for EngineConfig {
             output_backend: AudioBackend::Auto,
             output_device: None,
             dither_enabled: true,
+            noise_shaper: crate::NoiseShaper::Tpdf,
             resampler_quality: ResamplerQuality::Balanced,
+            resampler_filter: crate::ResamplerFilter::Fft,
             crossfade: CrossfadeConfig::default(),
             performance_mode: PerformanceMode::Normal,
             precision_mode: PrecisionMode::Performance,
@@ -539,6 +569,9 @@ impl Default for EngineConfig {
             speed_mode: SpeedMode::default(),
             timestretch_quality: TimeStretchQuality::default(),
             dsd_output: DsdOutput::default(),
+            dsd_noise_filter: crate::DsdNoiseFilter::default(),
+            ultrasonic_filter: crate::UltrasonicFilter::default(),
+            sdm: crate::SdmConfig::default(),
             channel_policy: ChannelPolicy::default(),
             channel_trim: ChannelTrimConfig::default(),
             channel_eq: ChannelEqConfig::default(),
@@ -552,6 +585,7 @@ impl Default for EngineConfig {
             mix_sends: Vec::new(),
             aux: AuxBusConfig::default(),
             correction: CorrectionConfig::default(),
+            dac_correction: crate::DacCorrectionConfig::default(),
             capture: crate::CaptureConfig::default(),
             spatial: SpatialConfig::default(),
             spatial_autosave_path: None,
@@ -1033,6 +1067,86 @@ mod tests {
         assert!(v.issues.iter().any(|i| {
             i.kind == ConfigIssueKind::Endpoint && i.message.contains("endpoint gain")
         }));
+    }
+
+    #[test]
+    fn matrix_fir_routes_round_trip_and_are_optional() {
+        let config = EngineConfig {
+            channel_routing: crate::ChannelRoutingConfig {
+                enabled: true,
+                matrix: Vec::new(),
+                fir_routes: vec![crate::MatrixFirRouteConfig {
+                    source: 0,
+                    destination: 2,
+                    ir_path: Some("/tmp/left-to-center.wav".to_string()),
+                    gain_db: -3.0,
+                    delay_ms: 1.5,
+                }],
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: EngineConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.channel_routing, config.channel_routing);
+        assert_eq!(back.channel_routing.fir_routes.len(), 1);
+        assert_eq!(back.channel_routing.fir_routes[0].source, 0);
+        assert_eq!(back.channel_routing.fir_routes[0].destination, 2);
+        assert_eq!(
+            back.channel_routing.fir_routes[0].ir_path.as_deref(),
+            Some("/tmp/left-to-center.wav")
+        );
+
+        // A config written before the field existed still loads: the route
+        // list is additive and defaults to empty.
+        let legacy: EngineConfig = serde_json::from_str(
+            r#"{"channel_routing":{"enabled":true,"matrix":[[1.0,0.0],[0.0,1.0]]}}"#,
+        )
+        .unwrap();
+        assert!(legacy.channel_routing.fir_routes.is_empty());
+        assert_eq!(legacy.channel_routing.matrix.len(), 2);
+    }
+
+    #[test]
+    fn dac_correction_profiles_round_trip_and_are_optional() {
+        let config = EngineConfig {
+            dac_correction: crate::DacCorrectionConfig {
+                enabled: true,
+                profiles: vec![crate::DacCorrectionProfileConfig {
+                    dac: "RME ADI-2".to_string(),
+                    sample_rate: 96_000,
+                    ir_paths: vec!["/tmp/rme-96k.wav".to_string()],
+                    latency_ms: 0.0,
+                    depth: 0.75,
+                }],
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: EngineConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.dac_correction, config.dac_correction);
+        assert_eq!(back.dac_correction.profiles[0].dac, "RME ADI-2");
+        assert_eq!(back.dac_correction.profiles[0].sample_rate, 96_000);
+        assert_eq!(back.dac_correction.profiles[0].depth, 0.75);
+
+        // A config written before the field existed still loads with the
+        // feature off and an empty profile list.
+        let legacy: EngineConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(!legacy.dac_correction.enabled);
+        assert!(legacy.dac_correction.profiles.is_empty());
+    }
+
+    #[test]
+    fn noise_shaper_defaults_to_tpdf_and_round_trips_by_name() {
+        let config = EngineConfig::default();
+        assert_eq!(config.noise_shaper, crate::NoiseShaper::Tpdf);
+        for shaper in crate::NoiseShaper::ALL {
+            let json = serde_json::to_string(&shaper).unwrap();
+            assert_eq!(json, format!("\"{}\"", shaper.as_str()));
+            let back: crate::NoiseShaper = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, shaper);
+        }
+        let patched: EngineConfig = serde_json::from_str(r#"{"noise_shaper":"Lns15"}"#).unwrap();
+        assert_eq!(patched.noise_shaper, crate::NoiseShaper::Lns15);
     }
 
     #[test]

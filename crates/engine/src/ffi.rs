@@ -2190,6 +2190,7 @@ fn bit_perfect_cause_code(c: crate::BitPerfectCause) -> i32 {
         crate::BitPerfectCause::OutputNotDirectExclusive => 9,
         crate::BitPerfectCause::DitherActive => 10,
         crate::BitPerfectCause::CrossfadeActive => 11,
+        crate::BitPerfectCause::SdmConversion => 12,
     }
 }
 

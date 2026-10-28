@@ -96,7 +96,7 @@ impl RenderContext {
         buffer_size: usize,
         sample_rate: u32,
     ) -> Self {
-        let dither_type = DitherType::Triangular;
+        let dither_type = crate::dsp::dither::configured_dither_type();
         Self {
             buffer,
             paused,

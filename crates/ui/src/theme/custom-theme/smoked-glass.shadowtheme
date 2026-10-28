@@ -71,6 +71,7 @@
     "radius_pill": 32,
     "frame_radius": 20
   },
+  "play_button": "rounded",
   "fonts": {
     "display": "Inter",
     "body": "Inter",

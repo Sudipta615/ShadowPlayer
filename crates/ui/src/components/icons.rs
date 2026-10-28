@@ -245,6 +245,12 @@ pub fn draw_reset(ui: &Ui, rect: Rect, color: Color32) {
         .paint_at(ui, fit_square(rect));
 }
 
+pub fn draw_palette(ui: &Ui, rect: Rect, color: Color32) {
+    egui::Image::new(egui::include_image!("../../assets/icons/palette.svg"))
+        .tint(color)
+        .paint_at(ui, fit_square(rect));
+}
+
 pub fn draw_headphones(ui: &Ui, rect: Rect, color: Color32) {
     egui::Image::new(egui::include_image!("../../assets/icons/headphones.svg"))
         .tint(color)

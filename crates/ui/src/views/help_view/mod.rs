@@ -1,6 +1,6 @@
 use crate::state::{AppState, DspState};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Vec2};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -144,57 +144,12 @@ pub fn render_help_view(
 /// so the chrome gets out of the way and the field stays where the reader
 /// left it.
 fn render_manual_search(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme) {
-    egui::Frame::NONE
-        .fill(theme.bg_input)
-        .stroke(Stroke::new(1.0, theme.border_input))
-        .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(egui::Margin::symmetric(
-            theme.space_xl as i8,
-            theme.space_md as i8,
-        ))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
-
-                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
-                crate::components::icons::draw_search(ui, icon_rect, theme.text_muted);
-
-                let has_query = !state.search_query.is_empty();
-                let clear_w = if has_query { 28.0 } else { 0.0 };
-                let input_w = (ui.available_width() - clear_w - 6.0).max(80.0);
-
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.search_query)
-                        .hint_text(
-                            egui::RichText::new(tr!(
-                                "Search the manual — LUFS, ASIO, HRTF, Biquad, Dither…"
-                            ))
-                            .color(theme.text_muted)
-                            .font(crate::theme::font(12.5)),
-                        )
-                        .text_color(theme.text_primary)
-                        .font(crate::theme::font(13.0))
-                        .desired_width(input_w)
-                        .frame(egui::Frame::NONE),
-                );
-
-                if has_query
-                    && ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(tr!("×"))
-                                    .font(crate::theme::font(14.0))
-                                    .color(theme.text_muted),
-                            )
-                            .fill(Color32::TRANSPARENT)
-                            .frame(false),
-                        )
-                        .clicked()
-                {
-                    state.search_query.clear();
-                }
-            });
-        });
+    crate::components::search_field::search_field(
+        ui,
+        &mut state.search_query,
+        tr!("Search the manual — LUFS, ASIO, HRTF, Biquad, Dither…"),
+        theme,
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,6 +236,14 @@ fn render_search_results(ui: &mut egui::Ui, state: &mut HelpState, theme: &Theme
             ("Binaural HRTF Spatialization", "Convolves stereo audio through Head-Related Transfer Function impulse responses for expansive 3D headphone sound.", HelpTab::SpatialBinaural),
             ("Graphic EQ Band Topology (10, 15, 31, 64 Bands)", "Constant-Q minimum-phase filter banks for octave-spaced acoustic frequency tuning.", HelpTab::EqualizerAcoustics),
             ("TPDF Triangular Dithering", "High-resolution noise shaping eliminating quantization distortion when converting bit depth.", HelpTab::EqualizerAcoustics),
+            ("DSD Transport & Decimation Filters", "PCM conversion, DSD over PCM, or native DSD, plus the decimation filter used when one-bit audio becomes PCM.", HelpTab::BitPerfectDac),
+            ("Native DSD Modulation (SDM)", "PCM to one-bit conversion with fifth- or seventh-order modulation and device-negotiated DSD rates.", HelpTab::BitPerfectDac),
+            ("Resampler Filter Families", "FFT, Kaiser, Blackman-Harris, minimum-phase, apodizing, and reference Sinc-M rate conversion.", HelpTab::SignalPath),
+            ("Noise Shaper (TPDF, Shibata, NS5, NS9, LNS15)", "Error-feedback designs applied when integer output quantization would otherwise add distortion.", HelpTab::SignalPath),
+            ("Apodizing Guidance", "Read-only near-Nyquist burst count that recommends an apodizing filter for the current track.", HelpTab::SignalPath),
+            ("DAC Correction Profiles", "Device- and rate-keyed FIR correction, separate from room and headphone correction.", HelpTab::BitPerfectDac),
+            ("Matrix FIR Routing", "Sparse multichannel convolution routes with per-route gain, delay, and impulse response.", HelpTab::MixBusStudio),
+            ("Processing Precision (f32 vs f64)", "Performance uses f32; Quality promotes the stereo graph to f64; multichannel and matrix FIR stay f32.", HelpTab::SignalPath),
             ("Sidechain Ducking Compressor", "Automatically reduces background music level when voice or commentary channel speaks.", HelpTab::MixBusStudio),
             ("High-Resolution Stream Capture", "Record live bit-perfect audio stream directly to uncompressed PCM WAV files.", HelpTab::MixBusStudio),
             ("Keyboard Shortcuts & Gestures", "Space to play/pause, J/L to skip tracks, M for mute, S for shuffle, R for repeat, Ctrl+B for bit-perfect.", HelpTab::KeyboardShortcuts),

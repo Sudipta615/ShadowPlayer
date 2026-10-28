@@ -142,21 +142,13 @@ fn render_body(
 }
 
 fn render_search(ui: &mut egui::Ui, state: &mut AutoEqModalState, theme: &Theme) {
-    ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(tr!("Search:"))
-                .font(font(12.5))
-                .color(theme.text_primary),
-        );
-        ui.add(
-            egui::TextEdit::singleline(&mut state.search_query)
-                .hint_text(tr!("Headphone or IEM model, source"))
-                .desired_width(ui.available_width() - 72.0),
-        );
-        if ui.button(tr!("Clear")).clicked() {
-            state.search_query.clear();
-        }
-    });
+    crate::components::search_field::search_field_with_width(
+        ui,
+        &mut state.search_query,
+        tr!("Headphone or IEM model, source"),
+        theme,
+        f32::INFINITY,
+    );
 }
 
 fn render_list(

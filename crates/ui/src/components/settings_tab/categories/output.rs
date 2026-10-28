@@ -2,12 +2,15 @@
 //! policy, and resampling precision.
 
 use super::super::widgets::{
-    card_header, pill_btn, segment_picker, setting_card, setting_item, setting_item_with_info,
-    toggle_switch,
+    card_header, pill_btn, segment_picker, setting_card, setting_item, setting_item_toggle,
+    setting_item_with_info, toggle_switch,
 };
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use config::{FallbackPolicy, PrecisionMode, ResamplerQuality, SampleRatePolicy, VolumeMode};
+use config::{
+    DsdNoiseFilter, DsdOutput, FallbackPolicy, NoiseShaper, PrecisionMode, ResamplerFilter,
+    ResamplerQuality, SampleRatePolicy, SdmModulator, SdmRate, UltrasonicFilter, VolumeMode,
+};
 use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
 
 /// The output-device picker.
@@ -377,5 +380,374 @@ pub(in crate::components::settings_tab) fn render_output_category(
                 }
             },
         );
+    });
+
+    // Card 4: DSD transport and decoding filters.
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_disc,
+            &tr!("DSD Transport & Decimation"),
+            &tr!("How DSD sources are carried to the DAC, and how they are filtered when converted to PCM"),
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            &tr!("DSD Transport"),
+            &tr!("PCM conversion is the safe default. DoP works over an I32 PCM stream. Native DSD needs a direct hardware endpoint and is negotiated down with a reported reason when unavailable."),
+            theme,
+            |ui| {
+                let options = [
+                    (DsdOutput::PcmConvert, "PCM Conversion"),
+                    (DsdOutput::DoP, "DSD over PCM (DoP)"),
+                    (DsdOutput::NativeDsd, "Native DSD (Direct)"),
+                ];
+                if segment_picker(ui, &mut state.dsd_output, &options, theme) {
+                    actions.dsd_output_changed = Some(state.dsd_output);
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("DSD Decimation Filter"),
+            &tr!("Filter used when a DSD stream is converted to PCM. It trades audio-band flatness against ultrasonic noise rejection; applies to the next DSD track."),
+            theme,
+            |ui| {
+                let options = [
+                    (DsdNoiseFilter::Standard, "Standard (63-tap)"),
+                    (DsdNoiseFilter::Low, "Low (95-tap)"),
+                    (DsdNoiseFilter::HighOrder, "High Order (127-tap)"),
+                    (DsdNoiseFilter::Brickwall, "Brickwall (191-tap)"),
+                    (DsdNoiseFilter::SlowLp, "Slow Linear Phase"),
+                    (DsdNoiseFilter::SlowMp, "Slow Minimum Phase"),
+                ];
+                if segment_picker(ui, &mut state.dsd_noise_filter, &options, theme) {
+                    actions.dsd_noise_filter_changed = Some(state.dsd_noise_filter);
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Ultrasonic Filter"),
+            &tr!("Output-domain low-pass that removes shaped noise above the audio band. Off is a bit-exact bypass; the 20 kHz setting is the sharp metering filter."),
+            theme,
+            |ui| {
+                let options = [
+                    (UltrasonicFilter::Off, "Off (Bypass)"),
+                    (UltrasonicFilter::Cut20k, "20 kHz"),
+                    (UltrasonicFilter::Cut30k, "30 kHz"),
+                    (UltrasonicFilter::Cut40k, "40 kHz"),
+                    (UltrasonicFilter::Cut50k, "50 kHz"),
+                    (UltrasonicFilter::X2, "2x Rate"),
+                    (UltrasonicFilter::X4, "4x Rate"),
+                    (UltrasonicFilter::X8, "8x Rate"),
+                ];
+                if segment_picker(ui, &mut state.ultrasonic_filter, &options, theme) {
+                    actions.ultrasonic_filter_changed = Some(state.ultrasonic_filter);
+                }
+            },
+        );
+    });
+
+    // Card 5: Resampler family and noise shaping.
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_equalizer_sliders,
+            &tr!("Resampling Filter & Noise Shaping"),
+            &tr!(
+                "Choose the rate-conversion filter family and the final quantization noise shaper"
+            ),
+            None,
+            theme,
+        );
+
+        setting_item(
+            ui,
+            &tr!("Resampler Filter Family"),
+            &tr!("FFT is the historical rubato engine. The polyphase designs trade length and latency: Kaiser and Blackman-Harris are linear phase, Minimum Phase removes pre-ringing, Apodizing rejects images just above the source Nyquist, and Sinc-M is the reference-length converter."),
+            theme,
+            |ui| {
+                let options = [
+                    (ResamplerFilter::Fft, "FFT (Rubato)"),
+                    (ResamplerFilter::Kaiser, "Kaiser Polyphase"),
+                    (ResamplerFilter::BlackmanHarris, "Blackman-Harris"),
+                    (ResamplerFilter::MinimumPhase, "Minimum Phase"),
+                    (ResamplerFilter::Apodizing, "Apodizing"),
+                    (ResamplerFilter::SincM, "Sinc-M (Reference)"),
+                ];
+                if segment_picker(ui, &mut state.resampler_filter, &options, theme) {
+                    actions.resampler_filter_changed = Some(state.resampler_filter);
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Noise Shaper"),
+            &tr!("Error-feedback design applied when the output is quantized to an integer format. TPDF is unshaped; Shibata and the NS/LNS designs move noise out of the audible band. Applies to the next stream open."),
+            theme,
+            |ui| {
+                let options = [
+                    (NoiseShaper::Tpdf, "TPDF (Unshaped)"),
+                    (NoiseShaper::Shibata, "Shibata"),
+                    (NoiseShaper::Ns5, "NS5"),
+                    (NoiseShaper::Ns9, "NS9"),
+                    (NoiseShaper::Lns15, "LNS15"),
+                ];
+                if segment_picker(ui, &mut state.noise_shaper, &options, theme) {
+                    actions.noise_shaper_changed = Some(state.noise_shaper);
+                }
+            },
+        );
+    });
+
+    // Card 6: Native DSD modulation and apodizing guidance.
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_speaker(ui, r, c, false),
+            &tr!("Native DSD Modulation & Apodizing"),
+            &tr!("PCM to one-bit SDM conversion, and the per-track apodizing recommendation"),
+            None,
+            theme,
+        );
+
+        let sdm_changed = setting_item_toggle(
+            ui,
+            &tr!("SDM Conversion"),
+            &tr!("Convert PCM sources to a one-bit SDM bitstream for native DSD output. Requires a transport the DAC accepts; otherwise the engine reports the negotiated fallback."),
+            theme,
+            &mut state.sdm.enabled,
+        );
+        if sdm_changed {
+            actions.sdm_config_changed = Some(state.sdm.clone());
+        }
+
+        setting_item(
+            ui,
+            &tr!("SDM Modulator"),
+            &tr!("Fifth order suits converters with a simple analog reconstruction filter. Seventh order shapes more in-band noise but needs an analog stage that tolerates more out-of-band energy."),
+            theme,
+            |ui| {
+                let options = [
+                    (SdmModulator::FifthOrder, "5th Order"),
+                    (SdmModulator::SeventhOrder, "7th Order"),
+                ];
+                if segment_picker(ui, &mut state.sdm.modulator, &options, theme) {
+                    actions.sdm_config_changed = Some(state.sdm.clone());
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("SDM Rate"),
+            &tr!("Auto asks the device for the highest multiple it reports. A fixed selection is only used when the device accepts it; the negotiated rate is reported by the engine."),
+            theme,
+            |ui| {
+                let options = [
+                    (SdmRate::Auto, "Auto"),
+                    (SdmRate::Dsd64, "DSD64"),
+                    (SdmRate::Dsd128, "DSD128"),
+                    (SdmRate::Dsd256, "DSD256"),
+                    (SdmRate::Dsd512, "DSD512"),
+                ];
+                if segment_picker(ui, &mut state.sdm.rate, &options, theme) {
+                    actions.sdm_config_changed = Some(state.sdm.clone());
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Apodizing Guidance"),
+            &tr!("Read-only measurement from the decoded source. A high near-Nyquist burst count suggests an apodizing resampler; it is guidance, never a silent filter switch."),
+            theme,
+            |ui| {
+                let Some(report) = extra.apodizing else {
+                    ui.label(
+                        egui::RichText::new(tr!("No stream analysed yet"))
+                            .font(crate::theme::font(11.0))
+                            .color(theme.text_dim),
+                    );
+                    return;
+                };
+                let recommendation = match report.recommendation {
+                    engine::dsp::apodizing::ApodizingRecommendation::InsufficientData => {
+                        tr!("Insufficient data")
+                    }
+                    engine::dsp::apodizing::ApodizingRecommendation::NotNeeded => {
+                        tr!("Not needed")
+                    }
+                    engine::dsp::apodizing::ApodizingRecommendation::Recommended => {
+                        tr!("Apodizing recommended")
+                    }
+                };
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(recommendation)
+                            .font(crate::theme::font(11.5))
+                            .color(theme.text_primary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{:.1} incidents/min · {} · {:.0} s analysed · threshold {}",
+                            report.incidents_per_minute,
+                            if report.sample_rate > 0 {
+                                format!("{} Hz", report.sample_rate)
+                            } else {
+                                tr!("unknown rate").to_string()
+                            },
+                            report.analyzed_seconds,
+                            report.threshold
+                        ))
+                        .font(crate::theme::font(10.5))
+                        .color(theme.text_muted),
+                    );
+                });
+            },
+        );
+    });
+
+    // Card 7: DAC correction (device/rate-specific, distinct from room correction).
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            |ui, r, c| crate::components::icons::draw_speaker(ui, r, c, false),
+            &tr!("DAC Correction Profiles"),
+            &tr!("Device- and rate-specific correction supplied as pre-rendered FIR profiles. This is a separate bank from room/headphone correction, so both can run and both are reported distinctly."),
+            None,
+            theme,
+        );
+
+        let toggle_changed = setting_item_toggle(
+            ui,
+            &tr!("DAC Correction"),
+            &tr!("Enable the DAC correction bank. The engine matches a profile by output-device name and session rate, loads its FIRs on the control path, and reports the selected profile or the reason it stayed inactive."),
+            theme,
+            &mut state.dac_correction.enabled,
+        );
+        let mut correction_changed = toggle_changed;
+
+        setting_item(
+            ui,
+            &tr!("DAC Correction Profiles"),
+            &tr!("One row per profile. Device is a case-insensitive substring (empty or * matches every device); rate 0 matches any rate. Paths are separated by semicolons: one FIR per channel, or one multichannel WAV. Latency is the delay already present in the profile."),
+            theme,
+            |ui| {
+                let mut remove = None;
+                ui.vertical(|ui| {
+                    if state.dac_correction.profiles.is_empty() {
+                        ui.label(
+                            egui::RichText::new(tr!("No DAC correction profiles"))
+                                .font(crate::theme::font(11.0))
+                                .color(theme.text_dim),
+                        );
+                    }
+                    for (index, profile) in state.dac_correction.profiles.iter_mut().enumerate() {
+                        let mut row_changed = false;
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{}", index + 1))
+                                    .font(crate::theme::font(10.5))
+                                    .color(theme.text_dim),
+                            );
+                            row_changed |= ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut profile.dac)
+                                        .hint_text(tr!("Device match (e.g. RME ADI-2)"))
+                                        .desired_width(220.0)
+                                        .font(crate::theme::font(10.5)),
+                                )
+                                .changed();
+                            row_changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut profile.sample_rate)
+                                        .range(0..=768_000)
+                                        .speed(100.0)
+                                        .suffix(" Hz"),
+                                )
+                                .changed();
+                            if ui.small_button("×").clicked() {
+                                remove = Some(index);
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            row_changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut profile.latency_ms)
+                                        .range(0.0..=1000.0)
+                                        .speed(0.05)
+                                        .suffix(" ms"),
+                                )
+                                .changed();
+                            ui.label(
+                                egui::RichText::new(tr!("depth"))
+                                    .font(crate::theme::font(10.5))
+                                    .color(theme.text_muted),
+                            );
+                            row_changed |= ui
+                                .add(
+                                    egui::Slider::new(&mut profile.depth, 0.0..=1.0)
+                                        .show_value(true),
+                                )
+                                .changed();
+                        });
+                        let mut paths = profile.ir_paths.join("; ");
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut paths)
+                                    .hint_text(tr!("FIR paths, separated by semicolons"))
+                                    .desired_width(f32::INFINITY)
+                                    .font(crate::theme::font(10.5)),
+                            )
+                            .changed()
+                        {
+                            profile.ir_paths = paths
+                                .split(';')
+                                .map(str::trim)
+                                .filter(|path| !path.is_empty())
+                                .map(str::to_string)
+                                .collect();
+                            row_changed = true;
+                        }
+                        correction_changed |= row_changed;
+                    }
+                });
+                if let Some(index) = remove {
+                    state.dac_correction.profiles.remove(index);
+                    correction_changed = true;
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Add DAC Profile"),
+            &tr!("Add another device/rate profile. The first matching profile wins; keep the device match specific when several DACs share an output rate."),
+            theme,
+            |ui| {
+                if ui
+                    .add(pill_btn(tr!("Add Profile"), false, theme))
+                    .clicked()
+                {
+                    state
+                        .dac_correction
+                        .profiles
+                        .push(config::DacCorrectionProfileConfig::default());
+                    state.dac_correction.enabled = true;
+                    correction_changed = true;
+                }
+            },
+        );
+
+        if correction_changed {
+            actions.dac_correction_changed = Some(state.dac_correction.clone());
+        }
     });
 }

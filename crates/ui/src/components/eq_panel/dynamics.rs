@@ -7,10 +7,12 @@
 //! Every control here writes the existing typed action, and the dispatcher
 //! forwards it to the engine.
 
-use super::controls::{custom_toggle_switch, gradient_horizontal_slider, render_footer_controls};
+use super::controls::{
+    card, custom_toggle_switch, gradient_horizontal_slider, render_footer_controls,
+};
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 use engine::dsp::limiter::LimiterMode;
 use std::ops::RangeInclusive;
 
@@ -308,24 +310,6 @@ fn render_compressor_card(
             |_| actions.comp_band_features_changed = Some(band),
         );
     });
-}
-
-fn card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::NONE
-        .fill(theme.bg_card_hover)
-        .stroke(Stroke::new(1.0, theme.border_card))
-        .corner_radius(CornerRadius::same(theme.radius_lg))
-        .inner_margin(Margin::symmetric(
-            theme.space_3xl as i8,
-            theme.space_2xl as i8,
-        ))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
-                add_contents(ui);
-            });
-        });
 }
 
 fn toggle_row(

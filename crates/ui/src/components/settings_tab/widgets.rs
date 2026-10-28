@@ -108,11 +108,37 @@ pub fn setting_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(
             theme.space_3xl as i8,
         ));
 
-    card_frame.show(ui, |ui| {
+    let card_response = card_frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xl);
         add_contents(ui);
     });
+
+    let card_rect = card_response.response.rect;
+    let hover_t = ui.ctx().animate_bool_with_time(
+        card_response.response.id.with("setting_card_hover"),
+        ui.rect_contains_pointer(card_rect),
+        theme.motion_time(0.15),
+    );
+    if hover_t > 0.0 {
+        ui.painter().rect_stroke(
+            card_rect,
+            CornerRadius::same(theme.radius_xl),
+            Stroke::new(
+                1.0,
+                crate::theme::with_alpha(theme.accent_highlight, (hover_t * 38.0) as u8),
+            ),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if theme.frosted {
+        crate::theme::glass::paint_glass_sheen(
+            ui,
+            card_rect,
+            CornerRadius::same(theme.radius_xl),
+            theme,
+        );
+    }
 }
 
 pub fn card_header(
@@ -225,13 +251,72 @@ pub fn setting_item_with_info(
     theme: &Theme,
     add_control: impl FnOnce(&mut egui::Ui),
 ) {
+    setting_item_impl(
+        ui,
+        label,
+        description,
+        info,
+        theme,
+        ControlAlignment::Start,
+        |ui| {
+            add_control(ui);
+        },
+    );
+}
+
+/// A setting row whose single compact control is aligned with the card's
+/// right edge.
+///
+/// Simple switches used to sit immediately after a long description, which
+/// left the right half of the row empty and made the control feel attached to
+/// the sentence rather than the setting. The label column also gets more room
+/// here, because a 38 px switch does not need a wide control column.
+pub fn setting_item_toggle(
+    ui: &mut egui::Ui,
+    label: &str,
+    description: &str,
+    theme: &Theme,
+    value: &mut bool,
+) -> bool {
+    setting_item_impl(
+        ui,
+        label,
+        description,
+        None,
+        theme,
+        ControlAlignment::End,
+        |ui| toggle_switch(ui, value, theme),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ControlAlignment {
+    Start,
+    End,
+}
+
+fn setting_item_impl<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    description: &str,
+    info: Option<&crate::components::info_box::InfoBoxContent>,
+    theme: &Theme,
+    alignment: ControlAlignment,
+    add_control: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
         let avail_w = ui.available_width();
         // The label column grows with the window instead of staying at a
         // fixed 240, so a wide window does not leave the control floating in
         // the middle of the card with a gutter after it.
-        let label_w = (avail_w * 0.30).clamp(200.0, 340.0);
+        let (share, max_label_w) = match alignment {
+            ControlAlignment::Start => (0.30, 340.0),
+            ControlAlignment::End => (0.55, 520.0),
+        };
+        let label_w = (avail_w * share)
+            .clamp(200.0, max_label_w)
+            .min((avail_w - 170.0).max(160.0));
         let control_w = (avail_w - label_w - theme.space_xl).max(160.0);
 
         // Column 1: Label + info icon + description
@@ -271,23 +356,36 @@ pub fn setting_item_with_info(
         // Column 2: the controls fill the rest of the row. Sliders are given
         // the full width they can have, so their right-hand end lands on the
         // card's right edge and the row reads as two columns rather than a
-        // label with a control abandoned beside it.
+        // label with a control abandoned beside it. Compact controls opt into
+        // a right-aligned layout instead.
         let controls = ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
             // The value box beside a slider takes about 74px; the slider
             // gets what is left.
             ui.spacing_mut().slider_width = (control_w - 86.0).clamp(120.0, 620.0);
-            add_control(ui);
+            match alignment {
+                ControlAlignment::Start => add_control(ui),
+                ControlAlignment::End => {
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        add_control,
+                    )
+                    .inner
+                }
+            }
         });
-        controls.response.rect
+        (controls.response.rect, controls.inner)
     });
 
+    let (controls_rect, value) = row.inner;
     // A search result or command-palette entry asked for this row. The row is
     // only known after it has been laid out, which is exactly when a scroll
     // target can be registered. The highlight spans the controls as well as
     // the label: the horizontal row's own rect stops at the label column.
-    let highlight = row.response.rect.union(row.inner);
+    let highlight = row.response.rect.union(controls_rect);
     apply_setting_jump(label, &row.response, highlight, ui, theme);
+
+    value
 }
 
 pub fn toggle_switch(ui: &mut egui::Ui, value: &mut bool, theme: &Theme) -> bool {

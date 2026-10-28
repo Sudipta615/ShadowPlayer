@@ -131,6 +131,49 @@ fn a_command_that_is_reflected_reaches_the_settings_snapshot() {
 }
 
 #[test]
+fn new_filter_and_dsd_commands_reach_the_engine_config() {
+    use config::{
+        DacCorrectionConfig, DsdNoiseFilter, DsdOutput, NoiseShaper, ResamplerFilter, SdmConfig,
+        SdmModulator, SdmRate, UltrasonicFilter,
+    };
+
+    let mut engine = AudioEngine::new_default().unwrap();
+    let handle = engine.handle();
+
+    let sdm = SdmConfig {
+        enabled: true,
+        modulator: SdmModulator::SeventhOrder,
+        rate: SdmRate::Dsd256,
+    };
+    let dac = DacCorrectionConfig {
+        enabled: true,
+        ..Default::default()
+    };
+
+    let _ = handle.send_command(EngineCommand::SetDsdOutput(DsdOutput::DoP));
+    let _ = handle.send_command(EngineCommand::SetDsdNoiseFilter(DsdNoiseFilter::HighOrder));
+    let _ = handle.send_command(EngineCommand::SetUltrasonicFilter(UltrasonicFilter::Cut30k));
+    let _ = handle.send_command(EngineCommand::SetResamplerFilter(ResamplerFilter::Kaiser));
+    let _ = handle.send_command(EngineCommand::SetNoiseShaper(NoiseShaper::Ns9));
+    let _ = handle.send_command(EngineCommand::SetSdmConfig(sdm.clone()));
+    let _ = handle.send_command(EngineCommand::SetDacCorrection(dac.clone()));
+    engine.tick();
+
+    assert_eq!(engine.config.dsd_output, DsdOutput::DoP);
+    assert_eq!(engine.config.dsd_noise_filter, DsdNoiseFilter::HighOrder);
+    assert_eq!(engine.config.ultrasonic_filter, UltrasonicFilter::Cut30k);
+    assert_eq!(engine.config.resampler_filter, ResamplerFilter::Kaiser);
+    assert_eq!(engine.config.noise_shaper, NoiseShaper::Ns9);
+    assert_eq!(engine.config.sdm, sdm);
+    assert_eq!(engine.config.dac_correction, dac);
+    assert_eq!(
+        handle.settings().noise_shaper,
+        NoiseShaper::Ns9,
+        "the read-back snapshot must report the shaper used for the next stream"
+    );
+}
+
+#[test]
 fn settings_summary_clears_the_per_band_vectors() {
     let engine = AudioEngine::new_default().unwrap();
     let handle = engine.handle();

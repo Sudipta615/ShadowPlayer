@@ -37,7 +37,7 @@ pub use state::{
 };
 pub use widgets::{
     card_header, card_header_with_info, dual_tone_slider, segment_picker, setting_card,
-    setting_item, setting_item_with_info, toggle_switch,
+    setting_item, setting_item_toggle, setting_item_with_info, toggle_switch,
 };
 
 pub fn show_settings_tab_extended(
@@ -107,7 +107,7 @@ pub fn show_settings_tab_extended(
                                 if is_active {
                                     ui.painter().rect(
                                         rect,
-                                        CornerRadius::same(theme.radius_pill),
+                                        theme.control_radius(),
                                         fill,
                                         stroke,
                                         egui::StrokeKind::Inside,
@@ -115,7 +115,7 @@ pub fn show_settings_tab_extended(
                                 } else if resp.hovered() {
                                     ui.painter().rect_filled(
                                         rect,
-                                        CornerRadius::same(theme.radius_pill),
+                                        theme.control_radius(),
                                         theme.bg_card_hover,
                                     );
                                 }
@@ -373,7 +373,11 @@ mod search_tests {
     /// the definition dispatching to `setting_item_with_info`, not a row.
     fn rendered_rows(source: &str) -> Vec<(usize, String)> {
         let mut rows = Vec::new();
-        for name in ["setting_item(", "setting_item_with_info("] {
+        for name in [
+            "setting_item(",
+            "setting_item_with_info(",
+            "setting_item_toggle(",
+        ] {
             let mut from = 0;
             while let Some(offset) = source[from..].find(name) {
                 let start = from + offset;
@@ -522,6 +526,26 @@ mod search_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn search_reaches_card_headings() {
+        let hits = super::index::scored_setting_cards("theme editor");
+        assert!(
+            hits.iter().any(
+                |(_, category, title)| *category == SettingsCategory::Appearance
+                    && *title == "Theme Editor"
+            ),
+            "the Theme Editor card must be searchable: {hits:?}"
+        );
+        let hits = super::index::scored_setting_cards("theme gallery");
+        assert!(
+            hits.iter().any(
+                |(_, category, title)| *category == SettingsCategory::Appearance
+                    && *title == "Theme Gallery"
+            ),
+            "the Theme Gallery card must be searchable: {hits:?}"
+        );
     }
 
     #[test]

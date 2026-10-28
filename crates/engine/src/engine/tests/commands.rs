@@ -1419,6 +1419,7 @@ fn test_multichannel_commands_dispatch_correctly() {
     let routing_cfg = config::ChannelRoutingConfig {
         enabled: true,
         matrix: vec![vec![1.0, 0.0], vec![0.0, 1.0]],
+        fir_routes: Vec::new(),
     };
     engine.send_command(EngineCommand::SetChannelRouting(routing_cfg.clone()));
     engine.tick();

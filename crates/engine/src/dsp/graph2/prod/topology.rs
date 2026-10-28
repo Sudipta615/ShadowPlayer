@@ -200,8 +200,12 @@ pub const CANONICAL_CHAIN: &[ProdStage] = &[
 
 /// The output-domain stages: described + validated in the topology, not
 /// wired into the mix chain (driven by the dedicated output endpoints).
-pub const OUTPUT_DOMAIN_STAGES: &[ProdStage] =
-    &[ProdStage::Limiter, ProdStage::Resampler, ProdStage::Dither];
+pub const OUTPUT_DOMAIN_STAGES: &[ProdStage] = &[
+    ProdStage::Limiter,
+    ProdStage::Resampler,
+    ProdStage::Dither,
+    ProdStage::Ultrasonic,
+];
 
 /// The stages the arena cannot run without, and why.
 ///

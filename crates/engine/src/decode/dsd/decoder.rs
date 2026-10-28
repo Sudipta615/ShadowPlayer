@@ -138,6 +138,18 @@ impl DsdDecoder {
         self.reader.rate()
     }
 
+    /// Select the PCM decimation filter used when the source is converted to
+    /// PCM (the default `DsdOutput::PcmConvert` path). A no-op for native/DoP
+    /// transport, which never decimates.
+    pub fn set_noise_filter(&mut self, filter: config::DsdNoiseFilter) {
+        self.reader.set_noise_filter(filter);
+    }
+
+    /// The active PCM decimation filter.
+    pub fn noise_filter(&self) -> config::DsdNoiseFilter {
+        self.reader.noise_filter()
+    }
+
     /// Offset of ID3v2 metadata if present (DSF files only; 0 otherwise).
     pub fn metadata_offset(&self) -> u64 {
         self.reader.metadata_offset()
@@ -415,6 +427,22 @@ mod tests {
         let expected = (4096.0 * 4.0 * 8.0) / 2_822_400.0;
         assert!((dec.duration_secs() - expected as f32).abs() < 1e-6);
         assert!(dec.format_info().is_dsd);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_decoder_applies_noise_filter_selection() {
+        let path = temp_path("dsf");
+        std::fs::write(&path, build_dsf(4096, 4096 * 4)).unwrap();
+        let mut dec = DsdDecoder::open(&path).expect("open DSF");
+        assert_eq!(dec.noise_filter(), config::DsdNoiseFilter::Standard);
+
+        dec.set_noise_filter(config::DsdNoiseFilter::Brickwall);
+        assert_eq!(dec.noise_filter(), config::DsdNoiseFilter::Brickwall);
+
+        let chunk = dec.decode_next(1024).expect("decode with brickwall filter");
+        assert!(!chunk.samples.is_empty());
+        assert!(chunk.samples.iter().all(|s| s.is_finite()));
         let _ = std::fs::remove_file(&path);
     }
 

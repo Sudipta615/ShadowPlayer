@@ -80,6 +80,10 @@ impl SettingsCategory {
             Self::Output => &[
                 "Audio Driver Backend & Hardware Device",
                 "Sample Rate Policies & Resampling Precision",
+                "DSD Transport & Decimation",
+                "Resampling Filter & Noise Shaping",
+                "Native DSD Modulation & Apodizing",
+                "DAC Correction Profiles",
             ],
             Self::Spatial => &[
                 "Spatial Audio Master",
@@ -96,6 +100,7 @@ impl SettingsCategory {
                 "LFE Channel",
                 "Up / Down Mixing",
                 "CLAP Plugin Insert",
+                "Matrix FIR Routing",
             ],
             Self::Tools => &[
                 "High-Resolution Stream Capture",
@@ -121,7 +126,7 @@ impl SettingsCategory {
                 "Application Instances",
                 "About ShadowPlayer",
             ],
-            Self::Appearance => &["Surface Material", "Theme Gallery"],
+            Self::Appearance => &["Surface Material", "Theme Gallery", "Theme Editor"],
         }
     }
 }
@@ -165,6 +170,7 @@ pub fn card_display_name(card: &str) -> &str {
         "Application Instances" => "App Instances",
         "About ShadowPlayer" => "About ShadowPlayer",
         "Theme Gallery" => "Theme Gallery",
+        "Theme Editor" => "Theme Editor",
         other => other,
     }
 }
@@ -195,7 +201,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 94] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 110] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -303,6 +309,78 @@ pub static SETTINGS_INDEX: [SettingsEntry; 94] = [
         card: "Sample Rate Policies & Resampling Precision",
         label: "TPDF Dither",
         description: "Triangular PDF dithering eliminates quantization distortion when converting bit depth",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "DSD Transport & Decimation",
+        label: "DSD Transport",
+        description: "PCM conversion, DSD over PCM (DoP), or native DSD; the negotiated fallback is always reported",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "DSD Transport & Decimation",
+        label: "DSD Decimation Filter",
+        description: "Filter used when DSD is converted to PCM; trades audio-band flatness against ultrasonic noise rejection",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "DSD Transport & Decimation",
+        label: "Ultrasonic Filter",
+        description: "Output-domain low-pass that removes shaped noise above the audio band",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Resampling Filter & Noise Shaping",
+        label: "Resampler Filter Family",
+        description: "FFT, Kaiser, Blackman-Harris, minimum-phase, apodizing, or reference Sinc-M rate conversion",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Resampling Filter & Noise Shaping",
+        label: "Noise Shaper",
+        description: "TPDF, Shibata, NS5, NS9, or LNS15 error feedback for integer output quantization",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Native DSD Modulation & Apodizing",
+        label: "SDM Conversion",
+        description: "Convert PCM to a one-bit SDM bitstream for native DSD output",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Native DSD Modulation & Apodizing",
+        label: "SDM Modulator",
+        description: "Fifth- or seventh-order one-bit modulator design",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Native DSD Modulation & Apodizing",
+        label: "SDM Rate",
+        description: "Auto or a fixed DSD64/128/256/512 multiple, subject to device negotiation",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Native DSD Modulation & Apodizing",
+        label: "Apodizing Guidance",
+        description: "Read-only near-Nyquist burst measurement and apodizing recommendation for the current stream",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "DAC Correction Profiles",
+        label: "DAC Correction",
+        description: "Enable the device/rate-keyed DAC correction bank, separate from room correction",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "DAC Correction Profiles",
+        label: "DAC Correction Profiles",
+        description: "Per-device, per-rate FIR profile table with latency and wet/dry depth",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "DAC Correction Profiles",
+        label: "Add DAC Profile",
+        description: "Add another device/rate correction profile",
     },
     SettingsEntry {
         category: SettingsCategory::Spatial,
@@ -525,6 +603,24 @@ pub static SETTINGS_INDEX: [SettingsEntry; 94] = [
         card: "CLAP Plugin Insert",
         label: "Plugin Rack",
         description: "Parameters, host bypass, and named presets that capture the plugin's own state",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Matrix FIR Routing",
+        label: "Matrix FIR Routing",
+        description: "Enable sparse per-route convolution for multichannel output",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Matrix FIR Routing",
+        label: "FIR Routes",
+        description: "Source/destination, gain, delay, and impulse response for each convolution route",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Matrix FIR Routing",
+        label: "Add FIR Route",
+        description: "Add another sparse convolution route (maximum 16)",
     },
     SettingsEntry {
         category: SettingsCategory::Tools,
@@ -761,6 +857,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 94] = [
         label: "Frosted Glass Surfaces",
         description: "Apply authentic frosted glass translucency and specular highlights across any active theme",
     },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Interface & Language",
+        label: "Reduce Motion",
+        description: "Disable hover and transition animations across the interface",
+    },
 ];
 
 /// The settings that match a query, best first.
@@ -770,6 +872,14 @@ pub static SETTINGS_INDEX: [SettingsEntry; 94] = [
 /// called. The same scorer as the command palette keeps the two search boxes
 /// feeling the same.
 pub fn search_settings(query: &str) -> Vec<&'static SettingsEntry> {
+    scored_settings(query)
+        .into_iter()
+        .map(|(_, entry)| entry)
+        .collect()
+}
+
+/// Settings and their relevance, before the public result list drops scores.
+pub(crate) fn scored_settings(query: &str) -> Vec<(i32, &'static SettingsEntry)> {
     use crate::components::command_palette::fuzzy_score;
 
     let query = query.trim();
@@ -787,5 +897,29 @@ pub fn search_settings(query: &str) -> Vec<&'static SettingsEntry> {
         })
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(b.1.label)));
-    scored.into_iter().map(|(_, entry)| entry).collect()
+    scored
+}
+
+/// Card headings are destinations too. Searching for "theme editor" used to
+/// find only the Frosted Glass row because only rows lived in the index; the
+/// gallery and editor were reachable by scrolling, not by search.
+pub(crate) fn scored_setting_cards(query: &str) -> Vec<(i32, SettingsCategory, &'static str)> {
+    use crate::components::command_palette::fuzzy_score;
+
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut scored = Vec::new();
+    for category in SettingsCategory::ALL {
+        for &card in category.cards() {
+            if let Some(score) = fuzzy_score(card, query) {
+                // A card is a navigation target, not a setting: prefer a
+                // row's label when both match equally well.
+                scored.push((score - 4, category, card));
+            }
+        }
+    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.2.cmp(b.2)));
+    scored
 }

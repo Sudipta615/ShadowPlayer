@@ -3,9 +3,10 @@
 
 use super::index::SettingsCategory;
 use config::{
-    AudioBackend, BassManagementConfig, ChannelMixConfig, CrossfadeCurve, FallbackPolicy,
-    LfeConfig, LoudnessMode, PrecisionMode, ResamplerQuality, SampleRatePolicy, SpatialQuality,
-    SpeedMode, TransitionMode, VolumeMode,
+    AudioBackend, BassManagementConfig, ChannelMixConfig, ChannelRoutingConfig, CrossfadeCurve,
+    DacCorrectionConfig, DsdNoiseFilter, DsdOutput, FallbackPolicy, LfeConfig, LoudnessMode,
+    NoiseShaper, PrecisionMode, ResamplerFilter, ResamplerQuality, SampleRatePolicy, SdmConfig,
+    SpatialQuality, SpeedMode, TransitionMode, UltrasonicFilter, VolumeMode,
 };
 use domain::ids::ScanRootId;
 use domain::models::ScanRoot;
@@ -56,6 +57,22 @@ pub struct SettingsTabState {
     pub dither_enabled: bool,
     pub resampler_quality: ResamplerQuality,
     pub fallback_policy: FallbackPolicy,
+    /// Resampler filter family (FFT or one of the polyphase designs).
+    pub resampler_filter: ResamplerFilter,
+    /// Final quantization noise shaper; applies on the next stream open.
+    pub noise_shaper: NoiseShaper,
+    /// How DSD sources reach the DAC (PCM conversion, DoP, native DSD).
+    pub dsd_output: DsdOutput,
+    /// DSD→PCM decimation filter; applies on the next DSD stream.
+    pub dsd_noise_filter: DsdNoiseFilter,
+    /// Output-domain ultrasonic low-pass; applies live.
+    pub ultrasonic_filter: UltrasonicFilter,
+    /// PCM→SDM native-DSD conversion policy.
+    pub sdm: SdmConfig,
+    /// Multichannel scalar matrix and sparse FIR routes.
+    pub channel_routing: ChannelRoutingConfig,
+    /// Device/rate-keyed DAC correction profiles (distinct from room correction).
+    pub dac_correction: DacCorrectionConfig,
     /// Engine processing profile, applied to the session on change.
     ///
     /// Persisted with `AppSettings` rather than here: the engine needs it at
@@ -200,6 +217,9 @@ pub struct SettingsTabState {
     /// Apply translucent frosted glass surfaces and optical specular rims
     /// across any active theme.
     pub frosted_glass_enabled: bool,
+    /// Disable hover and transition animations for users who are sensitive to
+    /// motion. Explicitly timed fades consult [`crate::theme::Theme::motion_time`].
+    pub reduce_motion: bool,
 
     // Legacy collapsible section flags preserved for compatibility
     pub section_playback: bool,
@@ -233,6 +253,14 @@ impl Default for SettingsTabState {
             dither_enabled: true,
             resampler_quality: ResamplerQuality::HighQuality,
             fallback_policy: FallbackPolicy::Allow,
+            resampler_filter: ResamplerFilter::Fft,
+            noise_shaper: NoiseShaper::Tpdf,
+            dsd_output: DsdOutput::PcmConvert,
+            dsd_noise_filter: DsdNoiseFilter::Standard,
+            ultrasonic_filter: UltrasonicFilter::Off,
+            sdm: SdmConfig::default(),
+            channel_routing: ChannelRoutingConfig::default(),
+            dac_correction: DacCorrectionConfig::default(),
             audio_profile: domain::models::AudioProfileChoice::default(),
             precision_mode: None,
             bass_management: BassManagementConfig::default(),
@@ -308,6 +336,7 @@ impl Default for SettingsTabState {
             theme_gallery: crate::theme::ThemeGalleryState::default(),
             theme_editor: crate::theme::ThemeEditorState::default(),
             frosted_glass_enabled: false,
+            reduce_motion: false,
 
             section_playback: true,
             section_output: false,
@@ -345,6 +374,14 @@ pub struct SettingsTabActions {
     pub dither_changed: Option<bool>,
     pub resampler_quality_changed: Option<ResamplerQuality>,
     pub fallback_policy_changed: Option<FallbackPolicy>,
+    pub resampler_filter_changed: Option<ResamplerFilter>,
+    pub noise_shaper_changed: Option<NoiseShaper>,
+    pub dsd_output_changed: Option<DsdOutput>,
+    pub dsd_noise_filter_changed: Option<DsdNoiseFilter>,
+    pub ultrasonic_filter_changed: Option<UltrasonicFilter>,
+    pub sdm_config_changed: Option<SdmConfig>,
+    pub channel_routing_changed: Option<ChannelRoutingConfig>,
+    pub dac_correction_changed: Option<DacCorrectionConfig>,
     /// The engine processing profile changed (Consumer / Fidelity / Low power).
     pub audio_profile_changed: Option<domain::models::AudioProfileChoice>,
     pub precision_mode_changed: Option<PrecisionMode>,
@@ -438,8 +475,8 @@ pub struct SettingsTabActions {
     pub cancel_theme_preview: bool,
     pub reload_themes: bool,
     pub import_theme: bool,
-    pub open_custom_themes_folder: bool,
     pub frosted_glass_changed: Option<bool>,
+    pub reduce_motion_changed: Option<bool>,
 
     // Audio Converter actions
     pub start_file_conversion: bool,
@@ -500,6 +537,8 @@ pub struct SettingsExtraContext<'a> {
     /// The full negotiated output snapshot. Shared with the Bit-Perfect modal
     /// so both surfaces render exactly the same facts.
     pub output_info: Option<&'a engine::output::OutputInfo>,
+    /// Per-track apodizing guidance from the decode loop (read-only).
+    pub apodizing: Option<&'a engine::dsp::apodizing::ApodizingReport>,
     /// The output devices the *selected* backend can open.
     ///
     /// Each backend enumerates its own devices, so a device chosen from this

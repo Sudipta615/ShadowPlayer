@@ -43,6 +43,12 @@ impl DsdByteBuffer {
         self.ring.capacity()
     }
 
+    /// Bytes the producer can still write before the ring is full.
+    #[inline]
+    pub fn free_bytes(&self) -> usize {
+        self.ring.free_slots()
+    }
+
     /// Push whole DSD frames. A frame is `frame_width` interleaved bytes
     /// (e.g. 2 for stereo DSD_U8, 4 for stereo DSD_U16). Returns the number
     /// of frames actually written.

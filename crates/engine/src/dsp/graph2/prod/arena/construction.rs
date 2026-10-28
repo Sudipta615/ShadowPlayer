@@ -335,6 +335,7 @@ impl GraphGeneration {
             GraphNode::Spatial(SpatialNode::new(sample_rate)),
             GraphNode::PluginHost(PluginHostNode::new(sample_rate)),
             GraphNode::Fx(FxNode::new(sample_rate)),
+            GraphNode::Ultrasonic(UltrasonicNode::new(sample_rate)),
         ];
         debug_assert!(matches!(nodes[node_id::MIX], GraphNode::Mix(_)));
         debug_assert!(matches!(nodes[node_id::EQ], GraphNode::Eq(_)));
@@ -364,6 +365,10 @@ impl GraphGeneration {
         debug_assert!(matches!(nodes[node_id::SPATIAL], GraphNode::Spatial(_)));
         debug_assert!(matches!(nodes[node_id::PLUGIN], GraphNode::PluginHost(_)));
         debug_assert!(matches!(nodes[node_id::FX], GraphNode::Fx(_)));
+        debug_assert!(matches!(
+            nodes[node_id::ULTRASONIC],
+            GraphNode::Ultrasonic(_)
+        ));
 
         let mut gen = GraphGeneration {
             node_ids: GraphGeneration::canonical_ids(nodes.len()),
@@ -468,6 +473,11 @@ impl GraphGeneration {
                     config.loudness.max_attenuation_db,
                 );
             }
+        }
+
+        {
+            let ultrasonic = gen_node!(self, node_id::ULTRASONIC, Ultrasonic);
+            ultrasonic.set_filter(config.ultrasonic_filter);
         }
 
         {
@@ -688,7 +698,7 @@ impl DspGraph {
             plans,
         );
 
-        Self {
+        let mut graph = Self {
             active,
             bus,
             multichannel_layout: ChannelLayout::Stereo,
@@ -699,6 +709,8 @@ impl DspGraph {
             performance_mode: config.performance_mode,
             bit_perfect: false,
             dop_bypass: false,
+            dac_config: config.dac_correction.clone(),
+            dac_device: config.output_device.clone(),
             scratch: GraphScratch::new(),
             transition_fader: crate::dsp::graph2::transitions::TransitionCrossfader::new(
                 crate::dsp::graph2::transitions::TransitionConfig::default(),
@@ -707,7 +719,35 @@ impl DspGraph {
             non_finite_policy: crate::dsp::safety::NonFinitePolicy::Clamp,
             build_stats: None,
             dropped_blocks: std::sync::atomic::AtomicU32::new(0),
-        }
+        };
+        graph.reload_dac_correction();
+        graph
+    }
+
+    /// Set the active output-device identity used for DAC profile matching.
+    /// Control path: a changed device re-selects and reloads the profile.
+    pub fn set_dac_device(&mut self, device: Option<String>) {
+        self.dac_device = device;
+        self.reload_dac_correction();
+    }
+
+    /// Replace the DAC correction profile table and reload the matching bank.
+    ///
+    /// Control path: the profile's IR files are read and convolved only after
+    /// the node publishes the new bank, so this never runs on the audio thread.
+    pub fn set_dac_correction(&mut self, config: config::DacCorrectionConfig) {
+        self.dac_config = config;
+        self.reload_dac_correction();
+    }
+
+    /// Re-select the DAC correction profile for the current device and rate.
+    /// Called on config apply, device change, and output-rate change only.
+    pub(crate) fn reload_dac_correction(&mut self) {
+        let cfg = self.dac_config.clone();
+        let device = self.dac_device.clone();
+        let rate = self.sample_rate;
+        self.correction_mut()
+            .apply_dac_config(&cfg, device.as_deref(), rate);
     }
 
     /// Apply a config to the active generation directly (control path; used
@@ -726,6 +766,8 @@ impl DspGraph {
                 let _ = self.correction_mut().load_set(&set, rate);
             }
         }
+        self.dac_config = config.dac_correction.clone();
+        self.reload_dac_correction();
         self.precision_mode = config.precision_mode;
         self.performance_mode = config.performance_mode;
         self.volume_fade_ms = config.volume_fade_ms as f32;
@@ -815,7 +857,20 @@ impl DspGraph {
                 })
                 .collect();
         }
-        GraphGeneration::build_with_plans(config, sample_rate, &layout, user, plans)
+        let mut generation =
+            GraphGeneration::build_with_plans(config, sample_rate, &layout, user, plans);
+        // DAC profiles are selected by device + output rate, not by the
+        // generation's default (stereo/unknown) state. Load them on this
+        // control path so the fresh generation does not lose the active
+        // converter correction.
+        if let GraphNode::Correction(node) = &mut generation.nodes[node_id::CORRECTION] {
+            node.apply_dac_config(
+                &config.dac_correction,
+                self.dac_device.as_deref(),
+                sample_rate,
+            );
+        }
+        generation
     }
 
     /// The engine-side rebuild-cost counters, when they are attached.
@@ -838,6 +893,7 @@ impl DspGraph {
     /// fade state before the swap would change how the old generation is
     /// processed during the crossfade.
     pub(crate) fn sync_shell_from_config(&mut self, config: &EngineConfig) {
+        self.dac_config = config.dac_correction.clone();
         self.precision_mode = config.precision_mode;
         self.performance_mode = config.performance_mode;
         self.volume_fade_ms = config.volume_fade_ms as f32;

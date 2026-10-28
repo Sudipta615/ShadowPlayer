@@ -120,6 +120,7 @@ impl ShadowPlayerApp {
                     if self.dsp_state.settings_tab.frosted_glass_enabled {
                         self.theme = self.theme.with_frosted_glass(true);
                     }
+                    self.theme.reduce_motion = self.dsp_state.settings_tab.reduce_motion;
                 }
                 Err(e) => {
                     log::warn!("Could not read the saved audio settings, using defaults: {e}");
@@ -338,7 +339,10 @@ impl ShadowPlayerApp {
     /// Update effective theme combining active or staged theme with frosted glass modifier.
     pub(in crate::app) fn sync_effective_theme(&mut self) {
         let base = self.theme_manager.effective_theme();
-        self.theme = base.with_frosted_glass(self.dsp_state.settings_tab.frosted_glass_enabled);
+        let mut effective =
+            base.with_frosted_glass(self.dsp_state.settings_tab.frosted_glass_enabled);
+        effective.reduce_motion = self.dsp_state.settings_tab.reduce_motion;
+        self.theme = effective;
         self.applied_theme = None;
     }
 }

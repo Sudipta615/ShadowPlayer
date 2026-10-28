@@ -31,6 +31,7 @@ pub struct ThemeCardInfo {
     pub text_dim: eframe::egui::Color32,
     pub border_card: eframe::egui::Color32,
     pub border_subtle: eframe::egui::Color32,
+    pub play_button_shape: super::tokens::PlayButtonShape,
     pub fonts: ThemeFonts,
     /// Requested font families that are not bundled; those roles use Inter.
     pub missing_fonts: Vec<String>,
@@ -340,6 +341,7 @@ impl ThemeManager {
                 text_dim: t.text_dim,
                 border_card: t.border_card,
                 border_subtle: t.border_subtle,
+                play_button_shape: t.play_button_shape,
                 fonts: ThemeFonts::default(),
                 missing_fonts: Vec::new(),
             });
@@ -377,6 +379,7 @@ impl ThemeManager {
                 text_dim: t.text_dim,
                 border_card: t.border_card,
                 border_subtle: t.border_subtle,
+                play_button_shape: t.play_button_shape,
                 fonts: user.fonts.clone(),
                 missing_fonts: user.fonts.missing_fonts(),
             });

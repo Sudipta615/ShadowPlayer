@@ -4,7 +4,7 @@
 use super::super::cards::render_chain_presets_card;
 use super::super::widgets::{
     badge_label, card_header, dual_tone_slider, pill_btn, segment_picker, setting_card,
-    setting_item, setting_item_with_info, toggle_switch,
+    setting_item, setting_item_toggle, setting_item_with_info, toggle_switch,
 };
 use super::super::{SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
@@ -661,6 +661,147 @@ fn render_clap_plugin_card(
                 }
             },
         );
+    });
+
+    // Card: Matrix FIR routing (multichannel only).
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_equalizer_sliders,
+            &tr!("Matrix FIR Routing"),
+            &tr!("Sparse per-route convolution for multichannel systems: send a source channel through a measured impulse response into a destination channel. Multichannel only; stereo playback uses the balance and crossfeed stages."),
+            None,
+            theme,
+        );
+
+        let toggle_changed = setting_item_toggle(
+            ui,
+            &tr!("Matrix FIR Routing"),
+            &tr!("Enable the multichannel routing stage. Each route convolves its source with a mono (or first-channel) IR and sums the result into the destination. The partition block adds latency, reported by the engine."),
+            theme,
+            &mut state.channel_routing.enabled,
+        );
+        let mut routing_changed = toggle_changed;
+
+        setting_item(
+            ui,
+            &tr!("FIR Routes"),
+            &tr!("One row per route. Source and destination are zero-based channel indices. Gain and delay are applied to the source before convolution. An empty IR path leaves the route inactive."),
+            theme,
+            |ui| {
+                let mut remove = None;
+                ui.vertical(|ui| {
+                    if state.channel_routing.fir_routes.is_empty() {
+                        ui.label(
+                            egui::RichText::new(tr!("No FIR routes loaded"))
+                                .font(crate::theme::font(11.0))
+                                .color(theme.text_dim),
+                        );
+                    }
+                    for (index, route) in
+                        state.channel_routing.fir_routes.iter_mut().enumerate()
+                    {
+                        let mut row_changed = false;
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{}", index + 1))
+                                    .font(crate::theme::font(10.5))
+                                    .color(theme.text_dim),
+                            );
+                            ui.label(
+                                egui::RichText::new(tr!("from"))
+                                    .font(crate::theme::font(10.5))
+                                    .color(theme.text_muted),
+                            );
+                            row_changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut route.source)
+                                        .range(0..=engine::buffer::MAX_CHANNELS - 1),
+                                )
+                                .changed();
+                            ui.label(
+                                egui::RichText::new(tr!("to"))
+                                    .font(crate::theme::font(10.5))
+                                    .color(theme.text_muted),
+                            );
+                            row_changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut route.destination)
+                                        .range(0..=engine::buffer::MAX_CHANNELS - 1),
+                                )
+                                .changed();
+                            row_changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut route.gain_db)
+                                        .range(-60.0..=12.0)
+                                        .speed(0.1)
+                                        .suffix(" dB"),
+                                )
+                                .changed();
+                            row_changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut route.delay_ms)
+                                        .range(0.0..=1000.0)
+                                        .speed(0.05)
+                                        .suffix(" ms"),
+                                )
+                                .changed();
+                            if ui.small_button("×").clicked() {
+                                remove = Some(index);
+                            }
+                        });
+                        let mut path = route.ir_path.clone().unwrap_or_default();
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut path)
+                                    .hint_text(tr!("Impulse response WAV/FLAC path"))
+                                    .desired_width(f32::INFINITY)
+                                    .font(crate::theme::font(10.5)),
+                            )
+                            .changed()
+                        {
+                            route.ir_path = if path.trim().is_empty() {
+                                None
+                            } else {
+                                Some(path.trim().to_string())
+                            };
+                            row_changed = true;
+                        }
+                        routing_changed |= row_changed;
+                    }
+                });
+                if let Some(index) = remove {
+                    state.channel_routing.fir_routes.remove(index);
+                    routing_changed = true;
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Add FIR Route"),
+            &tr!("Add another sparse convolution route. The engine accepts at most 16 routes and IRs up to 262,144 samples."),
+            theme,
+            |ui| {
+                let full =
+                    state.channel_routing.fir_routes.len() >= engine::dsp::channel_trim::MAX_MATRIX_FIR_ROUTES;
+                if ui
+                    .add_enabled(!full, pill_btn(tr!("Add Route"), false, theme))
+                    .clicked()
+                {
+                    state
+                        .channel_routing
+                        .fir_routes
+                        .push(config::MatrixFirRouteConfig::default());
+                    state.channel_routing.enabled = true;
+                    routing_changed = true;
+                }
+            },
+        );
+
+        if routing_changed {
+            actions.channel_routing_changed = Some(state.channel_routing.clone());
+        }
     });
 }
 

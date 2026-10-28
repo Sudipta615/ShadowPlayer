@@ -293,7 +293,7 @@ impl WasapiOutput {
                 WasapiContainer::I32 => TargetFormat::I32,
                 WasapiContainer::F32 => TargetFormat::F32,
             },
-            DitherType::Triangular,
+            crate::dsp::dither::configured_dither_type(),
             self.client().sample_rate,
         );
 

@@ -620,6 +620,7 @@ impl DspPipeline {
         if self.bit_perfect || self.dop_bypass {
             return (left, right);
         }
+        let (left, right) = self.ultrasonic.process(left, right);
         self.limiter.process(left, right)
     }
 
@@ -628,6 +629,8 @@ impl DspPipeline {
         if self.bit_perfect || self.dop_bypass {
             return;
         }
+        self.ultrasonic
+            .process_block(&mut [&mut left[..], &mut right[..]]);
         self.limiter.process_block(left, right);
     }
 
@@ -636,6 +639,7 @@ impl DspPipeline {
         if self.bit_perfect || self.dop_bypass {
             return;
         }
+        self.ultrasonic.process_interleaved(interleaved, channels);
         self.limiter
             .process_block_multichannel(interleaved, channels);
     }

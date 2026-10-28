@@ -175,6 +175,12 @@ impl ShadowPlayerApp {
         window_w: f32,
         playback: &PlaybackView<'_>,
     ) {
+        if self.theme.frosted {
+            let backdrop = playback
+                .current_track
+                .and_then(|track| self.artwork_service.backdrop_texture(ctx, &track.id));
+            crate::theme::glass::paint_backdrop(ui, &self.theme, backdrop.as_ref());
+        }
         self.render_sidebar_panel(ui);
         self.render_center_panel(ui, ctx, window_w, playback);
     }

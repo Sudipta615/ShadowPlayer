@@ -1,11 +1,30 @@
-//! Shared panel controls: the footer preamp/reset strip, the gradient slider,
-//! and the toggle switch.
+//! Shared panel controls: cards, the footer preamp/reset strip, the gradient
+//! slider, and the toggle switch.
 
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
 use config::CrossfeedProfile;
 use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2};
 use engine::dsp::limiter::LimiterMode;
+
+/// A rounded, bordered card with the panel's standard inner spacing.
+pub(super) fn card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::NONE
+        .fill(theme.bg_card_hover)
+        .stroke(Stroke::new(1.0, theme.border_card))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
+        .inner_margin(Margin::symmetric(
+            theme.space_3xl as i8,
+            theme.space_2xl as i8,
+        ))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_sm);
+                add_contents(ui);
+            });
+        });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. Footer Controls: Preamp Slider & Tab-Specific Reset Button
@@ -33,10 +52,35 @@ pub(super) fn render_footer_controls(
     theme: &Theme,
     tab: EqTab,
 ) {
-    let avail_w = ui.available_width();
-    let reset_btn_w = 95.0;
-    let preamp_card_w = (avail_w - reset_btn_w - 12.0).max(200.0);
+    // The preamp card and a fixed-width reset button need roughly 420 px
+    // together. Below that, stacking them is what lets the panel actually stay
+    // at the width the user dragged it to instead of being forced wider by its
+    // content.
+    let stacked = ui.available_width() < 420.0;
 
+    if stacked {
+        render_preamp_card(ui, state, actions, theme, None);
+        ui.add_space(theme.space_xs);
+        render_reset_button(ui, state, actions, theme, tab, None);
+    } else {
+        let preamp_w = (ui.available_width() - 95.0 - theme.space_xl).max(200.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
+            render_preamp_card(ui, state, actions, theme, Some(preamp_w));
+            render_reset_button(ui, state, actions, theme, tab, Some(95.0));
+        });
+    }
+}
+
+/// The shared master preamp. `width` is the card's outer width; `None` fills
+/// the available width (the stacked layout).
+fn render_preamp_card(
+    ui: &mut egui::Ui,
+    state: &mut EqPanelState,
+    actions: &mut EqPanelActions,
+    theme: &Theme,
+    width: Option<f32>,
+) {
     // A preset or AutoEQ curve may compute a preamp outside the normal range.
     // Widen the control so the knob can actually represent it; otherwise the
     // readout said −18 dB while the slider was pinned at −12 dB, and touching
@@ -45,225 +89,250 @@ pub(super) fn render_footer_controls(
     let min_lbl = format!("-{preamp_max:.0}dB");
     let max_lbl = format!("+{preamp_max:.0}dB");
 
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
+    egui::Frame::NONE
+        .fill(theme.bg_card_hover)
+        .stroke(Stroke::new(1.0, theme.border_card))
+        .corner_radius(CornerRadius::same(theme.radius_lg))
+        .inner_margin(Margin::symmetric(
+            theme.space_2xl as i8,
+            theme.space_md as i8,
+        ))
+        .show(ui, |ui| {
+            if let Some(width) = width {
+                ui.set_width((width - 28.0).max(0.0));
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
 
-        // Preamp Card (All-in-one control shared across tabs)
-        egui::Frame::NONE
-            .fill(theme.bg_card_hover)
-            .stroke(Stroke::new(1.0, theme.border_card))
-            .corner_radius(CornerRadius::same(theme.radius_lg))
-            .inner_margin(Margin::symmetric(
-                theme.space_2xl as i8,
-                theme.space_md as i8,
-            ))
-            .show(ui, |ui| {
-                ui.set_width(preamp_card_w - 28.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
+                // Row 1: Label + Info Button
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+                    ui.label(
+                        egui::RichText::new(tr!("Preamp (Master)"))
+                            .font(crate::theme::font(12.5))
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    crate::components::info_box::render_info_icon_button(
+                        ui,
+                        "eq_footer_master_preamp",
+                        &crate::components::info_box::INFO_MASTER_PREAMP,
+                        theme,
+                    );
+                });
 
-                    // Row 1: Label + Info Button
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
-                        ui.label(
-                            egui::RichText::new(tr!("Preamp (Master)"))
-                                .font(crate::theme::font(12.5))
-                                .strong()
-                                .color(theme.text_primary),
-                        );
-                        crate::components::info_box::render_info_icon_button(
-                            ui,
-                            "eq_footer_master_preamp",
-                            &crate::components::info_box::INFO_MASTER_PREAMP,
-                            theme,
-                        );
-                    });
+                // Row 2: Range Labels & Slider
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+                    ui.label(
+                        egui::RichText::new(min_lbl)
+                            .font(crate::theme::font(10.5))
+                            .color(theme.text_muted),
+                    );
 
-                    // Row 2: Range Labels & Slider
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
-                        ui.label(
-                            egui::RichText::new(min_lbl)
-                                .font(crate::theme::font(10.5))
-                                .color(theme.text_muted),
-                        );
+                    let slider_w = (ui.available_width() - 50.0).max(80.0);
+                    let mut p = state.preamp_db;
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(slider_w, 20.0),
+                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                        |ui| {
+                            if gradient_horizontal_slider(
+                                ui,
+                                &mut p,
+                                -preamp_max..=preamp_max,
+                                0.0,
+                                theme,
+                            ) {
+                                state.set_preamp(p);
+                                actions.graphic_eq_changed = true;
+                            }
+                        },
+                    );
 
-                        let slider_w = (ui.available_width() - 50.0).max(80.0);
-                        let mut p = state.preamp_db;
-                        ui.allocate_ui_with_layout(
-                            Vec2::new(slider_w, 20.0),
-                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                            |ui| {
-                                if gradient_horizontal_slider(
-                                    ui,
-                                    &mut p,
-                                    -preamp_max..=preamp_max,
-                                    0.0,
-                                    theme,
-                                ) {
-                                    state.set_preamp(p);
-                                    actions.graphic_eq_changed = true;
-                                }
-                            },
-                        );
+                    ui.label(
+                        egui::RichText::new(max_lbl)
+                            .font(crate::theme::font(10.5))
+                            .color(theme.text_muted),
+                    );
+                });
 
-                        ui.label(
-                            egui::RichText::new(max_lbl)
-                                .font(crate::theme::font(10.5))
-                                .color(theme.text_muted),
-                        );
-                    });
-
-                    // Row 3: Readout
-                    ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!("{:+.1} dB", state.preamp_db))
-                                .font(crate::theme::font(11.5))
-                                .color(theme.text_secondary),
-                        );
-                    });
+                // Row 3: Readout
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{:+.1} dB", state.preamp_db))
+                            .font(crate::theme::font(11.5))
+                            .color(theme.text_secondary),
+                    );
                 });
             });
-
-        // Tab-Specific Reset Button
-        let (reset_rect, reset_resp) =
-            ui.allocate_exact_size(Vec2::new(reset_btn_w, 58.0), Sense::click());
-        reset_resp.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::Role::Button, true, "Reset this section")
         });
-        let _ = reset_resp
-            .clone()
-            .on_hover_text(tr!(Msg::SEE997457CAFF5C1B));
-        let rp = ui.painter_at(reset_rect);
-        let bg = if reset_resp.hovered() {
-            theme.accent
-        } else {
-            theme.bg_card_hover
-        };
-        rp.rect_filled(reset_rect, CornerRadius::same(theme.radius_lg), bg);
-        rp.rect_stroke(
-            reset_rect,
-            CornerRadius::same(theme.radius_lg),
-            Stroke::new(1.0, theme.border_card),
-            egui::StrokeKind::Inside,
-        );
+}
 
-        // High quality SVG Reset icon and Reset text
-        let icon_rect = Rect::from_center_size(
-            Pos2::new(reset_rect.center().x + 22.0, reset_rect.center().y),
-            Vec2::splat(16.0),
-        );
-        crate::components::icons::draw_reset(ui, icon_rect, theme.accent_highlight);
+fn render_reset_button(
+    ui: &mut egui::Ui,
+    state: &mut EqPanelState,
+    actions: &mut EqPanelActions,
+    theme: &Theme,
+    tab: EqTab,
+    width: Option<f32>,
+) {
+    let width = width.unwrap_or(ui.available_width());
+    let (reset_rect, reset_resp) = ui.allocate_exact_size(Vec2::new(width, 40.0), Sense::click());
+    reset_resp
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Reset this section"));
+    let _ = reset_resp
+        .clone()
+        .on_hover_text(tr!(Msg::SEE997457CAFF5C1B));
+    let rp = ui.painter_at(reset_rect);
+    let bg = if reset_resp.hovered() {
+        theme.accent
+    } else {
+        theme.bg_card_hover
+    };
+    rp.rect_filled(reset_rect, CornerRadius::same(theme.radius_lg), bg);
+    rp.rect_stroke(
+        reset_rect,
+        CornerRadius::same(theme.radius_lg),
+        Stroke::new(1.0, theme.border_card),
+        egui::StrokeKind::Inside,
+    );
 
-        rp.text(
-            Pos2::new(reset_rect.center().x - 12.0, reset_rect.center().y),
-            egui::Align2::CENTER_CENTER,
-            "Reset",
-            crate::theme::font(13.0),
-            theme.text_primary,
-        );
+    // Centre the icon and the label as one group, so the button looks the same
+    // at 95 px and when it spans a narrow stacked footer.
+    let text_color = if reset_resp.hovered() {
+        Color32::WHITE
+    } else {
+        theme.text_primary
+    };
+    let icon_color = if reset_resp.hovered() {
+        Color32::WHITE
+    } else {
+        theme.accent_highlight
+    };
+    let font = crate::theme::font(13.0);
+    let galley = rp.layout_no_wrap("Reset".to_string(), font, text_color);
+    let icon_size = 16.0;
+    let gap = 6.0;
+    let group_w = icon_size + gap + galley.size().x;
+    let left = reset_rect.center().x - group_w / 2.0;
+    let icon_rect = Rect::from_min_size(
+        Pos2::new(left, reset_rect.center().y - icon_size / 2.0),
+        Vec2::splat(icon_size),
+    );
+    crate::components::icons::draw_reset(ui, icon_rect, icon_color);
+    rp.galley(
+        Pos2::new(
+            left + icon_size + gap,
+            reset_rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        text_color,
+    );
 
-        let tooltip = match tab {
-            EqTab::Graphic => "Reset Graphic EQ band sliders to 0.0 dB flat",
-            EqTab::Tone => "Reset Bass, Treble, Stereo Width, and Balance to defaults",
-            EqTab::Parametric => "Flatten every parametric band and reset the shared preamp",
-            EqTab::Dynamics => "Reset the limiter and all three compressor bands to defaults",
-            EqTab::Filters => "Reset crossfeed and correction to their bypassed defaults",
-            EqTab::Advanced => "Reset Advanced dynamic range and DSP processing modes to defaults",
-            _ => "Reset settings for this tab",
-        };
+    let tooltip = match tab {
+        EqTab::Graphic => "Reset Graphic EQ band sliders to 0.0 dB flat",
+        EqTab::Tone => "Reset Bass, Treble, Stereo Width, and Balance to defaults",
+        EqTab::Parametric => "Flatten every parametric band and reset the shared preamp",
+        EqTab::Dynamics => "Reset the limiter and all three compressor bands to defaults",
+        EqTab::Filters => "Reset crossfeed and correction to their bypassed defaults",
+        EqTab::Advanced => "Reset Advanced dynamic range and DSP processing modes to defaults",
+        _ => "Reset settings for this tab",
+    };
 
-        if reset_resp.on_hover_text(tooltip).clicked() {
-            match tab {
-                EqTab::Graphic => {
-                    // One snapshot resets the whole curve, not 64 queued
-                    // single-band commands racing the engine's tick budget.
-                    state.reset_graphic_eq();
-                    actions.graphic_eq_changed = true;
-                }
-                EqTab::Tone => {
-                    // Reset Tone shelves, stereo width, balance, and master preamp
-                    state.bass_shelf_db = 0.0;
-                    actions.bass_shelf_changed = Some(0.0);
+    if reset_resp.on_hover_text(tooltip).clicked() {
+        apply_reset(state, actions, tab);
+    }
+}
 
-                    state.treble_shelf_db = 0.0;
-                    actions.treble_shelf_changed = Some(0.0);
-
-                    state.stereo_width = 1.0;
-                    actions.stereo_width_changed = Some(1.0);
-
-                    state.balance = 0.0;
-                    actions.balance_changed = Some(0.0);
-
-                    state.set_preamp(0.0);
-                    actions.graphic_eq_changed = true;
-                }
-                EqTab::Advanced => {
-                    // Reset Advanced settings to the new honest defaults:
-                    // no hidden static attenuation, but the true-peak guard
-                    // remains available and on for new state.
-                    // Do not hide a curve that still exceeds the standard
-                    // range: the engine would keep applying it while the
-                    // canvas drew a clamped picture.
-                    state.extended_range = state.needs_extended_range();
-                    state.auto_headroom = false;
-                    actions.eq_auto_headroom_changed = Some(false);
-                    state.midside_eq = false;
-                    actions.midside_eq_changed = Some(false);
-                    state.dither_enabled = false;
-                    actions.dither_enabled_changed = Some(false);
-                }
-                EqTab::Parametric => {
-                    for band in &mut state.bands {
-                        band.gain_db = 0.0;
-                    }
-                    state.set_preamp(0.0);
-                    actions.eq_bands_changed = true;
-                    actions.graphic_eq_changed = true;
-                }
-                EqTab::Dynamics => {
-                    state.limiter_enabled = true;
-                    actions.limiter_enabled_changed = Some(true);
-                    state.limiter_mode = LimiterMode::Transparent;
-                    actions.limiter_mode_changed = Some(LimiterMode::Transparent);
-                    state.limiter_true_peak = true;
-                    actions.limiter_true_peak_changed = Some(true);
-                    state.limiter_lookahead_ms = 5.0;
-                    state.limiter_attack_ms = 0.3;
-                    state.limiter_release_ms = 100.0;
-                    state.limiter_ceiling_db = -1.0;
-                    state.limiter_soft_clip = false;
-                    actions.limiter_params_changed = true;
-                    state.compressor_enabled = false;
-                    actions.compressor_enabled_changed = Some(false);
-                    state.comp_threshold = [-24.0, -18.0, -18.0];
-                    state.comp_ratio = [4.0, 3.0, 3.0];
-                    state.comp_attack_ms = [10.0, 10.0, 5.0];
-                    state.comp_release_ms = [100.0, 100.0, 80.0];
-                    state.comp_makeup_db = [0.0; 3];
-                    state.comp_knee_db = [3.0; 3];
-                    state.comp_stereo_link = [true; 3];
-                    state.comp_band = 0;
-                    actions.comp_params_reset = true;
-                }
-                EqTab::Filters => {
-                    state.crossfeed_enabled = false;
-                    actions.crossfeed_enabled_changed = Some(false);
-                    state.crossfeed_profile = CrossfeedProfile::Bauer;
-                    actions.crossfeed_profile_changed = Some(CrossfeedProfile::Bauer);
-                    state.crossfeed_freq = 700.0;
-                    state.crossfeed_q = 0.707;
-                    state.crossfeed_delay_ms = 0.3;
-                    actions.crossfeed_custom_changed = true;
-                    state.correction_enabled = false;
-                    actions.correction_enabled_changed = Some(false);
-                    state.correction_depth = 1.0;
-                    actions.correction_depth_changed = Some(1.0);
-                }
-                _ => {}
-            }
+fn apply_reset(state: &mut EqPanelState, actions: &mut EqPanelActions, tab: EqTab) {
+    match tab {
+        EqTab::Graphic => {
+            // One snapshot resets the whole curve, not 64 queued
+            // single-band commands racing the engine's tick budget.
+            state.reset_graphic_eq();
+            actions.graphic_eq_changed = true;
         }
-    });
+        EqTab::Tone => {
+            // Reset Tone shelves, stereo width, balance, and master preamp
+            state.bass_shelf_db = 0.0;
+            actions.bass_shelf_changed = Some(0.0);
+
+            state.treble_shelf_db = 0.0;
+            actions.treble_shelf_changed = Some(0.0);
+
+            state.stereo_width = 1.0;
+            actions.stereo_width_changed = Some(1.0);
+
+            state.balance = 0.0;
+            actions.balance_changed = Some(0.0);
+
+            state.set_preamp(0.0);
+            actions.graphic_eq_changed = true;
+        }
+        EqTab::Advanced => {
+            // Reset Advanced settings to the new honest defaults:
+            // no hidden static attenuation, but the true-peak guard
+            // remains available and on for new state.
+            // Do not hide a curve that still exceeds the standard
+            // range: the engine would keep applying it while the
+            // canvas drew a clamped picture.
+            state.extended_range = state.needs_extended_range();
+            state.auto_headroom = false;
+            actions.eq_auto_headroom_changed = Some(false);
+            state.midside_eq = false;
+            actions.midside_eq_changed = Some(false);
+            state.dither_enabled = false;
+            actions.dither_enabled_changed = Some(false);
+        }
+        EqTab::Parametric => {
+            for band in &mut state.bands {
+                band.gain_db = 0.0;
+            }
+            state.set_preamp(0.0);
+            actions.eq_bands_changed = true;
+            actions.graphic_eq_changed = true;
+        }
+        EqTab::Dynamics => {
+            state.limiter_enabled = true;
+            actions.limiter_enabled_changed = Some(true);
+            state.limiter_mode = LimiterMode::Transparent;
+            actions.limiter_mode_changed = Some(LimiterMode::Transparent);
+            state.limiter_true_peak = true;
+            actions.limiter_true_peak_changed = Some(true);
+            state.limiter_lookahead_ms = 5.0;
+            state.limiter_attack_ms = 0.3;
+            state.limiter_release_ms = 100.0;
+            state.limiter_ceiling_db = -1.0;
+            state.limiter_soft_clip = false;
+            actions.limiter_params_changed = true;
+            state.compressor_enabled = false;
+            actions.compressor_enabled_changed = Some(false);
+            state.comp_threshold = [-24.0, -18.0, -18.0];
+            state.comp_ratio = [4.0, 3.0, 3.0];
+            state.comp_attack_ms = [10.0, 10.0, 5.0];
+            state.comp_release_ms = [100.0, 100.0, 80.0];
+            state.comp_makeup_db = [0.0; 3];
+            state.comp_knee_db = [3.0; 3];
+            state.comp_stereo_link = [true; 3];
+            state.comp_band = 0;
+            actions.comp_params_reset = true;
+        }
+        EqTab::Filters => {
+            state.crossfeed_enabled = false;
+            actions.crossfeed_enabled_changed = Some(false);
+            state.crossfeed_profile = CrossfeedProfile::Bauer;
+            actions.crossfeed_profile_changed = Some(CrossfeedProfile::Bauer);
+            state.crossfeed_freq = 700.0;
+            state.crossfeed_q = 0.707;
+            state.crossfeed_delay_ms = 0.3;
+            actions.crossfeed_custom_changed = true;
+            state.correction_enabled = false;
+            actions.correction_enabled_changed = Some(false);
+            state.correction_depth = 1.0;
+            actions.correction_depth_changed = Some(1.0);
+        }
+        EqTab::Effects => {}
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

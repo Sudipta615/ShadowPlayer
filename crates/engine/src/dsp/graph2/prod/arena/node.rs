@@ -64,6 +64,7 @@ pub trait DspNode: Send {
             } else {
                 0.0
             },
+            channel_support: self.capability().channel_support,
         }
     }
 

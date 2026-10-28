@@ -634,11 +634,13 @@ pub fn show_playlist_editor(
                             );
                         });
 
-                        let search_edit = egui::TextEdit::singleline(&mut state.search)
-                            .hint_text(tr!(Msg::S4B808A03176E6A3B))
-                            .desired_width(ui.available_width())
-                            .font(crate::theme::font(12.0));
-                        ui.add(search_edit);
+                        crate::components::search_field::search_field_with_width(
+                            ui,
+                            &mut state.search,
+                            tr!(Msg::S4B808A03176E6A3B),
+                            theme,
+                            f32::INFINITY,
+                        );
 
                         // Recompute matches only when search text changes
                         if state.search != state.search_cache {

@@ -18,8 +18,11 @@ pub(super) fn render_spline_eq_canvas(
 ) {
     let avail_w = ui.available_width();
     let avail_h = ui.available_height();
-    // Dynamic height scaling with plenty of space in the dedicated tab
-    let canvas_h = (avail_h - 90.0).clamp(190.0, 500.0);
+    // The canvas is the visual anchor of the Graphic tab, not the whole tab.
+    // A hard cap keeps the preamp and the tab strip above the fold when the
+    // window is tall, and stops the canvas from demanding height the user did
+    // not give the panel.
+    let canvas_h = (avail_h - 90.0).clamp(190.0, 280.0);
 
     let (canvas_rect, canvas_resp) =
         ui.allocate_exact_size(Vec2::new(avail_w, canvas_h), Sense::click_and_drag());

@@ -308,6 +308,22 @@ impl DspGraph {
         }
     }
 
+    pub fn ultrasonic(&self) -> &crate::dsp::graph2::prod::arena::nodes::UltrasonicNode {
+        match &self.active.nodes[node_id::ULTRASONIC] {
+            GraphNode::Ultrasonic(n) => n,
+            _ => unreachable!("arena slot ULTRASONIC holds an UltrasonicNode"),
+        }
+    }
+
+    pub fn ultrasonic_mut(
+        &mut self,
+    ) -> &mut crate::dsp::graph2::prod::arena::nodes::UltrasonicNode {
+        match &mut self.active.nodes[node_id::ULTRASONIC] {
+            GraphNode::Ultrasonic(n) => n,
+            _ => unreachable!("arena slot ULTRASONIC holds an UltrasonicNode"),
+        }
+    }
+
     pub fn limiter_mut(&mut self) -> &mut LimiterNode {
         match &mut self.active.nodes[node_id::LIMITER] {
             GraphNode::Limiter(n) => n,

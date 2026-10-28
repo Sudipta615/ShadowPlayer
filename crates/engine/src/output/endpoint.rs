@@ -220,6 +220,7 @@ impl EndpointWorker {
         capacity_frames: usize,
         master_rate: u32,
         resampler_quality: config::ResamplerQuality,
+        resampler_filter: config::ResamplerFilter,
         precision: config::PrecisionMode,
     ) -> Result<Self, OutputError> {
         config.gain = config.gain.clamp(0.0, 4.0);
@@ -236,16 +237,18 @@ impl EndpointWorker {
         let resampler = if rate != master_rate && master_rate > 0 {
             let built = match precision {
                 config::PrecisionMode::Performance => {
-                    crate::dsp::resampler::AudioResampler::<f32>::new(
+                    crate::dsp::resampler::AudioResampler::<f32>::new_with_filter(
                         resampler_quality,
+                        resampler_filter,
                         master_rate as f32,
                         rate as f32,
                     )
                     .map(crate::dsp::resampler::GenericResampler::F32)
                 }
                 config::PrecisionMode::Quality => {
-                    crate::dsp::resampler::AudioResampler::<f64>::new(
+                    crate::dsp::resampler::AudioResampler::<f64>::new_with_filter(
                         resampler_quality,
+                        resampler_filter,
                         master_rate as f32,
                         rate as f32,
                     )
@@ -556,6 +559,18 @@ impl EndpointWorker {
         let previous = self.config.clone();
         self.update_config(config);
         previous
+    }
+
+    /// Change the endpoint resampler's filter family in place.
+    ///
+    /// Only meaningful when the endpoint's rate differs from the master rate;
+    /// same-rate endpoints have no resampler and ignore this. The resampler
+    /// rebuilds on its worker path and crossfades, so the endpoint keeps
+    /// playing while the filter changes.
+    pub fn set_resampler_filter(&mut self, filter: config::ResamplerFilter) {
+        if let Some(resampler) = self.resampler.as_mut() {
+            resampler.set_filter(filter);
+        }
     }
 
     pub fn stop(&mut self) {

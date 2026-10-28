@@ -715,6 +715,133 @@ fn per_slot_user_state_survives_reconfigure() {
 
 // ── N-channel secondary planes + multichannel bus sum ─────────
 
+/// Write a minimal 16-bit mono PCM WAV for the graph-vs-oracle matrix-FIR test.
+fn write_matrix_fir_wav(path: &std::path::Path, samples: &[f32]) {
+    let mut data = Vec::with_capacity(samples.len() * 2);
+    for &sample in samples {
+        let value = (sample.clamp(-1.0, 1.0) * 32_767.0).round() as i16;
+        data.extend_from_slice(&value.to_le_bytes());
+    }
+    let mut bytes = Vec::with_capacity(44 + data.len());
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&((36 + data.len()) as u32).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&data);
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn dac_correction_profile_is_selected_by_device_and_rate() {
+    let path =
+        std::env::temp_dir().join(format!("shadowplayer_dac_graph_{}.wav", std::process::id()));
+    write_matrix_fir_wav(&path, &[0.5, 0.0, 0.0, 0.0]);
+
+    let mut cfg = EngineConfig {
+        output_device: Some("RME ADI-2 DAC".to_string()),
+        dac_correction: config::DacCorrectionConfig {
+            enabled: true,
+            profiles: vec![config::DacCorrectionProfileConfig {
+                dac: "RME ADI-2".to_string(),
+                sample_rate: 48_000,
+                ir_paths: vec![path.display().to_string()],
+                latency_ms: 0.0,
+                depth: 1.0,
+            }],
+        },
+        ..EngineConfig::default()
+    };
+    cfg.dither_enabled = false;
+    cfg.limiter.enabled = false;
+
+    let mut graph = DspGraph::from_config(&cfg, 48_000.0);
+    assert!(
+        graph.correction().dac_info().active,
+        "profile should load from the configured device name"
+    );
+    assert_eq!(
+        graph.correction().dac_info().profile.as_deref(),
+        Some("RME ADI-2")
+    );
+
+    graph.set_dac_device(Some("Some Other DAC".to_string()));
+    let info = graph.correction().dac_info();
+    assert!(info.enabled);
+    assert!(!info.active);
+    assert!(info.reason.is_some());
+
+    graph.set_dac_device(Some("RME ADI-2 DAC".to_string()));
+    assert!(graph.correction().dac_info().active);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn matrix_fir_matches_the_reference_pipeline_on_the_multichannel_path() {
+    use crate::decode::ChannelLayout;
+
+    let path = std::env::temp_dir().join(format!(
+        "shadowplayer_matrix_fir_graph_{}.wav",
+        std::process::id()
+    ));
+    write_matrix_fir_wav(&path, &[0.75, -0.25, 0.125, 0.0]);
+
+    let mut cfg = EngineConfig {
+        dither_enabled: false,
+        ..EngineConfig::default()
+    };
+    cfg.limiter.enabled = false;
+    cfg.channel_routing = config::ChannelRoutingConfig {
+        enabled: true,
+        matrix: Vec::new(),
+        fir_routes: vec![config::MatrixFirRouteConfig {
+            source: 0,
+            destination: 2,
+            ir_path: Some(path.display().to_string()),
+            gain_db: -1.5,
+            delay_ms: 0.25,
+        }],
+    };
+
+    let mut graph = DspGraph::from_config(&cfg, 48_000.0);
+    graph.set_multichannel_layout(&ChannelLayout::FourPointZero);
+    let mut pipeline = DspPipeline::from_config(&cfg, 48_000.0);
+    pipeline.set_multichannel_layout(&ChannelLayout::FourPointZero);
+
+    let frames = 2_048;
+    let channels = 4;
+    let input: Vec<f32> = (0..frames)
+        .flat_map(|i| {
+            let x = if i == 0 { 0.5 } else { 0.0 };
+            [x, 0.1, 0.0, -0.05]
+        })
+        .collect();
+
+    let mut graph_io = input.clone();
+    let mut pipeline_io = input;
+    graph.process_block_multichannel(&mut graph_io, channels);
+    pipeline.process_block_multichannel(&mut pipeline_io, channels);
+
+    for (index, (g, p)) in graph_io.iter().zip(pipeline_io.iter()).enumerate() {
+        assert!(
+            (g - p).abs() < 1e-6,
+            "matrix FIR graph/pipeline mismatch at sample {index}: {g} vs {p}"
+        );
+    }
+    // The route must have produced something on the destination, not silently
+    // passed the block through.
+    let dest_energy: f32 = (0..frames).map(|i| graph_io[i * channels + 2].abs()).sum();
+    assert!(dest_energy > 1e-3, "matrix FIR route produced no output");
+    let _ = std::fs::remove_file(path);
+}
+
 #[test]
 fn multichannel_stream_slots_sum_channel_wise() {
     use crate::decode::ChannelLayout;
@@ -1693,4 +1820,110 @@ fn the_creative_fx_settings_survive_a_rebuild() {
         graph.fx().is_engaged(),
         "the fx settings survive a generation rebuild"
     );
+}
+
+/// Disabled, the output-domain ultrasonic stage must not touch a single
+/// sample — the limiter is disabled here so the only stage in the path is
+/// the one under test.
+#[test]
+fn the_ultrasonic_stage_is_bit_exact_when_off() {
+    let mut cfg = EngineConfig::default();
+    cfg.limiter.enabled = false;
+    cfg.ultrasonic_filter = config::UltrasonicFilter::Off;
+    let mut graph = DspGraph::from_config(&cfg, 192_000.0);
+
+    let left_in: Vec<f32> = (0..512).map(|n| (n as f32 * 0.013).sin()).collect();
+    let right_in: Vec<f32> = (0..512).map(|n| (n as f32 * 0.017).cos()).collect();
+    let mut left = left_in.clone();
+    let mut right = right_in.clone();
+    graph.process_final_limiter_block(&mut left, &mut right);
+    assert_eq!(left, left_in);
+    assert_eq!(right, right_in);
+}
+
+/// Enabled, the 20 kHz selection rejects ultrasonics and keeps the audio band.
+#[test]
+fn the_ultrasonic_stage_rejects_ultrasonics_at_the_output() {
+    let mut cfg = EngineConfig::default();
+    cfg.limiter.enabled = false;
+    cfg.ultrasonic_filter = config::UltrasonicFilter::Cut20k;
+    let sr = 192_000.0f32;
+
+    let gain = |graph: &mut DspGraph, freq: f32| {
+        let n = 16_384usize;
+        let mut left = vec![0.0f32; n];
+        let mut right = vec![0.0f32; n];
+        for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
+            let x = (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin();
+            *l = x;
+            *r = x;
+        }
+        // Process in blocks and keep the second half (steady state).
+        for chunk in 0..(n / 512) {
+            let start = chunk * 512;
+            let end = start + 512;
+            graph.process_final_limiter_block(&mut left[start..end], &mut right[start..end]);
+        }
+        let half = n / 2;
+        let out_energy: f64 = left[half..].iter().map(|s| (*s as f64) * (*s as f64)).sum();
+        let ref_energy: f64 = (half..n)
+            .map(|i| {
+                let x = (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin() as f64;
+                x * x
+            })
+            .sum();
+        (out_energy / ref_energy).sqrt() as f32
+    };
+
+    let mut graph = DspGraph::from_config(&cfg, sr);
+    let audio = gain(&mut graph, 5_000.0);
+    assert!(audio > 0.97, "5 kHz gain was {audio}");
+    let stop = gain(&mut graph, 60_000.0);
+    assert!(stop < 0.03, "60 kHz gain was {stop}");
+}
+
+/// The multichannel interleaved endpoint must run the same filter on every
+/// channel as the planar one.
+#[test]
+fn the_ultrasonic_stage_covers_every_multichannel_plane() {
+    let mut cfg = EngineConfig::default();
+    cfg.limiter.enabled = false;
+    cfg.ultrasonic_filter = config::UltrasonicFilter::Cut20k;
+    let sr = 192_000.0f32;
+
+    let mut planar_graph = DspGraph::from_config(&cfg, sr);
+    let mut interleaved_graph = DspGraph::from_config(&cfg, sr);
+
+    let frames = 2048;
+    let channels = 6;
+    let mut planes: Vec<Vec<f32>> = (0..channels)
+        .map(|c| {
+            (0..frames)
+                .map(|n| (n as f32 * (0.01 + 0.003 * c as f32)).sin() * 0.5)
+                .collect()
+        })
+        .collect();
+    let mut interleaved: Vec<f32> = (0..frames)
+        .flat_map(|n| (0..channels).map(move |c| (n * 10 + c) as f32 * 0.0))
+        .collect();
+    for n in 0..frames {
+        for c in 0..channels {
+            interleaved[n * channels + c] = planes[c][n];
+        }
+    }
+
+    let mut refs: Vec<&mut [f32]> = planes.iter_mut().map(|p| &mut p[..]).collect();
+    planar_graph.ultrasonic_mut().stage.process_block(&mut refs);
+    interleaved_graph.process_final_limiter_multichannel(&mut interleaved, channels);
+
+    for n in 0..frames {
+        for c in 0..channels {
+            let got = interleaved[n * channels + c];
+            let want = planes[c][n];
+            assert!(
+                (got - want).abs() < 1e-6,
+                "frame {n} channel {c}: {got} vs {want}"
+            );
+        }
+    }
 }

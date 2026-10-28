@@ -162,6 +162,8 @@ pub enum BitPerfectCause {
     DitherActive,
     /// A crossfade / gapless transition is blending two tracks.
     CrossfadeActive,
+    /// PCM is being converted to a one-bit SDM stream for native DSD output.
+    SdmConversion,
 }
 
 impl BitPerfectCause {
@@ -180,6 +182,7 @@ impl BitPerfectCause {
             BitPerfectCause::OutputNotDirectExclusive => "output_not_direct_exclusive",
             BitPerfectCause::DitherActive => "dither_active",
             BitPerfectCause::CrossfadeActive => "crossfade_active",
+            BitPerfectCause::SdmConversion => "sdm_conversion",
         }
     }
 }
@@ -241,6 +244,7 @@ mod tests {
             BitPerfectCause::OutputNotDirectExclusive,
             BitPerfectCause::DitherActive,
             BitPerfectCause::CrossfadeActive,
+            BitPerfectCause::SdmConversion,
         ] {
             assert_eq!(format!("{c}"), c.code());
         }

@@ -306,6 +306,27 @@ impl ScrobbleRepo {
         self.count_since(None)
     }
 
+    /// Drop scrobbles whose linked track lives inside `prefix`.
+    ///
+    /// Scrobbles normally outlive their track on purpose: the artist, title
+    /// and album are copied in at write time, and deleting a file must not
+    /// erase the fact that it was played. Development fixture rows are the
+    /// exception — they describe files that never existed, so their history
+    /// has to go with them. The link is matched before the track row is
+    /// deleted; afterwards the `ON DELETE SET NULL` rule has already erased
+    /// the only connection back to the path.
+    pub fn purge_track_path_prefix(&self, prefix: &Path) -> Result<usize> {
+        let like = like_prefix(prefix);
+        self.db.with_conn(|conn| {
+            let n = conn.execute(
+                "DELETE FROM scrobbles
+                 WHERE track_id IN (SELECT id FROM tracks WHERE path LIKE ?1 ESCAPE '\\');",
+                params![like],
+            )?;
+            Ok(n)
+        })
+    }
+
     /// How many scrobbles fall inside a period (`None` is all time).
     pub fn count_since(&self, since: Option<i64>) -> Result<usize> {
         self.db.with_conn(|conn| {

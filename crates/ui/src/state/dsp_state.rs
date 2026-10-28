@@ -231,6 +231,14 @@ impl DspState {
         session.set_dither_enabled(st.dither_enabled);
         session.set_resampler_quality(st.resampler_quality);
         session.set_fallback_policy(st.fallback_policy);
+        session.set_resampler_filter(st.resampler_filter);
+        session.set_noise_shaper(st.noise_shaper);
+        session.set_dsd_output(st.dsd_output);
+        session.set_dsd_noise_filter(st.dsd_noise_filter);
+        session.set_ultrasonic_filter(st.ultrasonic_filter);
+        session.set_sdm_config(st.sdm.clone());
+        session.set_channel_routing(st.channel_routing.clone());
+        session.set_dac_correction(st.dac_correction.clone());
         // Only push precision mode once the user has actually chosen one, so the
         // engine's own persisted value survives an upgrade untouched.
         if let Some(mode) = st.precision_mode {
@@ -430,6 +438,30 @@ impl DspState {
         }
         if let Some(q) = s.resampler_quality_changed {
             session.set_resampler_quality(q);
+        }
+        if let Some(f) = s.resampler_filter_changed {
+            session.set_resampler_filter(f);
+        }
+        if let Some(n) = s.noise_shaper_changed {
+            session.set_noise_shaper(n);
+        }
+        if let Some(o) = s.dsd_output_changed {
+            session.set_dsd_output(o);
+        }
+        if let Some(f) = s.dsd_noise_filter_changed {
+            session.set_dsd_noise_filter(f);
+        }
+        if let Some(f) = s.ultrasonic_filter_changed {
+            session.set_ultrasonic_filter(f);
+        }
+        if let Some(ref c) = s.sdm_config_changed {
+            session.set_sdm_config(c.clone());
+        }
+        if let Some(ref c) = s.channel_routing_changed {
+            session.set_channel_routing(c.clone());
+        }
+        if let Some(ref c) = s.dac_correction_changed {
+            session.set_dac_correction(c.clone());
         }
         if let Some(p) = s.fallback_policy_changed {
             session.set_fallback_policy(p);

@@ -681,6 +681,15 @@ impl DspPipeline {
         } else {
             0.0
         };
+        let routing_latency_ms = if self.sample_rate > 0.0
+            && self
+                .channel_trim
+                .is_active(self.multichannel_layout.channel_count())
+        {
+            self.channel_trim.latency_samples() as f32 / self.sample_rate * 1000.0
+        } else {
+            0.0
+        };
         // The frozen pipeline oracle hosts no correction stage (lives in the graph); the graph's twin builder reports the live
         // CorrectionNode latency.
         let correction_latency_ms = 0.0;
@@ -692,6 +701,7 @@ impl DspPipeline {
         let total_latency_ms = limiter_lookahead_ms
             + limiter_detector_delay_ms
             + convolution_latency_ms
+            + routing_latency_ms
             + correction_latency_ms
             + crossfeed_delay_ms
             + timestretch_latency_ms
@@ -703,6 +713,7 @@ impl DspPipeline {
             limiter_lookahead_ms,
             limiter_detector_delay_ms,
             convolution_latency_ms,
+            routing_latency_ms,
             correction_latency_ms,
             crossfeed_delay_ms,
             timestretch_latency_ms,
@@ -804,6 +815,7 @@ impl DspPipeline {
                         };
                         (active, lookahead, tail)
                     }
+                    "ultrasonic" => (self.ultrasonic.is_active(), 0.0, 0.0),
                     "resampler" | "dither" => (false, 0.0, 0.0),
                     _ => (false, 0.0, 0.0),
                 }
@@ -813,6 +825,7 @@ impl DspPipeline {
                 active,
                 latency_ms,
                 tail_ms,
+                channel_support: cap.channel_support,
             });
         }
         nodes

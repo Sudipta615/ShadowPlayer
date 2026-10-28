@@ -190,7 +190,7 @@ impl CpalOutput {
                             let mut declick = UnderrunState::new(sample_rate);
                             let mut converter = AudioFormatConverter::new_at_rate(
                                 TargetFormat::I16,
-                                DitherType::Triangular,
+                                crate::dsp::dither::configured_dither_type(),
                                 sample_rate,
                             );
 
@@ -236,7 +236,7 @@ impl CpalOutput {
                             let mut declick = UnderrunState::new(sample_rate);
                             let mut converter = AudioFormatConverter::new_at_rate(
                                 TargetFormat::U16,
-                                DitherType::Triangular,
+                                crate::dsp::dither::configured_dither_type(),
                                 sample_rate,
                             );
 

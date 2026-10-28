@@ -42,7 +42,6 @@ use config::AudioBackend;
 
 use crate::buffer::{DsdByteBuffer, FixedFrameBuffer, UnderrunState};
 use crate::decode::dsd::DsdWireFormat;
-use crate::dsp::dither::DitherType;
 use crate::dsp::pipeline::OutputSampleFormat;
 use crate::output::capabilities::{OutputAccessMode, OutputAccessState, OutputCapabilities};
 use crate::output::cpal_output::{OutputError, OutputVolume};
@@ -504,7 +503,7 @@ impl AlsaOutput {
                         Container::I32 => TargetFormat::I32,
                         Container::I16 => TargetFormat::I16,
                     },
-                    DitherType::Triangular,
+                    crate::dsp::dither::configured_dither_type(),
                     sample_rate,
                 );
                 let mut declick = UnderrunState::new(sample_rate);

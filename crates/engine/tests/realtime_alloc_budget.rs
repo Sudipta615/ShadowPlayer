@@ -326,3 +326,289 @@ fn the_counter_itself_does_not_allocate() {
         "the allocation counter must not allocate while it is counting"
     );
 }
+
+/// The output ultrasonic stage is inline-state only: enabling it must not add
+/// a single allocation to the output-domain hot path.
+#[test]
+fn the_ultrasonic_stage_allocates_nothing_while_processing_blocks() {
+    let mut config = config::EngineConfig::default();
+    config.limiter.enabled = false;
+    config.ultrasonic_filter = config::UltrasonicFilter::Cut20k;
+    let mut pipeline = DspPipeline::from_config(&config, 192_000.0);
+
+    let mut left = vec![0.25f32; 512];
+    let mut right = vec![-0.25f32; 512];
+    for _ in 0..8 {
+        pipeline.process_final_limiter_block(&mut left, &mut right);
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..128 {
+            pipeline.process_final_limiter_block(&mut left, &mut right);
+        }
+    });
+    assert_eq!(
+        allocations, 0,
+        "the ultrasonic stage must not allocate on the hot path"
+    );
+
+    // The multichannel endpoint is the same contract.
+    let mut interleaved = vec![0.1f32; 512 * 6];
+    for _ in 0..8 {
+        pipeline.process_final_limiter_multichannel(&mut interleaved, 6);
+    }
+    let allocations = allocations_during(|| {
+        for _ in 0..128 {
+            pipeline.process_final_limiter_multichannel(&mut interleaved, 6);
+        }
+    });
+    assert_eq!(
+        allocations, 0,
+        "the multichannel ultrasonic path must not allocate"
+    );
+}
+
+/// PCM→SDM runs on the audio thread: interpolation, modulation, and packing
+/// must all be allocation-free once the stage is built.
+#[test]
+fn the_pcm_to_sdm_stage_allocates_nothing_while_processing_blocks() {
+    use engine::decode::dsd::DsdWireFormat;
+    use engine::dsp::sdm::{SdmOutput, SdmRatePlan};
+
+    for (multiple, stage_factor) in [(64u32, 8u32), (256, 32)] {
+        let plan = SdmRatePlan {
+            pcm_rate: 44_100,
+            working_rate: 352_800,
+            dsd_rate: 44_100 * multiple,
+            multiple,
+            stage_factor,
+            family: 44_100,
+        };
+        for order in [5usize, 7] {
+            let mut stage = SdmOutput::new(plan, 2, DsdWireFormat::U8, order).expect("sdm stage");
+            let frames = 512usize;
+            let input = vec![0.1f32; frames * 2];
+            // The caller owns the packed buffer; size it for the block.
+            let mut out = Vec::with_capacity(frames * 2 * stage_factor as usize / 8 + 64);
+            for _ in 0..4 {
+                stage.process_block(&input, &mut out);
+            }
+
+            let allocations = allocations_during(|| {
+                for _ in 0..64 {
+                    stage.process_block(&input, &mut out);
+                }
+            });
+            assert_eq!(
+                allocations, 0,
+                "SDM order {order} at DSD{multiple} must not allocate"
+            );
+        }
+    }
+}
+
+/// The polyphase engine (P1.2 filter shapes) must meet the same realtime
+/// budget as every other DSP stage: its history is sized at construction and
+/// trimmed in place, so no chunk may touch the heap.
+#[cfg(feature = "resample")]
+#[test]
+fn the_polyphase_resampler_allocates_nothing_while_processing_chunks() {
+    use engine::dsp::resampler::AudioResampler;
+
+    let mut resampler = AudioResampler::<f32>::new_with_filter(
+        config::ResamplerQuality::Fast,
+        config::ResamplerFilter::Kaiser,
+        44_100.0,
+        48_000.0,
+    )
+    .expect("polyphase resampler");
+
+    let left = vec![0.125f32; 1024];
+    let right = vec![-0.125f32; 1024];
+
+    // Warm up: the first chunks exercise the branch table and the output
+    // ring, not the steady state an audio callback sees.
+    for _ in 0..8 {
+        resampler.feed_block(&left, &right);
+        while resampler.read().is_some() {}
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..64 {
+            resampler.feed_block(&left, &right);
+            while resampler.read().is_some() {}
+        }
+    });
+    assert_eq!(
+        allocations, 0,
+        "the polyphase resampler allocated {allocations} times in the steady state"
+    );
+}
+
+#[test]
+fn the_high_order_dither_path_allocates_nothing_while_converting_blocks() {
+    use engine::dsp::dither::DitherType;
+    use engine::output::format_converter::{AudioFormatConverter, TargetFormat};
+
+    for dither_type in [DitherType::Ns5, DitherType::Ns9, DitherType::Lns15] {
+        for rate in [44_100u32, 96_000] {
+            // Construction may allocate; the per-sample conversion may not.
+            let mut converter =
+                AudioFormatConverter::new_at_rate(TargetFormat::I24Le, dither_type, rate);
+            converter.set_dither_seed(0x1234_5678_9ABC_DEF0);
+            let mut phase = 0.0f32;
+            let allocations = allocations_during(|| {
+                for _ in 0..4_096 {
+                    phase += 0.01;
+                    let sample = (phase * 997.0).sin() * 0.25;
+                    let _ = converter.convert_stereo_to_i24le(sample, -sample);
+                }
+            });
+            assert_eq!(
+                allocations,
+                0,
+                "{} at {rate} Hz allocated on the conversion path",
+                dither_type.as_str()
+            );
+        }
+    }
+}
+
+/// Write a minimal 16-bit mono WAV for the matrix-FIR allocation test.
+fn write_delta_wav(path: &std::path::Path) {
+    let samples = [1.0f32, 0.0, 0.0, 0.0];
+    let mut data = Vec::new();
+    for sample in samples {
+        data.extend_from_slice(&((sample * 32_767.0) as i16).to_le_bytes());
+    }
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&((36 + data.len()) as u32).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&data);
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn the_matrix_fir_stage_allocates_nothing_while_processing_blocks() {
+    use engine::dsp::channel_trim::ChannelTrimmer;
+
+    let path = std::env::temp_dir().join(format!(
+        "shadowplayer_matrix_fir_alloc_{}.wav",
+        std::process::id()
+    ));
+    write_delta_wav(&path);
+    let mut trimmer = ChannelTrimmer::new(48_000.0);
+    trimmer.set_config(&config::ChannelTrimConfig::default(), 48_000.0);
+    let path = path.display().to_string();
+    trimmer.set_routing(&config::ChannelRoutingConfig {
+        enabled: true,
+        matrix: Vec::new(),
+        fir_routes: (0..4)
+            .map(|route| config::MatrixFirRouteConfig {
+                source: route % 2,
+                destination: 2 + route % 2,
+                ir_path: Some(path.clone()),
+                gain_db: -3.0,
+                delay_ms: route as f32 * 0.5,
+            })
+            .collect(),
+    });
+    assert!(trimmer.is_active(4));
+
+    let mut planes: Vec<Vec<f32>> = (0..4)
+        .map(|channel| {
+            (0..1_024)
+                .map(|frame| {
+                    if channel < 2 {
+                        (frame as f32 * 0.001).sin()
+                    } else {
+                        0.0
+                    }
+                })
+                .collect()
+        })
+        .collect();
+
+    let allocations = allocations_during(|| {
+        for _ in 0..4 {
+            trimmer.process_planes(&mut planes, 4, 1_024);
+        }
+    });
+    assert_eq!(allocations, 0, "matrix FIR allocated on the audio path");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn the_apodizing_detector_allocates_nothing_while_analyzing_blocks() {
+    use engine::dsp::apodizing::ApodizingDetector;
+
+    let mut detector = ApodizingDetector::new(48_000.0);
+    let block: Vec<f32> = (0..512)
+        .flat_map(|frame| {
+            let x = (frame as f32 * 0.05).sin() * 0.25;
+            [x, -x]
+        })
+        .collect();
+    // Warm the biquad/history state outside the measured region.
+    detector.analyze_interleaved(&block, 2, 48_000.0);
+
+    let allocations = allocations_during(|| {
+        for _ in 0..256 {
+            detector.analyze_interleaved(&block, 2, 48_000.0);
+        }
+    });
+    assert_eq!(
+        allocations, 0,
+        "the apodizing detector allocated while analysing the decode path"
+    );
+}
+
+#[test]
+fn the_dac_correction_bank_allocates_nothing_while_processing_blocks() {
+    use engine::dsp::graph2::prod::{CorrectionNode, DspNode};
+
+    let path =
+        std::env::temp_dir().join(format!("shadowplayer_dac_alloc_{}.wav", std::process::id()));
+    write_delta_wav(&path);
+    let mut node = CorrectionNode::new(48_000.0);
+    node.apply_dac_config(
+        &config::DacCorrectionConfig {
+            enabled: true,
+            profiles: vec![config::DacCorrectionProfileConfig {
+                dac: "test-dac".to_string(),
+                sample_rate: 48_000,
+                ir_paths: vec![path.display().to_string()],
+                latency_ms: 0.0,
+                depth: 0.8,
+            }],
+        },
+        Some("test-dac"),
+        48_000.0,
+    );
+    assert!(node.dac_info().active);
+    let mut plane = vec![0.0f32; 512];
+    for block in 0..4 {
+        plane[0] = if block == 0 { 0.5 } else { 0.0 };
+        let mut planes = [&mut plane[..]];
+        node.process_block_f32(&mut planes);
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..64 {
+            let mut planes = [&mut plane[..]];
+            node.process_block_f32(&mut planes);
+        }
+    });
+    assert_eq!(allocations, 0, "DAC correction allocated on the audio path");
+    let _ = std::fs::remove_file(path);
+}

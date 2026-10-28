@@ -409,6 +409,22 @@ impl AudioEngine {
                 // Dither and crossfade perturb the sample sequence even when
                 // every pipeline condition holds: re-derive the verdict.
                 bp.finalize_with_engine_state();
+                // A PCM source that is modulated to one-bit DSD is not a
+                // passthrough, even when the PCM chain itself is clean. Say
+                // so explicitly: the source samples are not what the DAC
+                // receives.
+                if self.dsd.sdm_active {
+                    bp.bit_perfect_samples = false;
+                    bp.is_bit_perfect = false;
+                    bp.result = crate::dsp::pipeline::BitPerfectResult::Dsp;
+                    bp.cause = Some(crate::diagnostics::BitPerfectCause::SdmConversion);
+                    bp.reason = Some(
+                        "PCM is converted to a one-bit DSD stream by the \
+                         engine's SDM modulator; the samples are not \
+                         bit-identical to the source"
+                            .to_string(),
+                    );
+                }
                 stats.bit_perfect_report = bp.clone();
                 stats.bit_perfect = bp.is_bit_perfect;
                 stats.bit_perfect_reason = bp.reason.clone();
@@ -497,6 +513,9 @@ impl AudioEngine {
             // expensive part of building them.
             let mut stats = Some(stats);
             let mut lanes = Some(lanes);
+            // PCM→SDM telemetry is built outside the closure for the same
+            // reason as the stats: the snapshot borrows the live stage.
+            let mut sdm = Some(self.sdm_report());
             // Built outside the `FnMut` closure for the same reason: the
             // closure cannot borrow `self` mutably, and the snapshot reads
             // the live graph nodes. `Arc` so the publish stays a refcount
@@ -511,6 +530,11 @@ impl AudioEngine {
                 next.nan_count = next.nan_count.saturating_add(new_nans as u64);
                 next.engine_stats = stats.take();
                 next.lanes = lanes.take().unwrap_or_default();
+                if let Some(report) = sdm.take() {
+                    next.sdm_active = report.active;
+                    next.sdm = report;
+                }
+                next.apodizing = self.apodizing.report();
                 // Mirror the aux insert toggle so hosts (FFI
                 // included) can read the live state like any other telemetry.
                 let (ins_enabled, ins_wet) = self.graph.control_handle().aux_insert_state();
@@ -526,6 +550,17 @@ impl AudioEngine {
                     ir_len_samples: corr.ir_len_samples,
                     latency_ms: corr.latency_ms,
                     max_gain_db: corr.max_gain_db,
+                };
+                let dac = self.graph.correction().dac_info();
+                next.dac_correction = crate::playback_info::DacCorrectionInfo {
+                    enabled: dac.enabled,
+                    active: dac.active,
+                    profile: dac.profile,
+                    depth: dac.depth,
+                    latency_ms: dac.latency_ms,
+                    ir_len_samples: dac.ir_len_samples,
+                    max_gain_db: dac.max_gain_db,
+                    reason: dac.reason,
                 };
                 // Mirror the spatial master's output meters and
                 // voice-budget admission counts onto the lock-free snapshot.
@@ -829,6 +864,21 @@ impl AudioEngine {
                 // Dither must stay off while DoP is active — it would corrupt
                 // the 24-bit DoP words at the i32 conversion.
                 output.set_dither_enabled(config.dither_enabled && !self.dsd.dop_active);
+            }
+        }
+
+        if config.noise_shaper != self.config.noise_shaper {
+            crate::dsp::dither::set_configured_noise_shaper(config.noise_shaper);
+            // Converters own their selected family at construction; a live
+            // change cannot be applied without rebuilding a render thread.
+            // Say so instead of letting the new config claim a shaper the
+            // running stream is not using.
+            if self.audio_output.is_some() {
+                log::info!(
+                    "noise shaper set to {:?}; the running output stream keeps its current \
+                     shaper until the next stream open",
+                    config.noise_shaper
+                );
             }
         }
 

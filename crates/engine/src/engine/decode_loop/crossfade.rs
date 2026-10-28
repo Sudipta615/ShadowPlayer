@@ -189,6 +189,19 @@ impl AudioEngine {
         let outgoing_eos = out_chunk.is_none();
         let incoming_eos = in_chunk.is_none();
 
+        // The apodizing counter is per track. During a transition it keeps
+        // following the outgoing track; the incoming track's count starts at
+        // zero when the hand-off completes.
+        if let Some(chunk) = out_chunk.as_ref() {
+            if !chunk.samples.is_empty() {
+                self.apodizing.analyze_interleaved(
+                    &chunk.samples,
+                    chunk.channels,
+                    chunk.sample_rate as f32,
+                );
+            }
+        }
+
         let out_samples = out_chunk
             .as_ref()
             .map(|c| c.samples.as_slice())
