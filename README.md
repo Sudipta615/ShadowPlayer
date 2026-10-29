@@ -8,7 +8,7 @@ A local-first desktop music player built in Rust: bit-perfect output, a
 studio-grade DSP chain, a 100,000-track library that stays fast, and no
 accounts, cloud, or telemetry.
 
-[![Version](https://img.shields.io/badge/version-0.25.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.26.0-blue?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)](#platform-support)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org/)
@@ -70,6 +70,11 @@ its own README, test matrix, and C ABI.
 - **Podcasts and local radio.** RSS/Atom subscriptions with per-episode
   downloads and resume, plus smart radio seeded from a track's genre, BPM, and
   rating.
+- **An on-device For You mix.** A local recommendation engine ranks your own
+  library from audio features and the plays, skips, likes, and ratings you
+  already produce. It starts with a small batch, refills as you listen, and
+  never sends listening data anywhere. Optional, with its own settings card and
+  a background library analyser.
 - **Lyrics where you expect them.** Embedded tags, `.lrc` sidecars, ID3v2
   `SYLT` timed lyrics, non-UTF-8 files, a synced-lyrics panel, and an inline
   `.lrc` editor.
@@ -403,7 +408,8 @@ and the alternatives that were measured and rejected.
 ```bash
 # Player workspace (engine excluded: it has its own workspace and suite)
 cargo test -p domain -p database -p metadata -p lyrics -p library \
-           -p playback -p search -p audio-session -p media-tools -p ui --lib \
+           -p playback -p search -p audio-session -p media-tools \
+           -p shadow-recommender -p ui --lib \
            -- --test-threads=1
 
 # The version bump is guarded by a test, not by remembering to do it.
@@ -502,7 +508,8 @@ These are deliberate omissions, not missing features. They keep the app small,
 predictable, and focused on the music you own.
 
 - **Not a streaming client, account system, or telemetry product.** No cloud
-  library, no recommendation feed, no usage reporting. Auto-tagging, cover-art
+  library, no cloud recommendation feed, no usage reporting. The on-device For
+  You mix is computed locally and never uploaded. Auto-tagging, cover-art
   lookup, podcast subscriptions, and the update check contact the network only
   when you invoke them.
 - **Not a video player.** Audio is the product.

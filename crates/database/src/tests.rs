@@ -2040,4 +2040,39 @@ mod unit {
         let rules_after = repo.list_rules().unwrap();
         assert!(rules_after.is_empty());
     }
+
+    #[test]
+    fn migration_v17_creates_the_recommendation_tables_and_reapplies_cleanly() {
+        let db = Database::in_memory().expect("In-memory DB creation failed");
+
+        // Re-run from a database that claims to be at V16: V17 is idempotent
+        // and must create its tables even though the earlier migrations ran.
+        db.with_conn(|conn| {
+            conn.execute("DELETE FROM schema_migrations WHERE version = 17;", [])?;
+            crate::schema::run_migrations(conn)
+        })
+        .unwrap();
+
+        let version: i64 = db
+            .with_conn(|conn| {
+                conn.query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+                    row.get(0)
+                })
+            })
+            .unwrap();
+        assert_eq!(version, 17);
+
+        let tables: i64 = db
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master
+                      WHERE type = 'table'
+                        AND name IN ('track_features', 'recommendation_feedback');",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(tables, 2);
+    }
 }

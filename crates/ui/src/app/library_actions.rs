@@ -21,6 +21,9 @@ impl ShadowPlayerApp {
             self.app_state.current_sort,
             self.app_state.current_sort_order,
         );
+        // New or removed tracks change the ranking pool. The worker reloads
+        // lazily and re-ranks only when a session is already running.
+        self.recommendation_service.reload_catalog();
     }
 
     /// Re-evaluate the smart playlists now.

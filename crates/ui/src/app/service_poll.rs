@@ -517,6 +517,12 @@ impl ShadowPlayerApp {
             }
         }
 
+        // 2e2. Recommendation ranking, analysis progress, and playback edges.
+        // Both workers are polled without blocking; the tracker observes the
+        // transport once per frame so a skip is reported on the real change.
+        self.poll_recommendation_services(ctx);
+        self.track_recommendation_playback();
+
         // 2f. Embedded lyric tags are read on a worker thread; pick up the
         // result as soon as it lands so the lyrics panel fills in.
         if self.lyrics_service.poll() {

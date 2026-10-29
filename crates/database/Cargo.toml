@@ -1,12 +1,13 @@
 [package]
 name = "database"
-version = "0.25.0"
+version = "0.26.0"
 edition = "2021"
 license = "Apache-2.0"
 
 
 [dependencies]
 domain = { path = "../domain" }
+recommendation = { package = "shadow-recommender", path = "../recommendation" }
 rusqlite = { version = "0.40", features = ["bundled", "bundled-full"] }
 uuid = { version = "1.10", features = ["v4", "v5", "serde"] }
 thiserror = "2.0"

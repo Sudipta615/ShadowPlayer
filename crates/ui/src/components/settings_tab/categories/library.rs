@@ -118,7 +118,153 @@ pub(in crate::components::settings_tab) fn render_library_category(
         );
     });
 
-    // Card 3: Theme & Visual Aesthetics
+    // Card 3: Recommendation Engine
+    setting_card(ui, theme, |ui| {
+        card_header(
+            ui,
+            crate::components::icons::draw_trending_up,
+            &tr!("Recommendation Engine"),
+            &tr!("A private, on-device mix that learns from what you play, skip, like and rate"),
+            Some((
+                if state.recommendation_enabled {
+                    "ON"
+                } else {
+                    "OFF"
+                },
+                theme.bg_pill,
+                theme.accent,
+            )),
+            theme,
+        );
+
+        if setting_item_toggle(
+            ui,
+            &tr!("Enable For You"),
+            &tr!("Show the For You chip beside Lossless and Hi-Res, and learn from playback. Everything stays on this device."),
+            theme,
+            &mut state.recommendation_enabled,
+        ) {
+            actions.recommendation_enabled_changed = Some(state.recommendation_enabled);
+        }
+
+        setting_item(
+            ui,
+            &tr!("Batch Size"),
+            &tr!("How many new tracks each refill adds after playback and feedback"),
+            theme,
+            |ui| {
+                let mut batch = state.recommendation_batch_size as u32;
+                if ui
+                    .add(egui::Slider::new(&mut batch, 4..=30).suffix(tr!(" tracks")))
+                    .changed()
+                {
+                    state.recommendation_batch_size = batch as usize;
+                    actions.recommendation_batch_size_changed = Some(batch as usize);
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Analysis Quality"),
+            &tr!("How much of each file the background analyser samples"),
+            theme,
+            |ui| {
+                let current = state.recommendation_analysis_quality;
+                egui::ComboBox::from_id_salt("settings_recommendation_quality")
+                    .selected_text(analysis_quality_label(current))
+                    .show_ui(ui, |ui| {
+                        for option in crate::state::AnalysisQuality::ALL {
+                            if ui
+                                .selectable_label(current == option, analysis_quality_label(option))
+                                .on_hover_text(analysis_quality_description(option))
+                                .clicked()
+                            {
+                                state.recommendation_analysis_quality = option;
+                                actions.recommendation_analysis_quality_changed = Some(option);
+                            }
+                        }
+                    });
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Library Analysis"),
+            &tr!("Decode every track missing audio features in the background; playback keeps running"),
+            theme,
+            |ui| {
+                if extra.recommendation.analysis_running {
+                    if ui
+                        .add(pill_btn(tr!("Cancel"), false, theme))
+                        .clicked()
+                    {
+                        actions.cancel_recommendation_analysis = true;
+                    }
+                } else {
+                    let response = ui.add_enabled(
+                        state.recommendation_enabled,
+                        pill_btn(tr!("Analyze all"), false, theme),
+                    );
+                    let response = response.on_disabled_hover_text(tr!(
+                        "Enable For You to analyze the library"
+                    ));
+                    if response.clicked() {
+                        actions.start_recommendation_analysis = true;
+                    }
+                }
+            },
+        );
+
+        let rec = &extra.recommendation;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+            let label = if rec.analysis_running {
+                tr_args!(
+                    "{done} of {total} analyzed · {failed} failed",
+                    "done" => rec.analysis_done,
+                    "total" => rec.analysis_total,
+                    "failed" => rec.analysis_failed
+                )
+            } else {
+                tr_args!(
+                    "{analyzed} of {total} tracks analyzed · {feedback} feedback events",
+                    "analyzed" => rec.analyzed,
+                    "total" => rec.total,
+                    "feedback" => rec.feedback
+                )
+            };
+            ui.label(
+                egui::RichText::new(label)
+                    .font(crate::theme::font(11.5))
+                    .color(theme.text_muted),
+            );
+        });
+        if rec.analysis_running && !rec.analysis_current.is_empty() {
+            ui.label(
+                egui::RichText::new(rec.analysis_current)
+                    .font(crate::theme::font(11.0))
+                    .color(theme.text_secondary),
+            );
+        }
+
+        setting_item(
+            ui,
+            &tr!("Clear Listening History"),
+            &tr!("Delete the stored likes, skips and ratings that tune the feed. The audio features stay cached."),
+            theme,
+            |ui| {
+                if ui
+                    .add(pill_btn(tr!("Clear history"), false, theme))
+                    .clicked()
+                {
+                    actions.clear_recommendation_history = true;
+                }
+            },
+        );
+    });
+
+    // Card 4: Theme & Visual Aesthetics
     setting_card(ui, theme, |ui| {
         card_header(
             ui,
@@ -477,3 +623,29 @@ pub(in crate::components::settings_tab) fn render_library_category(
 // ─────────────────────────────────────────────────────────────────────────────
 // Category 7: Themes & Appearance
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Localised labels for the analysis quality presets.
+///
+/// The state enum stays free of presentation strings; the settings card is the
+/// only place that names them.
+fn analysis_quality_label(quality: crate::state::AnalysisQuality) -> String {
+    match quality {
+        crate::state::AnalysisQuality::LowResource => tr!("Low resource"),
+        crate::state::AnalysisQuality::Balanced => tr!("Balanced"),
+        crate::state::AnalysisQuality::HighQuality => tr!("High quality"),
+    }
+}
+
+fn analysis_quality_description(quality: crate::state::AnalysisQuality) -> String {
+    match quality {
+        crate::state::AnalysisQuality::LowResource => {
+            tr!("Fastest indexing; best for very large libraries or low-power machines")
+        }
+        crate::state::AnalysisQuality::Balanced => {
+            tr!("Recommended: a good balance between indexing time and stable features")
+        }
+        crate::state::AnalysisQuality::HighQuality => {
+            tr!("Samples more audio with a larger FFT; slowest, most detailed")
+        }
+    }
+}

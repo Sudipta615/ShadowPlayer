@@ -122,6 +122,14 @@ pub struct SettingsTabState {
     /// question is when the query runs again.
     pub smart_refresh: domain::smart::SmartRefreshSettings,
 
+    // Recommendation engine
+    /// Show the local "For You" feed and learn from playback.
+    pub recommendation_enabled: bool,
+    /// How many tracks each refill appends.
+    pub recommendation_batch_size: usize,
+    /// How much audio the background analyser samples per track.
+    pub recommendation_analysis_quality: crate::state::AnalysisQuality,
+
     // Library maintenance
     /// Set by the Settings > Library "Organize Files" button; the app raises the
     /// batch organizer and clears it.
@@ -275,6 +283,9 @@ impl Default for SettingsTabState {
             chain_preset_notice: None,
             clap: crate::state::clap_rack::ClapCardSummary::default(),
             smart_refresh: domain::smart::SmartRefreshSettings::default(),
+            recommendation_enabled: true,
+            recommendation_batch_size: 12,
+            recommendation_analysis_quality: crate::state::AnalysisQuality::default(),
             request_organize: false,
             request_clap_library: false,
 
@@ -471,6 +482,17 @@ pub struct SettingsTabActions {
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
 
+    // Recommendation engine
+    pub recommendation_enabled_changed: Option<bool>,
+    pub recommendation_batch_size_changed: Option<usize>,
+    pub recommendation_analysis_quality_changed: Option<crate::state::AnalysisQuality>,
+    /// User pressed "Analyze library" in the Recommendation card.
+    pub start_recommendation_analysis: bool,
+    /// User pressed "Cancel" during a library analysis.
+    pub cancel_recommendation_analysis: bool,
+    /// User pressed "Clear listening history".
+    pub clear_recommendation_history: bool,
+
     // Themes & Gallery actions
     pub preview_theme: Option<String>,
     pub apply_theme: Option<String>,
@@ -565,4 +587,20 @@ pub struct SettingsExtraContext<'a> {
     pub converter_progress: Option<(usize, usize, String)>,
     /// Activity message of the converter worker.
     pub converter_activity: &'a str,
+    /// Recommendation engine counters and analysis progress.
+    pub recommendation: RecommendationSettingsContext<'a>,
+}
+
+/// Live recommendation counters, supplied by the app that owns the workers.
+#[derive(Default, Clone, Copy)]
+pub struct RecommendationSettingsContext<'a> {
+    pub analyzed: usize,
+    pub total: usize,
+    pub feedback: usize,
+    pub analysis_running: bool,
+    pub analysis_done: usize,
+    pub analysis_total: usize,
+    pub analysis_failed: usize,
+    /// File currently being analysed, or the last status line.
+    pub analysis_current: &'a str,
 }

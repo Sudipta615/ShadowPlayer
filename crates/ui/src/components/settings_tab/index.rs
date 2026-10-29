@@ -121,6 +121,7 @@ impl SettingsCategory {
             Self::Library => &[
                 "Interface & Language",
                 "Smart Playlists",
+                "Recommendation Engine",
                 "Music Library Storage & Directories",
                 "Organize Files",
                 "Application Instances",
@@ -165,6 +166,7 @@ pub fn card_display_name(card: &str) -> &str {
         "Batch File Conversion Queue" => "Batch Conversion",
         "Interface & Language" => "Interface & Language",
         "Smart Playlists" => "Smart Playlists",
+        "Recommendation Engine" => "Recommendations",
         "Music Library Storage & Directories" => "Library Storage",
         "Organize Files" => "Organize Files",
         "Application Instances" => "App Instances",
@@ -201,7 +203,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 110] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 115] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -795,6 +797,36 @@ pub static SETTINGS_INDEX: [SettingsEntry; 110] = [
         card: "Smart Playlists",
         label: "Refresh Interval",
         description: "How many minutes pass between two refreshes under the timer policy",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Recommendation Engine",
+        label: "Enable For You",
+        description: "Show the For You chip and learn from playback. Everything stays on this device",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Recommendation Engine",
+        label: "Batch Size",
+        description: "How many new tracks each refill adds after playback and feedback",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Recommendation Engine",
+        label: "Analysis Quality",
+        description: "How much of each file the background analyser samples",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Recommendation Engine",
+        label: "Library Analysis",
+        description: "Decode every track missing audio features in the background; playback keeps running",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Library,
+        card: "Recommendation Engine",
+        label: "Clear Listening History",
+        description: "Delete the stored likes, skips and ratings that tune the feed. Audio features stay cached",
     },
     // ── Converter Category ──────────────────────────────────────────
     SettingsEntry {

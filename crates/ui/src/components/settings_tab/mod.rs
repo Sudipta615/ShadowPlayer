@@ -33,7 +33,8 @@ use search::{render_settings_search, render_settings_search_results};
 pub use index::{search_settings, SettingsCategory, SettingsEntry, SETTINGS_INDEX};
 pub use jump::{request_settings_jump, settings_jump_pending};
 pub use state::{
-    CrossfadePreviewContext, SettingsExtraContext, SettingsTabActions, SettingsTabState,
+    CrossfadePreviewContext, RecommendationSettingsContext, SettingsExtraContext,
+    SettingsTabActions, SettingsTabState,
 };
 pub use widgets::{
     card_header, card_header_with_info, dual_tone_slider, pill_btn, segment_picker, setting_card,

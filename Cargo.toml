@@ -9,6 +9,7 @@ members = [
     "crates/search",
     "crates/library",
     "crates/playback",
+    "crates/recommendation",
     "crates/ui",
     "crates/app",
     "crates/clap-fixture-plugin",

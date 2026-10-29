@@ -39,6 +39,7 @@ const ART_LOADS_PER_FRAME: usize = 8;
 enum EmptyStateAction {
     OpenFolders,
     ClearSearch,
+    AnalyzeRecommendations,
 }
 
 /// Explain an empty list and offer the next step.
@@ -46,33 +47,66 @@ enum EmptyStateAction {
 /// The table used to render its header and then nothing at all, so an empty
 /// library, a search that matched nothing and an empty playlist were all
 /// indistinguishable from a broken app.
+#[allow(clippy::too_many_arguments)]
 fn render_empty_state(
     ui: &mut egui::Ui,
     theme: &Theme,
     search_query: &str,
     library_track_count: usize,
+    quick_filter: QuickFilter,
+    recommendations_enabled: bool,
+    recommendation_loading: bool,
     action: &mut SongsTableAction,
 ) {
-    let (headline, body, cta): (&str, String, Option<(&str, EmptyStateAction)>) =
+    let (headline, body, cta): (String, String, Option<(String, EmptyStateAction)>) =
         if library_track_count == 0 {
             (
-                "Your library is empty",
-                "Add a music folder and ShadowPlayer will scan it, read the tags \
-                 and build your library."
-                    .to_string(),
-                Some(("Add a music folder", EmptyStateAction::OpenFolders)),
+                tr!("Your library is empty"),
+                tr!(
+                    "Add a music folder and ShadowPlayer will scan it, read the tags \
+                     and build your library."
+                ),
+                Some((tr!("Add a music folder"), EmptyStateAction::OpenFolders)),
             )
+        } else if quick_filter == QuickFilter::ForYou
+            && recommendations_enabled
+            && search_query.trim().is_empty()
+        {
+            if recommendation_loading {
+                (
+                    tr!("Building your For You mix"),
+                    tr!(
+                        "The recommendation engine is ranking your library. This stays off the \
+                         audio thread, so playback keeps running."
+                    ),
+                    None,
+                )
+            } else {
+                (
+                    tr!("No recommendations yet"),
+                    tr!(
+                        "Play a few songs so the engine can learn your taste, or analyze the \
+                         library to give it audio features to work with."
+                    ),
+                    Some((
+                        tr!("Analyze library"),
+                        EmptyStateAction::AnalyzeRecommendations,
+                    )),
+                )
+            }
         } else if !search_query.trim().is_empty() {
             (
-                "Nothing matched your search",
-                format!("No tracks, albums, artists or playlists match “{search_query}”."),
-                Some(("Clear search", EmptyStateAction::ClearSearch)),
+                tr!("Nothing matched your search"),
+                tr_args!(
+                    "No tracks, albums, artists or playlists match “{search_query}”.",
+                    "search_query" => search_query
+                ),
+                Some((tr!("Clear search"), EmptyStateAction::ClearSearch)),
             )
         } else {
             (
-                "No tracks here yet",
-                "This view is empty. Try another one, or add more music to your library."
-                    .to_string(),
+                tr!("No tracks here yet"),
+                tr!("This view is empty. Try another one, or add more music to your library."),
                 None,
             )
         };
@@ -113,7 +147,7 @@ fn render_empty_state(
             ui.add_space(if tight { 8.0 } else { 14.0 });
             let resp = ui.add(
                 egui::Button::new(
-                    egui::RichText::new(label)
+                    egui::RichText::new(&label)
                         .font(crate::theme::font(13.0))
                         .color(Color32::WHITE),
                 )
@@ -122,12 +156,15 @@ fn render_empty_state(
                 .min_size(Vec2::new(158.0, 32.0)),
             );
             resp.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label)
+                egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label.as_str())
             });
             if resp.clicked() {
                 match cta_action {
                     EmptyStateAction::OpenFolders => action.open_folders = true,
                     EmptyStateAction::ClearSearch => action.clear_search = true,
+                    EmptyStateAction::AnalyzeRecommendations => {
+                        action.analyze_recommendations = true;
+                    }
                 }
             }
         }
@@ -202,6 +239,8 @@ pub struct SongsTableAction {
     pub open_folders: bool,
     /// The empty state asked the user to clear the search query.
     pub clear_search: bool,
+    /// The For You empty state asked to analyze the library.
+    pub analyze_recommendations: bool,
 }
 
 pub struct SongsTable<'a> {
@@ -245,6 +284,10 @@ pub struct SongsTable<'a> {
     /// itself is empty, which is a different situation from a filtered view
     /// that happens to be empty.
     pub library_track_count: usize,
+    /// Whether the recommendation feature is enabled in settings.
+    pub recommendations_enabled: bool,
+    /// A ranking request is in flight; the For You empty state says so.
+    pub recommendation_loading: bool,
 }
 
 impl<'a> SongsTable<'a> {
@@ -289,6 +332,7 @@ impl<'a> SongsTable<'a> {
             clear_selection: false,
             open_folders: false,
             clear_search: false,
+            analyze_recommendations: false,
         };
 
         // Split the borrows so the row loops can mutably borrow
@@ -316,6 +360,8 @@ impl<'a> SongsTable<'a> {
             show_header,
             search_query,
             library_track_count,
+            recommendations_enabled,
+            recommendation_loading,
         } = self;
 
         let ctx = ui.ctx().clone();
@@ -327,6 +373,7 @@ impl<'a> SongsTable<'a> {
                 &mut toolbar::TableToolbar {
                     track_count: tracks.len(),
                     quick_filter,
+                    recommendations_enabled,
                     is_grid_view,
                     column_preset,
                     column_preset_names,
@@ -349,7 +396,16 @@ impl<'a> SongsTable<'a> {
 
         // An empty list gets an explanation and a way out, not a blank area.
         if tracks.is_empty() {
-            render_empty_state(ui, theme, search_query, library_track_count, &mut action);
+            render_empty_state(
+                ui,
+                theme,
+                search_query,
+                library_track_count,
+                quick_filter,
+                recommendations_enabled,
+                recommendation_loading,
+                &mut action,
+            );
             return action;
         }
 

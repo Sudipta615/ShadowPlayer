@@ -10,6 +10,7 @@
 //! Nothing in this crate installs software, accepts untrusted plugin code, or
 //! performs a network request unless the caller explicitly asks for it.
 
+pub mod analysis;
 pub mod cd;
 pub mod dynlib;
 pub mod markdown;

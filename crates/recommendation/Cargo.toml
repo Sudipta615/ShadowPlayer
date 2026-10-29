@@ -1,0 +1,14 @@
+[package]
+name = "shadow-recommender"
+version = "0.26.0"
+edition = "2021"
+rust-version = "1.70"
+license = "Apache-2.0"
+description = "Lightweight, local-first music recommendation core for ShadowPlayer"
+
+[lib]
+name = "shadow_recommender"
+path = "src/lib.rs"
+
+[features]
+default = []

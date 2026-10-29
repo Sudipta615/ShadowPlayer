@@ -4,7 +4,8 @@ use eframe::egui::{self, Vec2};
 use std::path::PathBuf;
 
 use crate::components::settings_tab::{
-    show_settings_tab_extended, CrossfadePreviewContext, SettingsExtraContext,
+    show_settings_tab_extended, CrossfadePreviewContext, RecommendationSettingsContext,
+    SettingsExtraContext,
 };
 use crate::services::{ImportKind, LoudnessProgress};
 use crate::state::DspState;
@@ -48,6 +49,18 @@ pub struct SettingsViewActions {
     pub pick_converter_dir: bool,
     pub pick_converter_files: bool,
     pub clear_converter_queue: bool,
+    /// The Recommendation Engine toggle changed.
+    pub recommendation_enabled_changed: Option<bool>,
+    /// How many tracks each refill appends.
+    pub recommendation_batch_size_changed: Option<usize>,
+    /// How much audio the analyser samples per track.
+    pub recommendation_analysis_quality_changed: Option<crate::state::AnalysisQuality>,
+    /// User pressed "Analyze all".
+    pub start_recommendation_analysis: bool,
+    /// User pressed "Cancel" during a library analysis.
+    pub cancel_recommendation_analysis: bool,
+    /// User pressed "Clear history".
+    pub clear_recommendation_history: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -69,6 +82,7 @@ pub fn render_settings_view(
     converter_busy: bool,
     converter_progress: Option<(usize, usize, String)>,
     converter_activity: &str,
+    recommendation: RecommendationSettingsContext<'_>,
     mut on_start_scan: impl FnMut(PathBuf),
     mut on_import: impl FnMut(ImportKind),
 ) -> SettingsViewActions {
@@ -130,6 +144,7 @@ pub fn render_settings_view(
             converter_busy,
             converter_progress,
             converter_activity,
+            recommendation,
         };
 
         let s_actions = show_settings_tab_extended(ui, &mut dsp_state.settings_tab, theme, &extra);
@@ -225,6 +240,24 @@ pub fn render_settings_view(
         }
         if s_actions.clear_converter_queue {
             view_actions.clear_converter_queue = true;
+        }
+        if let Some(enabled) = s_actions.recommendation_enabled_changed {
+            view_actions.recommendation_enabled_changed = Some(enabled);
+        }
+        if let Some(batch) = s_actions.recommendation_batch_size_changed {
+            view_actions.recommendation_batch_size_changed = Some(batch);
+        }
+        if let Some(quality) = s_actions.recommendation_analysis_quality_changed {
+            view_actions.recommendation_analysis_quality_changed = Some(quality);
+        }
+        if s_actions.start_recommendation_analysis {
+            view_actions.start_recommendation_analysis = true;
+        }
+        if s_actions.cancel_recommendation_analysis {
+            view_actions.cancel_recommendation_analysis = true;
+        }
+        if s_actions.clear_recommendation_history {
+            view_actions.clear_recommendation_history = true;
         }
 
         dsp_state.handle_settings_actions(session, &s_actions);

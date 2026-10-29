@@ -260,7 +260,8 @@ cargo check --workspace
 
 # 3. Full player test suite (engine has its own; run serially for DB/env safety)
 cargo test -p domain -p database -p metadata -p lyrics -p library \
-  -p playback -p search -p audio-session -p media-tools -p ui --lib \
+  -p playback -p search -p audio-session -p media-tools \
+  -p shadow-recommender -p ui --lib \
   -- --test-threads=1
 
 # 4. Integration guards

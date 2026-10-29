@@ -31,6 +31,7 @@ const PLAYER_CRATES: &[&str] = &[
     "search",
     "library",
     "playback",
+    "recommendation",
     "ui",
     "media-tools",
     "app",

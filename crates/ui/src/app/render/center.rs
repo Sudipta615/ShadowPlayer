@@ -300,9 +300,20 @@ impl ShadowPlayerApp {
                             self.media_tools_service.is_busy(),
                             self.media_tools.export_progress.clone(),
                             self.media_tools_service.activity(),
+                            crate::views::RecommendationSettingsContext {
+                                analyzed: self.recommendation_state.analyzed,
+                                total: self.recommendation_state.total,
+                                feedback: self.recommendation_state.feedback_count,
+                                analysis_running: self.recommendation_state.analysis_running,
+                                analysis_done: self.recommendation_state.analysis_done,
+                                analysis_total: self.recommendation_state.analysis_total,
+                                analysis_failed: self.recommendation_state.analysis_failed,
+                                analysis_current: &self.recommendation_state.analysis_current,
+                            },
                             |path| scan_to_start = Some(path),
                             |kind| import_req = Some(kind),
                         );
+                        self.handle_recommendation_settings(&sv_actions);
                         if self.theme.is_light != prev_light {
                             self.settings_dirty = true;
                         }
@@ -680,7 +691,18 @@ impl ShadowPlayerApp {
                             &self.playlist_repo,
                             &self.favorites_repo,
                             self.dsp_state.eq_panel.is_open,
+                            self.dsp_state.settings_tab.recommendation_enabled,
+                            self.recommendation_state.loading,
                         );
+                        if view_action.start_recommendations {
+                            self.start_recommendation_feed();
+                        }
+                        if view_action.start_recommendation_analysis {
+                            self.start_recommendation_analysis();
+                        }
+                        for feedback in view_action.recommendation_feedback {
+                            self.record_recommendation_feedback(feedback);
+                        }
                         if let Some(q) = view_action.search_query.take() {
                             self.app_state.search_query = q;
                             self.refresh_view();

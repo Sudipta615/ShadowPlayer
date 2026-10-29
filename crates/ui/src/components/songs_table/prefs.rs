@@ -11,6 +11,8 @@ use super::columns::ColumnPreset;
 pub enum QuickFilter {
     #[default]
     All,
+    /// The local recommendation engine's pending mix.
+    ForYou,
     Lossless,
     HiRes,
     Favorites,
@@ -20,8 +22,9 @@ pub enum QuickFilter {
 }
 
 impl QuickFilter {
-    pub const ALL: [QuickFilter; 4] = [
+    pub const ALL: [QuickFilter; 5] = [
         QuickFilter::All,
+        QuickFilter::ForYou,
         QuickFilter::Lossless,
         QuickFilter::HiRes,
         QuickFilter::Rating,
@@ -30,6 +33,7 @@ impl QuickFilter {
     pub fn label(self) -> &'static str {
         match self {
             QuickFilter::All => "All",
+            QuickFilter::ForYou => "For You",
             QuickFilter::Lossless => "Lossless",
             QuickFilter::HiRes => "Hi-Res",
             QuickFilter::Favorites => "Favorites",

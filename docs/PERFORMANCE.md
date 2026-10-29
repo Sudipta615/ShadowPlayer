@@ -93,6 +93,25 @@ what the budget catches is a change that makes the rebuild an order of
 magnitude slower — a clone that became a deep copy, a sort key that started
 allocating per comparison.
 
+## Recommendation workers
+
+The local For You feed never ranks or decodes on the UI thread. Two workers
+own that work:
+
+| Operation (release, synthetic) | Cost |
+| --- | --- |
+| Build a taste profile for 100,000 tracks | ~12 ms |
+| Rank 100,000 tracks, `limit = 30` | ~43 ms p50, ~46 ms p95 |
+| Analyse a 24-second stereo signal (three windows) | 31 ms low-resource, 60 ms balanced, 76 ms high-quality |
+
+The ranking worker loads a lightweight catalog projection and returns only the
+pending ids (12 by default), so the frame loop never walks the library for the
+feed. The analysis worker decodes one file at a time through `media-tools`,
+writes each vector as it finishes, and yields between files; the settings card
+polls its progress rather than blocking on it. These numbers exclude decoder
+seek and I/O, which depend on the file and the disk. The full synthetic
+benchmarks live in `crates/recommendation/examples/`.
+
 ## What is not measured
 
 - **Decoding and the audio thread.** The engine has its own benchmarks

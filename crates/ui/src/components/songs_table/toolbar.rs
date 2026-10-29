@@ -12,6 +12,8 @@ use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, V
 pub(super) struct TableToolbar<'a, 'b> {
     pub track_count: usize,
     pub quick_filter: QuickFilter,
+    /// The feature is opt-out; hide its chip entirely when disabled.
+    pub recommendations_enabled: bool,
     pub is_grid_view: bool,
     pub column_preset: &'a ColumnPreset,
     pub column_preset_names: &'a [String],
@@ -393,17 +395,28 @@ pub(super) fn render_toolbar(ui: &mut Ui, toolbar: &mut TableToolbar<'_, '_>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
         for filter in QuickFilter::ALL {
+            if filter == QuickFilter::ForYou && !toolbar.recommendations_enabled {
+                continue;
+            }
             let is_active = quick_filter == filter;
-            let label = filter.label();
+            let id_label = filter.label();
+            // "For You" is the one chip whose name is part of the new feature,
+            // so it goes through the catalogue; the older chips keep their
+            // static labels until they are localised as a group.
+            let label = if filter == QuickFilter::ForYou {
+                tr!("For You")
+            } else {
+                id_label.to_string()
+            };
             // One animation id per chip, so the state stays bounded.
             let chip_t = ui.ctx().animate_bool_with_time(
-                ui.make_persistent_id(("chip", label)),
+                ui.make_persistent_id(("chip", id_label)),
                 is_active,
                 theme.motion_time(0.16),
             );
             let resp = ui.add(
                 egui::Button::new(
-                    egui::RichText::new(label)
+                    egui::RichText::new(&label)
                         .font(crate::theme::font(11.5))
                         .color(crate::theme::lerp_color(
                             theme.text_secondary,
@@ -466,14 +479,17 @@ fn sort_field_label(field: SortField) -> &'static str {
 }
 
 /// A one-line explanation of what a quick-filter chip does.
-fn quick_filter_tooltip(filter: QuickFilter) -> &'static str {
+fn quick_filter_tooltip(filter: QuickFilter) -> String {
     match filter {
-        QuickFilter::All => "Show every track",
-        QuickFilter::Lossless => "Show only lossless tracks (FLAC, ALAC, WAV, DSD…)",
-        QuickFilter::HiRes => "Show only Hi-Res tracks (above 48 kHz or 1000 kbps)",
-        QuickFilter::Favorites => "Show only tracks you have favorited",
-        QuickFilter::Played => "Show only tracks you have played before",
-        QuickFilter::Rating => "Show only tracks with at least one star",
+        QuickFilter::All => "Show every track".to_string(),
+        QuickFilter::ForYou => {
+            tr!("A local mix that learns from what you play, skip, like and rate")
+        }
+        QuickFilter::Lossless => "Show only lossless tracks (FLAC, ALAC, WAV, DSD…)".to_string(),
+        QuickFilter::HiRes => "Show only Hi-Res tracks (above 48 kHz or 1000 kbps)".to_string(),
+        QuickFilter::Favorites => "Show only tracks you have favorited".to_string(),
+        QuickFilter::Played => "Show only tracks you have played before".to_string(),
+        QuickFilter::Rating => "Show only tracks with at least one star".to_string(),
     }
 }
 

@@ -98,6 +98,13 @@ pub struct LibraryState {
     /// or reshuffle the station.
     pub radio_tracks: Vec<Track>,
 
+    /// The recommendation engine's pending list, in ranking order.
+    ///
+    /// The worker owns the rolling session; this is only the id projection the
+    /// table needs. For You renders it in this exact order rather than applying
+    /// the user's global sort, the same way Radio owns its shuffle.
+    pub recommendation_ids: Vec<TrackId>,
+
     /// Identity of the currently materialised `displayed_tracks`. Used to skip
     /// needless rebuilds (and the associated 10k-track clones) when the user
     /// bounces between tabs.
@@ -382,8 +389,13 @@ impl LibraryState {
                 same_list && (previous.2 != current_sort || previous.3 != sort_order);
             if only_the_sort_changed {
                 // Recently Added and Radio own their running order: one is
-                // defined by recency, the other is a deliberate shuffle.
-                if active_nav != NavItem::RecentlyAdded && active_nav != NavItem::Radio {
+                // defined by recency, the other is a deliberate shuffle. For
+                // You is ranked by the engine, so a column header must not
+                // reorder it either.
+                if active_nav != NavItem::RecentlyAdded
+                    && active_nav != NavItem::Radio
+                    && self.quick_filter != QuickFilter::ForYou
+                {
                     sort_tracks(&mut self.displayed_tracks, current_sort, sort_order);
                 }
                 self.displayed_key = Some(key);
@@ -393,74 +405,87 @@ impl LibraryState {
         self.displayed_key = Some(key);
         self.rebuilds += 1;
 
-        let mut tracks = if !search_query.trim().is_empty() {
-            let result = search_engine.search(search_query, 100);
-            self.search_result = result.clone();
-            result.tracks
-        } else {
-            self.search_result = search::SearchResult::default();
-            match active_nav {
-                NavItem::Favorites => self
-                    .all_tracks
-                    .iter()
-                    .filter(|t| self.favorite_ids.contains(&t.id))
-                    .cloned()
-                    .collect(),
-                NavItem::RecentlyPlayed => match history_repo.list_recently_played(100) {
-                    Ok(tracks) => tracks,
-                    Err(e) => {
-                        log::warn!("Could not load the recently played list: {e}");
-                        Vec::new()
-                    }
-                },
-                NavItem::MostPlayed => match history_repo.list_most_played(100) {
-                    Ok(tracks) => tracks,
-                    Err(e) => {
-                        log::warn!("Could not load the most played list: {e}");
-                        Vec::new()
-                    }
-                },
-                // Newest imports first. `all_tracks` is already in memory, so
-                // this is a sort rather than another query.
-                NavItem::RecentlyAdded => {
-                    let mut recent = self.all_tracks.clone();
-                    recent.sort_by_key(|t| std::cmp::Reverse(t.added_at));
-                    recent.truncate(200);
-                    recent
-                }
-                NavItem::Playlist(pl_id) => match playlist_repo.get_tracks_resolved(&pl_id) {
-                    Ok(tracks) => tracks,
-                    Err(e) => {
-                        log::warn!("Could not load the playlist: {e}");
-                        Vec::new()
-                    }
-                },
-                NavItem::Radio => self.radio_tracks.clone(),
-                NavItem::SmartPlaylist(sp_id) => {
-                    let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
-                    match playlist {
-                        // The policy decides whether the query runs now or
-                        // the previous result is served.
-                        Some(sp) => {
-                            let sp = sp.clone();
-                            self.smart_playlist_tracks(smart_repo, &sp, now_secs())
+        let mut tracks =
+            if self.quick_filter == QuickFilter::ForYou && search_query.trim().is_empty() {
+                // The feed is the whole view, not a narrowing of the current tab.
+                self.search_result = search::SearchResult::default();
+                self.recommended_tracks()
+            } else if !search_query.trim().is_empty() {
+                let result = search_engine.search(search_query, 100);
+                self.search_result = result.clone();
+                result.tracks
+            } else {
+                self.search_result = search::SearchResult::default();
+                match active_nav {
+                    NavItem::Favorites => self
+                        .all_tracks
+                        .iter()
+                        .filter(|t| self.favorite_ids.contains(&t.id))
+                        .cloned()
+                        .collect(),
+                    NavItem::RecentlyPlayed => match history_repo.list_recently_played(100) {
+                        Ok(tracks) => tracks,
+                        Err(e) => {
+                            log::warn!("Could not load the recently played list: {e}");
+                            Vec::new()
                         }
-                        None => Vec::new(),
+                    },
+                    NavItem::MostPlayed => match history_repo.list_most_played(100) {
+                        Ok(tracks) => tracks,
+                        Err(e) => {
+                            log::warn!("Could not load the most played list: {e}");
+                            Vec::new()
+                        }
+                    },
+                    // Newest imports first. `all_tracks` is already in memory, so
+                    // this is a sort rather than another query.
+                    NavItem::RecentlyAdded => {
+                        let mut recent = self.all_tracks.clone();
+                        recent.sort_by_key(|t| std::cmp::Reverse(t.added_at));
+                        recent.truncate(200);
+                        recent
                     }
+                    NavItem::Playlist(pl_id) => match playlist_repo.get_tracks_resolved(&pl_id) {
+                        Ok(tracks) => tracks,
+                        Err(e) => {
+                            log::warn!("Could not load the playlist: {e}");
+                            Vec::new()
+                        }
+                    },
+                    NavItem::Radio => self.radio_tracks.clone(),
+                    NavItem::SmartPlaylist(sp_id) => {
+                        let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
+                        match playlist {
+                            // The policy decides whether the query runs now or
+                            // the previous result is served.
+                            Some(sp) => {
+                                let sp = sp.clone();
+                                self.smart_playlist_tracks(smart_repo, &sp, now_secs())
+                            }
+                            None => Vec::new(),
+                        }
+                    }
+                    _ => self.all_tracks.clone(),
                 }
-                _ => self.all_tracks.clone(),
-            }
-        };
+            };
 
         // Quality/format chips narrow whatever the view produced. Safe on top
         // of search results too.
-        apply_quick_filter(&mut tracks, &self.favorite_ids, self.quick_filter);
+        apply_quick_filter(
+            &mut tracks,
+            &self.favorite_ids,
+            &self.recommendation_ids,
+            self.quick_filter,
+        );
 
         // "Recently Added" defines itself by recency, so the user's global sort
         // would fight the view. Radio owns its scored, salted running order for
         // the same reason: re-sorting it alphabetically would throw away the
-        // shuffle the user asked for. Everything else honours the chosen sort.
-        if active_nav != NavItem::RecentlyAdded && active_nav != NavItem::Radio {
+        // shuffle the user asked for. For You keeps the engine's ranking.
+        if active_nav != NavItem::RecentlyAdded
+            && active_nav != NavItem::Radio
+            && self.quick_filter != QuickFilter::ForYou
+        {
             sort_tracks(&mut tracks, current_sort, sort_order);
         }
 
@@ -493,6 +518,49 @@ impl LibraryState {
         self.radio_label = label;
         self.radio_tracks = tracks;
         self.displayed_key = None;
+    }
+
+    /// Replace the recommendation feed with a new pending list.
+    ///
+    /// Played tracks drop out and fresh ones append, so the visible For You
+    /// list changes without the user touching a control. The rebuild is only
+    /// forced while For You is on screen; otherwise the next visit builds it.
+    pub fn set_recommendation_ids(&mut self, ids: Vec<TrackId>) {
+        if self.recommendation_ids == ids {
+            return;
+        }
+        self.recommendation_ids = ids;
+        if self.quick_filter == QuickFilter::ForYou {
+            self.displayed_key = None;
+        }
+    }
+
+    /// Forget the feed after the worker resets or the feature is disabled.
+    pub fn clear_recommendation_ids(&mut self) {
+        self.set_recommendation_ids(Vec::new());
+    }
+
+    /// Materialise the pending recommendation ids in ranking order.
+    ///
+    /// Only the dozen or so recommended tracks are cloned, not the library.
+    /// A single pass collects the wanted ids; building a 100,000-entry map
+    /// just to look up twelve tracks would allocate and hash the whole catalog
+    /// on every playback edge.
+    fn recommended_tracks(&self) -> Vec<Track> {
+        if self.recommendation_ids.is_empty() {
+            return Vec::new();
+        }
+        let wanted: HashSet<&TrackId> = self.recommendation_ids.iter().collect();
+        let mut found: HashMap<TrackId, Track> = HashMap::with_capacity(wanted.len());
+        for track in &self.all_tracks {
+            if wanted.contains(&track.id) {
+                found.insert(track.id, track.clone());
+            }
+        }
+        self.recommendation_ids
+            .iter()
+            .filter_map(|id| found.remove(id))
+            .collect()
     }
 
     pub fn toggle_favorite(&mut self, favorites_repo: &FavoritesRepo, track_id: TrackId) {
@@ -582,10 +650,18 @@ impl LibraryState {
 fn apply_quick_filter(
     tracks: &mut Vec<Track>,
     favorite_ids: &HashSet<TrackId>,
+    recommendation_ids: &[TrackId],
     filter: QuickFilter,
 ) {
     match filter {
         QuickFilter::All => {}
+        QuickFilter::ForYou => {
+            if recommendation_ids.is_empty() {
+                tracks.clear();
+            } else {
+                tracks.retain(|track| recommendation_ids.contains(&track.id));
+            }
+        }
         QuickFilter::Lossless => tracks.retain(|t| t.is_lossless),
         QuickFilter::HiRes => tracks.retain(|t| t.is_hires()),
         QuickFilter::Favorites => tracks.retain(|t| favorite_ids.contains(&t.id)),
@@ -599,6 +675,13 @@ fn apply_quick_filter(
 /// Comparisons compare pre-folded byte slices directly (`&[u8]`),
 /// eliminating per-comparison heap allocations during sorts.
 pub fn sort_tracks(tracks: &mut [Track], field: SortField, order: SortOrder) {
+    // Lists built outside the repository (tests, freshly imported rows) may
+    // not carry the folded keys yet. Without them the fallback compares raw
+    // bytes, so `Beta` would sort before `alpha` and the column would be
+    // case-sensitive depending on where the list came from.
+    for track in tracks.iter_mut() {
+        track.ensure_sort_keys();
+    }
     match field {
         SortField::Title => {
             tracks.sort_unstable_by(|a, b| a.sort_title_bytes().cmp(b.sort_title_bytes()))
@@ -767,9 +850,39 @@ mod sort_tests {
         ];
         tracks[1].rating = 3;
         let favorites = HashSet::new();
-        apply_quick_filter(&mut tracks, &favorites, QuickFilter::Rating);
+        apply_quick_filter(&mut tracks, &favorites, &[], QuickFilter::Rating);
         assert_eq!(titles(&tracks), ["two"]);
         assert!(tracks[0].rating > 0);
+    }
+
+    #[test]
+    fn for_you_keeps_the_engine_ranking_and_hides_other_tracks() {
+        let mut state = LibraryState::default();
+        let one = track("one", "A", "A", false, 1.0);
+        let two = track("two", "A", "A", false, 2.0);
+        let three = track("three", "A", "A", false, 3.0);
+        let (one_id, two_id, three_id) = (one.id, two.id, three.id);
+        state.all_tracks = vec![one, two, three];
+
+        state.set_recommendation_ids(vec![three_id, one_id]);
+        assert_eq!(titles(&state.recommended_tracks()), ["three", "one"]);
+
+        // A played track drops out; the rest keeps its order.
+        state.set_recommendation_ids(vec![one_id, three_id]);
+        assert_eq!(titles(&state.recommended_tracks()), ["one", "three"]);
+
+        state.clear_recommendation_ids();
+        assert!(state.recommended_tracks().is_empty());
+
+        // The empty filter must not fall through to the whole library.
+        let mut tracks = state.all_tracks.clone();
+        let favorites = HashSet::new();
+        apply_quick_filter(&mut tracks, &favorites, &[], QuickFilter::ForYou);
+        assert!(tracks.is_empty());
+
+        let mut tracks = state.all_tracks.clone();
+        apply_quick_filter(&mut tracks, &favorites, &[two_id], QuickFilter::ForYou);
+        assert_eq!(titles(&tracks), ["two"]);
     }
 }
 

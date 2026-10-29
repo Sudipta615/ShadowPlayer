@@ -30,10 +30,12 @@ use crate::services::{
     ArtworkFetchService, ArtworkService, AutoEqCatalogService, AutotagService, BiographyService,
     ControlService, CrossfadePreview, ImportKind, ImportResult, ImportService, LoudnessService,
     LyricsService, MediaToolEvent, MediaToolsService, MprisCommand, MprisService, MprisSnapshot,
-    PodcastEvent, PodcastService, PresetIoEvent, PresetIoService, ScannerService, WaveformService,
+    PodcastEvent, PodcastService, PresetIoEvent, PresetIoService, RecommendationAnalysisService,
+    RecommendationService, ScannerService, WaveformService,
 };
 use crate::state::{
-    AppState, DspState, LibraryState, PodcastState, SleepTimerMode, TelemetryState,
+    AppState, DspState, LibraryState, PodcastState, RecommendationState, SleepTimerMode,
+    TelemetryState,
 };
 use crate::theme::{Theme, ThemeFonts, ThemeManager};
 use crate::views::{
@@ -53,6 +55,7 @@ mod history;
 mod imports;
 mod library_actions;
 mod modals;
+mod recommendation_actions;
 mod render;
 mod service_poll;
 mod settings_io;
@@ -114,6 +117,12 @@ pub struct ShadowPlayerApp {
     /// transport.
     control_service: Option<ControlService>,
     loudness_service: LoudnessService,
+    /// Ranking worker for the local For You feed.
+    recommendation_service: RecommendationService,
+    /// Background feature-extraction worker.
+    recommendation_analysis_service: RecommendationAnalysisService,
+    /// Worker status, counters, and the playback edge tracker.
+    recommendation_state: RecommendationState,
     /// Persistent data directory, used for non-database settings that must be
     /// readable before the database is opened.
     data_dir: PathBuf,
@@ -250,6 +259,9 @@ impl ShadowPlayerApp {
         let podcast_service = PodcastService::new(PodcastRepo::new(db.clone()), &data_dir);
         let podcast_state = PodcastState::default();
         let loudness_service = LoudnessService::new(db.clone());
+        let recommendation_service = RecommendationService::new(db.clone());
+        let recommendation_analysis_service = RecommendationAnalysisService::new(db.clone());
+        let recommendation_state = RecommendationState::default();
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
         let preset_io = PresetIoService::new();
@@ -306,6 +318,9 @@ impl ShadowPlayerApp {
             mpris_service,
             control_service,
             loudness_service,
+            recommendation_service,
+            recommendation_analysis_service,
+            recommendation_state,
             data_dir,
             multi_instance_allowed: false,
             locale: String::new(),
@@ -355,6 +370,9 @@ impl ShadowPlayerApp {
 
         // Load all persistent settings (normal, theme, EQ, DSP)
         app.load_persisted_settings();
+        app.recommendation_service
+            .set_batch_size(app.dsp_state.settings_tab.recommendation_batch_size);
+        app.recommendation_service.refresh_stats();
         // Durable presets live in their own table, not in the settings JSON.
         app.reload_eq_presets();
         app.biography_service

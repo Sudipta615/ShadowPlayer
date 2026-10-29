@@ -375,6 +375,8 @@ fn the_table_renders_a_hundred_thousand_tracks_inside_a_frame() {
                     show_header: true,
                     search_query: "",
                     library_track_count: LIBRARY_SIZE,
+                    recommendations_enabled: false,
+                    recommendation_loading: false,
                 };
                 let _ = table.show(ui);
             });

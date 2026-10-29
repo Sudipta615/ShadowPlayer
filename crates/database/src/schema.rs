@@ -117,6 +117,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_v16(conn)?;
     }
 
+    if current_version < 17 {
+        apply_v17(conn)?;
+    }
+
     Ok(())
 }
 
@@ -1153,6 +1157,50 @@ fn apply_v15(conn: &mut Connection) -> Result<()> {
     for stmt in statements {
         if let Err(e) = tx.execute(stmt, []) {
             log::error!("Migration V15 statement failed: {e}\nStmt: {stmt}");
+            return Err(e);
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn apply_v17(conn: &mut Connection) -> Result<()> {
+    info!("Applying SQLite migration V17 (recommendation features and feedback)");
+    let tx = conn.transaction()?;
+
+    let statements = [
+        // One cached audio-feature vector per track. The schema version is
+        // stored beside the blob so a semantics change invalidates the cache
+        // without guessing from the payload.
+        "CREATE TABLE IF NOT EXISTS track_features (
+            track_id TEXT PRIMARY KEY NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            schema_version INTEGER NOT NULL,
+            features BLOB NOT NULL,
+            analyzed_at INTEGER NOT NULL
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_track_features_schema
+            ON track_features(schema_version);",
+        // Explicit listening signals. Play history already exists, but this
+        // table records the signed feedback the recommendation profile learns
+        // from (likes, ratings, skips, completions, playlist adds).
+        "CREATE TABLE IF NOT EXISTS recommendation_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            value REAL,
+            timestamp_ms INTEGER NOT NULL,
+            session_id INTEGER
+        );",
+        "CREATE INDEX IF NOT EXISTS idx_recommendation_feedback_track
+            ON recommendation_feedback(track_id);",
+        "CREATE INDEX IF NOT EXISTS idx_recommendation_feedback_time
+            ON recommendation_feedback(timestamp_ms DESC);",
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (17, strftime('%s', 'now'));",
+    ];
+
+    for stmt in statements {
+        if let Err(e) = tx.execute(stmt, []) {
+            log::error!("Migration V17 statement failed: {e}\nStmt: {stmt}");
             return Err(e);
         }
     }

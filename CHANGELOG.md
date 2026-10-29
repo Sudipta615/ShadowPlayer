@@ -4,6 +4,20 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-10-29
+
+*Released with audio-engine 1.11.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **On-device For You recommendations.** A new dependency-free `shadow-recommender` crate (audio-feature extraction, taste profile, ranking, and a stateful rolling session) is integrated as an optional feed beside the Lossless/Hi-Res chips. The first batch holds 12 tracks; plays, completions, skips, likes, ratings, and playlist adds re-rank the pending list and refill it without duplicates. Settings gain a Recommendation Engine card with enable/disable, batch size, analysis quality, library-wide background analysis with progress and cancellation, and a clear-history action.
+- **Recommendation persistence.** Database migration V17 adds `track_features` and `recommendation_feedback`, with a `RecommendationRepo` that caches feature vectors per schema version and replays signed feedback. Analysis decodes through `media-tools` on a worker thread, so playback and the UI thread are never blocked.
+
+### Fixed
+- **Artist column sort is case-insensitive for lists built outside the repository.** `sort_tracks` now populates the pre-folded collation keys before comparing, so imported or freshly built lists no longer sort uppercase names before lowercase ones.
+
+---
+
 ## [0.25.0] - 2026-10-28
 
 *Released with audio-engine 1.11.0. The player and the engine are versioned separately and released

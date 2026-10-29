@@ -42,6 +42,12 @@ pub struct MainViewAction {
     pub open_loudness: bool,
     /// Table preferences changed and should be written to the settings store.
     pub settings_dirty: bool,
+    /// The For You chip was clicked; make sure a feed is running.
+    pub start_recommendations: bool,
+    /// The For You empty state asked to analyze the library.
+    pub start_recommendation_analysis: bool,
+    /// Explicit signals from the table that should tune the feed.
+    pub recommendation_feedback: Vec<crate::state::RecommendationFeedback>,
 }
 
 /// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
@@ -61,6 +67,8 @@ pub fn render_main_playback_view(
     playlist_repo: &PlaylistRepo,
     favorites_repo: &FavoritesRepo,
     is_eq_open: bool,
+    recommendations_enabled: bool,
+    recommendation_loading: bool,
 ) -> MainViewAction {
     let mut view_action = MainViewAction::default();
     let title = current_track
@@ -143,6 +151,11 @@ pub fn render_main_playback_view(
     }
     if np_events.toggle_favorite {
         if let Some(t) = current_track {
+            if !library_state.favorite_ids.contains(&t.id) {
+                view_action
+                    .recommendation_feedback
+                    .push(crate::state::RecommendationFeedback::Liked(t.id));
+            }
             library_state.toggle_favorite(favorites_repo, t.id);
             view_action.needs_reload = true;
         }
@@ -422,6 +435,8 @@ pub fn render_main_playback_view(
         show_header: ui.available_height() > 210.0,
         search_query: &app_state.search_query,
         library_track_count: library_state.all_tracks.len(),
+        recommendations_enabled,
+        recommendation_loading,
     }
     .show(ui);
 
@@ -432,11 +447,73 @@ pub fn render_main_playback_view(
     if table_action.clear_search {
         view_action.search_query = Some(String::new());
     }
+    if table_action.analyze_recommendations {
+        view_action.start_recommendation_analysis = true;
+        // Analysis improves the features, but the engine can rank on metadata
+        // and play history right away. Start the feed so the empty state is
+        // replaced as soon as the first batch is ready.
+        view_action.start_recommendations = true;
+    }
 
     if let Some(f) = table_action.quick_filter_changed {
         library_state.quick_filter = f;
         // The displayed list is keyed on the filter, so a refresh rebuilds it.
         view_action.needs_reload = true;
+        if f == crate::components::songs_table::QuickFilter::ForYou {
+            // Starting is idempotent: an existing session just re-emits its
+            // pending list.
+            view_action.start_recommendations = true;
+        }
+    }
+
+    // Collect explicit feedback before the action is consumed. A like is the
+    // *addition* of a favorite; removing one is not a dislike, so it teaches
+    // nothing. Clearing a rating likewise stays neutral.
+    if let Some(fav_id) = table_action.toggle_favorite {
+        if !library_state.favorite_ids.contains(&fav_id) {
+            view_action
+                .recommendation_feedback
+                .push(crate::state::RecommendationFeedback::Liked(fav_id));
+        }
+    }
+    if let Some((track_id, rating)) = table_action.set_rating {
+        if rating > 0 {
+            view_action
+                .recommendation_feedback
+                .push(crate::state::RecommendationFeedback::Rated(
+                    track_id, rating,
+                ));
+        }
+    }
+    if let Some(rating) = table_action.rate_selected {
+        if rating > 0 {
+            for track in library_state.selected_tracks_in_order() {
+                view_action.recommendation_feedback.push(
+                    crate::state::RecommendationFeedback::Rated(track.id, rating),
+                );
+            }
+        }
+    }
+    if let Some((track_id, _)) = table_action.add_to_playlist {
+        view_action.recommendation_feedback.push(
+            crate::state::RecommendationFeedback::AddedToPlaylist(track_id),
+        );
+    }
+    if table_action.add_selected_to_playlist.is_some() {
+        for track in library_state.selected_tracks_in_order() {
+            view_action.recommendation_feedback.push(
+                crate::state::RecommendationFeedback::AddedToPlaylist(track.id),
+            );
+        }
+    }
+    if table_action.favorite_selected {
+        for track in library_state.selected_tracks_in_order() {
+            if !library_state.favorite_ids.contains(&track.id) {
+                view_action
+                    .recommendation_feedback
+                    .push(crate::state::RecommendationFeedback::Liked(track.id));
+            }
+        }
     }
 
     // Column dragging updates the live layout immediately, but the settings

@@ -27,6 +27,17 @@ macro_rules! define_id {
             pub fn as_uuid(&self) -> &Uuid {
                 &self.0
             }
+
+            /// Lossless `u128` form, used at boundaries that cannot depend on
+            /// `uuid` (the recommendation core's `TrackId`).
+            pub fn as_u128(&self) -> u128 {
+                self.0.as_u128()
+            }
+
+            /// Restore an id written by [`Self::as_u128`].
+            pub fn from_u128(value: u128) -> Self {
+                Self(Uuid::from_u128(value))
+            }
         }
 
         impl Default for $name {

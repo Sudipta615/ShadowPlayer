@@ -10,6 +10,7 @@ pub mod library_state;
 pub mod lyrics_editor;
 pub mod podcast_state;
 pub mod preset_library;
+pub mod recommendation_state;
 pub mod sleep_timer;
 pub mod telemetry_state;
 
@@ -24,5 +25,6 @@ pub use library_state::LibraryState;
 pub use lyrics_editor::LyricsEditorState;
 pub use podcast_state::PodcastState;
 pub use preset_library::{PresetLibraryState, StoredCurve, StoredPreset};
+pub use recommendation_state::{AnalysisQuality, RecommendationFeedback, RecommendationState};
 pub use sleep_timer::{SleepTimer, SleepTimerMode};
 pub use telemetry_state::TelemetryState;
