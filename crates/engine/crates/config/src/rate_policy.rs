@@ -34,6 +34,47 @@ impl SampleRatePolicy {
         self.select_rate_with_ranges(source_rate, supported, &[], fallback)
     }
 
+    /// Select a rate filtering through an optional allowed rates whitelist.
+    pub fn select_rate_with_allowed(
+        &self,
+        source_rate: u32,
+        supported: &[u32],
+        ranges: &[(u32, u32)],
+        allowed: &[u32],
+        fallback: RateFallbackPolicy,
+    ) -> u32 {
+        if allowed.is_empty() {
+            return self.select_rate_with_ranges(source_rate, supported, ranges, fallback);
+        }
+
+        // A whitelist names concrete rates. Keep only entries the hardware
+        // actually supports, either discretely or inside a reported range.
+        // Passing the ranges through would let an in-range rate that is *not*
+        // whitelisted win, which is exactly what the whitelist forbids.
+        let mut candidates: Vec<u32> = allowed
+            .iter()
+            .copied()
+            .filter(|&rate| {
+                supported.contains(&rate)
+                    || ranges.iter().any(|&(min, max)| rate >= min && rate <= max)
+            })
+            .collect();
+        candidates.sort_unstable();
+        candidates.dedup();
+
+        if candidates.is_empty() {
+            // No allowed rate is supported by this device. Return the closest
+            // allowed rate rather than silently selecting an unlisted one; the
+            // output layer's negotiation error is the visible failure.
+            let mut sorted = allowed.to_vec();
+            sorted.sort_unstable();
+            sorted.dedup();
+            return apply_fallback(source_rate, &sorted, fallback);
+        }
+
+        self.select_rate_with_ranges(source_rate, &candidates, &[], fallback)
+    }
+
     /// Select a rate using both discrete rates and continuous driver ranges.
     ///
     /// CPAL commonly reports a range such as 44.1–192 kHz rather than one
@@ -266,4 +307,85 @@ pub fn nearest_rate(target: u32, supported: &[u32]) -> u32 {
         .copied()
         .min_by_key(|&r| (r as i64 - target as i64).unsigned_abs())
         .unwrap_or(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_whitelist_only_returns_rates_on_the_whitelist() {
+        let supported = [44_100, 48_000, 88_200, 96_000, 192_000];
+        let allowed = [48_000, 96_000];
+
+        // FollowTrack asks for 192 kHz, which the device supports but the
+        // user excluded: the nearest allowed rate wins.
+        assert_eq!(
+            SampleRatePolicy::FollowTrack.select_rate_with_allowed(
+                192_000,
+                &supported,
+                &[],
+                &allowed,
+                RateFallbackPolicy::Nearest,
+            ),
+            96_000
+        );
+        assert_eq!(
+            SampleRatePolicy::BestSupported.select_rate_with_allowed(
+                44_100,
+                &supported,
+                &[],
+                &allowed,
+                RateFallbackPolicy::Nearest,
+            ),
+            96_000
+        );
+        assert_eq!(
+            SampleRatePolicy::Fixed(44_100).select_rate_with_allowed(
+                44_100,
+                &supported,
+                &[],
+                &allowed,
+                RateFallbackPolicy::Nearest,
+            ),
+            48_000,
+            "a fixed rate outside the whitelist must not leak through"
+        );
+    }
+
+    #[test]
+    fn whitelist_intersects_discrete_rates_and_hardware_ranges() {
+        let supported = [44_100, 48_000];
+        let ranges = [(48_000, 192_000)];
+        let allowed = [50_000, 96_000, 176_400];
+
+        assert_eq!(
+            SampleRatePolicy::FollowTrack.select_rate_with_allowed(
+                50_000,
+                &supported,
+                &ranges,
+                &allowed,
+                RateFallbackPolicy::Nearest,
+            ),
+            50_000,
+            "an in-range whitelisted rate must be accepted"
+        );
+    }
+
+    #[test]
+    fn an_entirely_unsupported_whitelist_returns_the_closest_allowed_rate() {
+        let allowed = [88_200, 96_000];
+        let selected = SampleRatePolicy::FollowTrack.select_rate_with_allowed(
+            44_100,
+            &[44_100, 48_000],
+            &[],
+            &allowed,
+            RateFallbackPolicy::Nearest,
+        );
+        assert!(
+            allowed.contains(&selected),
+            "the fallback must stay inside the whitelist, got {selected}"
+        );
+        assert_eq!(selected, 88_200);
+    }
 }

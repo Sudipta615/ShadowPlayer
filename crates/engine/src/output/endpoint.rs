@@ -221,6 +221,7 @@ impl EndpointWorker {
         master_rate: u32,
         resampler_quality: config::ResamplerQuality,
         resampler_filter: config::ResamplerFilter,
+        resampler_cutoff_ratio: f32,
         precision: config::PrecisionMode,
     ) -> Result<Self, OutputError> {
         config.gain = config.gain.clamp(0.0, 4.0);
@@ -237,18 +238,20 @@ impl EndpointWorker {
         let resampler = if rate != master_rate && master_rate > 0 {
             let built = match precision {
                 config::PrecisionMode::Performance => {
-                    crate::dsp::resampler::AudioResampler::<f32>::new_with_filter(
+                    crate::dsp::resampler::AudioResampler::<f32>::new_with_filter_and_cutoff(
                         resampler_quality,
                         resampler_filter,
+                        f64::from(resampler_cutoff_ratio),
                         master_rate as f32,
                         rate as f32,
                     )
                     .map(crate::dsp::resampler::GenericResampler::F32)
                 }
                 config::PrecisionMode::Quality => {
-                    crate::dsp::resampler::AudioResampler::<f64>::new_with_filter(
+                    crate::dsp::resampler::AudioResampler::<f64>::new_with_filter_and_cutoff(
                         resampler_quality,
                         resampler_filter,
+                        f64::from(resampler_cutoff_ratio),
                         master_rate as f32,
                         rate as f32,
                     )
@@ -570,6 +573,13 @@ impl EndpointWorker {
     pub fn set_resampler_filter(&mut self, filter: config::ResamplerFilter) {
         if let Some(resampler) = self.resampler.as_mut() {
             resampler.set_filter(filter);
+        }
+    }
+
+    /// Change the endpoint resampler's polyphase cutoff ratio in place.
+    pub fn set_resampler_cutoff_ratio(&mut self, cutoff_ratio: f32) {
+        if let Some(resampler) = self.resampler.as_mut() {
+            resampler.set_cutoff_ratio(f64::from(cutoff_ratio));
         }
     }
 

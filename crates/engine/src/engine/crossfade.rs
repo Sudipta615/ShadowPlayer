@@ -146,6 +146,7 @@ impl AudioEngine {
         let incoming_resampler = recovery::build_resampler(
             self.config.resampler_quality,
             self.config.resampler_filter,
+            self.config.resampler_cutoff_ratio,
             incoming_sample_rate as f32,
             self.output_sample_rate as f32,
             self.speed,

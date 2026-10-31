@@ -464,6 +464,19 @@ pub enum EngineCommand {
     /// decode and endpoint resamplers on the control path.
     SetResamplerFilter(config::ResamplerFilter),
 
+    /// Select the polyphase low-pass cutoff ratio (0.85 ..= 0.999 of the
+    /// lower Nyquist). Rebuilds the active decode and endpoint resamplers on
+    /// the control path.
+    SetResamplerCutoffRatio(f32),
+
+    /// Replace the set of output sample rates the engine may negotiate.
+    /// Takes effect on the next rate selection (track load or device reopen).
+    SetAllowedSampleRates(Vec<u32>),
+
+    /// Set the DAC warmup silence inserted at the start of the next stream,
+    /// in milliseconds (clamped to 0 ..= 500).
+    SetDacWarmupMs(u32),
+
     /// Select the final quantization noise shaper. Takes effect on the next
     /// stream open; the active converter keeps its current design.
     SetNoiseShaper(config::NoiseShaper),

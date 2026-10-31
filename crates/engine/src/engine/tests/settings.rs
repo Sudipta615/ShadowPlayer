@@ -144,6 +144,7 @@ fn new_filter_and_dsd_commands_reach_the_engine_config() {
         enabled: true,
         modulator: SdmModulator::SeventhOrder,
         rate: SdmRate::Dsd256,
+        dsd_bypass: true,
     };
     let dac = DacCorrectionConfig {
         enabled: true,
@@ -645,5 +646,128 @@ fn capture_start_on_a_device_that_does_not_exist_never_reports_success() {
     assert!(
         !handle.settings().capture_active,
         "a failed capture start must not leave `capture_active` true"
+    );
+}
+
+// ── Output negotiation, cutoff and warmup ─────────────────────────────
+
+#[test]
+fn new_output_settings_commands_are_clamped_and_normalized() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    let handle = engine.handle();
+
+    let _ = handle.send_command(EngineCommand::SetResamplerCutoffRatio(1.5));
+    let _ = handle.send_command(EngineCommand::SetAllowedSampleRates(vec![
+        96_000, 44_100, 44_100, 7_000, 2_000_000, 48_000,
+    ]));
+    let _ = handle.send_command(EngineCommand::SetDacWarmupMs(9_000));
+    engine.tick();
+
+    assert_eq!(
+        engine.config.resampler_cutoff_ratio, 0.999,
+        "an out-of-range cutoff must clamp to the filter's supported range"
+    );
+    assert_eq!(
+        engine.config.allowed_sample_rates,
+        vec![44_100, 48_000, 96_000],
+        "the whitelist must be sorted, deduplicated, and range-checked"
+    );
+    assert_eq!(
+        engine.config.dac_warmup_ms, 500,
+        "the warmup must be capped at 500 ms"
+    );
+
+    let _ = handle.send_command(EngineCommand::SetResamplerCutoffRatio(f32::NAN));
+    engine.tick();
+    assert_eq!(
+        engine.config.resampler_cutoff_ratio,
+        config::default_resampler_cutoff_ratio(),
+        "a non-finite cutoff must fall back to the documented default"
+    );
+
+    let _ = handle.send_command(EngineCommand::SetResamplerCutoffRatio(0.1));
+    engine.tick();
+    assert_eq!(
+        engine.config.resampler_cutoff_ratio, 0.85,
+        "a cutoff below the filter design range must clamp, not pass through"
+    );
+}
+
+/// A sink that records every interleaved sample, so a test can prove what the
+/// engine actually sent rather than what its counters claim.
+struct RecordingSink(std::sync::Arc<std::sync::Mutex<Vec<f32>>>);
+
+impl crate::sink::SampleSink for RecordingSink {
+    fn push_interleaved(&self, samples: &[f32], channels: usize) -> usize {
+        self.0.lock().unwrap().extend_from_slice(samples);
+        samples.len() / channels.max(1)
+    }
+
+    fn reset(&self) {
+        self.0.lock().unwrap().clear();
+    }
+}
+
+#[test]
+fn dac_warmup_delivers_exactly_zero_frames_before_audio() {
+    let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let config = EngineConfig {
+        dac_warmup_ms: 20,
+        ..Default::default()
+    };
+    let mut engine = AudioEngine::with_sink(
+        config,
+        Box::new(RecordingSink(std::sync::Arc::clone(&recorded))),
+    )
+    .unwrap();
+    engine.output_sample_rate = 48_000;
+
+    engine.arm_dac_warmup();
+    let mut pumps = 0;
+    while engine.pump_dac_warmup() {
+        pumps += 1;
+        assert!(pumps < 100, "warmup must terminate");
+    }
+
+    let samples = recorded.lock().unwrap().clone();
+    assert_eq!(
+        samples.len(),
+        960 * 2,
+        "20 ms at 48 kHz stereo is 960 zero frames"
+    );
+    assert!(
+        samples.iter().all(|&sample| sample == 0.0),
+        "warmup must write silence, never decoder output"
+    );
+}
+
+#[test]
+fn dac_warmup_is_skipped_for_dsd_transports() {
+    let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let config = EngineConfig {
+        dac_warmup_ms: 20,
+        ..Default::default()
+    };
+    let mut engine = AudioEngine::with_sink(
+        config,
+        Box::new(RecordingSink(std::sync::Arc::clone(&recorded))),
+    )
+    .unwrap();
+    engine.output_sample_rate = 48_000;
+
+    for transport in 0..3 {
+        engine.dsd.native_dsd_active = transport == 0;
+        engine.dsd.dop_active = transport == 1;
+        engine.dsd.sdm_active = transport == 2;
+
+        engine.arm_dac_warmup();
+        assert!(
+            !engine.pump_dac_warmup(),
+            "a DSD transport must not start a PCM warmup"
+        );
+    }
+    assert!(
+        recorded.lock().unwrap().is_empty(),
+        "skipped warmups must not write anything"
     );
 }

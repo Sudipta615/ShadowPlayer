@@ -7,7 +7,7 @@ use std::{
 
 use arc_swap::ArcSwap;
 use crossbeam::channel::{self, Sender};
-use log::warn;
+use log::{info, warn};
 
 use config::EngineConfig;
 
@@ -185,6 +185,7 @@ impl AudioEngine {
             dsd: DsdTransportState::default(),
             loudness_scan: LoudnessScanState::default(),
             recovery: RecoveryState::default(),
+            dac_warmup_frames_remaining: 0,
             scratch: EngineScratch::default(),
             spatial_persistence,
             dsp_persistence,
@@ -285,6 +286,59 @@ impl AudioEngine {
             return self.push_sdm(samples, channels);
         }
         self.sample_sink.push_interleaved(samples, channels)
+    }
+
+    /// Arm the configured DAC warmup for the stream that is opening.
+    ///
+    /// Native DSD, DoP and PCM→SDM bypass the PCM sink path, so there is no
+    /// PCM warmup to send; the counter stays at zero for those transports.
+    pub(crate) fn arm_dac_warmup(&mut self) {
+        let bypassed = self.dsd.native_dsd_active || self.dsd.dop_active || self.dsd.sdm_active;
+        if self.config.dac_warmup_ms == 0 || bypassed {
+            self.dac_warmup_frames_remaining = 0;
+            return;
+        }
+        let rate = u64::from(self.output_sample_rate.max(1));
+        self.dac_warmup_frames_remaining =
+            (u64::from(self.config.dac_warmup_ms) * rate).div_ceil(1000);
+        if self.dac_warmup_frames_remaining > 0 {
+            info!(
+                "DAC warmup armed: {} ms ({} frames at {} Hz)",
+                self.config.dac_warmup_ms, self.dac_warmup_frames_remaining, rate
+            );
+        }
+    }
+
+    /// Send the next slice of DAC warmup silence.
+    ///
+    /// Returns `true` while the warmup is still active; the caller must not
+    /// decode into the sink until it returns `false`, otherwise music would
+    /// interleave with the warmup zeros.
+    pub(crate) fn pump_dac_warmup(&mut self) -> bool {
+        if self.dac_warmup_frames_remaining == 0 {
+            return false;
+        }
+        if self.dsd.native_dsd_active || self.dsd.dop_active || self.dsd.sdm_active {
+            // A DSD transport owns the sink now: the PCM warmup cannot run.
+            self.dac_warmup_frames_remaining = 0;
+            return false;
+        }
+        let channels = self
+            .audio_output
+            .as_ref()
+            .map(|output| output.output_info().channels as usize)
+            .unwrap_or(2)
+            .max(1);
+        let rate = u64::from(self.output_sample_rate.max(1));
+        // At most ~20 ms per tick; sink/ring backpressure paces the rest.
+        let max_frames = (rate / 50).max(64);
+        let frames = self.dac_warmup_frames_remaining.min(max_frames) as usize;
+        let zeros = vec![0.0f32; frames * channels];
+        let written = self.push_to_sink(&zeros, channels);
+        self.dac_warmup_frames_remaining = self
+            .dac_warmup_frames_remaining
+            .saturating_sub(written as u64);
+        self.dac_warmup_frames_remaining > 0
     }
 
     /// Route a working-rate PCM block through the PCM→SDM stage and into the

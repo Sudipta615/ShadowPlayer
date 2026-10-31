@@ -179,7 +179,7 @@ pub(super) fn render_advanced_tab(
                             );
                         });
                         ui.label(
-                            egui::RichText::new(tr!("Calibrate your headphones or IEMs using Harman/Diffuse-field acoustic targets from 4,000+ lab measurements."))
+                            egui::RichText::new(tr!("Calibrate your headphones or IEMs using Harman/Diffuse-field acoustic targets from 8,850+ measurements. Auto-detects connected headphones."))
                                 .font(crate::theme::font(11.0))
                                 .color(theme.text_secondary),
                         );

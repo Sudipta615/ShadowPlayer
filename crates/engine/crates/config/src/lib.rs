@@ -28,9 +28,9 @@ pub use dsp_config::{
     MatrixFirRouteConfig, MultibandCompressorConfig, SdmConfig, StereoEnhancerConfig,
 };
 pub use engine_config::{
-    AuxBusConfig, ConfigIssue, ConfigIssueKind, ConfigSeverity, ConfigValidation, EndpointConfig,
-    EngineConfig, EnginePreset, PluginHostConfig, PluginSlotConfig, SlotSendConfig, SlotTrimEntry,
-    SpatialConfig, SpatialRoomConfig,
+    default_resampler_cutoff_ratio, AuxBusConfig, ConfigIssue, ConfigIssueKind, ConfigSeverity,
+    ConfigValidation, EndpointConfig, EngineConfig, EnginePreset, PluginHostConfig,
+    PluginSlotConfig, SlotSendConfig, SlotTrimEntry, SpatialConfig, SpatialRoomConfig,
 };
 pub use enums::{
     AudioBackend, ChannelPolicy, CompressorDetector, CrossfadeCurve, CrossfeedProfile,

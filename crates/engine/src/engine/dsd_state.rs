@@ -46,6 +46,61 @@ pub fn dop_exclusive_reason(
     }
 }
 
+/// The one transport the engine will attempt for a newly opened source.
+///
+/// Native DSD, DoP and PCM→SDM all reconfigure the same output stream, so
+/// they must be mutually exclusive. Deriving the choice once from the source,
+/// the DSD output preference and the SDM config keeps negotiation from
+/// engaging two transports at once (the previous code could negotiate native
+/// DSD and then reconfigure the device for SDM on the same load).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DsdTransportPlan {
+    /// PCM (or DSD→PCM conversion) through the normal DSP chain.
+    Pcm,
+    /// Raw 1-bit DSD bitstream to a native-DSD DAC.
+    Native,
+    /// DSD-over-PCM packed into 24-bit frames.
+    Dop,
+    /// PCM→SDM modulation to native DSD (also used to re-modulate DSD
+    /// sources when `sdm.dsd_bypass` is off).
+    Sdm,
+}
+
+/// Choose the transport plan for a source.
+///
+/// Precedence:
+/// 1. A PCM source uses SDM when enabled, otherwise PCM.
+/// 2. A DSD source re-modulates through SDM when SDM is enabled and
+///    `dsd_bypass` is off. This deliberately overrides `dsd_output`: the user
+///    asked for the modulator, and letting native/DoP run first would leave
+///    the device in the wrong mode for the SDM attempt.
+/// 3. Otherwise a DSD source follows `dsd_output` exactly.
+pub(crate) fn plan_transport(
+    is_dsd: bool,
+    dsd_output: config::DsdOutput,
+    sdm: &config::SdmConfig,
+) -> DsdTransportPlan {
+    if is_dsd {
+        if sdm.enabled && !sdm.dsd_bypass {
+            return DsdTransportPlan::Sdm;
+        }
+    } else if sdm.enabled {
+        return DsdTransportPlan::Sdm;
+    }
+
+    match dsd_output {
+        config::DsdOutput::PcmConvert => DsdTransportPlan::Pcm,
+        config::DsdOutput::DoP => DsdTransportPlan::Dop,
+        config::DsdOutput::NativeDsd => {
+            if is_dsd {
+                DsdTransportPlan::Native
+            } else {
+                DsdTransportPlan::Pcm
+            }
+        }
+    }
+}
+
 pub(crate) struct DsdTransportState {
     /// True when the current track is being output as DSD-over-PCM (DoP): raw
     /// DSD packed into 24-bit frames, DSP fully bypassed, no resampling.
@@ -97,6 +152,86 @@ impl Default for DsdTransportState {
             sdm_output: None,
             sdm_plan: None,
             sdm_fallback_reason: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sdm(enabled: bool, dsd_bypass: bool) -> config::SdmConfig {
+        config::SdmConfig {
+            enabled,
+            dsd_bypass,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn pcm_source_only_uses_sdm_when_enabled() {
+        assert_eq!(
+            plan_transport(false, config::DsdOutput::PcmConvert, &sdm(false, true)),
+            DsdTransportPlan::Pcm
+        );
+        assert_eq!(
+            plan_transport(false, config::DsdOutput::PcmConvert, &sdm(true, true)),
+            DsdTransportPlan::Sdm
+        );
+        // dsd_output selects the transport for DSD sources only; a PCM source
+        // must not turn it into a DSD transport.
+        assert_eq!(
+            plan_transport(false, config::DsdOutput::NativeDsd, &sdm(false, true)),
+            DsdTransportPlan::Pcm
+        );
+    }
+
+    #[test]
+    fn dsd_source_follows_dsd_output_when_bypassing_sdm() {
+        for (output, expected) in [
+            (config::DsdOutput::PcmConvert, DsdTransportPlan::Pcm),
+            (config::DsdOutput::DoP, DsdTransportPlan::Dop),
+            (config::DsdOutput::NativeDsd, DsdTransportPlan::Native),
+        ] {
+            assert_eq!(
+                plan_transport(true, output, &sdm(false, true)),
+                expected,
+                "disabled SDM must not change the requested DSD transport"
+            );
+            assert_eq!(
+                plan_transport(true, output, &sdm(true, true)),
+                expected,
+                "dsd_bypass=true must keep native DSD bit-perfect"
+            );
+        }
+    }
+
+    #[test]
+    fn dsd_source_remodulates_through_sdm_when_bypass_is_off() {
+        for output in [
+            config::DsdOutput::PcmConvert,
+            config::DsdOutput::DoP,
+            config::DsdOutput::NativeDsd,
+        ] {
+            assert_eq!(
+                plan_transport(true, output, &sdm(true, false)),
+                DsdTransportPlan::Sdm,
+                "SDM with dsd_bypass=false must own the transport for DSD sources"
+            );
+        }
+    }
+
+    #[test]
+    fn bypass_flag_is_inert_while_sdm_is_disabled() {
+        for output in [
+            config::DsdOutput::PcmConvert,
+            config::DsdOutput::DoP,
+            config::DsdOutput::NativeDsd,
+        ] {
+            assert_eq!(
+                plan_transport(true, output, &sdm(false, false)),
+                plan_transport(true, output, &sdm(false, true))
+            );
         }
     }
 }

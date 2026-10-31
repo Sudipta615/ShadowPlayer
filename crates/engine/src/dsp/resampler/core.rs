@@ -156,6 +156,10 @@ pub struct AudioResampler<T: rubato::Sample + Float + Default + Send + Sync + 's
     /// rebuilds; [`Self::effective_filter`] reports the family actually
     /// running when construction had to fall back.
     filter: ResamplerFilter,
+    /// Low-pass cutoff as a fraction of the lower Nyquist (0.85 ..= 0.999).
+    /// Only the polyphase families use it; the rubato FFT engine keeps its
+    /// own fixed design.
+    cutoff_ratio: f64,
     /// Playback speed multiplier (1.0 = normal)
     speed: f32,
     /// Input buffer for accumulating samples before processing
@@ -219,6 +223,19 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         source_rate: f32,
         output_rate: f32,
     ) -> Result<Self, ResamplerError> {
+        Self::new_with_filter_and_cutoff(quality, filter, 0.95, source_rate, output_rate)
+    }
+
+    /// Create a new resampler with an explicit filter family, cutoff ratio and
+    /// sample rates. The cutoff is clamped to the polyphase design's supported
+    /// range (0.85 ..= 0.999 of the lower Nyquist).
+    pub fn new_with_filter_and_cutoff(
+        quality: ResamplerQuality,
+        filter: ResamplerFilter,
+        cutoff_ratio: f64,
+        source_rate: f32,
+        output_rate: f32,
+    ) -> Result<Self, ResamplerError> {
         // `is_finite`, not `<= 0.0`. Every NaN comparison is false, so a NaN rate
         // sailed past a `<= 0.0` guard: `NaN.round() as usize` saturates to 0,
         // `.max(1)` turned that into 1, and the result was a 1 Hz → 48 kHz
@@ -248,7 +265,8 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
                 output_rate: out,
             });
         }
-        let inner = Self::create_resampler(quality, filter, src, out)?;
+        let cutoff_ratio = cutoff_ratio.clamp(0.85, 0.999);
+        let inner = Self::create_resampler(quality, filter, cutoff_ratio, src, out)?;
         let rebuilt_quality = inner.quality();
         let mut resampler = Self {
             inner,
@@ -256,6 +274,7 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
             output_rate: out,
             requested_quality: quality,
             filter,
+            cutoff_ratio,
             speed: 1.0,
             input_buffers: [Vec::new(), Vec::new()],
             input_pos: 0,
@@ -291,11 +310,18 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
     fn create_resampler(
         quality: ResamplerQuality,
         filter: ResamplerFilter,
+        cutoff_ratio: f64,
         source_rate: usize,
         output_rate: usize,
     ) -> Result<ResamplerInner<T>, ResamplerError> {
         if filter.is_polyphase() {
-            match PolyphaseResampler::new(filter, quality, source_rate as u32, output_rate as u32) {
+            match PolyphaseResampler::new_with_cutoff(
+                filter,
+                quality,
+                source_rate as u32,
+                output_rate as u32,
+                cutoff_ratio,
+            ) {
                 Ok(p) => return Ok(ResamplerInner::Polyphase(p)),
                 Err(err) => log::warn!(
                     "Polyphase {:?} resampler unavailable for {} -> {} Hz, \
@@ -885,6 +911,23 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         }
     }
 
+    /// Set the polyphase low-pass cutoff ratio (triggers a rebuild).
+    ///
+    /// The ratio is relative to the lower of the two Nyquist frequencies and
+    /// is clamped to the filter design's supported range.
+    pub fn set_cutoff_ratio(&mut self, cutoff_ratio: f64) {
+        let cutoff_ratio = cutoff_ratio.clamp(0.85, 0.999);
+        if (cutoff_ratio - self.cutoff_ratio).abs() > 1e-6 {
+            self.cutoff_ratio = cutoff_ratio;
+            self.needs_rebuild = true;
+        }
+    }
+
+    /// The cutoff ratio the resampler is configured to use.
+    pub fn cutoff_ratio(&self) -> f64 {
+        self.cutoff_ratio
+    }
+
     /// The quality profile the caller requested. If construction of the
     /// requested profile failed, the resampler silently fell back to
     /// [`Self::effective_quality`] — see [`Self::quality_fell_back`].
@@ -966,11 +1009,18 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
         let effective_source = (effective_source_f32.round() as usize).max(1);
         let quality = self.pending_quality.unwrap_or_else(|| self.inner.quality());
         let filter = self.filter;
+        let cutoff_ratio = self.cutoff_ratio;
         let output_rate = self.output_rate;
 
         let (tx, rx) = crossbeam::channel::bounded(1);
         std::thread::spawn(move || {
-            let result = Self::create_resampler(quality, filter, effective_source, output_rate);
+            let result = Self::create_resampler(
+                quality,
+                filter,
+                cutoff_ratio,
+                effective_source,
+                output_rate,
+            );
             let _ = tx.send(result);
         });
 
@@ -1205,6 +1255,24 @@ impl GenericResampler {
         match self {
             Self::F32(r) => r.set_filter(filter),
             Self::F64(r) => r.set_filter(filter),
+        }
+    }
+
+    /// Set the polyphase cutoff ratio on either precision path.
+    #[inline]
+    pub fn set_cutoff_ratio(&mut self, cutoff_ratio: f64) {
+        match self {
+            Self::F32(r) => r.set_cutoff_ratio(cutoff_ratio),
+            Self::F64(r) => r.set_cutoff_ratio(cutoff_ratio),
+        }
+    }
+
+    /// The configured polyphase cutoff ratio.
+    #[inline]
+    pub fn cutoff_ratio(&self) -> f64 {
+        match self {
+            Self::F32(r) => r.cutoff_ratio(),
+            Self::F64(r) => r.cutoff_ratio(),
         }
     }
 

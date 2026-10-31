@@ -215,7 +215,11 @@ impl AudioEngine {
             // Check for crossfade trigger before decoding.
             self.check_crossfade_trigger();
 
-            self.decode_and_process();
+            // DAC warmup owns the sink until its silence has been delivered;
+            // decoding earlier would interleave music into the warmup burst.
+            if !self.pump_dac_warmup() {
+                self.decode_and_process();
+            }
             if self.audio_output.is_none() {
                 // Dummy-mode drain: no audio output device, but we still
                 // consume from the ring buffer so the decode loop doesn't

@@ -59,8 +59,15 @@ pub struct SettingsTabState {
     pub fallback_policy: FallbackPolicy,
     /// Resampler filter family (FFT or one of the polyphase designs).
     pub resampler_filter: ResamplerFilter,
+    /// Cutoff frequency ratio for polyphase resampling (0.85 ..= 0.999, default 0.95).
+    pub resampler_cutoff_ratio: f32,
+    /// Warmup silence duration in milliseconds (0..500 ms) sent to external DAC on start.
+    pub dac_warmup_ms: u32,
     /// Final quantization noise shaper; applies on the next stream open.
     pub noise_shaper: NoiseShaper,
+    /// Whitelist of output sample rates the engine may negotiate. An empty
+    /// list means every hardware-supported rate is permitted.
+    pub allowed_sample_rates: Vec<u32>,
     /// How DSD sources reach the DAC (PCM conversion, DoP, native DSD).
     pub dsd_output: DsdOutput,
     /// DSD→PCM decimation filter; applies on the next DSD stream.
@@ -262,7 +269,10 @@ impl Default for SettingsTabState {
             resampler_quality: ResamplerQuality::HighQuality,
             fallback_policy: FallbackPolicy::Allow,
             resampler_filter: ResamplerFilter::Fft,
+            resampler_cutoff_ratio: 0.95,
+            dac_warmup_ms: 0,
             noise_shaper: NoiseShaper::Tpdf,
+            allowed_sample_rates: Vec::new(),
             dsd_output: DsdOutput::PcmConvert,
             dsd_noise_filter: DsdNoiseFilter::Standard,
             ultrasonic_filter: UltrasonicFilter::Off,
@@ -386,7 +396,10 @@ pub struct SettingsTabActions {
     pub resampler_quality_changed: Option<ResamplerQuality>,
     pub fallback_policy_changed: Option<FallbackPolicy>,
     pub resampler_filter_changed: Option<ResamplerFilter>,
+    pub resampler_cutoff_ratio_changed: Option<f32>,
+    pub dac_warmup_ms_changed: Option<u32>,
     pub noise_shaper_changed: Option<NoiseShaper>,
+    pub allowed_sample_rates_changed: Option<Vec<u32>>,
     pub dsd_output_changed: Option<DsdOutput>,
     pub dsd_noise_filter_changed: Option<DsdNoiseFilter>,
     pub ultrasonic_filter_changed: Option<UltrasonicFilter>,
@@ -603,4 +616,35 @@ pub struct RecommendationSettingsContext<'a> {
     pub analysis_failed: usize,
     /// File currently being analysed, or the last status line.
     pub analysis_current: &'a str,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_saved_before_the_output_fields_existed_still_load() {
+        let state: SettingsTabState = serde_json::from_str("{}").expect("old settings JSON");
+        assert_eq!(state.resampler_cutoff_ratio, 0.95);
+        assert_eq!(state.dac_warmup_ms, 0);
+        assert!(
+            state.allowed_sample_rates.is_empty(),
+            "an absent whitelist means every hardware-supported rate stays available"
+        );
+    }
+
+    #[test]
+    fn the_new_output_fields_round_trip() {
+        let state = SettingsTabState {
+            resampler_cutoff_ratio: 0.87,
+            dac_warmup_ms: 120,
+            allowed_sample_rates: vec![44_100, 96_000],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SettingsTabState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.resampler_cutoff_ratio, 0.87);
+        assert_eq!(back.dac_warmup_ms, 120);
+        assert_eq!(back.allowed_sample_rates, vec![44_100, 96_000]);
+    }
 }

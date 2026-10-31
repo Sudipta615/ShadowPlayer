@@ -177,6 +177,10 @@ pub struct AudioEngine {
     pub(crate) dsd: DsdTransportState,
     pub(crate) loudness_scan: LoudnessScanState,
     pub(crate) recovery: RecoveryState,
+    /// Frames of digital silence still to send before decoding resumes.
+    /// Armed when an output stream opens/reopens, and skipped for native
+    /// DSD/DoP/SDM transports where the PCM warmup path is not used.
+    pub(crate) dac_warmup_frames_remaining: u64,
     pub(crate) scratch: EngineScratch,
     /// Auto-save/restore of the active spatial scene. Control
     /// thread only: restores at construction, writes on change + shutdown.

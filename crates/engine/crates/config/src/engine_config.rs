@@ -37,6 +37,16 @@ pub struct EngineConfig {
     /// bank and publish measured metadata. See [`crate::ResamplerFilter`].
     #[serde(default)]
     pub resampler_filter: crate::ResamplerFilter,
+    /// Cutoff frequency ratio for the polyphase resampler low-pass filter
+    /// (0.85 ..= 0.999, default 0.95 = 95% of Nyquist).
+    #[serde(default = "default_resampler_cutoff_ratio")]
+    pub resampler_cutoff_ratio: f32,
+    /// Warmup silence duration in milliseconds (0..500 ms) sent to external DACs on stream start.
+    #[serde(default)]
+    pub dac_warmup_ms: u32,
+    /// Whitelist of permitted sample rates. Empty allows all hardware rates.
+    #[serde(default)]
+    pub allowed_sample_rates: Vec<u32>,
     pub crossfade: CrossfadeConfig,
     pub performance_mode: PerformanceMode,
     pub precision_mode: PrecisionMode,
@@ -540,6 +550,10 @@ impl SpatialRoomConfig {
     }
 }
 
+pub fn default_resampler_cutoff_ratio() -> f32 {
+    0.95
+}
+
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
@@ -549,6 +563,9 @@ impl Default for EngineConfig {
             noise_shaper: crate::NoiseShaper::Tpdf,
             resampler_quality: ResamplerQuality::Balanced,
             resampler_filter: crate::ResamplerFilter::Fft,
+            resampler_cutoff_ratio: default_resampler_cutoff_ratio(),
+            dac_warmup_ms: 0,
+            allowed_sample_rates: Vec::new(),
             crossfade: CrossfadeConfig::default(),
             performance_mode: PerformanceMode::Normal,
             precision_mode: PrecisionMode::Performance,

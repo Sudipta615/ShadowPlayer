@@ -125,12 +125,23 @@ pub struct PolyphaseResampler<T: Float + NumCast + ToPrimitive + Default + Send 
 }
 
 impl<T: Float + NumCast + ToPrimitive + Default + Send + Sync + 'static> PolyphaseResampler<T> {
-    /// Build a polyphase resampler. `filter` must be a polyphase family.
+    /// Build a polyphase resampler with default 0.95 (95% Nyquist) cutoff.
     pub fn new(
         filter: ResamplerFilter,
         quality: ResamplerQuality,
         input_rate: u32,
         output_rate: u32,
+    ) -> Result<Self, ResamplerError> {
+        Self::new_with_cutoff(filter, quality, input_rate, output_rate, 0.95)
+    }
+
+    /// Build a polyphase resampler with customizable cutoff ratio (0.85 ..= 0.999).
+    pub fn new_with_cutoff(
+        filter: ResamplerFilter,
+        quality: ResamplerQuality,
+        input_rate: u32,
+        output_rate: u32,
+        cutoff_ratio: f64,
     ) -> Result<Self, ResamplerError> {
         if !filter.is_polyphase() {
             return Err(ResamplerError::CreationFailed {
@@ -164,9 +175,10 @@ impl<T: Float + NumCast + ToPrimitive + Default + Send + Sync + 'static> Polypha
             });
         }
 
-        // The ideal low-pass cutoff at the common rate is half the *lower* of
-        // the two Nyquists: 0.5/max(L, M) cycles per common-rate sample.
-        let fc = 0.5 / l.max(m) as f64;
+        // The ideal low-pass cutoff at the common rate is scaled by the cutoff ratio:
+        // (0.5 * ratio) / max(L, M) cycles per common-rate sample.
+        let ratio = cutoff_ratio.clamp(0.85, 0.999);
+        let fc = (0.5 * ratio) / l.max(m) as f64;
         let mut prototype = design_prototype(filter, prototype_taps, fc, l);
         if filter == ResamplerFilter::MinimumPhase {
             prototype = minimum_phase(&prototype, taps, quality)?;
@@ -840,5 +852,51 @@ mod tests {
         assert!(s.contains("kaiser"));
         assert!(s.contains("linear phase"));
         assert!(s.contains("640 taps") || s.contains("640"));
+    }
+
+    #[test]
+    fn cutoff_ratio_moves_the_anti_aliasing_edge() {
+        // 21.5 kHz is above 0.85 × Nyquist (18.7 kHz) but below
+        // 0.99 × Nyquist (21.8 kHz), so the same tone must survive one
+        // filter and be rejected by the other.
+        fn rms_at(cutoff: f64) -> f64 {
+            let mut r = PolyphaseResampler::<f32>::new_with_cutoff(
+                ResamplerFilter::Kaiser,
+                ResamplerQuality::HighQuality,
+                IN,
+                96_000,
+                cutoff,
+            )
+            .expect("filter construction");
+            let delay = r.output_delay() as usize;
+            let mut out = [
+                vec![0.0f32; r.output_frames_max()],
+                vec![0.0f32; r.output_frames_max()],
+            ];
+            let mut collected = Vec::new();
+            let mut input = [vec![0.0f32; CHUNK_SIZE], vec![0.0f32; CHUNK_SIZE]];
+            let mut phase = 0.0f64;
+            for _ in 0..32 {
+                let [left, right] = &mut input;
+                for (l, rr) in left.iter_mut().zip(right.iter_mut()) {
+                    let sample = (2.0 * std::f64::consts::PI * 21_500.0 * phase / IN as f64).sin();
+                    phase += 1.0;
+                    *l = sample as f32;
+                    *rr = sample as f32;
+                }
+                let n = r.output_frames_next();
+                let produced = r.process(&input, &mut out, n);
+                collected.extend_from_slice(&out[0][..produced]);
+            }
+            let tail = &collected[delay + 4096..];
+            (tail.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / tail.len() as f64).sqrt()
+        }
+
+        let wide = rms_at(0.99);
+        let narrow = rms_at(0.85);
+        assert!(
+            narrow < wide * 0.25,
+            "0.85 cutoff should reject 21.5 kHz much more than 0.99: {narrow:.5} vs {wide:.5}"
+        );
     }
 }

@@ -40,6 +40,7 @@ impl AudioEngine {
                     self.output_sample_rate,
                     self.config.resampler_quality,
                     self.config.resampler_filter,
+                    self.config.resampler_cutoff_ratio,
                     self.config.precision_mode,
                 )
                 .map_err(|e| EngineError::Config(format!("Endpoint open: {e}")))?,
@@ -98,6 +99,7 @@ impl AudioEngine {
             _ => {}
         }
         self.output_sample_rate = output.sample_rate();
+        self.arm_dac_warmup();
         output.start()?;
         output.pause();
         self.audio_output = Some(output);

@@ -259,6 +259,18 @@ impl ShadowPlayerApp {
             }
         }
 
+        // The AutoEQ suggestion matches against a display name, not the
+        // backend id stored in settings. Resolve through the device list
+        // (`id`/`name`/`is_default`) so the name shown is the name matched,
+        // falling back to the default device when the user has not pinned one.
+        if self.dsp_state.autoeq.is_open {
+            // The device list is normally populated by the settings page.
+            // Opening AutoEQ directly must still resolve the connected
+            // headphone, so make sure the cache exists before matching.
+            self.dsp_state.refresh_output_devices(&self.session, false);
+            self.dsp_state.autoeq.active_device_name = self.dsp_state.resolve_autoeq_device_name();
+        }
+
         if let Some(curve) = show_autoeq_modal(ctx, &mut self.dsp_state.autoeq, &self.theme) {
             self.dsp_state.eq_panel.apply_imported_curve(&curve);
             self.dsp_state.push_imported_eq(&self.session);

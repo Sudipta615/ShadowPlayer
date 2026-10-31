@@ -4,6 +4,21 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-10-31
+
+*Released with audio-engine 1.12.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **AutoEQ Headphone Auto-Detection & Quick Calibration.** Automatic matching of active audio output device display names (resolving WASAPI endpoint IDs and CoreAudio UIDs) against 8,850+ acoustic target measurement profiles with stop-word tokenization. Shows an interactive suggestion banner in the AutoEQ modal with one-click "Apply Match".
+- **Polyphase Resampler Cutoff Tuning.** User-configurable anti-aliasing low-pass cutoff ratio ($0.85 \dots 0.999 \times \text{Nyquist}$, default 0.95) for Kaiser, Blackman-Harris, minimum-phase, apodizing, and Sinc-M resamplers, triggering dynamic filter rebuilds on change.
+- **Allowed Sample Rates Whitelist.** User-definable whitelist for output sample rates across 44.1 kHz and 48 kHz families up to 768 kHz, filtering device negotiation to avoid jitter, PLL unlock, or hardware-specific filter degradation at unsupported rates.
+- **DAC Warmup on Start.** Configurable zero-frame burst ($0 \dots 500\text{ ms}$) delivered on stream initialization to allow external DAC clock PLLs to achieve lock without startup pops or clicks.
+- **Native DSD Bypass for SDM.** Dedicated `dsd_bypass` toggle ensuring native DSF/DFF bitstreams bypass delta-sigma re-modulation and play bit-perfect to the DAC while SDM modulation remains active for PCM streams, coordinated through a unified `DsdTransportPlan`.
+- **Expanded Settings Index & Localization.** Added 4 new settings entries to the searchable settings index (119 total) with complete German (`de.json`) and English (`en.json`) localizations.
+
+---
+
 ## [0.26.0] - 2026-10-29
 
 *Released with audio-engine 1.11.0. The player and the engine are versioned separately and released

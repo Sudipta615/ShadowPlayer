@@ -119,6 +119,7 @@ fn reference_gapless_output(
                 crate::engine::recovery::build_resampler(
                     config.resampler_quality,
                     config.resampler_filter,
+                    config.resampler_cutoff_ratio,
                     *sr as f32,
                     output_rate as f32,
                     1.0,
@@ -471,6 +472,7 @@ fn test_single_track_resampler_tail_flushed_at_eos() {
         let mut ref_rs = crate::engine::recovery::build_resampler(
             config::ResamplerQuality::Balanced,
             config::ResamplerFilter::Fft,
+            0.95,
             sr as f32,
             out_rate as f32,
             1.0,

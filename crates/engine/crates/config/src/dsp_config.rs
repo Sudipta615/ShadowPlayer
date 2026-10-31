@@ -583,7 +583,7 @@ impl Default for LimiterConfig {
 /// integrally (44.1 kHz family → 44.1 kHz-family DSD; 48 kHz family → 48 kHz
 /// family). When either condition fails, the engine falls back to PCM and
 /// records the reason in the playback telemetry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SdmConfig {
     /// Convert PCM sources to a one-bit SDM bitstream for native DSD output.
@@ -592,6 +592,24 @@ pub struct SdmConfig {
     pub modulator: crate::SdmModulator,
     /// Requested DSD multiple, or auto-negotiate with the device.
     pub rate: crate::SdmRate,
+    /// When true, native DSD sources (DSF/DFF) bypass SDM modulation and play bit-perfect.
+    #[serde(default = "default_true")]
+    pub dsd_bypass: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for SdmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            modulator: crate::SdmModulator::default(),
+            rate: crate::SdmRate::default(),
+            dsd_bypass: true,
+        }
+    }
 }
 
 fn default_knee_db() -> f32 {
@@ -879,10 +897,6 @@ pub struct BassManagementConfig {
     /// Subwoofer polarity inversion (false = normal, true = inverted).
     #[serde(default)]
     pub sub_polarity_invert: bool,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_bass_crossover_hz() -> f32 {

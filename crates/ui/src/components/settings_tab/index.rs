@@ -203,7 +203,7 @@ pub struct SettingsEntry {
     pub description: &'static str,
 }
 
-pub static SETTINGS_INDEX: [SettingsEntry; 115] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 119] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -269,6 +269,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 115] = [
         card: "Audio Driver Backend & Hardware Device",
         label: "Output Endpoint",
         description: "Leave blank for system default, or enter specific ALSA/WASAPI endpoint string",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Audio Driver Backend & Hardware Device",
+        label: "DAC Warmup on Start",
+        description: "Sends a short burst of zero frames upon stream start to allow external DAC clock PLLs to stabilize",
     },
     SettingsEntry {
         category: SettingsCategory::Output,
@@ -339,6 +345,18 @@ pub static SETTINGS_INDEX: [SettingsEntry; 115] = [
     SettingsEntry {
         category: SettingsCategory::Output,
         card: "Resampling Filter & Noise Shaping",
+        label: "Resampler Cutoff Ratio",
+        description: "Anti-aliasing low-pass filter cutoff ratio relative to Nyquist (85% to 99.9%)",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Sample Rate Policies & Resampling Precision",
+        label: "Allowed Sample Rates",
+        description: "Restricts which DAC rates the engine may negotiate; an empty selection leaves every hardware-supported rate available",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Resampling Filter & Noise Shaping",
         label: "Noise Shaper",
         description: "TPDF, Shibata, NS5, NS9, or LNS15 error feedback for integer output quantization",
     },
@@ -347,6 +365,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 115] = [
         card: "Native DSD Modulation & Apodizing",
         label: "SDM Conversion",
         description: "Convert PCM to a one-bit SDM bitstream for native DSD output",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Native DSD Modulation & Apodizing",
+        label: "Bypass for Native DSD",
+        description: "When SDM conversion is enabled, native DSD tracks (DSF/DFF) bypass delta-sigma re-modulation and play bit-perfect directly to the DAC",
     },
     SettingsEntry {
         category: SettingsCategory::Output,

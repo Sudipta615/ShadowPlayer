@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use config::ImportedCurve;
-use eframe::egui::{self, Color32, CornerRadius, Stroke, TextWrapMode, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, TextWrapMode, Vec2};
 
 use crate::state::AutoEqCatalog;
 use crate::theme::{font, Theme};
@@ -26,6 +26,8 @@ pub struct AutoEqModalState {
     pub selected_index: Option<usize>,
     pub catalog: Option<Arc<AutoEqCatalog>>,
     pub catalog_error: Option<String>,
+    /// Currently connected audio device name for AutoEQ auto-suggestion
+    pub active_device_name: String,
     /// Indices into the catalog that match `filter_query`. Recomputed only
     /// when the query changes, not on every frame.
     pub filtered: Vec<usize>,
@@ -134,6 +136,57 @@ fn render_body(
         }
         (Some(catalog), None) => {
             let catalog = Arc::clone(catalog);
+            if !state.active_device_name.is_empty() {
+                if let Some(suggestion) = catalog.find_suggestion(&state.active_device_name) {
+                    egui::Frame::NONE
+                        .fill(theme.accent.linear_multiply(0.12))
+                        .stroke(Stroke::new(1.0, theme.accent.linear_multiply(0.4)))
+                        .corner_radius(CornerRadius::same(theme.radius_md))
+                        .inner_margin(Margin::same(8))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("🎧").font(font(14.0)));
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(tr_args!(
+                                            "AutoEQ Match for {device}:",
+                                            "device" => state.active_device_name.clone()
+                                        ))
+                                        .font(font(10.5))
+                                        .color(theme.text_secondary),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} ({})",
+                                            suggestion.name, suggestion.source
+                                        ))
+                                        .font(font(11.5))
+                                        .strong()
+                                        .color(theme.text_primary),
+                                    );
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let btn = egui::Button::new(
+                                            egui::RichText::new(tr!("Apply Match"))
+                                                .font(font(11.0))
+                                                .strong()
+                                                .color(Color32::WHITE),
+                                        )
+                                        .fill(theme.accent)
+                                        .corner_radius(CornerRadius::same(theme.radius_sm));
+                                        if ui.add(btn).clicked() {
+                                            *applied = Some(suggestion.to_imported_curve());
+                                            *close_requested = true;
+                                        }
+                                    },
+                                );
+                            });
+                        });
+                    ui.add_space(4.0);
+                }
+            }
             render_list(ui, state, &catalog, theme);
             ui.separator();
             render_selection(ui, state, &catalog, theme, applied, close_requested);

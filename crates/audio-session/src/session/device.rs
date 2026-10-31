@@ -80,6 +80,22 @@ impl AudioSession {
         self.send(EngineCommand::SetResamplerFilter(filter));
     }
 
+    /// Select the polyphase low-pass cutoff ratio. Rebuilds active resamplers
+    /// on the control path; the FFT families keep their fixed design.
+    pub fn set_resampler_cutoff_ratio(&self, ratio: f32) {
+        self.send(EngineCommand::SetResamplerCutoffRatio(ratio));
+    }
+
+    /// Replace the sample-rate whitelist used by the next rate selection.
+    pub fn set_allowed_sample_rates(&self, rates: Vec<u32>) {
+        self.send(EngineCommand::SetAllowedSampleRates(rates));
+    }
+
+    /// Set the DAC warmup silence inserted at the next stream open.
+    pub fn set_dac_warmup_ms(&self, ms: u32) {
+        self.send(EngineCommand::SetDacWarmupMs(ms));
+    }
+
     /// Select the final quantization noise shaper. Applies on the next stream.
     pub fn set_noise_shaper(&self, shaper: config::NoiseShaper) {
         self.send(EngineCommand::SetNoiseShaper(shaper));

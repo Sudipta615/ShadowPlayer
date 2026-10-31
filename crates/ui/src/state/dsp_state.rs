@@ -192,6 +192,31 @@ impl DspState {
         self.output_devices_backend = Some(backend);
     }
 
+    /// The display name of the currently selected output device.
+    ///
+    /// `SettingsTabState.output_device` holds a backend id (WASAPI endpoint
+    /// id, CoreAudio UID, …), which is useless for AutoEQ device matching.
+    /// Resolves it through the cached device list; an empty selection maps to
+    /// the backend's default device. Falls back to the configured id when the
+    /// device enumeration has not populated yet.
+    pub fn resolve_autoeq_device_name(&self) -> String {
+        let selection = self.settings_tab.output_device.trim().to_string();
+        let default_name = self
+            .output_devices
+            .iter()
+            .filter(|d| d.is_default)
+            .map(|d| d.name.clone())
+            .next();
+        if selection.is_empty() {
+            return default_name.unwrap_or_default();
+        }
+        self.output_devices
+            .iter()
+            .find(|d| d.id == selection)
+            .map(|d| d.name.clone())
+            .unwrap_or(selection)
+    }
+
     /// Sync all restored persistent DSP and EQ parameters to the active audio engine session
     pub fn sync_all_to_session(&self, session: &AudioSession) {
         // 1. The signal chain itself (EQ, tone, dynamics, filters, mix bus) is
@@ -232,6 +257,9 @@ impl DspState {
         session.set_resampler_quality(st.resampler_quality);
         session.set_fallback_policy(st.fallback_policy);
         session.set_resampler_filter(st.resampler_filter);
+        session.set_resampler_cutoff_ratio(st.resampler_cutoff_ratio);
+        session.set_allowed_sample_rates(st.allowed_sample_rates.clone());
+        session.set_dac_warmup_ms(st.dac_warmup_ms);
         session.set_noise_shaper(st.noise_shaper);
         session.set_dsd_output(st.dsd_output);
         session.set_dsd_noise_filter(st.dsd_noise_filter);
@@ -441,6 +469,15 @@ impl DspState {
         }
         if let Some(f) = s.resampler_filter_changed {
             session.set_resampler_filter(f);
+        }
+        if let Some(r) = s.resampler_cutoff_ratio_changed {
+            session.set_resampler_cutoff_ratio(r);
+        }
+        if let Some(ref rates) = s.allowed_sample_rates_changed {
+            session.set_allowed_sample_rates(rates.clone());
+        }
+        if let Some(ms) = s.dac_warmup_ms_changed {
+            session.set_dac_warmup_ms(ms);
         }
         if let Some(n) = s.noise_shaper_changed {
             session.set_noise_shaper(n);
@@ -1048,5 +1085,59 @@ mod tests {
         state.restore_pure_direct_state().unwrap();
         assert!(state.eq_panel.eq_enabled);
         assert!((state.eq_panel.preamp_db - (-4.0)).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod device_name_tests {
+    use super::*;
+
+    fn device(id: &str, name: &str, is_default: bool) -> OutputDeviceInfo {
+        OutputDeviceInfo {
+            backend: AudioBackend::Auto,
+            id: id.to_string(),
+            name: name.to_string(),
+            is_default,
+        }
+    }
+
+    #[test]
+    fn autoeq_matches_a_display_name_not_a_backend_id() {
+        let dsp = DspState {
+            output_devices: vec![
+                device("wasapi:{endpoint-guid}", "Sennheiser HD 600", false),
+                device("wasapi:{default-guid}", "Speakers (Realtek)", true),
+            ],
+            settings_tab: SettingsTabState {
+                output_device: "wasapi:{endpoint-guid}".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(dsp.resolve_autoeq_device_name(), "Sennheiser HD 600");
+    }
+
+    #[test]
+    fn an_unpinned_selection_resolves_the_default_device() {
+        let dsp = DspState {
+            output_devices: vec![device("default", "Sennheiser HD 600", true)],
+            ..Default::default()
+        };
+
+        assert_eq!(dsp.resolve_autoeq_device_name(), "Sennheiser HD 600");
+    }
+
+    #[test]
+    fn an_unenumerated_selection_keeps_the_configured_value() {
+        let dsp = DspState {
+            settings_tab: SettingsTabState {
+                output_device: "hw:0,1".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(dsp.resolve_autoeq_device_name(), "hw:0,1");
     }
 }

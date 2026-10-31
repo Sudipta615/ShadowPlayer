@@ -50,6 +50,7 @@ impl super::AudioEngine {
             decoder,
             self.config.resampler_quality,
             self.config.resampler_filter,
+            self.config.resampler_cutoff_ratio,
             self.output_sample_rate as f32,
             self.speed,
             self.config.precision_mode,

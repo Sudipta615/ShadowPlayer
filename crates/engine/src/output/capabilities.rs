@@ -173,6 +173,24 @@ impl OutputCapabilities {
         )
     }
 
+    /// Select the best rate that also satisfies the user's whitelist.
+    ///
+    /// An empty whitelist preserves [`Self::best_rate_for`] exactly.
+    pub fn best_rate_for_with_allowed(
+        &self,
+        source_rate: u32,
+        policy: &SampleRatePolicy,
+        allowed: &[u32],
+    ) -> u32 {
+        policy.select_rate_with_allowed(
+            source_rate,
+            &self.sample_rates,
+            &self.hardware_ranges,
+            allowed,
+            config::RateFallbackPolicy::Nearest,
+        )
+    }
+
     /// Whether the negotiated device advertises any output layout wider than
     /// stereo. Codec decoding support is intentionally separate: callers
     /// must combine this result with `CodecCapability::multichannel_decode`.
@@ -300,6 +318,39 @@ mod tests {
             caps.sample_rates.contains(&rate),
             "rate {} not in caps",
             rate
+        );
+    }
+
+    #[test]
+    fn best_rate_with_allowed_never_selects_an_unlisted_rate() {
+        let caps = OutputCapabilities {
+            sample_rates: vec![44_100, 48_000, 88_200, 96_000, 192_000],
+            hardware_ranges: vec![(44_100, 192_000)],
+            formats: vec![SampleFormat::F32],
+            channels: vec![2],
+            device_name: "whitelist test".into(),
+            access_mode: OutputAccessMode::Shared,
+            access_state: OutputAccessState::default(),
+            likely_direct_access: false,
+            supports_exclusive: false,
+        };
+
+        for policy in [
+            SampleRatePolicy::FollowTrack,
+            SampleRatePolicy::BestSupported,
+            SampleRatePolicy::Fixed(192_000),
+        ] {
+            let rate = caps.best_rate_for_with_allowed(192_000, &policy, &[44_100, 48_000]);
+            assert!(
+                [44_100, 48_000].contains(&rate),
+                "{policy:?} selected {rate}, which the user excluded"
+            );
+        }
+
+        assert_eq!(
+            caps.best_rate_for_with_allowed(96_000, &SampleRatePolicy::FollowTrack, &[]),
+            caps.best_rate_for(96_000, &SampleRatePolicy::FollowTrack),
+            "an empty whitelist must preserve the existing policy exactly"
         );
     }
 }

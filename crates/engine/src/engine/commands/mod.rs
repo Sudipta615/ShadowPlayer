@@ -201,9 +201,10 @@ impl AudioEngine {
                 self.config.sample_rate_policy = config::SampleRatePolicy::Fixed(rate);
                 if let Some(ref mut output) = self.audio_output {
                     let caps = output.capabilities();
-                    let target = caps.best_rate_for(
+                    let target = caps.best_rate_for_with_allowed(
                         self.clock.source_sample_rate,
                         &config::SampleRatePolicy::Fixed(rate),
+                        &self.config.allowed_sample_rates,
                     );
                     if let Ok(actual) = output.reconfigure_sample_rate(target) {
                         self.output_sample_rate = actual;
@@ -517,6 +518,13 @@ impl AudioEngine {
             EngineCommand::SetDsdNoiseFilter(filter) => self.handle_set_dsd_noise_filter(filter),
             EngineCommand::SetUltrasonicFilter(filter) => self.handle_set_ultrasonic_filter(filter),
             EngineCommand::SetResamplerFilter(filter) => self.handle_set_resampler_filter(filter),
+            EngineCommand::SetResamplerCutoffRatio(ratio) => {
+                self.handle_set_resampler_cutoff_ratio(ratio)
+            }
+            EngineCommand::SetAllowedSampleRates(rates) => {
+                self.handle_set_allowed_sample_rates(rates)
+            }
+            EngineCommand::SetDacWarmupMs(ms) => self.handle_set_dac_warmup_ms(ms),
             EngineCommand::SetNoiseShaper(shaper) => self.handle_set_noise_shaper(shaper),
             EngineCommand::SetSdmConfig(cfg) => self.handle_set_sdm_config(cfg),
             EngineCommand::SetDacCorrection(cfg) => self.handle_set_dac_correction(cfg),

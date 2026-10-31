@@ -72,7 +72,11 @@ impl AudioEngine {
         self.config.sample_rate_policy = policy.clone();
         if let Some(ref mut output) = self.audio_output {
             let caps = output.capabilities();
-            let target = caps.best_rate_for(self.clock.source_sample_rate, &policy);
+            let target = caps.best_rate_for_with_allowed(
+                self.clock.source_sample_rate,
+                &policy,
+                &self.config.allowed_sample_rates,
+            );
             if let Ok(actual) = output.reconfigure_sample_rate(target) {
                 self.output_sample_rate = actual;
                 self.graph.update_sample_rate(actual as f32);

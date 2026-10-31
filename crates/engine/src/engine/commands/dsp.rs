@@ -228,6 +228,75 @@ impl AudioEngine {
         info!("Resampler filter family set to {:?}", filter);
     }
 
+    /// Select the polyphase low-pass cutoff ratio.
+    ///
+    /// Like the filter family, this rebuilds every live resampler on its own
+    /// control path and keeps the buffered tail, so it is safe mid-stream.
+    /// The rubato FFT families ignore the ratio and keep their fixed design;
+    /// only polyphase banks consume it.
+    pub(super) fn handle_set_resampler_cutoff_ratio(&mut self, ratio: f32) {
+        let ratio = if ratio.is_finite() {
+            ratio.clamp(0.85, 0.999)
+        } else {
+            config::default_resampler_cutoff_ratio()
+        };
+        self.config.resampler_cutoff_ratio = ratio;
+        #[cfg(feature = "resample")]
+        {
+            let ratio = f64::from(ratio);
+            match &mut self.stream {
+                Some(PlaybackStream::Single {
+                    resampler: Some(ref mut r),
+                    ..
+                }) => r.set_cutoff_ratio(ratio),
+                Some(PlaybackStream::Transitioning {
+                    outgoing_resampler,
+                    incoming_resampler,
+                    ..
+                }) => {
+                    if let Some(ref mut r) = outgoing_resampler {
+                        r.set_cutoff_ratio(ratio);
+                    }
+                    if let Some(ref mut r) = incoming_resampler {
+                        r.set_cutoff_ratio(ratio);
+                    }
+                }
+                _ => {}
+            }
+        }
+        #[cfg(feature = "audio-output")]
+        for endpoint in &mut self.endpoints {
+            endpoint.set_resampler_cutoff_ratio(ratio);
+        }
+        info!("Resampler cutoff ratio set to {:.4}", ratio);
+    }
+
+    /// Replace the output sample-rate whitelist. The next rate selection uses
+    /// it; the running stream is left alone so a settings change cannot
+    /// abruptly reconfigure the device mid-track.
+    pub(super) fn handle_set_allowed_sample_rates(&mut self, rates: Vec<u32>) {
+        let mut rates: Vec<u32> = rates
+            .into_iter()
+            .filter(|rate| (8_000..=1_536_000).contains(rate))
+            .collect();
+        rates.sort_unstable();
+        rates.dedup();
+        self.config.allowed_sample_rates = rates;
+        info!(
+            "Allowed sample rates set to {:?} (next rate selection)",
+            self.config.allowed_sample_rates
+        );
+    }
+
+    /// Set the DAC warmup silence for the next stream open.
+    pub(super) fn handle_set_dac_warmup_ms(&mut self, ms: u32) {
+        self.config.dac_warmup_ms = ms.min(500);
+        info!(
+            "DAC warmup set to {} ms (next stream)",
+            self.config.dac_warmup_ms
+        );
+    }
+
     /// Select the final quantization noise shaper.
     ///
     /// A converter's dither design is built when the device stream opens, so

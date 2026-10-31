@@ -13,6 +13,12 @@ use config::{
 };
 use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
 
+/// The concrete output rates offered in the allowed-rates whitelist. Matching
+/// the engine's policy: the 44.1 kHz family and the 48 kHz family.
+const ALLOWED_SAMPLE_RATE_CHOICES: [u32; 10] = [
+    44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000, 705_600, 768_000,
+];
+
 /// The output-device picker.
 ///
 /// The devices come from the *selected* backend, so the device chosen here is
@@ -242,6 +248,22 @@ pub(in crate::components::settings_tab) fn render_output_category(
         );
         setting_item(
             ui,
+            &tr!("DAC Warmup on Start"),
+            &tr!("Sends a short burst of zero frames (0–500 ms) upon stream start to allow external DAC clock PLLs to stabilize, eliminating startup pops and clicks."),
+            theme,
+            |ui| {
+                let mut ms = state.dac_warmup_ms;
+                if ui
+                    .add(egui::Slider::new(&mut ms, 0..=500).suffix(" ms").step_by(10.0))
+                    .changed()
+                {
+                    state.dac_warmup_ms = ms;
+                    actions.dac_warmup_ms_changed = Some(ms);
+                }
+            },
+        );
+        setting_item(
+            ui,
             &tr!("Fallback Policy"),
             &tr!("Action to take if exclusive mode device acquisition is rejected by the OS"),
             theme,
@@ -312,6 +334,42 @@ pub(in crate::components::settings_tab) fn render_output_category(
 
         setting_item_with_info(
             ui,
+            &tr!("Allowed Sample Rates"),
+            &tr!(
+                "Restricts which DAC rates the engine may negotiate. Disabled chips leave every hardware-supported rate available"
+            ),
+            None,
+            theme,
+            |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = theme.space_sm;
+                    for rate in ALLOWED_SAMPLE_RATE_CHOICES {
+                        let mut on = state.allowed_sample_rates.contains(&rate);
+                        let label = if rate % 1000 == 0 {
+                            format!("{} kHz", rate / 1000)
+                        } else {
+                            format!("{:.1} kHz", rate as f32 / 1000.0)
+                        };
+                        if ui.toggle_value(&mut on, label).changed() {
+                            if on {
+                                state.allowed_sample_rates.push(rate);
+                                state.allowed_sample_rates.sort_unstable();
+                                state.allowed_sample_rates.dedup();
+                            } else {
+                                state
+                                    .allowed_sample_rates
+                                    .retain(|&r| r != rate);
+                            }
+                            actions.allowed_sample_rates_changed =
+                                Some(state.allowed_sample_rates.clone());
+                        }
+                    }
+                });
+            },
+        );
+
+        setting_item_with_info(
+            ui,
             &tr!("Resampler Engine"),
             &tr!("Polyphase FIR filter quality used when rate conversion is required"),
             Some(&crate::components::info_box::INFO_RESAMPLER_QUALITY),
@@ -351,14 +409,14 @@ pub(in crate::components::settings_tab) fn render_output_category(
             ui,
             &tr!("Volume Attenuation Mode"),
             &tr!(
-                "Software volume scaling vs Fixed 100% line-out for external preamp/headphone amp"
+                "Software Controlled vs Hardware Synchronized (DVC Mode): keeps digital DSP and EQ at full 0 dBFS float scale with maximum dynamic range, delegating attenuation to the DAC hardware"
             ),
             Some(&crate::components::info_box::INFO_VOLUME_MODE),
             theme,
             |ui| {
                 let options = [
                     (VolumeMode::SoftwareOnly, "Software Controlled"),
-                    (VolumeMode::HardwarePreferred, "Hardware Preferred"),
+                    (VolumeMode::HardwarePreferred, "Hardware Synchronized (DVC Mode)"),
                 ];
                 if segment_picker(ui, &mut state.volume_mode, &options, theme) {
                     actions.volume_mode_changed = Some(state.volume_mode);
@@ -488,6 +546,27 @@ pub(in crate::components::settings_tab) fn render_output_category(
 
         setting_item(
             ui,
+            &tr!("Resampler Cutoff Ratio"),
+            &tr!("Cutoff frequency ratio for anti-aliasing low-pass filter (85% to 99.9%, default 95% of Nyquist). Higher preserves more ultrasonic bandwidth; lower reduces filter ringing."),
+            theme,
+            |ui| {
+                let mut ratio = state.resampler_cutoff_ratio * 100.0;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut ratio, 85.0..=99.9)
+                            .suffix("%")
+                            .step_by(0.5),
+                    )
+                    .changed()
+                {
+                    state.resampler_cutoff_ratio = (ratio / 100.0).clamp(0.85, 0.999);
+                    actions.resampler_cutoff_ratio_changed = Some(state.resampler_cutoff_ratio);
+                }
+            },
+        );
+
+        setting_item(
+            ui,
             &tr!("Noise Shaper"),
             &tr!("Error-feedback design applied when the output is quantized to an integer format. TPDF is unshaped; Shibata and the NS/LNS designs move noise out of the audible band. Applies to the next stream open."),
             theme,
@@ -525,6 +604,17 @@ pub(in crate::components::settings_tab) fn render_output_category(
             &mut state.sdm.enabled,
         );
         if sdm_changed {
+            actions.sdm_config_changed = Some(state.sdm.clone());
+        }
+
+        let dsd_bypass_changed = setting_item_toggle(
+            ui,
+            &tr!("Bypass for Native DSD"),
+            &tr!("When SDM conversion is enabled, native DSD tracks (DSF/DFF) bypass delta-sigma re-modulation and play bit-perfect directly to the DAC."),
+            theme,
+            &mut state.sdm.dsd_bypass,
+        );
+        if dsd_bypass_changed {
             actions.sdm_config_changed = Some(state.sdm.clone());
         }
 

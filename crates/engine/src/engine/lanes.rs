@@ -68,6 +68,7 @@ impl LaneTrack {
         decoder: Decoder,
         #[cfg(feature = "resample")] quality: config::ResamplerQuality,
         #[cfg(feature = "resample")] filter: config::ResamplerFilter,
+        #[cfg(feature = "resample")] cutoff_ratio: f32,
         #[cfg(feature = "resample")] output_rate: f32,
         #[cfg(feature = "resample")] speed: f32,
         #[cfg(feature = "resample")] precision: config::PrecisionMode,
@@ -76,6 +77,7 @@ impl LaneTrack {
         let resampler = crate::engine::recovery::build_resampler(
             quality,
             filter,
+            cutoff_ratio,
             decoder.info().sample_rate as f32,
             output_rate,
             speed,

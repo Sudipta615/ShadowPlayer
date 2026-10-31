@@ -322,6 +322,9 @@ impl AudioEngine {
 
         self.audio_output = Some(new_output);
         self.output_sample_rate = actual_rate;
+        // A re-opened device gets the same warmup as a fresh stream, unless a
+        // native DSD/DoP/SDM transport owns the sink.
+        self.arm_dac_warmup();
         // Re-select and re-apply the output profile for the (possibly new)
         // device — per-device profiles follow device changes.
         self.refresh_output_profile();
@@ -425,6 +428,7 @@ impl AudioEngine {
                         *resampler = build_resampler(
                             self.config.resampler_quality,
                             self.config.resampler_filter,
+                            self.config.resampler_cutoff_ratio,
                             source_rate as f32,
                             actual_rate as f32,
                             self.speed,
@@ -458,6 +462,7 @@ impl AudioEngine {
                         *outgoing_resampler = build_resampler(
                             self.config.resampler_quality,
                             self.config.resampler_filter,
+                            self.config.resampler_cutoff_ratio,
                             out_rate as f32,
                             actual_rate as f32,
                             self.speed,
@@ -468,6 +473,7 @@ impl AudioEngine {
                         *incoming_resampler = build_resampler(
                             self.config.resampler_quality,
                             self.config.resampler_filter,
+                            self.config.resampler_cutoff_ratio,
                             in_rate as f32,
                             actual_rate as f32,
                             self.speed,
@@ -838,15 +844,22 @@ impl AudioEngine {
 pub(super) fn build_resampler(
     quality: config::ResamplerQuality,
     filter: config::ResamplerFilter,
+    cutoff_ratio: f32,
     source_rate: f32,
     output_rate: f32,
     speed: f32,
     precision: config::PrecisionMode,
 ) -> Option<GenericResampler> {
+    let cutoff_ratio = f64::from(cutoff_ratio);
     match precision {
         config::PrecisionMode::Performance => {
-            match AudioResampler::<f32>::new_with_filter(quality, filter, source_rate, output_rate)
-            {
+            match AudioResampler::<f32>::new_with_filter_and_cutoff(
+                quality,
+                filter,
+                cutoff_ratio,
+                source_rate,
+                output_rate,
+            ) {
                 Ok(mut r) => {
                     if (speed - 1.0).abs() > 0.001 {
                         r.set_speed(speed);
@@ -860,8 +873,13 @@ pub(super) fn build_resampler(
             }
         }
         config::PrecisionMode::Quality => {
-            match AudioResampler::<f64>::new_with_filter(quality, filter, source_rate, output_rate)
-            {
+            match AudioResampler::<f64>::new_with_filter_and_cutoff(
+                quality,
+                filter,
+                cutoff_ratio,
+                source_rate,
+                output_rate,
+            ) {
                 Ok(mut r) => {
                     if (speed - 1.0).abs() > 0.001 {
                         r.set_speed(speed);
