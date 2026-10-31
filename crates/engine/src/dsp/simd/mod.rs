@@ -11,8 +11,8 @@ pub mod dispatch;
 pub mod gain;
 pub mod interpolate;
 pub mod levels;
-pub mod limiter;
 pub mod mix;
+pub mod peak;
 pub mod scalar;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod x86;
@@ -27,6 +27,6 @@ pub use dispatch::{
 pub use gain::{ramp_slice, ramp_slice_f64, scale_slice, scale_slice_f64};
 pub use interpolate::{vector_bilinear, vector_lerp};
 pub use levels::SimdLevel;
-pub use limiter::{vector_abs_max, vector_abs_max_f64};
 pub use mix::{mix_crossfade, mix_slices, mix_slices_f64};
+pub use peak::{vector_abs_max, vector_abs_max_f64};
 pub use scalar::dot_product;

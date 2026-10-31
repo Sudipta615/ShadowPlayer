@@ -15,7 +15,7 @@ use cpal::{
 use thiserror::Error;
 
 use crate::buffer::FixedFrameBuffer;
-use crate::output::output::{StreamErrorBatch, StreamErrorState};
+use crate::output::backend::{StreamErrorBatch, StreamErrorState};
 use crate::output::output_info::OutputInfo;
 
 mod reconfigure;
@@ -1029,7 +1029,7 @@ impl OutputVolume for CpalOutput {
     }
 }
 
-impl super::output::Output for CpalOutput {
+impl super::backend::Output for CpalOutput {
     fn sample_rate(&self) -> u32 {
         CpalOutput::sample_rate(self)
     }

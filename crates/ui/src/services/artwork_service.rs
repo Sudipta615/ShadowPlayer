@@ -334,7 +334,7 @@ fn blur_color_image(source: &egui::ColorImage, radius: usize) -> egui::ColorImag
                 a += c.a() as u32;
                 n += 1;
             }
-            horizontal[y * w + x] = egui::Color32::from_rgba_unmultiplied(
+            horizontal[y * w + x] = crate::theme::rgba_unmultiplied(
                 (r / n) as u8,
                 (g / n) as u8,
                 (b / n) as u8,
@@ -361,7 +361,7 @@ fn blur_color_image(source: &egui::ColorImage, radius: usize) -> egui::ColorImag
                 a += c.a() as u32;
                 n += 1;
             }
-            out[y * w + x] = egui::Color32::from_rgba_unmultiplied(
+            out[y * w + x] = crate::theme::rgba_unmultiplied(
                 (r / n) as u8,
                 (g / n) as u8,
                 (b / n) as u8,

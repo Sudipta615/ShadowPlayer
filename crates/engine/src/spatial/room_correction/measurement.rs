@@ -1,10 +1,20 @@
-//! Room correction measurement: log-sweep generation, inverse filter, and
-//! impulse response capture via FFT-domain deconvolution.
+//! Room correction measurement: the capture path for the correction wizard.
+//!
+//! Sweep generation and the matched inverse filter are **not** implemented
+//! here. They delegate to the canonical kit in
+//! [`crate::dsp::correction::sweep`] ([`EssSweep`], [`farina_inverse_filter`],
+//! [`deconvolve_direct_raw`]) — there is exactly one chirp law and one
+//! matched-filter envelope in the engine. This module owns only what the
+//! wizard adds on top of it: the persisted [`SweepConfig`], a unit-peak
+//! inverse filter for the capture UI, and an IR reported in the recording's
+//! own time base (truncated to the recording length, levels un-normalized).
 //!
 //! All functions in this module run on the **control path** and allocate freely.
 //! None of these functions may be called from the audio thread.
 
-use std::f32::consts::TAU;
+use crate::dsp::correction::sweep::{
+    deconvolve_direct_raw, farina_inverse_filter, EssConfig, EssSweep,
+};
 
 /// Configuration for a logarithmic sine sweep.
 #[derive(Debug, Clone)]
@@ -30,29 +40,36 @@ impl Default for SweepConfig {
     }
 }
 
+/// Map this wizard's configuration onto the canonical sweep kit.
+///
+/// The capture sweep has no fade (`fade_secs: 0.0`) — its endpoints are
+/// windowed by the recorder, not by the stimulus — and it carries the
+/// user-selected peak amplitude. Everything else is the same chirp law.
+fn ess_config(config: &SweepConfig, sample_rate: f32) -> EssConfig {
+    EssConfig {
+        sample_rate: sample_rate as f64,
+        duration_secs: config.duration_secs as f64,
+        f_start: config.start_hz as f64,
+        f_end: config.end_hz as f64,
+        amplitude: config.amplitude as f64,
+        fade_secs: 0.0,
+        pre_emphasis: false,
+    }
+}
+
 /// Generate a logarithmic sine sweep (Farina sweep). **Control path — allocates.**
 ///
 /// The sweep covers `[config.start_hz, config.end_hz]` in `config.duration_secs`
 /// seconds at `sample_rate`. The instantaneous frequency rises logarithmically so
 /// equal octaves receive equal energy (flat pink-spectrum excitation).
 pub fn generate_log_sweep(config: &SweepConfig, sample_rate: f32) -> Vec<f32> {
-    let n = (config.duration_secs * sample_rate).round() as usize;
-    if n == 0 {
-        return Vec::new();
+    match EssSweep::new(ess_config(config, sample_rate)) {
+        Ok(sweep) => sweep.samples().iter().map(|&x| x as f32).collect(),
+        Err(e) => {
+            log::warn!("room_correction::generate_log_sweep: unusable config: {e}");
+            Vec::new()
+        }
     }
-    let t_total = config.duration_secs;
-    let f1 = config.start_hz.max(1.0);
-    let f2 = config.end_hz.max(f1 + 1.0);
-    // k = T / ln(f2/f1)
-    let k = t_total / (f2 / f1).ln();
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let t = i as f32 / sample_rate;
-        // Instantaneous phase: φ(t) = 2π f1 k (e^(t/k) - 1).
-        let phase = TAU * f1 * k * ((t / k).exp() - 1.0);
-        out.push(config.amplitude * phase.sin());
-    }
-    out
 }
 
 /// Generate the time-reversed, amplitude-modulated inverse filter for a log sweep.
@@ -63,67 +80,45 @@ pub fn generate_log_sweep(config: &SweepConfig, sample_rate: f32) -> Vec<f32> {
 /// response. **Control path — allocates.**
 pub fn generate_inverse_filter(config: &SweepConfig, sample_rate: f32) -> Vec<f32> {
     let sweep = generate_log_sweep(config, sample_rate);
-    let n = sweep.len();
-    if n == 0 {
+    if sweep.is_empty() {
         return Vec::new();
     }
-    let t_total = config.duration_secs;
-    let f1 = config.start_hz.max(1.0);
-    let f2 = config.end_hz.max(f1 + 1.0);
-    let k = t_total / (f2 / f1).ln();
-    // Reverse and weight by 1/A(t). A(t) = e^(t/k) (the instantaneous frequency
-    // envelope of the sweep, normalized so A(0) = 1).
-    let mut inv = vec![0.0f32; n];
-    for i in 0..n {
-        let t = (n - 1 - i) as f32 / sample_rate; // reversed time
-        let a = (t / k).exp(); // amplitude envelope at reversed index
-        inv[i] = sweep[n - 1 - i] / a.max(1e-6);
-    }
-    // Normalize so peak of the inverse filter is 1.
-    let peak = inv.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let sweep_f64: Vec<f64> = sweep.iter().map(|&x| x as f64).collect();
+    let mut inverse: Vec<f32> = farina_inverse_filter(&sweep_f64, &ess_config(config, sample_rate))
+        .into_iter()
+        .map(|x| x as f32)
+        .collect();
+
+    // The canonical kit normalizes to unit *energy*; this capture UI's
+    // documented contract (and its level display) is a unit *peak*.
+    let peak = inverse.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
     if peak > 1e-6 {
-        for v in inv.iter_mut() {
+        for v in inverse.iter_mut() {
             *v /= peak;
         }
     }
-    inv
+    inverse
 }
 
-/// Deconvolve `recorded` with `inverse_filter` to recover the room impulse response.
+/// Deconvolve `recorded` with `inverse_filter` to recover the room impulse
+/// response, reported in the recording's own time base.
 ///
-/// Uses FFT-domain multiplication: `IR(f) = Recorded(f) × Inverse(f)`. The result
-/// length equals `recorded.len()`. **Control path — allocates.**
+/// The convolution itself is the canonical [`deconvolve_direct_raw`]; this
+/// wrapper only truncates the result to `recorded.len()` (the tail beyond the
+/// recording cannot contain the direct response the wizard windows) and keeps
+/// the recording's gain rather than normalizing it away. **Control path —
+/// allocates.**
 pub fn capture_impulse_response(recorded: &[f32], inverse_filter: &[f32]) -> Vec<f32> {
     if recorded.is_empty() || inverse_filter.is_empty() {
         return Vec::new();
     }
-    // Pad both to the next power of two ≥ recorded.len() + inverse.len() − 1.
-    let out_len = recorded.len() + inverse_filter.len() - 1;
-    let fft_size = out_len.next_power_of_two();
-
-    // Naive DFT-based convolution (control path; a real FFT is preferred for
-    // production but this is a measurement utility that runs rarely).
-    // For correctness we use circular convolution on the padded length.
-    let mut a = vec![0.0f32; fft_size];
-    let mut b = vec![0.0f32; fft_size];
-    a[..recorded.len()].copy_from_slice(recorded);
-    b[..inverse_filter.len()].copy_from_slice(inverse_filter);
-
-    // Simple O(n²) correlation for control-path correctness.
-    // A production impl would use rustfft. This is sufficient for the test harness.
-    let out_len_clamped = out_len.min(recorded.len());
-    let mut ir = vec![0.0f32; out_len_clamped];
-    for i in 0..out_len_clamped {
-        let mut acc = 0.0f64;
-        let kmax = inverse_filter.len().min(i + 1);
-        for k in 0..kmax {
-            if i >= k && i - k < recorded.len() {
-                acc += recorded[i - k] as f64 * inverse_filter[k] as f64;
-            }
-        }
-        ir[i] = acc as f32;
-    }
-    ir
+    let recorded_f64: Vec<f64> = recorded.iter().map(|&x| x as f64).collect();
+    let inverse_f64: Vec<f64> = inverse_filter.iter().map(|&x| x as f64).collect();
+    deconvolve_direct_raw(&recorded_f64, &inverse_f64)
+        .into_iter()
+        .take(recorded.len())
+        .map(|x| x as f32)
+        .collect()
 }
 
 #[cfg(test)]
@@ -167,6 +162,23 @@ mod tests {
     }
 
     #[test]
+    fn generation_is_the_canonical_sweep_converted_to_f32() {
+        let cfg = SweepConfig {
+            start_hz: 100.0,
+            end_hz: 10_000.0,
+            duration_secs: 1.0,
+            amplitude: 0.8,
+        };
+        let local = generate_log_sweep(&cfg, 48_000.0);
+        let canonical = EssSweep::new(ess_config(&cfg, 48_000.0)).expect("canonical sweep");
+        let expected: Vec<f32> = canonical.samples().iter().map(|&x| x as f32).collect();
+        assert_eq!(
+            local, expected,
+            "the capture path must not reshape the sweep"
+        );
+    }
+
+    #[test]
     fn generate_inverse_filter_same_length_as_sweep() {
         let cfg = SweepConfig::default();
         let sweep = generate_log_sweep(&cfg, 48_000.0);
@@ -181,7 +193,9 @@ mod tests {
         let cfg = SweepConfig {
             start_hz: 100.0,
             end_hz: 8_000.0,
-            duration_secs: 0.2,
+            // The canonical generator documents a 0.25 s floor; a shorter
+            // stimulus is rejected rather than silently shortened.
+            duration_secs: 0.25,
             amplitude: 1.0,
         };
         let sweep = generate_log_sweep(&cfg, 48_000.0);

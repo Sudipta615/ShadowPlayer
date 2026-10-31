@@ -3,7 +3,7 @@ use domain::models::Track;
 use eframe::egui;
 use playback::PlaybackCoordinator;
 
-use crate::components::artists_view::ArtistsView;
+use crate::components::artists_panel::ArtistsView;
 use crate::services::{ArtworkService, BiographyService};
 use crate::state::{BiographyEditorState, LibraryState};
 use crate::theme::Theme;

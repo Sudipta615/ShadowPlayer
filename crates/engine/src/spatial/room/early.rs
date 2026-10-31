@@ -27,7 +27,7 @@ pub struct ListenerImage {
     /// `f32::INFINITY` = spectrally flat (no filtering). A material's
     /// per-band spectrum or a diffraction/transmission corner is collapsed
     /// to this corner so the realtime renderers colour the reflection the
-    /// way the offline [`crate::spatial::acoustic::bake`] pipeline does,
+    /// way the offline [`crate::spatial::room_model::bake`] pipeline does,
     /// without carrying the full FIR on the audio thread.
     pub lowpass_hz: f32,
 }

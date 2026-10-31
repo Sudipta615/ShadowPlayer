@@ -1,7 +1,7 @@
 /// `audio-output` is a REQUIRED feature, despite being listed under
 /// `[features]`.
 ///
-/// It is not genuinely optional: `output::output` (the `Output` trait and its
+/// It is not genuinely optional: `output::backend` (the `Output` trait and its
 /// factory), `output::capabilities`, and every per-OS backend reach `cpal`
 /// unconditionally, so the crate cannot be built without it. The alternative
 /// would be to thread `#[cfg(feature = "audio-output")]` through the whole

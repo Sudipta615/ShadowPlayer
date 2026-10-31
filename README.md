@@ -8,7 +8,7 @@ A local-first desktop music player built in Rust: bit-perfect output, a
 studio-grade DSP chain, a 100,000-track library that stays fast, and no
 accounts, cloud, or telemetry.
 
-[![Version](https://img.shields.io/badge/version-0.27.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.27.1-blue?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)](#platform-support)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org/)
@@ -491,14 +491,53 @@ Deliberate product choices live in
 - **The long-form manual is English.** The interface catalogues cover English,
   German, French, Spanish, Japanese, and Chinese; the Help manual's prose is
   still English. Missing strings fall back to English instead of showing a key.
-- **Engine-level boundaries are inherited in full.** There is no talkback or
-  duplex monitoring. Ambisonic bus rotation is exact only for orders 1–3. The
-  N-input mix bus has no automatic summation headroom. `plugin-dylib` plugins
-  run in-process without a sandbox, so only load plugins you trust. CI
-  validates the output path through a null backend rather than a physical DAC;
-  real driver negotiation and hardware clocks remain environment-dependent.
-  See the [engine limitations](crates/engine/README.md#-known-limitations) for
-  the precise contracts.
+- **Engine-level boundaries are inherited in full.** The engine owns the
+  precise contracts; these are the player-facing summaries. See the
+  [engine limitations](crates/engine/README.md#-known-limitations) for each one
+  in full.
+  - **No Musepack or TAK decoding, and no plan to add it.** Neither format has
+    a validated pure-Rust decoder, so both fail with a named error rather than
+    being mis-parsed.
+  - **No talkback or duplex monitoring.** Input capture works, but routing a
+    live input back into the output path is not implemented.
+  - **No test opens a physical DAC.** CI exercises the whole output path
+    through a hardware-free null sink, so real driver negotiation and real
+    hardware clocks remain environment-dependent.
+  - **Ambisonic bus rotation is exact only for orders 1–3.** A higher-order bus
+    is left unrotated rather than partially rotated; encoding and decoding
+    still work up to order 9.
+  - **Several stereo-designed stages run on the front L/R pair only in a
+    `>2`-channel stream.** The mixer, EQ, compressor, convolution, balance,
+    crossfeed, stereo and bass enhancement, time-stretch, creative FX, and the
+    output resampler leave the centre, surrounds, and LFE untouched; the engine
+    reports exactly which stages are front-pair-only.
+  - **Sparse matrix FIR is a multichannel-path feature.** FIR routes exist only
+    in the `>2`-channel routing stage; the stereo plan has no routing stage.
+  - **DAC correction is a device profile, not room correction.** Profiles are
+    matched by device name and output rate; the engine neither measures nor
+    derives them.
+  - **Matrix-FIR multicore is CPU-only.** There is no worker-affinity pinning,
+    no user-selectable block sizing, and no GPU convolution backend.
+  - **The engine is bounded to 16 channels.** A configuration naming a channel
+    above 15 is rejected and logged rather than silently folded.
+  - **The apodizing counter is guidance, not a converter measurement.** It
+    counts near-Nyquist energy incidents and recommends a filter; it does not
+    measure a converter.
+  - **The output ultrasonic `2x`/`4x`/`8x` selections are relative to the
+    output clock family.** At ordinary PCM rates the stage reports itself
+    inactive instead of installing a filter that cannot exist; the
+    `20/30/40/50 kHz` selections are the ones that act at normal rates.
+  - **Noise-shaper selection is global and applies at stream open.** It is one
+    process-wide choice, and a running converter keeps the family it was built
+    with until the next stream open.
+  - **PCM→SDM is native-DSD only, and its high rates are CPU-bound.** DoP is
+    not synthesized from PCM, and DSD256 is not real-time on a low-power
+    dual-core.
+  - **The N-input mix bus has no automatic summation headroom.** Slots sum at
+    their per-input gain, so eight unity-gain slots reach +18 dB coherent
+    before the limiter.
+  - **`plugin-dylib` is not sandboxed.** Plugins run in-process behind only a
+    `catch_unwind` boundary, so only load plugins you trust.
 
 ---
 

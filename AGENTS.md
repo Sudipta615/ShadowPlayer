@@ -291,3 +291,67 @@ version badge, and the engine version/README when engine code changed.
 - Conventional-style subjects (`feat(ui):`, `fix(database):`, `refactor(ui):`,
   `docs:`, `test:`), imperative and specific.
 - Never commit generated output, `target/`, local databases, or cache files.
+
+## 7. Ownership of shared subsystems
+
+Several concepts exist on both sides of the engine boundary. These are the
+canonical owners; a change that forks one of them updates this table.
+
+| Concept | Canonical owner | Notes |
+| --- | --- | --- |
+| Audio DSP math (FFT, spectral/temporal descriptors, R128 loudness, true peak) | `crates/engine` (`dsp::analysis`, `dsp::loudness`) | Player crates reach it through `audio-session`; a player-side feature loop is application policy and must say so in its module docs. |
+| Scan → library identity | `crates/library` (`scanner`, `identity`, `fingerprint`) | `ui::services::scanner_service` only drives it on a worker thread. |
+| Playlist / M3U import | `crates/library` (`m3u`, `playlist_format`, `import_playlists`) | The engine's `playlist::io` serves the standalone engine CLI and is not imported by the player. |
+| CUE model | `crates/domain` (`cue`) for the parsed model; `crates/engine` for stream splitting | |
+| Tag extraction | `crates/metadata` (`extractor`) | `engine::decode::tags` is the mid-stream decoder view. |
+| LRC parsing | `crates/lyrics` (`parser`) | Every other crate calls it; no second LRC parser. |
+| Desktop media integration (MPRIS/SMTC) | `crates/ui` (`services::mpris_service`) | The engine's own MPRIS server is for its CLI; the app must not start both. |
+
+## 8. State ownership hierarchy
+
+A setting has exactly one durable owner. This is the order, from the UI
+inwards; a layer may only write the layer it owns.
+
+1. **Interaction state** — `ui::state` (pure, `Serialize` snapshots, no I/O).
+2. **Player settings** — `database::repos::settings`, written only by
+   `ui::app::settings_io` through the typed settings struct. Locale, theme,
+   view preferences, output selection the *player* owns.
+3. **Library data** — `database` repositories (tracks, playlists, presets,
+   zones). `ui::app::eq_presets` writes presets through `EqPresetsRepo`; the
+   EQ panel only emits typed requests.
+4. **Runtime control state** — `audio-session` (`session::{device,dsp,
+   transport}`) converts UI intent into engine commands. It holds no durable
+   copy.
+5. **Engine live state** — `EngineConfig` on the control thread.
+6. **Engine durable state** — narrow and engine-owned: EQ/limiter/output
+   selection in the engine's versioned state file, written only by
+   `engine::dsp_persistence` / `spatial_persistence`.
+
+Rules:
+
+- No key is written by two layers. If the player persists a value, the engine
+  must not also persist it; if the engine owns it, the player must load it
+  back from the engine rather than keeping a parallel copy.
+- Startup is load-then-apply: read the owning layer once, hand it downwards.
+  There is no second replay path.
+- A change that adds a persisted field names its owning layer in the commit
+  message.
+
+## 9. UI layer: one canonical implementation per screen
+
+The UI has four layers with distinct jobs. The same name may appear in more
+than one of them, but the *implementation* of a screen exists once.
+
+- `ui/src/views/` — screen policy: read state, render the screen's widget,
+  apply its result (convert a typed action into a service/coordinator call).
+- `ui/src/components/` — widgets and panels. A `<name>_panel.rs` is the drawing
+  half of `views/<name>_view.rs`; it takes borrowed state and returns a typed
+  action. It must not query the database or start work.
+- `ui/src/layout/` — shell geometry only (panel sizes, margins, rail layout).
+- `ui/src/app/render/` — dispatch: turn a layout/widget callback into app
+  state changes.
+
+So `views/albums_view.rs` (policy) + `components/albums_panel.rs` (drawing) is
+the intended split, and a second `components/albums_view.rs` is not allowed.
+Sidebar and drawer follow the same three-way split: geometry in `layout/`,
+widget in `components/`, dispatch in `app/render/`.

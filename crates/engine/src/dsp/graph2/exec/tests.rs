@@ -6,9 +6,9 @@
 //! asserts RT == offline across these same topologies.
 
 use super::*;
-use crate::spatial::acoustic::bake::{spectral_taps, ACOUSTIC_IR_LEN};
-use crate::spatial::acoustic::path::PathKind;
 use crate::spatial::hrtf::HrtfDataset;
+use crate::spatial::room_model::bake::{spectral_taps, ACOUSTIC_IR_LEN};
+use crate::spatial::room_model::path::PathKind;
 
 /// The renderable **broadband** taps of a baked response: `(excess_delay,
 /// gain)` per non-direct path (the classic collapsed form). Retained for
@@ -16,11 +16,13 @@ use crate::spatial::hrtf::HrtfDataset;
 /// equals; `run_acoustic` now applies true per-path spectral filters via
 /// [`spectral_taps`], which collapses to these exact taps when every path
 /// is flat.
-pub(crate) fn acoustic_taps(obj: &crate::spatial::acoustic::bake::BakedObject) -> Vec<(i64, f32)> {
+pub(crate) fn acoustic_taps(
+    obj: &crate::spatial::room_model::bake::BakedObject,
+) -> Vec<(i64, f32)> {
     let direct_delay = obj.direct().map(|d| d.delay_samples).unwrap_or(0.0);
     obj.paths
         .iter()
-        .filter(|p| p.kind != crate::spatial::acoustic::path::PathKind::Direct)
+        .filter(|p| p.kind != crate::spatial::room_model::path::PathKind::Direct)
         .map(|p| {
             let excess = (p.delay_samples - direct_delay).max(0.0).round() as i64;
             (excess, p.gain)
@@ -258,12 +260,12 @@ fn a_tempo_change_shifts_where_automation_landmarks_land() {
 
 #[test]
 fn acoustic_node_reproduces_baked_room_response() {
-    use crate::spatial::acoustic::bake::{AcousticBaker, BakePolicy};
-    use crate::spatial::acoustic::geometry::AcousticRoom;
-    use crate::spatial::acoustic::material::MaterialSpectrum;
-    use crate::spatial::acoustic::solver::AcousticWorld;
     use crate::spatial::math::Vec3;
     use crate::spatial::room::Room;
+    use crate::spatial::room_model::bake::{AcousticBaker, BakePolicy};
+    use crate::spatial::room_model::geometry::AcousticRoom;
+    use crate::spatial::room_model::material::MaterialSpectrum;
+    use crate::spatial::room_model::solver::AcousticWorld;
 
     let room = Room {
         enabled: true,
@@ -328,13 +330,13 @@ fn acoustic_node_honours_the_scene_air_absorption_model() {
     // without. Enabling it must darken the (flat-wall) reflections into
     // distance-dependent low-pass tails, spreading the reflection energy
     // over more output frames than the classic single-tap path.
-    use crate::spatial::acoustic::bake::{AcousticBaker, BakePolicy};
-    use crate::spatial::acoustic::geometry::AcousticRoom;
-    use crate::spatial::acoustic::material::MaterialSpectrum;
-    use crate::spatial::acoustic::solver::AcousticWorld;
     use crate::spatial::level::AirAbsorption;
     use crate::spatial::math::Vec3;
     use crate::spatial::room::Room;
+    use crate::spatial::room_model::bake::{AcousticBaker, BakePolicy};
+    use crate::spatial::room_model::geometry::AcousticRoom;
+    use crate::spatial::room_model::material::MaterialSpectrum;
+    use crate::spatial::room_model::solver::AcousticWorld;
 
     let room = Room {
         enabled: true,
@@ -361,7 +363,7 @@ fn acoustic_node_honours_the_scene_air_absorption_model() {
         ..Default::default()
     });
 
-    let render = |scene: crate::spatial::acoustic::bake::BakedScene| -> Vec<f32> {
+    let render = |scene: crate::spatial::room_model::bake::BakedScene| -> Vec<f32> {
         let mut g = Graph2::new();
         let src = g.add_source("imp");
         let room_node = g.add_acoustic("room", pos);
@@ -403,13 +405,13 @@ fn swap_baked_scene_switches_taps_without_cutting_the_tail() {
     // the tapped delay line keeps ringing: output[k] = direct·x[k] +
     // Σ gain_e·x[k−e] with A's taps before the swap and B's after, all
     // from the same continuous input history.
-    use crate::spatial::acoustic::bake::{AcousticBaker, BakePolicy};
-    use crate::spatial::acoustic::geometry::AcousticRoom;
-    use crate::spatial::acoustic::material::{MaterialKind, MaterialSpectrum};
-    use crate::spatial::acoustic::solver::wall_index;
-    use crate::spatial::acoustic::solver::AcousticWorld;
     use crate::spatial::math::Vec3;
     use crate::spatial::room::Room;
+    use crate::spatial::room_model::bake::{AcousticBaker, BakePolicy};
+    use crate::spatial::room_model::geometry::AcousticRoom;
+    use crate::spatial::room_model::material::{MaterialKind, MaterialSpectrum};
+    use crate::spatial::room_model::solver::wall_index;
+    use crate::spatial::room_model::solver::AcousticWorld;
 
     let room = Room {
         enabled: true,
@@ -437,7 +439,7 @@ fn swap_baked_scene_switches_taps_without_cutting_the_tail() {
     // kernel). Scene A is flat (single-tap gain kernels, matching the
     // classic broadband form); scene B's fabric wall spectrally colours
     // its reflections. Read before the scenes move into the executor.
-    let taps = |scene: &crate::spatial::acoustic::bake::BakedScene| {
+    let taps = |scene: &crate::spatial::room_model::bake::BakedScene| {
         spectral_taps(scene.get(pos).unwrap(), ACOUSTIC_IR_LEN)
     };
     let taps_a = taps(&scene_a);
@@ -456,11 +458,11 @@ fn swap_baked_scene_switches_taps_without_cutting_the_tail() {
         .unwrap_or(1.0);
     // Fabric dampens the *broadband* reflected energy (its low-pass
     // colours rather than merely scales — the spectral point of v3.40).
-    let bband = |scene: &crate::spatial::acoustic::bake::BakedScene| {
+    let bband = |scene: &crate::spatial::room_model::bake::BakedScene| {
         let obj = scene.get(pos).unwrap();
         obj.paths
             .iter()
-            .filter(|p| p.kind != crate::spatial::acoustic::path::PathKind::Direct)
+            .filter(|p| p.kind != crate::spatial::room_model::path::PathKind::Direct)
             .map(|p| p.gain.abs())
             .sum::<f32>()
     };
@@ -548,12 +550,12 @@ fn listener_position_drives_the_acoustic_lookup() {
     // drive retargets the node's lookup from P0 to P1 (and back),
     // rendering each cell's own response against the continuous sine
     // history — the moving-listener path.
-    use crate::spatial::acoustic::bake::{AcousticBaker, BakePolicy};
-    use crate::spatial::acoustic::geometry::AcousticRoom;
-    use crate::spatial::acoustic::material::MaterialSpectrum;
-    use crate::spatial::acoustic::solver::AcousticWorld;
     use crate::spatial::math::Vec3;
     use crate::spatial::room::Room;
+    use crate::spatial::room_model::bake::{AcousticBaker, BakePolicy};
+    use crate::spatial::room_model::geometry::AcousticRoom;
+    use crate::spatial::room_model::material::MaterialSpectrum;
+    use crate::spatial::room_model::solver::AcousticWorld;
 
     let room = Room {
         enabled: true,
@@ -683,12 +685,12 @@ fn named_scenes_render_per_listener_responses() {
     // Acoustic nodes (same source, different scene ids) must each
     // render their own listener's response; an unregistered id falls
     // back to pass-through; replacing a named scene changes that node.
-    use crate::spatial::acoustic::bake::{AcousticBaker, BakePolicy};
-    use crate::spatial::acoustic::geometry::AcousticRoom;
-    use crate::spatial::acoustic::material::MaterialSpectrum;
-    use crate::spatial::acoustic::solver::AcousticWorld;
     use crate::spatial::math::Vec3;
     use crate::spatial::room::Room;
+    use crate::spatial::room_model::bake::{AcousticBaker, BakePolicy};
+    use crate::spatial::room_model::geometry::AcousticRoom;
+    use crate::spatial::room_model::material::MaterialSpectrum;
+    use crate::spatial::room_model::solver::AcousticWorld;
 
     let room = Room {
         enabled: true,
@@ -713,7 +715,7 @@ fn named_scenes_render_per_listener_responses() {
     assert_ne!(front.get(pos).unwrap().paths, back.get(pos).unwrap().paths);
 
     // Oracle: the node's impulse response for one scene at `pos`.
-    let response = |scene: &crate::spatial::acoustic::bake::BakedScene| {
+    let response = |scene: &crate::spatial::room_model::bake::BakedScene| {
         let obj = scene.get(pos).unwrap();
         let direct_delay = obj.direct().unwrap().delay_samples;
         let mut e = vec![0.0f32; 2048];

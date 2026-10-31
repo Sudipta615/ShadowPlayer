@@ -22,9 +22,9 @@ use windows::Win32::{
 };
 
 use crate::buffer::{FixedFrameBuffer, UnderrunState};
+use crate::output::backend::StreamErrorState;
 use crate::output::cpal_output::OutputError;
 use crate::output::format_converter::AudioFormatConverter;
-use crate::output::output::StreamErrorState;
 
 use super::com::{SendCom, SendHandle};
 use super::format::{build_format, exclusive_format_supported, WasapiContainer};

@@ -475,7 +475,7 @@ impl<'a> AlbumsView<'a> {
                                         p.rect_filled(
                                             badge_rect,
                                             CornerRadius::same(self.theme.radius_sm),
-                                            Color32::from_black_alpha(200),
+                                            self.theme.overlay_scrim,
                                         );
                                         p.text(
                                             badge_rect.center(),

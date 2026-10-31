@@ -3,7 +3,7 @@ use domain::models::Track;
 use eframe::egui;
 use playback::PlaybackCoordinator;
 
-use crate::components::genres_view::GenresView;
+use crate::components::genres_panel::GenresView;
 use crate::state::LibraryState;
 use crate::theme::Theme;
 

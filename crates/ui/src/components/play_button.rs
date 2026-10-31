@@ -94,7 +94,7 @@ fn paint(ui: &Ui, rect: Rect, response: &Response, is_playing: bool, theme: &The
                 button_rect.center().y - button_rect.height() * 0.22,
             ),
             button_rect.width() * 0.16,
-            Color32::from_rgba_unmultiplied(255, 255, 255, 26),
+            crate::theme::with_alpha(Color32::WHITE, 26),
         );
     }
 

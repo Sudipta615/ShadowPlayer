@@ -10,11 +10,11 @@
 //! - All internal scratch planes and filter states pre-allocated during `prepare`.
 //! - Zero allocation and lock-free execution during `process_hybrid_block`.
 
-use super::acoustic::bass_room::ModalBassRoom;
 use super::ambisonic::AmbisonicRenderer;
 use super::bass::SpatialBassEngine;
 use super::binaural::BinauralRenderer;
 use super::render::{HybridBlockInputs, RenderError, RendererKind, SpatialRenderer};
+use super::room_model::bass_room::ModalBassRoom;
 use super::speaker::SpeakerLayout;
 use super::vbap::VbapRenderer;
 use super::SpatialScene;

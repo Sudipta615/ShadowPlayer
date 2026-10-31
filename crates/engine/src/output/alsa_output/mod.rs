@@ -43,10 +43,10 @@ use config::AudioBackend;
 use crate::buffer::{DsdByteBuffer, FixedFrameBuffer, UnderrunState};
 use crate::decode::dsd::DsdWireFormat;
 use crate::dsp::pipeline::OutputSampleFormat;
+use crate::output::backend::{NativeDsdParams, StreamErrorBatch, StreamErrorState};
 use crate::output::capabilities::{OutputAccessMode, OutputAccessState, OutputCapabilities};
 use crate::output::cpal_output::{OutputError, OutputVolume};
 use crate::output::format_converter::{AudioFormatConverter, TargetFormat};
-use crate::output::output::{NativeDsdParams, StreamErrorBatch, StreamErrorState};
 use crate::output::output_info::OutputInfo;
 
 /// `Arc<PCM>` wrapper with explicit Send+Sync, mirroring the WASAPI backend's
@@ -706,7 +706,7 @@ impl OutputVolume for AlsaOutput {
     }
 }
 
-impl super::output::Output for AlsaOutput {
+impl super::backend::Output for AlsaOutput {
     fn sample_rate(&self) -> u32 {
         self.rate
     }

@@ -40,9 +40,9 @@ use crate::buffer::DsdByteBuffer;
 use crate::buffer::FixedFrameBuffer;
 use crate::decode::dsd::DsdWireFormat;
 use crate::dsp::pipeline::OutputSampleFormat;
+use crate::output::backend::{NativeDsdCapability, Output, StreamErrorBatch, StreamErrorState};
 use crate::output::capabilities::{OutputAccessMode, OutputAccessState, OutputCapabilities};
 use crate::output::cpal_output::{OutputError, OutputVolume};
-use crate::output::output::{NativeDsdCapability, Output, StreamErrorBatch, StreamErrorState};
 use crate::output::output_info::OutputInfo;
 
 use com::enumerate_asio_drivers;
@@ -964,7 +964,7 @@ impl Output for AsioOutput {
 
     fn set_native_dsd(
         &mut self,
-        params: Option<crate::output::output::NativeDsdParams>,
+        params: Option<crate::output::backend::NativeDsdParams>,
     ) -> Result<Option<DsdWireFormat>, OutputError> {
         match params {
             None => {

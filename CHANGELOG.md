@@ -4,6 +4,21 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.1] - 2026-10-31
+
+*Released with audio-engine 1.12.1. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Changed & Refactored
+- **Single Canonical Sweep & Inverse-Filter Engine.** Consolidated exponential sine sweep (ESS) generation and Farina deconvolution under `crates/engine/src/dsp/correction/sweep.rs` (`EssSweep`), sharing an exact implementation between spatial acoustic metrics and room correction capture.
+- **Engine Module Reorganization.** Disambiguated module names across audio engine subsystems: `output` (`backend.rs`), `spatial` (`acoustic_metrics` vs `room_model`), `simd/peak.rs`, and graph2 control structures (`control_handle.rs`, `control_mutators.rs`).
+- **UI Architecture & Screen Standardization.** Renamed and refactored UI components (`albums_panel`, `artists_panel`, `folders_panel`, `genres_panel`) adhering to the canonical four-layer UI contract (`views/` for screen policy, `components/` for widgets and panels).
+- **Subsystem Ownership & Architecture Contracts.** Formally codified canonical subsystem ownership, state hierarchy, and screen implementation rules in `AGENTS.md` and `crates/engine/AGENTS.md`.
+- **Documentation Parity.** Updated `README.md` known limitations covering all 15 engine-level boundaries verified by `ui_docs_truth`.
+- **Asset Optimization & Lockfile Management.** Recompressed help images reducing repository asset footprint, added build asset documentation, and centralized authoritative dependency locking at workspace root.
+
+---
+
 ## [0.27.0] - 2026-10-31
 
 *Released with audio-engine 1.12.0. The player and the engine are versioned separately and released

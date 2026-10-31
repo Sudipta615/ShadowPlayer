@@ -92,7 +92,7 @@ project says about itself.
    feature**, so a build never offers a backend it cannot open.
 3. Enumerate your own devices. A device list borrowed from another backend is
    a device list that names the wrong thing.
-4. Add the backend to `src/output/output.rs`'s dispatch, with an honest
+4. Add the backend to `src/output/backend.rs`'s dispatch, with an honest
    fallback and a log line that says which path was taken.
 
 ### A DSP stage
@@ -115,3 +115,124 @@ cargo bench --no-run
 If the change touches a claim — a README number, a capability list, a
 limitation — the test that guards that claim must change in the same commit.
 A claim that is true and a test that proves it are one change, not two.
+
+## 6. Module layout: one owner per concept
+
+The engine tree is large, and several concepts are legitimately implemented
+twice (an offline path and a realtime path). The rule is that the *second*
+implementation must be a documented seam, never an accident. This section is
+that documentation; a change that adds a third implementation, or that moves a
+boundary named here, updates this section in the same commit.
+
+### 6.1 The two DSP execution models (reference pipeline vs Graph 2.0)
+
+- **`src/dsp/pipeline/` is the frozen reference oracle**, not a runtime
+  fallback. The audio path routes through Graph 2.0 (`src/dsp/graph2/`, lowered
+  from a `ChainRequest`); the pipeline exists so
+  `tests/fidelity/graph_pipeline_equivalence.rs` and
+  `benches/dsp_pipeline.rs` can pin the production chain against a second,
+  linear implementation. Removing it would remove the bit-exactness oracle.
+- **New DSP stages go into Graph 2.0 only.** Adding a stage to the pipeline is
+  allowed only to keep the oracle honest about a stage the graph already has.
+- `dsp::pipeline::format` also owns the output-status vocabulary the whole
+  crate reports through — `OutputSampleFormat`, `BitPerfectReport`,
+  `BitPerfectResult`, `VolumePath`, `LatencyReport`, `EngineStats`. That is a
+  public API surface; extracting it into its own module is an API-breaking
+  change and is deliberately **not** mixed into structural refactors.
+- `src/dsp/graph2/prod/` names its control modules by role, not by number:
+  `control_handle.rs` (the cloneable cross-thread surface) and
+  `control_mutators.rs` (the queued `set_*` mutators on `Graph2Engine`). A
+  bare `control.rs` next to `controls.rs` is not allowed again.
+
+### 6.2 Room acoustics: modelling vs measurement vs correction
+
+Three formerly confusable modules now name their job:
+
+- **`src/spatial/room_model/`** (was `spatial/acoustic/`) — geometry, materials,
+  ray/beam solving, and the baked scene the renderer consumes.
+- **`src/spatial/acoustic_metrics/`** (was `spatial/acoustics/`) — measurement
+  analysis: impulse responses, RT60/EDT/ETC/clarity, transfer and phase
+  response, MLS and sweep stimuli.
+- **`src/dsp/correction/`** — the per-channel (1D) correction node: IR
+  windowing, phase/magnitude derivation, and the FIR/IIR it feeds.
+- **`src/spatial/room_correction/`** — the multi-point workflow above it:
+  measurement capture, spatial averaging, target curves, filter synthesis.
+
+`room_correction` reuses the primitives from `acoustic_metrics` and
+`dsp::correction`; it must not re-derive one of them.
+
+**Sweep generation and the matched inverse filter have exactly one
+implementation:** `src/dsp/correction/sweep.rs` (`EssSweep`,
+`farina_inverse_filter`, `deconvolve_direct` / `deconvolve_direct_raw`).
+Everything else is a thin `f32` adapter over it:
+`spatial::acoustic_metrics::sweep` (analysis metrics) and
+`spatial::room_correction::measurement` (the capture wizard, which keeps a
+unit-*peak* inverse filter and truncates the IR to the recording length).
+Neither adapter may grow its own chirp law, inverse-filter envelope, or
+convolution loop; a change belongs in the canonical kit, and each adapter's
+`generation_is_the_canonical_sweep_converted_to_f32` equivalence test must
+keep holding. No new sweep generator may be added anywhere in the engine.
+
+### 6.3 Signal analysis is engine-owned
+
+FFT, windowing, spectral/temporal descriptors, crest factor, and EBU R128
+loudness have exactly one canonical implementation:
+`src/dsp/analysis/` (descriptors) and `src/dsp/loudness/` (R128 meter).
+`src/dsp/analyzer.rs` and `src/profile/` compose those primitives for the
+profile cache; they may not grow their own FFT or loudness loop.
+
+The outer workspace (`recommendation`, `media-tools`, `library`) cannot reach
+these modules: `audio-session` is the only crate allowed to speak to the
+engine, so player-side analysis must consume results through that boundary
+rather than linking engine DSP code. That is why a similar-looking feature
+loop exists there — it is an *application* policy layer, and it must state in
+its module docs which engine feature it approximates if it does.
+
+### 6.4 `standards/` defines specifications, never processing
+
+`src/standards/` holds specification *vocabulary* only: standard identifiers,
+compliance thresholds and windows, ADM document shape, channel-layout and
+coordinate-system names. It contains no DSP and no I/O, and the implementations
+elsewhere (`dsp::loudness`, `dsp::true_peak`, `spatial::adm`,
+`decode::channel_layout`) import from it rather than hard-coding the numbers.
+If a constant is needed by exactly one implementation and the specification
+names it there, the implementation may own it — but the two copies must not
+disagree, and a test must hold them together.
+
+### 6.5 What the engine owns vs what the player owns
+
+The engine is an independently versioned workspace with no dependency on the
+player crates. This is deliberate, and it fixes ownership of the subsystems
+that appear on both sides:
+
+| Concept | Engine owner | Player owner |
+| --- | --- | --- |
+| File identity / acoustic fingerprint | `decode::fingerprint` (stream-side, for the CLI and duplicate detection during decode) | `library::fingerprint` + `domain::file_identity` (scanner-side identity; the only implementation that touches the library DB) |
+| Playlist parsing | `playlist::io` (engine CLI interchange) | `library::m3u` / `playlist_format` (import into the library) |
+| CUE sheets | `decode::cue` + `engine::cue_split` (splitting a stream for playback) | `domain::cue` (a parsed, pure model the library stores) |
+| Metadata / tags | `decode::tags` (what the decoder needs mid-stream) | `metadata::extractor` (what the library stores) |
+| MPRIS | `mpris/` (an engine-only CLI/test server) | `ui::services::mpris_service` (the shipped desktop integration; the engine server is not started by the app) |
+
+The rule: a subsystem is *not* ported across the boundary because it looks
+similar. It is ported only if one side can be deleted. When both are needed,
+each side documents its consumer, as this table does.
+
+### 6.6 Engine state: one file, one writer
+
+Live control state is `EngineConfig` (control thread, in memory).
+Durable engine state is narrow: `DspState` (saved EQ/limiter/output
+selection), owned and written only by
+`src/engine/dsp_persistence.rs` (atomic temp-file + rename, save-if-changed),
+and the spatial equivalent in `spatial_persistence.rs`. The engine never
+writes player settings and the player never writes the engine's state file;
+`ui/src/app/settings_io.rs` owns the player's own settings rows. On startup the
+player loads its rows and then hands the engine a configuration; it does not
+replay a second copy of engine settings.
+
+### 6.7 Diagnostics have one sink
+
+`src/diagnostics/` (events + health) is the single diagnostic vocabulary.
+`dsp::graph2::diagnostics`, `spatial::health`, and `spatial::diagnostics`
+produce reports that are translated into it for `engine::telemetry`; none of
+them may define a parallel event type that the telemetry pipeline cannot
+carry.

@@ -1,4 +1,30 @@
-//! SIMD-accelerated peak and envelope calculation kernels for limiters/compressors.
+//! Shared absolute-peak scan kernel (§8.2, Item 29).
+//!
+//! One job: the maximum `|x|` over a block of samples, `f32` or `f64`. The
+//! mix-bus meters (`graph2::prod::arena::nodes::mix`) are its only callers —
+//! they need a per-plane peak without carrying their own scalar loop. The
+//! module is named for the *operation*, not for a consumer, because the
+//! consumer can change and the operation cannot.
+//!
+//! # This is not limiter DSP
+//!
+//! `crate::dsp::limiter` does not call these kernels, and must not: the
+//! lookahead limiter needs a peak for *every sample of every channel* (the
+//! same value feeds the sliding-window maximum, the stereo-link deque, and the
+//! true-peak FIR detector), so a block-wide scan would have to be re-run once
+//! per sample to produce it. Its peaks are computed inline in
+//! `LookaheadLimiter::process_sample_multichannel`. A block scan is the right
+//! shape for metering and the wrong shape for a per-sample envelope; the
+//! limiter's own vector code is the polyphase true-peak filter, not this.
+//!
+//! # Qualification
+//!
+//! `super::scalar::vector_abs_max` and `super::scalar::vector_abs_max_f64` are
+//! the portable reference the vector tiers must agree with. The tests in this
+//! file call that reference directly instead of re-writing it, so the
+//! reference and the check cannot drift apart; they pin the two properties a
+//! new tier can silently break: NaN handling and the scalar tail of a short
+//! slice.
 
 /// Find maximum absolute sample value in `src` over `n` samples.
 ///
@@ -209,33 +235,13 @@ mod tests {
 #[cfg(test)]
 mod nan_tests {
     use super::*;
-
-    /// The scalar reference the SIMD scan replaced.
-    ///
-    /// Written as an explicit comparison rather than `f32::max` so the
-    /// intent — "a NaN never becomes the peak" — is visible rather than
-    /// inherited from the standard library's NaN-ignoring `max`.
-    fn scalar_abs_max_f32(src: &[f32]) -> f32 {
-        let mut peak = 0.0f32;
-        for &v in src {
-            let a = v.abs();
-            if a > peak {
-                peak = a;
-            }
-        }
-        peak
-    }
-
-    fn scalar_abs_max_f64(src: &[f64]) -> f64 {
-        let mut peak = 0.0f64;
-        for &v in src {
-            let a = v.abs();
-            if a > peak {
-                peak = a;
-            }
-        }
-        peak
-    }
+    // The portable scalar reference is the kernel module's own, not a copy
+    // kept beside the test: if the reference changes, this test changes with
+    // it, and the two can never be asserting different contracts. The aliases
+    // keep the assertions reading as "SIMD vs scalar".
+    use crate::dsp::simd::scalar::{
+        vector_abs_max as scalar_abs_max_f32, vector_abs_max_f64 as scalar_abs_max_f64,
+    };
 
     /// SIMD and scalar must agree — including on NaN.
     ///
@@ -255,7 +261,7 @@ mod nan_tests {
         let plain = [0.1f32, -0.9, 0.4, -0.2, 0.75, -0.05];
         assert_eq!(
             vector_abs_max(&plain, plain.len()),
-            scalar_abs_max_f32(&plain),
+            scalar_abs_max_f32(&plain, plain.len()),
             "ordinary input must agree"
         );
 
@@ -268,7 +274,7 @@ mod nan_tests {
         ] {
             assert_eq!(
                 vector_abs_max(&input, input.len()),
-                scalar_abs_max_f32(&input),
+                scalar_abs_max_f32(&input, input.len()),
                 "NaN {name}: the scan must ignore it, not propagate it"
             );
         }
@@ -289,7 +295,7 @@ mod nan_tests {
         let short = [f32::NAN, 0.25, -0.5];
         assert_eq!(
             vector_abs_max(&short, short.len()),
-            scalar_abs_max_f32(&short),
+            scalar_abs_max_f32(&short, short.len()),
             "a short slice must agree too"
         );
     }
@@ -301,7 +307,7 @@ mod nan_tests {
         let input = [0.5f64, f64::NAN, -0.8, 0.2];
         assert_eq!(
             vector_abs_max_f64(&input, input.len()),
-            scalar_abs_max_f64(&input),
+            scalar_abs_max_f64(&input, input.len()),
             "f64 must agree with the scalar reference"
         );
     }

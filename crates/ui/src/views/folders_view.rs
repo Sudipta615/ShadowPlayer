@@ -5,7 +5,7 @@ use domain::models::Track;
 use eframe::egui;
 use playback::PlaybackCoordinator;
 
-use crate::components::folders_view::FoldersView;
+use crate::components::folders_panel::FoldersView;
 use crate::services::{ImportKind, ScannerService};
 use crate::state::LibraryState;
 use crate::theme::Theme;

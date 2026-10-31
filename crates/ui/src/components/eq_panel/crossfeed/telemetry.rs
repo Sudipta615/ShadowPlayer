@@ -66,7 +66,10 @@ fn telemetry_box(
     egui::Frame::NONE
         .fill(theme.bg_pill)
         .corner_radius(CornerRadius::same(theme.radius_sm))
-        .inner_margin(Margin::symmetric(4, 4))
+        .inner_margin(Margin::symmetric(
+            theme.space_xs as i8,
+            theme.space_xs as i8,
+        ))
         .show(ui, |ui| {
             ui.set_width(width.max(50.0));
             ui.vertical_centered(|ui| {

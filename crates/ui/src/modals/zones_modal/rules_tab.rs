@@ -51,7 +51,7 @@ pub fn render_rules_tab(
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.border_subtle))
                     .corner_radius(CornerRadius::same(theme.radius_md))
-                    .inner_margin(Margin::same(10))
+                    .inner_margin(Margin::same(theme.space_lg as i8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let mut enabled = rule.enabled;
@@ -111,7 +111,7 @@ pub fn render_rules_tab(
                                 egui::Frame::NONE
                                     .fill(theme.border_subtle)
                                     .corner_radius(CornerRadius::same(theme.radius_xs))
-                                    .inner_margin(Margin::same(4))
+                                    .inner_margin(Margin::same(theme.space_xs as i8))
                                     .show(ui, |ui| {
                                         ui.label(egui::RichText::new(cond_text).size(11.0));
                                     });

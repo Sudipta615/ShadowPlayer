@@ -62,9 +62,9 @@ use super::exec::buffers::{
 use super::node::{NodeId, NodeKind, NodeParams, PortId};
 use super::sort::ExecutionOrder;
 use super::Graph2;
-use crate::spatial::acoustic::bake::{spectral_taps, BakedScene, ACOUSTIC_IR_LEN};
 use crate::spatial::hrtf::{Ear, HrtfDataset};
 use crate::spatial::math::Vec3;
+use crate::spatial::room_model::bake::{spectral_taps, BakedScene, ACOUSTIC_IR_LEN};
 
 mod ops;
 

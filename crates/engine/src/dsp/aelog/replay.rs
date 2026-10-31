@@ -12,8 +12,8 @@ use crate::dsp::graph2::{ExecutionOrder, Graph2, NodeId, OfflineExecutor};
 use crate::dsp::timeline::{
     AudioClock, CurveBeats, EventPayload, ScheduledEvent, TempoMap, Timeline,
 };
-use crate::spatial::acoustic::bake::BakedScene;
 use crate::spatial::math::Vec3;
+use crate::spatial::room_model::bake::BakedScene;
 
 /// Errors produced while replaying a log.
 #[derive(Debug, Clone, PartialEq)]

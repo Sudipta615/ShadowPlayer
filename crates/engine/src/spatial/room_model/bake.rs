@@ -27,13 +27,13 @@
 //!   renderers (EarlyReflections tap placement)
 //! ```
 
-use crate::spatial::acoustic::geometry::Wall;
-use crate::spatial::acoustic::material::{surface_lowpass_hz, MaterialSpectrum};
-use crate::spatial::acoustic::path::{AcousticPath, PathKind};
-use crate::spatial::acoustic::solver::{AcousticWorld, MAX_PATHS};
 use crate::spatial::level::AirAbsorption;
 use crate::spatial::math::Vec3;
 use crate::spatial::room::{ListenerImage, MAX_IMAGES};
+use crate::spatial::room_model::geometry::Wall;
+use crate::spatial::room_model::material::{surface_lowpass_hz, MaterialSpectrum};
+use crate::spatial::room_model::path::{AcousticPath, PathKind};
+use crate::spatial::room_model::solver::{AcousticWorld, MAX_PATHS};
 
 /// How finely source positions are cached. Two sources inside the same
 /// world-space cube of this side length share one BakedObject (the cache key
@@ -648,9 +648,9 @@ impl AcousticBaker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spatial::acoustic::geometry::AcousticRoom;
-    use crate::spatial::acoustic::material::MaterialKind;
-    use crate::spatial::acoustic::solver::wall_index;
+    use crate::spatial::room_model::geometry::AcousticRoom;
+    use crate::spatial::room_model::material::MaterialKind;
+    use crate::spatial::room_model::solver::wall_index;
 
     const FS: f32 = 48_000.0;
 
@@ -934,9 +934,9 @@ mod tests {
 
     #[test]
     fn spectral_taps_render_per_path_filters() {
-        use crate::spatial::acoustic::geometry::AcousticRoom;
-        use crate::spatial::acoustic::material::MaterialKind;
-        use crate::spatial::acoustic::solver::wall_index;
+        use crate::spatial::room_model::geometry::AcousticRoom;
+        use crate::spatial::room_model::material::MaterialKind;
+        use crate::spatial::room_model::solver::wall_index;
 
         // A flat room: every reflection's kernel must collapse to a single
         // gain tap (the classic broadband behavior, reproduced exactly).

@@ -45,8 +45,9 @@ pub use phase::{
     PhaseMode, RenderParams, RenderedIr, Spectrum,
 };
 pub use sweep::{
-    analyze_harmonics, deconvolve, estimate_snr_db, noise_floor_db, EssConfig, EssSweep, Harmonic,
-    HarmonicReport, ImpulseResponse, MAX_ANALYSIS_HARMONIC_ORDER,
+    analyze_harmonics, deconvolve, deconvolve_direct, deconvolve_direct_raw, estimate_snr_db,
+    farina_inverse_filter, noise_floor_db, EssConfig, EssSweep, Harmonic, HarmonicReport,
+    ImpulseResponse, MAX_ANALYSIS_HARMONIC_ORDER,
 };
 
 use num_complex::Complex;

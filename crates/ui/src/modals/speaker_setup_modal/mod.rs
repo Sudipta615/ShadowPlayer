@@ -16,7 +16,7 @@ mod types;
 
 use audio_session::AudioSession;
 use config::{BassManagementConfig, ChannelTrimConfig, ChannelTrimEntry};
-use eframe::egui::{self, Color32, CornerRadius, Vec2};
+use eframe::egui::{self, CornerRadius, Vec2};
 
 use crate::theme::Theme;
 pub use types::*;
@@ -244,7 +244,7 @@ pub fn show_speaker_setup_modal(
                             egui::RichText::new(tr!("Apply Alignment to Engine"))
                                 .font(crate::theme::font(13.0))
                                 .strong()
-                                .color(Color32::BLACK),
+                                .color(crate::theme::on_positive_fill()),
                         )
                         .fill(theme.bit_perfect_green)
                         .corner_radius(CornerRadius::same(theme.radius_md)),

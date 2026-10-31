@@ -64,9 +64,9 @@ use super::validate::Graph2Error;
 use super::Graph2;
 use crate::dsp::timeline::automation::CurveBeats;
 use crate::dsp::timeline::tempo::TempoMap;
-use crate::spatial::acoustic::bake::BakedScene;
 use crate::spatial::hrtf::HrtfDataset;
 use crate::spatial::math::Vec3;
+use crate::spatial::room_model::bake::BakedScene;
 
 /// Renders a compiled topology over time. Snapshot semantics: construct from
 /// a `(&Graph2, &ExecutionOrder)` pair; mutate the graph only through a

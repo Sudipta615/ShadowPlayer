@@ -506,3 +506,163 @@ pub fn estimate_snr_db(ir: &ImpulseResponse) -> Result<f64, CorrectionError> {
     let peak_db = 20.0 * peak.max(1e-12).log10();
     Ok(peak_db - noise_floor_db(ir)?)
 }
+
+// ── Time-domain matched-filter pairing ───────────────────────────────────────
+
+/// Farina matched inverse filter for an ESS reference: the time-reversed
+/// sweep shaped by the `1/f` (6 dB/octave) amplitude envelope and scaled to
+/// unit energy, so convolving the sweep with it yields a unit-peak impulse.
+///
+/// This is the time-domain twin of the regularized FFT inverse inside
+/// [`deconvolve`]: same measurement model, different domain. It is the
+/// **only** implementation of the matched filter in the engine — the
+/// analysis API in [`crate::spatial::acoustic_metrics::sweep`] delegates here.
+///
+/// `config` describes the chirp law `sweep` was generated with (start/end
+/// frequency, duration, sample rate); `amplitude` and the fade are irrelevant
+/// because the shape is taken from the samples themselves.
+///
+/// Returns an empty vector for an empty sweep or a degenerate band
+/// (`f_end <= f_start`, non-finite rate/duration).
+pub fn farina_inverse_filter(sweep: &[f64], config: &EssConfig) -> Vec<f64> {
+    let n = sweep.len();
+    if n == 0
+        || !(config.sample_rate.is_finite() && config.sample_rate > 0.0)
+        || !(config.duration_secs.is_finite() && config.duration_secs > 0.0)
+    {
+        return Vec::new();
+    }
+    let log_ratio = (config.f_end / config.f_start).ln();
+    if !log_ratio.is_finite() || log_ratio <= 0.0 {
+        return Vec::new();
+    }
+
+    let mut inverse = vec![0.0_f64; n];
+    let mut energy = 0.0_f64;
+    for (i, slot) in inverse.iter_mut().enumerate() {
+        let t = i as f64 / config.sample_rate;
+        // −6 dB/octave envelope, then the time reversal of the reference.
+        let modulation = (-t / config.duration_secs * log_ratio).exp();
+        let value = sweep[n - 1 - i] * modulation;
+        *slot = value;
+        energy += value * value;
+    }
+    if energy > 0.0 {
+        let norm = 1.0 / energy.sqrt();
+        for x in &mut inverse {
+            *x *= norm;
+        }
+    }
+    inverse
+}
+
+/// Direct (time-domain) deconvolution of a recording with a matched inverse
+/// filter, normalized to a unit peak.
+///
+/// `O(n·m)` by design: this is the reference path for short captures and for
+/// cross-checking [`deconvolve`], which works in the frequency domain. A
+/// caller measuring a real room wants [`deconvolve`] instead — it also
+/// reports the pre-delay, the harmonic zones, and the noise floor.
+///
+/// Returns an empty vector if either input is empty.
+pub fn deconvolve_direct(recording: &[f64], inverse_filter: &[f64]) -> Vec<f64> {
+    let mut ir = deconvolve_direct_raw(recording, inverse_filter);
+    let peak = ir.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+    if peak > 1e-9 {
+        let scale = 1.0 / peak;
+        for x in &mut ir {
+            *x *= scale;
+        }
+    }
+    ir
+}
+
+/// [`deconvolve_direct`] without the peak normalization.
+///
+/// The capture path needs the raw linear convolution so it can report levels
+/// in the recording's own scale and window the IR itself; normalizing there
+/// would hide the measurement's gain. Returns an empty vector if either input
+/// is empty.
+pub fn deconvolve_direct_raw(recording: &[f64], inverse_filter: &[f64]) -> Vec<f64> {
+    if recording.is_empty() || inverse_filter.is_empty() {
+        return Vec::new();
+    }
+
+    let out_len = recording.len() + inverse_filter.len() - 1;
+    let mut ir = vec![0.0_f64; out_len];
+    for (i, &rec) in recording.iter().enumerate() {
+        if rec.abs() < 1e-9 {
+            continue;
+        }
+        for (j, &inv) in inverse_filter.iter().enumerate() {
+            ir[i + j] += rec * inv;
+        }
+    }
+    ir
+}
+
+#[cfg(test)]
+mod matched_filter_tests {
+    use super::*;
+
+    fn short_config() -> EssConfig {
+        EssConfig {
+            sample_rate: 8_000.0,
+            duration_secs: 0.25,
+            f_start: 20.0,
+            f_end: 3_000.0,
+            amplitude: 1.0,
+            fade_secs: 0.01,
+            pre_emphasis: false,
+        }
+    }
+
+    #[test]
+    fn inverse_filter_has_the_sweep_length_and_unit_energy() {
+        let sweep = EssSweep::new(short_config())
+            .expect("sweep")
+            .samples()
+            .to_vec();
+        let inverse = farina_inverse_filter(&sweep, &short_config());
+        assert_eq!(inverse.len(), sweep.len());
+        let energy: f64 = inverse.iter().map(|x| x * x).sum();
+        assert!((energy - 1.0).abs() < 1e-6, "energy {energy}");
+    }
+
+    #[test]
+    fn sweep_convolved_with_its_inverse_peaks_at_the_reference_end() {
+        let sweep = EssSweep::new(short_config())
+            .expect("sweep")
+            .samples()
+            .to_vec();
+        let inverse = farina_inverse_filter(&sweep, &short_config());
+        let ir = deconvolve_direct(&sweep, &inverse);
+        assert_eq!(ir.len(), 2 * sweep.len() - 1);
+
+        let peak_index = ir
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .map(|(i, _)| i)
+            .expect("non-empty IR");
+        // A matched filter aligns at the end of the reference.
+        assert!(
+            peak_index.abs_diff(sweep.len() - 1) <= 2,
+            "peak at {peak_index}, expected ~{}",
+            sweep.len() - 1
+        );
+    }
+
+    #[test]
+    fn a_degenerate_band_yields_no_filter() {
+        let mut config = short_config();
+        config.f_end = config.f_start;
+        assert!(farina_inverse_filter(&[1.0, 0.5, 0.0], &config).is_empty());
+    }
+
+    #[test]
+    fn direct_deconvolution_of_empty_input_is_empty() {
+        assert!(deconvolve_direct(&[], &[1.0]).is_empty());
+        assert!(deconvolve_direct(&[1.0], &[]).is_empty());
+    }
+}

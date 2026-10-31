@@ -12,8 +12,8 @@ use windows::Win32::{
     },
 };
 
+use crate::output::backend::StreamErrorEvent;
 use crate::output::format_converter::AudioFormatConverter;
-use crate::output::output::StreamErrorEvent;
 
 use super::client::{RenderContext, RenderFailure};
 use super::format::WasapiContainer;

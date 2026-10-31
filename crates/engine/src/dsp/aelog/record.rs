@@ -11,8 +11,8 @@ use crate::dsp::timeline::{
     CurveBeats, EventError, EventId, EventPayload, EventTime, Quantize, ScheduledEvent, TempoMap,
     Timeline, TransportState,
 };
-use crate::spatial::acoustic::bake::BakedScene;
 use crate::spatial::math::Vec3;
+use crate::spatial::room_model::bake::BakedScene;
 
 /// A recording session: owns a [`Timeline`] and logs every mutation.
 #[derive(Debug, Clone)]
@@ -264,12 +264,14 @@ mod tests {
         // master at record time, embedded verbatim, and identical sessions
         // serialize to byte-equal logs (the BTreeMap cache keeps serde
         // order-stable).
-        use crate::spatial::acoustic::bake::{AcousticBaker, BakePolicy};
-        use crate::spatial::acoustic::geometry::AcousticRoom;
         use crate::spatial::math::Vec3;
+        use crate::spatial::room_model::bake::{AcousticBaker, BakePolicy};
+        use crate::spatial::room_model::geometry::AcousticRoom;
 
-        let world =
-            crate::spatial::acoustic::solver::AcousticWorld::new(AcousticRoom::default(), 48_000.0);
+        let world = crate::spatial::room_model::solver::AcousticWorld::new(
+            AcousticRoom::default(),
+            48_000.0,
+        );
         let scene = AcousticBaker::new(world, 0.5).bake_single(
             Vec3::new(1.0, 2.0, 1.5),
             Vec3::new(6.0, 2.0, 1.5),

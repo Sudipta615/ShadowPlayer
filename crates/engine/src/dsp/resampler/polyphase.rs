@@ -868,7 +868,7 @@ mod tests {
                 cutoff,
             )
             .expect("filter construction");
-            let delay = r.output_delay() as usize;
+            let delay = r.output_delay();
             let mut out = [
                 vec![0.0f32; r.output_frames_max()],
                 vec![0.0f32; r.output_frames_max()],

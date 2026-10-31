@@ -59,7 +59,6 @@ use crate::buffer::MAX_AUDIO_BLOCK_FRAMES;
 use crate::decode::ChannelId;
 use crate::spatial::object::MAX_SPATIAL_OBJECTS;
 
-use super::acoustic::bake::BakedScene;
 use super::automation::SpatialAudioAutomationFrame;
 use super::bed::MAX_BEDS;
 use super::directivity::listener_angle_rad;
@@ -77,6 +76,7 @@ use super::occlusion::OcclusionState;
 use super::quality::SpatialQuality;
 use super::render::{HybridBlockInputs, RenderError, SpatialRenderer};
 use super::room::{EarlyReflections, ListenerImage, RoomLateField, MAX_IMAGES};
+use super::room_model::bake::BakedScene;
 use super::scene::{ListenerTransform, SpatialScene};
 use super::speaker::SpeakerLayout;
 use super::spread::{ring_directions, RING_SAMPLES, SPREAD_MAX_HALF_ANGLE_RAD};

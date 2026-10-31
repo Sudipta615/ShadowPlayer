@@ -7,6 +7,10 @@
 //!
 //! Every assertion names its source of truth in the failure message, so a
 //! drift is fixed by updating the document — never by weakening the test.
+//!
+//! Scope: this file is UI-scoped by name and by content. Workspace-wide and
+//! engine-facing claims belong to `crates/app/tests/docs_truth.rs`; do not
+//! duplicate an assertion that lives there, extend the owning test instead.
 
 use std::path::{Path, PathBuf};
 
@@ -111,7 +115,7 @@ fn the_readme_mentions_every_engine_limitation() {
     let limitations = engine_limitations(&engine);
     assert_eq!(
         limitations.len(),
-        6,
+        15,
         "the engine now documents {} limitations ({limitations:?}); add each one \
          to the player README's Known Limitations and update this test",
         limitations.len()
@@ -125,6 +129,15 @@ fn the_readme_mentions_every_engine_limitation() {
         "talkback",
         "physical",
         "ambisonic",
+        "front l/r",
+        "sparse matrix fir",
+        "dac correction",
+        "affinity",
+        "16 channels",
+        "apodizing",
+        "ultrasonic",
+        "noise-shaper",
+        "sdm",
         "mix bus",
         "plugin",
     ] {

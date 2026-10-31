@@ -11,7 +11,7 @@
 use std::collections::VecDeque;
 
 use crate::dsp::convolution::ConvolutionEngine;
-use crate::spatial::acoustic::bake::ACOUSTIC_IR_LEN;
+use crate::spatial::room_model::bake::ACOUSTIC_IR_LEN;
 
 /// Depth (samples) of the raw input-history ring each `Acoustic` node keeps
 /// for per-path spectral filtering. Bounded below by room scale (the
@@ -34,7 +34,7 @@ pub const ACOUSTIC_HISTORY: usize = ACOUSTIC_IR_LEN + 4096;
 /// `out[k] += Σ_j h[j]·x[k − excess − j]`.
 #[derive(Debug, Default)]
 pub struct AcousticState {
-    /// Cache key of the [`crate::spatial::acoustic::bake::BakedObject`]
+    /// Cache key of the [`crate::spatial::room_model::bake::BakedObject`]
     /// whose kernels are compiled in `paths`.
     pub(crate) key: Option<(i32, i32, i32)>,
     /// The executor's `acoustic_epoch` these kernels were compiled at; a

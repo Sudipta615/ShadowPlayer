@@ -30,13 +30,13 @@
 //! buffers or returns a `Vec`, and is never on the audio thread. The
 //! realtime renderers consume only the resulting [`AcousticPath`]s.
 
-use crate::spatial::acoustic::geometry::{
+use crate::spatial::math::Vec3;
+use crate::spatial::room_model::geometry::{
     closest_point_on_segment, portal_diffraction_edges, AcousticRoom, DiffractionEdge, Portal,
     Wall, ALL_WALLS,
 };
-use crate::spatial::acoustic::material::MaterialSpectrum;
-use crate::spatial::acoustic::path::{AcousticPath, PathFlags, PathKind};
-use crate::spatial::math::Vec3;
+use crate::spatial::room_model::material::MaterialSpectrum;
+use crate::spatial::room_model::path::{AcousticPath, PathFlags, PathKind};
 
 /// Maximum image-source cascade depth the solver will walk (order 2).
 pub const MAX_REFLECTION_ORDER: u8 = 2;
@@ -394,7 +394,7 @@ impl AcousticWorld {
 
     /// Calculate total absorption area $A = \sum S_i \alpha_i$ (metric Sabins) for octave band `octave_idx`.
     pub fn total_absorption_area(&self, octave_idx: usize) -> f32 {
-        let oct = octave_idx.min(crate::spatial::acoustic::material::OCTAVE_BANDS - 1);
+        let oct = octave_idx.min(crate::spatial::room_model::material::OCTAVE_BANDS - 1);
         let s_x = self.room.depth * self.room.height;
         let s_y = self.room.width * self.room.height;
         let s_z = self.room.width * self.room.depth;
@@ -565,7 +565,7 @@ fn bend_angle(edge: &DiffractionEdge, source: Vec3, listener: Vec3) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spatial::acoustic::material::MaterialKind;
+    use crate::spatial::room_model::material::MaterialKind;
 
     const FS: f32 = 48_000.0;
 

@@ -50,18 +50,18 @@
 //! - `prepare.rs` — the preparation boundary: a `ChainRequest` becomes a
 //!   complete, measured, unpublished [`PreparedGraph2`], which
 //!   [`Graph2Engine::activate_prepared`] then swaps in
-//! - `control.rs` — [`Graph2ControlHandle`]: the cloneable cross-thread
+//! - `control_handle.rs` — [`Graph2ControlHandle`]: the cloneable cross-thread
 //!   surface (mirrors the arena's queued control plane one-to-one)
 //! - `process.rs` — the block entry points
-//! - `controls.rs` — the queued control mutators (each forwards to the
+//! - `control_mutators.rs` — the queued control mutators (each forwards to the
 //!   active graph)
 //! - `mod.rs` (this file) — the [`Graph2Engine`] struct and construction
 
 use std::fmt;
 
 mod arena;
-mod control;
-mod controls;
+mod control_handle;
+mod control_mutators;
 mod lowering;
 mod plugins;
 mod prepare;
@@ -78,7 +78,7 @@ pub use arena::nodes::{
     MAX_SANDBOX_CHANNELS,
 };
 pub use arena::{DspGraph, DspNode, GraphControlHandle, GraphGeneration, GraphScratch};
-pub use control::Graph2ControlHandle;
+pub use control_handle::Graph2ControlHandle;
 pub use plugins::{register_static_host, resolve_host};
 pub use prepare::{
     estimate_graph_preparation, scratch_bytes, GraphPreparationEstimate, GraphPreparationResources,

@@ -3,7 +3,7 @@
 use super::types::biquad_crossfeed_gain_db;
 use crate::components::eq_panel::EqPanelState;
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// Interactive Acoustic Transfer Function Spectrum canvas.
 pub fn render_transfer_spectrum_canvas(ui: &mut egui::Ui, state: &EqPanelState, theme: &Theme) {
@@ -62,7 +62,7 @@ pub fn render_transfer_spectrum_canvas(ui: &mut egui::Ui, state: &EqPanelState, 
         let y = y_for_db(db);
         painter.line_segment(
             [Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)],
-            Stroke::new(0.8, Color32::from_white_alpha(15)),
+            Stroke::new(0.8, theme.meter_grid),
         );
         painter.text(
             Pos2::new(plot.left() - 4.0, y),
@@ -87,7 +87,7 @@ pub fn render_transfer_spectrum_canvas(ui: &mut egui::Ui, state: &EqPanelState, 
         let x = x_for_freq(freq);
         painter.line_segment(
             [Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())],
-            Stroke::new(0.8, Color32::from_white_alpha(15)),
+            Stroke::new(0.8, theme.meter_grid),
         );
         painter.text(
             Pos2::new(x, plot.bottom() + 4.0),
@@ -128,12 +128,7 @@ pub fn render_transfer_spectrum_canvas(ui: &mut egui::Ui, state: &EqPanelState, 
         let b0 = Pos2::new(p0.x, plot.bottom());
         let b1 = Pos2::new(p1.x, plot.bottom());
 
-        let fill_color = Color32::from_rgba_unmultiplied(
-            theme.accent.r(),
-            theme.accent.g(),
-            theme.accent.b(),
-            30,
-        );
+        let fill_color = crate::theme::with_alpha(theme.accent, 30);
         painter.add(egui::Shape::convex_polygon(
             vec![p0, p1, b1, b0],
             fill_color,

@@ -409,7 +409,7 @@ pub enum NodeParams {
     None,
     /// `Acoustic` — the source position in the baked acoustic world whose
     /// room response this node renders (the listener + response come from
-    /// the [`BakedScene`](crate::spatial::acoustic::bake::BakedScene)).
+    /// the [`BakedScene`](crate::spatial::room_model::bake::BakedScene)).
     /// `scene: Some(name)` selects a **named scene** from the executor's
     /// registry (`OfflineExecutor::set_scene`), letting one graph render
     /// distinct room responses for several listeners and mix them in the

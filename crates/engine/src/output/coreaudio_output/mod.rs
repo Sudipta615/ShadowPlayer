@@ -74,12 +74,12 @@ use objc2_core_audio_types::{
 
 use crate::buffer::FixedFrameBuffer;
 use crate::decode::dsd::DsdWireFormat;
+use crate::output::backend::{NativeDsdParams, StreamErrorState};
+use crate::output::backend::{Output, StreamErrorBatch};
 use crate::output::capabilities::STANDARD_RATES;
 use crate::output::capabilities::{OutputAccessMode, OutputAccessState, OutputCapabilities};
 use crate::output::cpal_output::{OutputError, OutputVolume};
 use crate::output::format_converter::TargetFormat;
-use crate::output::output::{NativeDsdParams, StreamErrorState};
-use crate::output::output::{Output, StreamErrorBatch};
 use crate::output::output_info::OutputInfo;
 
 use hal::{addr, get, get_cfstring, get_opt, is_settable, property_size, set, NO_ERROR};

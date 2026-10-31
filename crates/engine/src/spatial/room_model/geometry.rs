@@ -12,8 +12,8 @@
 //! spaces; a **diffraction edge** is an open boundary sound bends around
 //! (a door jamb, a window sill, a freestanding mullion).
 
-use crate::spatial::acoustic::material::MaterialSpectrum;
 use crate::spatial::math::Vec3;
+use crate::spatial::room_model::material::MaterialSpectrum;
 
 /// The index of one of the six walls of the box in the solver's convention.
 ///

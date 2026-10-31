@@ -142,10 +142,18 @@ fn render_body(
                         .fill(theme.accent.linear_multiply(0.12))
                         .stroke(Stroke::new(1.0, theme.accent.linear_multiply(0.4)))
                         .corner_radius(CornerRadius::same(theme.radius_md))
-                        .inner_margin(Margin::same(8))
+                        .inner_margin(Margin::same(theme.space_md as i8))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("🎧").font(font(14.0)));
+                                let (icon_rect, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(16.0),
+                                    egui::Sense::hover(),
+                                );
+                                crate::components::icons::draw_headphones(
+                                    ui,
+                                    icon_rect,
+                                    theme.accent,
+                                );
                                 ui.vertical(|ui| {
                                     ui.label(
                                         egui::RichText::new(tr_args!(

@@ -3,7 +3,7 @@
 use super::types::{calculate_acoustic_path_cm, calculate_itd_delay_us};
 use crate::components::eq_panel::EqPanelState;
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// Interactive 2D Soundstage Geometry Canvas simulating listener and virtual speakers at 60°.
 pub fn render_soundstage_geometry_canvas(ui: &mut egui::Ui, state: &EqPanelState, theme: &Theme) {
@@ -38,7 +38,7 @@ pub fn render_soundstage_geometry_canvas(ui: &mut egui::Ui, state: &EqPanelState
     painter.rect_filled(
         shadow_rect,
         CornerRadius::same(theme.radius_sm),
-        Color32::from_black_alpha(45),
+        theme.shadow,
     );
 
     // Virtual Speakers at ±30°
@@ -168,10 +168,14 @@ fn draw_speaker_cabinet(
 ) {
     let size = Vec2::new(26.0, 22.0);
     let rect = Rect::from_center_size(pos, size);
-    painter.rect_filled(rect, CornerRadius::same(3), theme.bg_card_hover);
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(theme.radius_xs),
+        theme.bg_card_hover,
+    );
     painter.rect_stroke(
         rect,
-        CornerRadius::same(3),
+        CornerRadius::same(theme.radius_xs),
         Stroke::new(1.2, theme.text_secondary),
         egui::StrokeKind::Inside,
     );

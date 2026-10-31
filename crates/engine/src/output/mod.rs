@@ -29,7 +29,7 @@ pub mod null_output;
 // The directory `src/output/` holds the `output.rs` core trait + factory
 // alongside the backend modules; the naming is intentional.
 #[allow(clippy::module_inception)]
-pub mod output;
+pub mod backend;
 pub mod output_info;
 pub mod output_profile;
 pub mod rate_policy;
@@ -49,6 +49,10 @@ pub use wasapi_loopback::WasapiLoopbackCapture;
 
 #[cfg(feature = "asio-native")]
 pub use asio_output::AsioOutput;
+pub use backend::{
+    create_output, NativeDsdCapability, NativeDsdParams, Output, StreamErrorBatch,
+    StreamErrorEvent, StreamErrorKind, StreamErrorState,
+};
 pub use calibration::{CorrectionIr, OutputCalibration, TargetLayoutKind};
 pub use capabilities::{OutputAccessMode, OutputCapabilities, OutputValidationError};
 pub use cpal_output::{CpalOutput, OutputError, OutputVolume};
@@ -61,10 +65,6 @@ pub use endpoint::{
 };
 pub use format_converter::{AudioFormatConverter, TargetFormat};
 pub use null_output::NullOutput;
-pub use output::{
-    create_output, NativeDsdCapability, NativeDsdParams, Output, StreamErrorBatch,
-    StreamErrorEvent, StreamErrorKind, StreamErrorState,
-};
 
 /// The output backends this build can actually try, in menu order.
 ///

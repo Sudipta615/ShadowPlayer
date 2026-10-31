@@ -67,6 +67,27 @@ pub fn with_alpha(color: Color32, alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
+/// Build a `Color32` from raw channel bytes.
+///
+/// This is the sanctioned constructor for **image data** — pixels read from
+/// artwork, averaged, or written into a texture buffer. Those bytes are not a
+/// palette choice and cannot be replaced by a theme token; palette colours
+/// still come from [`Theme`], and a view that hard-codes an RGB triple is
+/// exactly what `tests/theme_purity.rs` exists to catch.
+pub fn rgba_unmultiplied(r: u8, g: u8, b: u8, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
+/// Foreground for text drawn on a bright positive-action fill.
+///
+/// Both skins render actions like "Apply Alignment" on
+/// [`Theme::bit_perfect_green`], which is light in both. The foreground is
+/// therefore a contrast constant, not a skin colour: a skin that changes is
+/// expected to keep its positive fill light, and this stays black.
+pub fn on_positive_fill() -> Color32 {
+    Color32::BLACK
+}
+
 /// Parse a `#RRGGBB` or `#RRGGBBAA` hex colour string.
 pub fn parse_hex_color(hex: &str) -> Option<Color32> {
     let hex = hex.trim().strip_prefix('#').unwrap_or(hex.trim());

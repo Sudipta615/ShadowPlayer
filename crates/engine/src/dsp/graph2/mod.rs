@@ -220,7 +220,7 @@ impl Graph2 {
     /// A room-response node: the input plane passes through (direct) plus
     /// one delayed, gain-scaled copy per baked path of `position` — the
     /// acoustic world as a graph-routable primitive. The response comes from
-    /// the [`BakedScene`](crate::spatial::acoustic::bake::BakedScene)
+    /// the [`BakedScene`](crate::spatial::room_model::bake::BakedScene)
     /// attached to the executor (`OfflineExecutor::set_baked_scene`); an
     /// unbaked position (or no scene) passes the input through unchanged.
     pub fn add_acoustic(&mut self, name: &str, position: crate::spatial::math::Vec3) -> NodeId {

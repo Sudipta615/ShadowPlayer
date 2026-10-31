@@ -3,7 +3,7 @@
 //! Provides spatial averaging across multiple measurement positions
 //! to avoid narrow position-dependent acoustic comb-filtering artifacts.
 
-use crate::spatial::acoustics::frequency_response::FrequencyResponse;
+use crate::spatial::acoustic_metrics::frequency_response::FrequencyResponse;
 use serde::{Deserialize, Serialize};
 
 /// Strategy for combining multi-point measurement frequency responses.

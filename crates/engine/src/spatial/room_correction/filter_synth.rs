@@ -12,7 +12,7 @@ use super::correction::CorrectionMode;
 use super::profile::ChannelCorrectionMetrics;
 use super::target_curve::TargetCurve;
 use crate::dsp::correction::phase::{render_from_magnitude_db, PhaseMode, RenderParams};
-use crate::spatial::acoustics::frequency_response::FrequencyResponse;
+use crate::spatial::acoustic_metrics::frequency_response::FrequencyResponse;
 
 /// Configuration for FIR correction filter synthesis.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -253,7 +253,7 @@ mod tests {
         let resp = FrequencyResponse {
             frequencies: vec![20.0, 100.0, 1000.0, 10000.0, 20000.0],
             magnitude_db: vec![-3.0, 0.0, 2.0, -1.0, 0.0],
-            smoothing: crate::spatial::acoustics::frequency_response::OctaveSmoothing::None,
+            smoothing: crate::spatial::acoustic_metrics::frequency_response::OctaveSmoothing::None,
         };
         let target = TargetCurve::flat();
         let config = FilterSynthConfig {
@@ -283,7 +283,7 @@ mod tests {
         let resp = FrequencyResponse {
             frequencies: vec![20.0, 100.0, 1000.0, 10000.0, 20000.0],
             magnitude_db: vec![-2.0, 0.0, 3.0, -1.0, 0.0],
-            smoothing: crate::spatial::acoustics::frequency_response::OctaveSmoothing::None,
+            smoothing: crate::spatial::acoustic_metrics::frequency_response::OctaveSmoothing::None,
         };
         let target = TargetCurve::flat();
         let config = FilterSynthConfig {
@@ -309,7 +309,7 @@ mod tests {
         let resp = FrequencyResponse {
             frequencies: vec![63.0, 125.0, 250.0, 500.0, 1000.0],
             magnitude_db: vec![4.0, 0.0, -3.0, 0.0, 2.0],
-            smoothing: crate::spatial::acoustics::frequency_response::OctaveSmoothing::None,
+            smoothing: crate::spatial::acoustic_metrics::frequency_response::OctaveSmoothing::None,
         };
         let target = TargetCurve::flat();
         let bands = fit_parametric_eq(&resp, &target, 5);

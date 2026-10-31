@@ -15,8 +15,8 @@ use super::ops::{direct_convolve, to_ir_taps, GainStep, CONVOLUTION_FFT_THRESHOL
 use super::{
     ConvState, FftConvState, HrtfState, OfflineExecutor, ResamplerState, ACOUSTIC_HISTORY,
 };
-use crate::spatial::acoustic::bake::{spectral_taps, BakedScene, ACOUSTIC_IR_LEN};
 use crate::spatial::hrtf::Ear;
+use crate::spatial::room_model::bake::{spectral_taps, BakedScene, ACOUSTIC_IR_LEN};
 
 impl OfflineExecutor {
     pub(crate) fn run_source(&mut self, id: NodeId) {

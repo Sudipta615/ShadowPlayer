@@ -9,8 +9,8 @@
 //! "separate acoustic simulation from acoustic rendering" hinges on — the
 //! renderer consumes paths and never re-derives propagation itself.
 
-use crate::spatial::acoustic::geometry::Wall;
 use crate::spatial::math::Vec3;
+use crate::spatial::room_model::geometry::Wall;
 
 /// The kind of interaction a path represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

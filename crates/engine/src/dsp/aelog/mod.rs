@@ -49,8 +49,8 @@ pub use replay::{replay_events, replay_render, ReplayError, ReplayOutcome};
 use crate::dsp::timeline::{
     CurveBeats, EventPayload, EventTime, Quantize, TempoMap, TransportState,
 };
-use crate::spatial::acoustic::bake::BakedScene;
 use crate::spatial::math::Vec3;
+use crate::spatial::room_model::bake::BakedScene;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

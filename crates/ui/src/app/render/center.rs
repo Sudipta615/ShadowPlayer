@@ -177,7 +177,7 @@ impl ShadowPlayerApp {
                                 if ui
                                     .add(
                                         egui::Button::new(
-                                            egui::RichText::new(format!("🔊 {active_zone_name}"))
+                                            egui::RichText::new(active_zone_name)
                                                 .size(11.0)
                                                 .color(self.theme.accent),
                                         )

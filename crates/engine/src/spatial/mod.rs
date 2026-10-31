@@ -162,8 +162,7 @@
 //! The spatial layer contains **no** Dolby/DTS codecs, bitstreams, metadata,
 //! or trademarks — it is an independent implementation (§3, §115).
 
-pub mod acoustic;
-pub mod acoustics;
+pub mod acoustic_metrics;
 pub mod adm;
 pub mod ambisonic;
 pub mod automation;
@@ -195,6 +194,7 @@ pub mod render;
 pub mod representation;
 pub mod room;
 pub mod room_correction;
+pub mod room_model;
 pub mod scene;
 #[cfg(feature = "sofa-import")]
 pub mod sofa;
@@ -204,13 +204,7 @@ pub mod tracking;
 pub mod upmix;
 pub mod vbap;
 pub mod voice;
-pub use acoustic::{
-    diffract_around_edge, spectral_taps, wall_index, AcousticBaker, AcousticPath, AcousticRoom,
-    AcousticWorld, BakePolicy, BakedObject, BakedPath, BakedScene, DiffractionEdge, MaterialKind,
-    MaterialSpectrum, PathFlags, PathKind, Portal, SbirModel, Wall, ACOUSTIC_IR_LEN, ALL_WALLS,
-    DEFAULT_BAKE_CELL_M, MAX_PATHS, MAX_REFLECTION_ORDER, OCTAVE_BANDS, OCTAVE_BANDS_HZ,
-};
-pub use acoustics::{analyze_acoustics, AcousticReport};
+pub use acoustic_metrics::{analyze_acoustics, AcousticReport};
 pub use ambisonic::{
     channel_count, encode_plane_wave, encode_plane_wave_n, in_phase_window, max_re_window,
     rotate_bus_frame, rotate_bus_frame_n, sh_foa, sh_n, AmbisonicDecoder, AmbisonicRenderer,
@@ -276,6 +270,12 @@ pub use room_correction::{
     BiquadFitBand, ChannelCorrectionMetrics, CorrectionMode, CorrectionProfile, FilterSynthConfig,
     RoomCorrectionFilter, RoomCorrectionProcessor, RoomCorrectionTarget, RoomIrAnalysis,
     SpatialAverageStrategy, SweepConfig, TargetCurve, TargetCurveKind,
+};
+pub use room_model::{
+    diffract_around_edge, spectral_taps, wall_index, AcousticBaker, AcousticPath, AcousticRoom,
+    AcousticWorld, BakePolicy, BakedObject, BakedPath, BakedScene, DiffractionEdge, MaterialKind,
+    MaterialSpectrum, PathFlags, PathKind, Portal, SbirModel, Wall, ACOUSTIC_IR_LEN, ALL_WALLS,
+    DEFAULT_BAKE_CELL_M, MAX_PATHS, MAX_REFLECTION_ORDER, OCTAVE_BANDS, OCTAVE_BANDS_HZ,
 };
 pub use scene::{
     load_scene_json, save_scene_json, Listener, ListenerTransform, SceneFileError, SpatialScene,

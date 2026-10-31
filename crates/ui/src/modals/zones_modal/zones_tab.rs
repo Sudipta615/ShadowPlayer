@@ -51,7 +51,7 @@ pub fn render_zones_tab(
                         },
                     ))
                     .corner_radius(CornerRadius::same(theme.radius_md))
-                    .inner_margin(Margin::same(12))
+                    .inner_margin(Margin::same(theme.space_xl as i8))
                     .show(ui, |ui| {
                         // Title bar
                         ui.horizontal(|ui| {
@@ -104,7 +104,7 @@ pub fn render_zones_tab(
 
                             if zone_state.is_playing {
                                 egui::Frame::NONE
-                                    .fill(Color32::from_rgb(46, 125, 50))
+                                    .fill(theme.bit_perfect_green)
                                     .corner_radius(CornerRadius::same(theme.radius_sm))
                                     .inner_margin(Margin {
                                         left: 5,

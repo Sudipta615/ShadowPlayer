@@ -37,7 +37,6 @@ use crate::buffer::MAX_AUDIO_BLOCK_FRAMES;
 use crate::decode::ChannelId;
 use crate::spatial::object::MAX_SPATIAL_OBJECTS;
 
-use super::acoustic::bake::BakedScene;
 use super::automation::SpatialAudioAutomationFrame;
 use super::bed::render_beds;
 use super::directivity::listener_angle_rad;
@@ -51,6 +50,7 @@ use super::occlusion::OcclusionState;
 use super::quality::SpatialQuality;
 use super::render::{HybridBlockInputs, RenderError, SpatialRenderer};
 use super::room::{EarlyReflections, ListenerImage, RoomLateField, MAX_IMAGES};
+use super::room_model::bake::BakedScene;
 use super::scene::{ListenerTransform, SpatialScene};
 use super::speaker::SpeakerLayout;
 use super::spread::{
@@ -973,10 +973,10 @@ mod tests {
         // spectrally flat walls keeps reflections as clean spikes. Measured
         // by how many output samples in the reflection window clear 8% of
         // the window's own peak.
-        use super::super::acoustic::bake::{AcousticBaker, BakePolicy};
-        use super::super::acoustic::geometry::AcousticRoom;
-        use super::super::acoustic::material::MaterialKind;
-        use super::super::acoustic::solver::{wall_index, AcousticWorld};
+        use super::super::room_model::bake::{AcousticBaker, BakePolicy};
+        use super::super::room_model::geometry::AcousticRoom;
+        use super::super::room_model::material::MaterialKind;
+        use super::super::room_model::solver::{wall_index, AcousticWorld};
         use crate::spatial::Wall;
 
         let listener = Vec3::ZERO;

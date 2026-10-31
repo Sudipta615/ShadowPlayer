@@ -46,9 +46,9 @@ use cpal::SampleFormat;
 
 use crate::buffer::FixedFrameBuffer;
 use crate::dsp::pipeline::OutputSampleFormat;
+use crate::output::backend::{Output, StreamErrorBatch, StreamErrorState};
 use crate::output::capabilities::{OutputAccessMode, OutputAccessState, OutputCapabilities};
 use crate::output::cpal_output::OutputError;
-use crate::output::output::{Output, StreamErrorBatch, StreamErrorState};
 use crate::output::output_info::OutputInfo;
 use crate::output::OutputVolume;
 

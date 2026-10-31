@@ -89,10 +89,10 @@ use windows::Win32::{
 use crate::buffer::FixedFrameBuffer;
 use crate::dsp::dither::DitherType;
 use crate::dsp::pipeline::OutputSampleFormat;
+use crate::output::backend::{StreamErrorBatch, StreamErrorEvent, StreamErrorState};
 use crate::output::capabilities::{OutputAccessMode, OutputAccessState, OutputCapabilities};
 use crate::output::cpal_output::{OutputError, OutputVolume};
 use crate::output::format_converter::{AudioFormatConverter, TargetFormat};
-use crate::output::output::{StreamErrorBatch, StreamErrorEvent, StreamErrorState};
 use crate::output::output_info::OutputInfo;
 
 pub(crate) mod client;
@@ -358,9 +358,9 @@ impl WasapiOutput {
                 );
                 self.stream_errors.report(StreamErrorEvent {
                     kind: if hresult == AUDCLNT_E_DEVICE_INVALIDATED.0 {
-                        crate::output::output::StreamErrorKind::DeviceUnavailable
+                        crate::output::backend::StreamErrorKind::DeviceUnavailable
                     } else {
-                        crate::output::output::StreamErrorKind::BackendSpecific
+                        crate::output::backend::StreamErrorKind::BackendSpecific
                     },
                     error_type: interface,
                     message: "WASAPI render loop stopped after a client failure".to_string(),
@@ -707,7 +707,7 @@ impl OutputVolume for WasapiOutput {
     }
 }
 
-impl super::output::Output for WasapiOutput {
+impl super::backend::Output for WasapiOutput {
     fn sample_rate(&self) -> u32 {
         WasapiOutput::sample_rate(self)
     }

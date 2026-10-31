@@ -13,11 +13,11 @@ use serde::{Deserialize, Serialize};
 use super::correction::CorrectionMode;
 use super::filter_synth::{BiquadFitBand, FilterSynthConfig};
 use super::target_curve::TargetCurve;
-use crate::spatial::acoustics::frequency_response::{
+use crate::spatial::acoustic_metrics::frequency_response::{
     compute_magnitude_response, FrequencyResponse,
 };
-use crate::spatial::acoustics::group_delay::compute_group_delay;
-use crate::spatial::acoustics::phase_response::compute_phase_response;
+use crate::spatial::acoustic_metrics::group_delay::compute_group_delay;
+use crate::spatial::acoustic_metrics::phase_response::compute_phase_response;
 
 /// Comprehensive room correction validation assessment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

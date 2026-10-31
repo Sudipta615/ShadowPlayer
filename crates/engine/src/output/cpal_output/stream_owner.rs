@@ -9,8 +9,8 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use super::{CpalFormatPlan, CpalOutput, CpalStreamCommand, CpalStreamHandle, OutputError};
 use crate::buffer::UnderrunState;
 use crate::dsp::dither::DitherType;
+use crate::output::backend::StreamErrorEvent;
 use crate::output::format_converter::{AudioFormatConverter, TargetFormat};
-use crate::output::output::StreamErrorEvent;
 
 impl CpalOutput {
     pub(crate) fn start_raw(&mut self) -> Result<(), OutputError> {
