@@ -9,7 +9,7 @@
 //!
 //! A one-bit modulator has a finite maximum stable input amplitude. Rather
 //! than let a 0 dBFS signal drive the loop into overload, the input is
-//! attenuated by [`MODULATION_DEPTH`] (0.5, i.e. 50 %). This is the same
+//! attenuated by `MODULATION_DEPTH` (0.5, i.e. 50 %). This is the same
 //! policy HQPlayer documents — "maximum modulation depth is monitored and
 //! when necessary limited to 50 %" — and it keeps the loop stable for the
 //! full digital scale. The resulting analog level is 6 dB below the raw

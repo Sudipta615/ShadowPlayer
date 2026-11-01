@@ -741,7 +741,7 @@ impl ParametricEq {
     /// the file formats use (`Q`, `BW Oct`, `BW Hz`, `S`).
     ///
     /// The width is converted to the Q this EQ's biquads take
-    /// (`config::eq_width`), after the gain is clamped the way
+    /// ([`config::Bandwidth::to_q`]), after the gain is clamped the way
     /// [`Self::set_band`] clamps it — so an imported `S 0.5` shelf and a hand-
     /// typed `Q 0.49` land on the same filter. `EqBandParams::q` in `params`
     /// is ignored; the width argument is the width.

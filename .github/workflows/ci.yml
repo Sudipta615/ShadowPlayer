@@ -50,6 +50,13 @@ jobs:
             exit 1
           }
 
+      # The UI build script parses `tr!` literals byte by byte. A Windows
+      # checkout that rewrote LF as CRLF once made a `\` line continuation
+      # look like an unknown escape, so the scanner's line-ending handling is
+      # pinned by its own test (and `.gitattributes` keeps the tree LF).
+      - name: i18n scanner handles CRLF sources
+        run: cargo test -p ui --test i18n_source_scan
+
       # A real session bus, not a mock: the service registers its well-known
       # name and accepts the same PlayPause method playerctl calls.
       - name: MPRIS on a session bus
@@ -131,9 +138,11 @@ jobs:
         run: cargo bench --no-run
 
       # The engine's own documentation is a published surface: `cargo doc`
-      # is how an embedder reads the contracts.
+      # is how an embedder reads the contracts. `--all-features` also covers
+      # the feature-gated surfaces (C FFI, MPRIS, TUI), whose links would
+      # otherwise only be checked when someone happened to enable them.
       - name: Documentation
-        run: cargo doc --no-deps
+        run: cargo doc --no-deps --all-features
         env:
           RUSTDOCFLAGS: "-D warnings"
 

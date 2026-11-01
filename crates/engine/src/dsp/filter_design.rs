@@ -11,7 +11,7 @@
 //! was asked for. This module is that layer:
 //!
 //! * [`Bandwidth`] — the four ways the reference implementations spell a band
-//!   width, converted through [`config::eq_width`] so the importer and the DSP
+//!   width, converted through [`config::Bandwidth::to_q`] so the importer and the DSP
 //!   cannot disagree.
 //! * [`FilterDesign`] — which prototype maps the analog response onto the
 //!   digital one: the engine's historical cookbook bilinear transform, the

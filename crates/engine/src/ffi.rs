@@ -101,7 +101,7 @@ fn live_handle<'a>(handle: *const EngineHandleFFI) -> Option<&'a EngineHandleFFI
 /// Opaque handle to an audio engine instance.
 ///
 /// The engine itself is moved onto a dedicated background tick thread (see
-/// [`EngineHandleFFI::spawn_tick_thread`]); the handle only retains the
+/// `EngineHandleFFI::spawn_tick_thread`); the handle only retains the
 /// client-side [`EngineHandle`] plus the stop flag and thread join handle
 /// needed to tear it down cleanly in [`engine_destroy`].
 pub struct EngineHandleFFI {
@@ -462,7 +462,7 @@ pub mod backend_id {
     /// refused under `FallbackPolicy::Strict` (see `config::AudioBackend`).
     pub const PIPEWIRE: u32 = 5;
     /// Linux JACK pro-audio output. Declared, not implemented — see
-    /// [`Self::PIPEWIRE`].
+    /// [`PIPEWIRE`].
     pub const JACK: u32 = 6;
     /// Hardware-free sink: drains and discards, opening no OS device.
     pub const NULL: u32 = 7;

@@ -126,12 +126,18 @@ fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
     out.sort();
 }
 
-fn scan_source(
+pub(crate) fn scan_source(
     path: &Path,
     source: &str,
     en: &BTreeMap<String, String>,
     used: &mut BTreeSet<String>,
 ) {
+    // A Windows checkout may hand us CRLF line endings. Normalise them before
+    // scanning so the literal parser sees exactly the same bytes on every
+    // platform; otherwise a `\` line continuation is followed by `\r\n` and
+    // looks like an unknown escape.
+    let source = source.replace("\r\n", "\n");
+    let source = source.as_str();
     let bytes = source.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -332,7 +338,7 @@ fn is_code(source: &str, pos: usize) -> bool {
 
 /// Decode a Rust string literal beginning at `input[0] == '"'`.
 /// Returns the decoded text and the number of source bytes consumed.
-fn parse_string(input: &str) -> Option<(String, usize)> {
+pub(crate) fn parse_string(input: &str) -> Option<(String, usize)> {
     let bytes = input.as_bytes();
     if bytes.first() != Some(&b'"') {
         return None;
@@ -375,6 +381,17 @@ fn parse_string(input: &str) -> Option<(String, usize)> {
                             i += 1;
                         }
                     }
+                    b'\r' => {
+                        // A Windows checkout can leave CRLF inside a `\`
+                        // continuation even after normalisation elsewhere.
+                        if bytes.get(i + 1) != Some(&b'\n') {
+                            return None;
+                        }
+                        i += 1;
+                        while i + 1 < bytes.len() && bytes[i + 1].is_ascii_whitespace() {
+                            i += 1;
+                        }
+                    }
                     _ => return None,
                 }
                 i += 1;
@@ -390,7 +407,7 @@ fn parse_string(input: &str) -> Option<(String, usize)> {
 }
 
 /// Stable message id: `S` + 64-bit FNV-1a of the UTF-8 English text.
-fn message_key(text: &str) -> String {
+pub(crate) fn message_key(text: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in text.as_bytes() {
         hash ^= u64::from(*byte);

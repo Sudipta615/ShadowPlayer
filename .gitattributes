@@ -1,0 +1,22 @@
+# Keep the working tree byte-identical on every platform. The UI build script
+# scans Rust source byte by byte, and a Windows checkout that rewrote LF as
+# CRLF turned a `\` line continuation inside a `tr!` literal into an unknown
+# escape. Text is therefore normalised to LF in the repository and on checkout.
+* text=auto eol=lf
+
+# Binary assets are never normalised.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.ico   binary
+*.icns  binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.bin   binary
+*.wav   binary
+*.flac  binary
+*.mp3   binary
+*.zip   binary
+*.gz    binary

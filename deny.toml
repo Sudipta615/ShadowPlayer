@@ -31,6 +31,11 @@ allow = [
     "BSL-1.0",
     "OFL-1.1",
     "Ubuntu-font-1.0",
+    # The Mozilla root-store data shipped by `webpki-roots` (via `ureq` in
+    # media-tools and the UI). It is a permissive data licence, not a code
+    # licence; CDLA-Permissive-2.0 grants the same rights for the certificate
+    # bundle that MIT/Apache-2.0 grant for code.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 

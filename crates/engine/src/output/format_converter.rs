@@ -103,7 +103,7 @@ impl AudioFormatConverter {
 
     /// Seed the dither generator so this converter's noise is reproducible.
     ///
-    /// See [`crate::dsp::Dither::set_random_seed`]. A converter used to measure
+    /// See [`crate::dsp::dither::Dither::set_random_seed`]. A converter used to measure
     /// a noise floor needs this, because the estimate otherwise varies with the
     /// PRNG and any tolerance tight enough to catch a wrong constant fails at
     /// random.

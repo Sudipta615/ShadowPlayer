@@ -2,7 +2,7 @@
 //!
 //! # Overview
 //!
-//! Standard 1-pole exponential smoothers ($y[n] = y[n-1] + \alpha(x[n] - y[n-1])$)
+//! Standard 1-pole exponential smoothers ($y\[n\] = y\[n-1\] + \alpha(x\[n\] - y\[n-1\])$)
 //! exhibit discontinuous first derivatives ($C^0$ continuity) when the target
 //! steps. This corner in the velocity curve produces audible high-frequency
 //! click transients and zipper artifacts when dragging UI sliders or when
