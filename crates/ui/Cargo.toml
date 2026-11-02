@@ -39,7 +39,7 @@ rfd = "0.17"
 cpal = "0.18"
 # Podcast subscriptions: a small XML pull parser and a TLS-capable HTTP client.
 # Both are already in the dependency graph of the engine/tooling crates.
-roxmltree = "0.20"
+roxmltree = "0.21"
 ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
 
 # ── Windows: the native, exclusive-mode output backends ───────────────────────
