@@ -161,7 +161,8 @@ fn all_devices() -> Vec<AudioObjectID> {
             0,
             std::ptr::null::<c_void>(),
             NonNull::from(&mut actual),
-            NonNull::new(out.as_mut_ptr() as *mut c_void).unwrap(),
+            NonNull::new(out.as_mut_ptr() as *mut c_void)
+                .expect("invariant: a resized non-empty Vec has a non-null data pointer"),
         )
     };
     if status != NO_ERROR {
@@ -235,7 +236,8 @@ fn device_display_name(device: AudioObjectID) -> String {
             0,
             std::ptr::null::<c_void>(),
             NonNull::from(&mut size),
-            NonNull::new(name.as_mut_ptr() as *mut c_void).unwrap(),
+            NonNull::new(name.as_mut_ptr() as *mut c_void)
+                .expect("invariant: a non-empty name buffer has a non-null data pointer"),
         )
     };
     if status == NO_ERROR {
@@ -273,7 +275,8 @@ fn output_streams(device: AudioObjectID) -> Vec<AudioObjectID> {
             0,
             std::ptr::null::<c_void>(),
             NonNull::from(&mut actual),
-            NonNull::new(out.as_mut_ptr() as *mut c_void).unwrap(),
+            NonNull::new(out.as_mut_ptr() as *mut c_void)
+                .expect("invariant: a resized non-empty Vec has a non-null data pointer"),
         )
     };
     if status != NO_ERROR {
@@ -306,7 +309,8 @@ fn output_channel_count(device: AudioObjectID) -> u16 {
             0,
             std::ptr::null::<c_void>(),
             NonNull::from(&mut actual),
-            NonNull::new(bytes.as_mut_ptr() as *mut c_void).unwrap(),
+            NonNull::new(bytes.as_mut_ptr() as *mut c_void)
+                .expect("invariant: a non-empty byte buffer has a non-null data pointer"),
         )
     };
     if status != NO_ERROR {
@@ -370,7 +374,8 @@ fn available_rates(device: AudioObjectID) -> Vec<(f64, f64)> {
             0,
             std::ptr::null::<c_void>(),
             NonNull::from(&mut actual),
-            NonNull::new(out.as_mut_ptr() as *mut c_void).unwrap(),
+            NonNull::new(out.as_mut_ptr() as *mut c_void)
+                .expect("invariant: a resized non-empty Vec has a non-null data pointer"),
         )
     };
     if status != NO_ERROR {

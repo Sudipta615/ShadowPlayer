@@ -87,7 +87,8 @@ pub unsafe fn get<T: Copy>(
             0,
             ptr::null::<c_void>(),
             NonNull::from(&mut size),
-            NonNull::new(value.as_mut_ptr() as *mut c_void).unwrap(),
+            NonNull::new(value.as_mut_ptr() as *mut c_void)
+                .expect("invariant: a non-empty value buffer has a non-null data pointer"),
         )
     };
     if status == NO_ERROR {
@@ -129,7 +130,8 @@ pub unsafe fn set<T: Copy>(
             0,
             ptr::null::<c_void>(),
             std::mem::size_of::<T>() as u32,
-            NonNull::new(value as *const T as *mut c_void).unwrap(),
+            NonNull::new(value as *const T as *mut c_void)
+                .expect("invariant: the caller passed a non-null output pointer"),
         )
     };
     if status == NO_ERROR {
@@ -172,7 +174,12 @@ pub unsafe fn get_cfstring(
     }
     // SAFETY: the HAL handed us a +1 CFString for this property; owning it
     // via CFRetained releases it exactly once when dropped.
-    let string = unsafe { CFRetained::from_raw(NonNull::new(raw as *mut CFString).unwrap()) };
+    let string =
+        unsafe {
+            CFRetained::from_raw(NonNull::new(raw as *mut CFString).expect(
+                "invariant: a successful CFString property read returns a non-null pointer",
+            ))
+        };
     let cf = &*string;
 
     // Fast path: direct UTF-8 C pointer.

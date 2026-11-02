@@ -34,9 +34,19 @@ use super::measure::{
 use super::registry::ReferenceVectorRegistry;
 use super::{CheckResult, ComponentReport, Expect, MetricKind, ReferenceVector};
 
-/// A shorthand: the i-th `MetricSpec` expectation from a reference vector.
+/// The i-th `MetricSpec` expectation from a reference vector.
 fn expect(v: &ReferenceVector, i: usize) -> Expect {
     v.checks[i].expect
+}
+
+/// Fetch a built-in reference vector by id.
+///
+/// The registry is constructed by `ReferenceVectorRegistry::build`, and every
+/// suite below is paired with a vector registered there. A missing id is a
+/// programming error in the harness, not a runtime condition.
+fn reference<'a>(reg: &'a ReferenceVectorRegistry, id: &str) -> &'a ReferenceVector {
+    reg.get(id)
+        .unwrap_or_else(|| panic!("invariant: the built-in registry contains the '{id}' vector"))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,7 +72,7 @@ pub fn def_pipeline(engine_version: String) -> ReferenceVector {
 }
 
 pub fn dsp_pipeline(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("dsp-pipeline").unwrap();
+    let v = reference(reg, "dsp-pipeline");
     let sr = 48_000.0f64;
     let frames = 2 * sr as usize;
     let input: Vec<f32> = (0..frames)
@@ -136,7 +146,7 @@ pub fn def_parametric_eq(engine_version: String) -> ReferenceVector {
 }
 
 pub fn parametric_eq(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("parametric-eq").unwrap();
+    let v = reference(reg, "parametric-eq");
     let sr = 48_000.0f64;
     let coeffs = BiquadCoeffsF64::peaking(sr as f32, 1_000.0, 6.0, 1.0);
     let mut state = BiquadStateF64::default();
@@ -201,7 +211,7 @@ pub fn def_limiter(engine_version: String) -> ReferenceVector {
 }
 
 pub fn limiter(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("limiter").unwrap();
+    let v = reference(reg, "limiter");
     let sr = 48_000.0f64;
     let ceiling_db = -1.0f64;
     let ceiling_linear = 10.0f64.powf(ceiling_db / 20.0);
@@ -255,7 +265,7 @@ pub fn def_resampler(engine_version: String) -> ReferenceVector {
 
 #[cfg(feature = "resample")]
 pub fn resampler(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("resampler").unwrap();
+    let v = reference(reg, "resampler");
     let fs_in = 48_000.0f64;
     let fs_out = 44_100.0f64;
     let mut r = AudioResamplerF64::new(ResamplerQuality::Balanced, fs_in as f32, fs_out as f32)
@@ -308,7 +318,7 @@ pub fn def_binaural(engine_version: String) -> ReferenceVector {
 }
 
 pub fn binaural(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("binaural").unwrap();
+    let v = reference(reg, "binaural");
     let sr = 48_000.0f32;
     let frames = 1_024usize;
     let tone: Vec<f32> = (0..frames)
@@ -387,7 +397,7 @@ pub fn def_loudness(engine_version: String) -> ReferenceVector {
 }
 
 pub fn loudness(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("loudness").unwrap();
+    let v = reference(reg, "loudness");
     let sr = 48_000.0f64;
     let mut meter = LoudnessMeter::new(sr as f32, 2);
     let n = (sr as usize) * 5;
@@ -449,7 +459,7 @@ pub fn def_convolution(engine_version: String) -> ReferenceVector {
 }
 
 pub fn convolution(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("convolution").unwrap();
+    let v = reference(reg, "convolution");
     let ir: Vec<f64> = (0..100)
         .map(|i| {
             let t = i as f64;
@@ -466,7 +476,7 @@ pub fn convolution(reg: &ReferenceVectorRegistry) -> ComponentReport {
     let mut engine = ConvolutionEngine::new(48_000.0, 2048);
     engine
         .load_ir_from_samples_f64(&ir.iter().map(|&v| (v, v)).collect::<Vec<_>>())
-        .unwrap();
+        .expect("invariant: the synthetic IR is a valid impulse response");
     engine.set_enabled(true);
     engine.set_wet_mix(1.0);
 
@@ -520,7 +530,7 @@ pub fn def_channel_separation(engine_version: String) -> ReferenceVector {
 }
 
 pub fn channel_separation(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("channel-separation").unwrap();
+    let v = reference(reg, "channel-separation");
     let sr = 44_100.0f32;
     let frames = 512usize;
     let mut pipeline = DspPipeline::from_config(&EngineConfig::default(), sr);
@@ -572,7 +582,7 @@ pub fn def_hrtf(engine_version: String) -> ReferenceVector {
 }
 
 pub fn hrtf(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("hrtf").unwrap();
+    let v = reference(reg, "hrtf");
     let ds = HrtfDataset::synthetic(48_000, 32, 30.0, 30.0);
     let provider = HrtfDatasetProvider::new(ds);
     let taps = provider.taps();
@@ -657,7 +667,7 @@ pub fn def_spatial_cost(engine_version: String) -> ReferenceVector {
 }
 
 pub fn spatial_cost(reg: &ReferenceVectorRegistry) -> ComponentReport {
-    let v = reg.get("spatial_cost").unwrap();
+    let v = reference(reg, "spatial_cost");
     // The default stereo program at the analytic tier with the stage
     // enabled: two objects, no spread, no room → exactly 2.0 cost units
     // and ≤ 0.6 utilization under the default budget.

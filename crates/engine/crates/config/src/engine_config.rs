@@ -728,107 +728,105 @@ impl EngineConfig {
             && !self.convolution.enabled;
         if all_dsp_off && self.dither_enabled {
             let msg = "All DSP stages are disabled but dither is enabled.".to_string();
-            v.warnings.push(msg);
+            v.warnings.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::DitherPolicy,
                 severity: ConfigSeverity::Warning,
-                message: v.warnings.last().unwrap().clone(),
+                message: msg,
             });
         }
         if self.mix_slots < 2 {
             let msg = "mix_slots must be at least 2".to_string();
-            v.errors.push(msg);
+            v.errors.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::MixBus,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: msg,
             });
         }
         if self.mix_slots > 8 {
             let msg = "mix_slots above 8 will be clamped".to_string();
-            v.warnings.push(msg);
+            v.warnings.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::MixBus,
                 severity: ConfigSeverity::Warning,
-                message: v.warnings.last().unwrap().clone(),
+                message: msg,
             });
         }
         for trim in &self.mix_trims {
             if trim.slot >= 8 {
-                v.errors
-                    .push(format!("mix_trims slot {} is outside range", trim.slot));
+                let msg = format!("mix_trims slot {} is outside range", trim.slot);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::MixBus,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
             if trim.channel >= 16 {
-                v.errors.push(format!(
-                    "mix_trims channel {} is outside range",
-                    trim.channel
-                ));
+                let msg = format!("mix_trims channel {} is outside range", trim.channel);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::MixBus,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
             if !trim.gain_db.is_finite() || !(-60.0..=24.0).contains(&trim.gain_db) {
                 let msg = format!("invalid trim gain {}", trim.gain_db);
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::MixBus,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
         }
         for send in &self.mix_sends {
             if send.slot >= 8 {
                 let msg = format!("mix_sends slot {} is outside range", send.slot);
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::MixBus,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
             if !send.master_gain.is_finite() || !(0.0..=1.0).contains(&send.master_gain) {
                 let msg = format!("invalid master send {}", send.master_gain);
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::MixBus,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
             if !send.aux_gain.is_finite() || !(0.0..=1.0).contains(&send.aux_gain) {
                 let msg = format!("invalid aux send {}", send.aux_gain);
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::MixBus,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
         }
         if !self.aux.return_gain.is_finite() || !(0.0..=1.0).contains(&self.aux.return_gain) {
             let msg = format!("invalid aux return {}", self.aux.return_gain);
-            v.errors.push(msg);
+            v.errors.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::AuxBus,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: msg,
             });
         }
         if !self.correction.depth.is_finite() || !(0.0..=1.0).contains(&self.correction.depth) {
             let msg = format!("invalid correction depth {}", self.correction.depth);
-            v.errors.push(msg);
+            v.errors.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::Correction,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: msg,
             });
         }
         if self.correction.max_boost_db.is_finite()
@@ -838,11 +836,11 @@ impl EngineConfig {
                 "invalid correction max_boost_db {}",
                 self.correction.max_boost_db
             );
-            v.errors.push(msg);
+            v.errors.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::Correction,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: msg,
             });
         }
         if self.correction.smoothing_octaves.is_finite()
@@ -852,77 +850,77 @@ impl EngineConfig {
                 "invalid correction smoothing_octaves {}",
                 self.correction.smoothing_octaves
             );
-            v.errors.push(msg);
+            v.errors.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::Correction,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: msg,
             });
         }
         let s = &self.spatial;
         if !s.gain.is_finite() || !(0.0..=4.0).contains(&s.gain) {
             let msg = format!("invalid spatial gain {}", s.gain);
-            v.errors.push(msg);
+            v.errors.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::Spatial,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: msg,
             });
         }
         if !s.half_width_deg.is_finite() || !(0.0..=90.0).contains(&s.half_width_deg) {
             let msg = format!("invalid spatial half_width_deg {}", s.half_width_deg);
-            v.errors.push(msg);
+            v.errors.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::Spatial,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: msg,
             });
         }
         if let Err(e) = s.room.validate_scene() {
-            v.errors.push(e);
+            v.errors.push(e.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::Spatial,
                 severity: ConfigSeverity::Error,
-                message: v.errors.last().unwrap().clone(),
+                message: e,
             });
         }
         let mut endpoint_ids = std::collections::HashSet::new();
         for endpoint in &self.endpoints {
             if endpoint.id.trim().is_empty() {
                 let msg = "endpoint id must not be empty".to_string();
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::Endpoint,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
             if !endpoint_ids.insert(endpoint.id.trim().to_string()) {
                 let msg = format!("duplicate endpoint id '{}'", endpoint.id);
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::Endpoint,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
             if !endpoint.gain.is_finite() || !(0.0..=4.0).contains(&endpoint.gain) {
                 let msg = format!("invalid endpoint gain {}", endpoint.gain);
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::Endpoint,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
         }
         if self.output_backend == AudioBackend::ExclusiveAsio && !cfg!(target_os = "windows") {
             let msg = "ExclusiveAsio is only available on Windows.".to_string();
-            v.warnings.push(msg);
+            v.warnings.push(msg.clone());
             v.issues.push(ConfigIssue {
                 kind: ConfigIssueKind::Backend,
                 severity: ConfigSeverity::Warning,
-                message: v.warnings.last().unwrap().clone(),
+                message: msg,
             });
         }
         // Plugin host insert validation. Enabled slots must
@@ -932,21 +930,21 @@ impl EngineConfig {
         for (i, slot) in self.plugins.slots.iter().enumerate() {
             if slot.enabled && slot.source.trim().is_empty() {
                 let msg = format!("plugins.slots[{i}]: enabled slot has no plugin source");
-                v.errors.push(msg);
+                v.errors.push(msg.clone());
                 v.issues.push(ConfigIssue {
                     kind: ConfigIssueKind::Plugin,
                     severity: ConfigSeverity::Error,
-                    message: v.errors.last().unwrap().clone(),
+                    message: msg,
                 });
             }
             for &(index, value) in &slot.params {
                 if !value.is_finite() {
                     let msg = format!("plugins.slots[{i}]: param {index} value is not finite");
-                    v.errors.push(msg);
+                    v.errors.push(msg.clone());
                     v.issues.push(ConfigIssue {
                         kind: ConfigIssueKind::Plugin,
                         severity: ConfigSeverity::Error,
-                        message: v.errors.last().unwrap().clone(),
+                        message: msg,
                     });
                 }
             }
@@ -956,11 +954,11 @@ impl EngineConfig {
                         "plugins.slots[{i}]: state is {} bytes, over the 256 KiB cap",
                         state.len()
                     );
-                    v.errors.push(msg);
+                    v.errors.push(msg.clone());
                     v.issues.push(ConfigIssue {
                         kind: ConfigIssueKind::Plugin,
                         severity: ConfigSeverity::Error,
-                        message: v.errors.last().unwrap().clone(),
+                        message: msg,
                     });
                 }
             }

@@ -137,6 +137,12 @@ jobs:
       - name: Benchmarks compile
         run: cargo bench --no-run
 
+      # The fuzz targets are only *run* on a schedule, so compile them on
+      # every push; otherwise a renamed API can rot them for a week.
+      - name: Fuzz targets compile
+        run: cargo check
+        working-directory: crates/engine/fuzz
+
       # The engine's own documentation is a published surface: `cargo doc`
       # is how an embedder reads the contracts. `--all-features` also covers
       # the feature-gated surfaces (C FFI, MPRIS, TUI), whose links would
@@ -235,6 +241,52 @@ jobs:
             tail -n 60 test.log
             exit 1
           }
+
+  sanitizers:
+    name: AddressSanitizer (engine unsafe paths)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/engine
+          key: asan
+
+      # The DSP and buffer modules hold most of the engine's non-FFI `unsafe`
+      # (SIMD kernels, ring buffers, graph control). `--target` keeps
+      # RUSTFLAGS off the host proc-macro build, which sanitizers cannot
+      # instrument. LeakSanitizer is off: it reports the test process's global
+      # caches as leaks, and this job is scoped to memory errors (overflow,
+      # use-after-free), not leak accounting.
+      - name: DSP unsafe paths under AddressSanitizer
+        env:
+          RUSTFLAGS: "-Zsanitizer=address"
+          ASAN_OPTIONS: "detect_leaks=0"
+        run: >
+          cargo +nightly test --target x86_64-unknown-linux-gnu --lib
+          -- dsp:: --test-threads=1
+
+      - name: Buffer unsafe paths under AddressSanitizer
+        env:
+          RUSTFLAGS: "-Zsanitizer=address"
+          ASAN_OPTIONS: "detect_leaks=0"
+        run: >
+          cargo +nightly test --target x86_64-unknown-linux-gnu --lib
+          -- buffer:: --test-threads=1
 
   wayland-smoke:
     name: Wayland GUI smoke
@@ -373,3 +425,34 @@ jobs:
       # matrix.
       - name: The documentation matches the code
         run: cargo test -p shadowplayer --test docs_truth -- --test-threads=1
+
+  coverage:
+    name: Coverage floors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev dbus
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      # The floors are deliberately below today's measured values (player
+      # 34.1% lines, engine 72.3%): they exist to stop a large untested module
+      # landing silently, not to force the UI's rendering code to 70%.
+      - name: Player workspace coverage floor
+        run: cargo llvm-cov --workspace --lib --fail-under-lines 30 --summary-only
+
+      - name: Engine coverage floor
+        working-directory: crates/engine
+        run: cargo llvm-cov --lib --fail-under-lines 70 --summary-only

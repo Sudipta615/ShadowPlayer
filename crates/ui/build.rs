@@ -19,7 +19,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let manifest = PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cargo sets CARGO_MANIFEST_DIR for build scripts"),
+    );
     let locales = manifest.join("locales");
     let en_path = locales.join("en.json");
     let de_path = locales.join("de.json");
@@ -75,32 +78,37 @@ fn main() {
     generated.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n");
     generated.push_str("pub enum Msg {\n");
     for key in en.keys() {
-        writeln!(generated, "    {key},").unwrap();
+        writeln!(generated, "    {key},").expect("writing to a String cannot fail");
     }
     generated.push_str("}\n\n");
     generated.push_str("impl Msg {\n");
     generated.push_str("    pub const ALL: &'static [Msg] = &[\n");
     for key in en.keys() {
-        writeln!(generated, "        Msg::{key},").unwrap();
+        writeln!(generated, "        Msg::{key},").expect("writing to a String cannot fail");
     }
     generated.push_str("    ];\n\n");
     generated.push_str("    pub fn key(self) -> &'static str {\n        match self {\n");
     for key in en.keys() {
-        writeln!(generated, "            Msg::{key} => {key:?},").unwrap();
+        writeln!(generated, "            Msg::{key} => {key:?},")
+            .expect("writing to a String cannot fail");
     }
     generated.push_str("        }\n    }\n\n");
     generated.push_str("    pub fn english(self) -> &'static str {\n        match self {\n");
     for (key, text) in &en {
-        writeln!(generated, "            Msg::{key} => {text:?},").unwrap();
+        writeln!(generated, "            Msg::{key} => {text:?},")
+            .expect("writing to a String cannot fail");
     }
     generated.push_str("        }\n    }\n}\n\n");
     generated.push_str("pub fn msg_for_key(key: &str) -> Option<Msg> {\n    match key {\n");
     for key in en.keys() {
-        writeln!(generated, "        {key:?} => Some(Msg::{key}),").unwrap();
+        writeln!(generated, "        {key:?} => Some(Msg::{key}),")
+            .expect("writing to a String cannot fail");
     }
     generated.push_str("        _ => None,\n    }\n}\n");
 
-    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("i18n_generated.rs");
+    let out =
+        PathBuf::from(std::env::var("OUT_DIR").expect("Cargo sets OUT_DIR for build scripts"))
+            .join("i18n_generated.rs");
     fs::write(&out, generated).unwrap_or_else(|e| panic!("could not write {}: {e}", out.display()));
 }
 

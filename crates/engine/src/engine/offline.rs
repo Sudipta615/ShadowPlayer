@@ -96,8 +96,14 @@ impl CapturingSink {
         }
     }
 
+    fn lock_buffer(&self) -> std::sync::MutexGuard<'_, Vec<f32>> {
+        self.buffer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn samples(&self) -> Vec<f32> {
-        self.buffer.lock().unwrap().clone()
+        self.lock_buffer().clone()
     }
 
     fn channels(&self) -> usize {
@@ -108,13 +114,13 @@ impl CapturingSink {
 impl SampleSink for CapturingSink {
     fn push_interleaved(&self, samples: &[f32], channels: usize) -> usize {
         self.channels.store(channels, Ordering::Relaxed);
-        let mut buf = self.buffer.lock().unwrap();
+        let mut buf = self.lock_buffer();
         buf.extend_from_slice(samples);
         samples.len() / channels.max(1)
     }
 
     fn reset(&self) {
-        self.buffer.lock().unwrap().clear();
+        self.lock_buffer().clear();
     }
 }
 

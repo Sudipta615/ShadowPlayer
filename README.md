@@ -567,6 +567,22 @@ predictable, and focused on the music you own.
 
 ---
 
+## Contributing
+
+ShadowPlayer is two Rust workspaces — the player at the repository root and the
+realtime engine under `crates/engine`. Start with
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for prerequisites, the commands CI runs,
+and the test-a-claim rule. The engine's own contract
+([`crates/engine/AGENTS.md`](crates/engine/AGENTS.md)) is mandatory reading
+before touching DSP, the audio thread, or the C ABI.
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — crate ownership, the signal
+  path, and the realtime invariants.
+- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability privately.
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed between releases.
+
+---
+
 ## License
 
 Apache-2.0 — see [`LICENSE`](LICENSE). The engine (`crates/engine`) is licensed

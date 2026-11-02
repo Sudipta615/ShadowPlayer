@@ -141,8 +141,13 @@ boundary named here, updates this section in the same commit.
   change and is deliberately **not** mixed into structural refactors.
 - `src/dsp/graph2/prod/` names its control modules by role, not by number:
   `control_handle.rs` (the cloneable cross-thread surface) and
-  `control_mutators.rs` (the queued `set_*` mutators on `Graph2Engine`). A
-  bare `control.rs` next to `controls.rs` is not allowed again.
+  `control_mutators.rs` (the queued `set_*` mutators on `Graph2Engine`).
+- `src/dsp/graph2/prod/arena/controls/` is the arena control path, split by
+  role rather than by line count: `mod.rs` owns `NodeCmd` and `ControlBus`,
+  `handle.rs` the cloneable read surface, `handle_controls.rs` the queued
+  `set_*` mutators, `drain.rs` the audio-thread drain, `apply.rs` per-command
+  application, and `graph_controls.rs` the direct `DspGraph` surface. A bare
+  `control.rs` next to this directory is not allowed again.
 
 ### 6.2 Room acoustics: modelling vs measurement vs correction
 

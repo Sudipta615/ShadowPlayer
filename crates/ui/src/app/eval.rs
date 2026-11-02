@@ -21,6 +21,13 @@ const EVAL_TRACK_ALBUMS: [&str; 2] = ["Ambient Transmissions", "Low Orbit"];
 const EVAL_SAMPLE_RATES: [u32; 4] = [44100, 48000, 96000, 192000];
 
 impl ShadowPlayerApp {
+    /// Drive the opt-in evaluation harness.
+    ///
+    /// Every `unwrap()` in this module is fixture setup under the
+    /// `eval-tools` feature: a missing temp directory, database row or
+    /// screenshot is a broken harness, and failing immediately with the
+    /// fixture name is more useful than continuing with a half-built scene.
+    /// None of this code is reachable in a shipped binary.
     pub(super) fn eval_hook(&mut self, ctx: &egui::Context) {
         // 4. Automated Evaluation Screenshot Hook.
         //

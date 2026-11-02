@@ -124,7 +124,10 @@ impl CurveScalar {
             return pts[0].1;
         }
         if t >= self.core.end_secs {
-            return pts.last().unwrap().1;
+            return pts
+                .last()
+                .expect("invariant: the curve is non-empty (checked above)")
+                .1;
         }
         for i in 0..pts.len() - 1 {
             let (ta, va) = pts[i];
@@ -134,7 +137,9 @@ impl CurveScalar {
                 return va + f * (vb - va);
             }
         }
-        pts.last().unwrap().1
+        pts.last()
+            .expect("invariant: the curve is non-empty (checked above)")
+            .1
     }
 }
 
@@ -191,7 +196,10 @@ impl CurveVec3 {
             return pts[0].1;
         }
         if t >= self.core.end_secs {
-            return pts.last().unwrap().1;
+            return pts
+                .last()
+                .expect("invariant: the curve is non-empty (checked above)")
+                .1;
         }
         for i in 0..pts.len() - 1 {
             let (ta, va) = pts[i];
@@ -201,7 +209,9 @@ impl CurveVec3 {
                 return va + (vb - va) * f;
             }
         }
-        pts.last().unwrap().1
+        pts.last()
+            .expect("invariant: the curve is non-empty (checked above)")
+            .1
     }
 }
 
@@ -258,7 +268,10 @@ impl CurveQuat {
             return pts[0].1;
         }
         if t >= self.core.end_secs {
-            return pts.last().unwrap().1;
+            return pts
+                .last()
+                .expect("invariant: the curve is non-empty (checked above)")
+                .1;
         }
         for i in 0..pts.len() - 1 {
             let (ta, qa) = pts[i];
@@ -268,7 +281,9 @@ impl CurveQuat {
                 return qa.nlerp(qb, f);
             }
         }
-        pts.last().unwrap().1
+        pts.last()
+            .expect("invariant: the curve is non-empty (checked above)")
+            .1
     }
 }
 

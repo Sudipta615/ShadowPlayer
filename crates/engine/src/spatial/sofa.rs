@@ -500,8 +500,14 @@ impl<'a> CdfReader<'a> {
     fn u64(&mut self) -> Result<u64, SofaImportError> {
         let b = self.bytes(8)?;
         Ok(match self.endian {
-            Endian::Big => u64::from_be_bytes(b.try_into().unwrap()),
-            Endian::Little => u64::from_le_bytes(b.try_into().unwrap()),
+            Endian::Big => u64::from_be_bytes(
+                b.try_into()
+                    .expect("invariant: bytes(8) returns exactly eight bytes"),
+            ),
+            Endian::Little => u64::from_le_bytes(
+                b.try_into()
+                    .expect("invariant: bytes(8) returns exactly eight bytes"),
+            ),
         })
     }
 
@@ -611,8 +617,14 @@ impl<'a> CdfReader<'a> {
                 let s = (v.begin as usize) + i * 8;
                 let b = &self.data[s..s + 8];
                 match self.endian {
-                    Endian::Big => f64::from_be_bytes(b.try_into().unwrap()),
-                    Endian::Little => f64::from_le_bytes(b.try_into().unwrap()),
+                    Endian::Big => f64::from_be_bytes(
+                        b.try_into()
+                            .expect("invariant: the slice is exactly eight bytes"),
+                    ),
+                    Endian::Little => f64::from_le_bytes(
+                        b.try_into()
+                            .expect("invariant: the slice is exactly eight bytes"),
+                    ),
                 }
             })
             .collect())

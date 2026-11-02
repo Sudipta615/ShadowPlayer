@@ -142,15 +142,27 @@ impl VecSink {
         }
     }
 
+    /// Lock the buffer, recovering the guard if a previous writer panicked.
+    ///
+    /// A poisoned mutex means some thread panicked while holding the lock; the
+    /// `Vec<f32>` itself is still structurally valid, and a second panic here
+    /// would hide the first one. This is a test/offline sink, not the audio
+    /// thread.
+    fn lock_buffer(&self) -> std::sync::MutexGuard<'_, Vec<f32>> {
+        self.buffer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Take all accumulated samples (clears the internal buffer).
     pub fn take(&self) -> Vec<f32> {
-        let mut buf = self.buffer.lock().unwrap();
+        let mut buf = self.lock_buffer();
         std::mem::take(&mut *buf)
     }
 
     /// Append accumulated samples without clearing.
     pub fn clone_samples(&self) -> Vec<f32> {
-        self.buffer.lock().unwrap().clone()
+        self.lock_buffer().clone()
     }
 }
 
@@ -162,12 +174,12 @@ impl Default for VecSink {
 
 impl SampleSink for VecSink {
     fn push_interleaved(&self, samples: &[f32], _channels: usize) -> usize {
-        let mut buf = self.buffer.lock().unwrap();
+        let mut buf = self.lock_buffer();
         buf.extend_from_slice(samples);
         samples.len() / _channels.max(1)
     }
 
     fn reset(&self) {
-        self.buffer.lock().unwrap().clear();
+        self.lock_buffer().clear();
     }
 }

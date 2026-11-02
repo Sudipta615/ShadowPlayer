@@ -200,8 +200,18 @@ fn parse_tag_payload<R: Read + Seek>(
     anchor_offset: u64,
     is_header: bool,
 ) -> std::io::Result<Option<Apev2Tag>> {
-    let tag_size = u32::from_le_bytes(descriptor[12..16].try_into().unwrap()) as u64;
-    let item_count = u32::from_le_bytes(descriptor[16..20].try_into().unwrap()) as usize;
+    let tag_size = u32::from_le_bytes([
+        descriptor[12],
+        descriptor[13],
+        descriptor[14],
+        descriptor[15],
+    ]) as u64;
+    let item_count = u32::from_le_bytes([
+        descriptor[16],
+        descriptor[17],
+        descriptor[18],
+        descriptor[19],
+    ]) as usize;
 
     // Sanity checks: tag_size includes descriptor (32 bytes); must be bounded.
     if tag_size < APEV2_HEADER_LEN || tag_size as usize > MAX_APEV2_TAG_BYTES {
@@ -229,8 +239,18 @@ fn parse_tag_payload<R: Read + Seek>(
         if offset + 8 > payload.len() {
             break;
         }
-        let val_len = u32::from_le_bytes(payload[offset..offset + 4].try_into().unwrap()) as usize;
-        let item_flags = u32::from_le_bytes(payload[offset + 4..offset + 8].try_into().unwrap());
+        let val_len = u32::from_le_bytes([
+            payload[offset],
+            payload[offset + 1],
+            payload[offset + 2],
+            payload[offset + 3],
+        ]) as usize;
+        let item_flags = u32::from_le_bytes([
+            payload[offset + 4],
+            payload[offset + 5],
+            payload[offset + 6],
+            payload[offset + 7],
+        ]);
         offset += 8;
 
         // Key is a null-terminated ASCII string (1..=255 chars).

@@ -86,7 +86,10 @@ impl AutomationTrack {
         if sample <= self.keyframes[0].sample {
             return self.keyframes[0].value;
         }
-        let last = self.keyframes.last().unwrap();
+        let last = self
+            .keyframes
+            .last()
+            .expect("invariant: the curve is non-empty (checked above)");
         if sample >= last.sample {
             return last.value;
         }
@@ -120,7 +123,11 @@ impl AutomationTrack {
         }
 
         let first_sample = self.keyframes[0].sample;
-        let last_sample = self.keyframes.last().unwrap().sample;
+        let last_sample = self
+            .keyframes
+            .last()
+            .expect("invariant: the curve is non-empty (checked above)")
+            .sample;
 
         // Before first keyframe
         if start_sample + out.len() as u64 <= first_sample {
@@ -129,7 +136,12 @@ impl AutomationTrack {
         }
         // After last keyframe
         if start_sample >= last_sample {
-            out.fill(self.keyframes.last().unwrap().value);
+            out.fill(
+                self.keyframes
+                    .last()
+                    .expect("invariant: the curve is non-empty (checked above)")
+                    .value,
+            );
             return;
         }
 

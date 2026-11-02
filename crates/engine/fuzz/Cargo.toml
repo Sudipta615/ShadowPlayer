@@ -1,0 +1,39 @@
+[package]
+name = "engine-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# cargo-fuzz convention: the fuzz crate is its own workspace so it builds
+# out-of-tree with its own lockfile. `crates/engine/Cargo.toml` deliberately
+# neither lists it as a member nor excludes it.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+engine = { package = "audio-engine", path = ".." }
+lyrics = { path = "../../lyrics" }
+
+[[bin]]
+name = "decode_fuzz"
+path = "fuzz_targets/decode_fuzz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "playlist_fuzz"
+path = "fuzz_targets/playlist_fuzz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lyrics_fuzz"
+path = "fuzz_targets/lyrics_fuzz.rs"
+test = false
+doc = false
+bench = false
