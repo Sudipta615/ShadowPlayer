@@ -26,4 +26,4 @@ serde-types = ["dep:serde"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
-libloading = { version = "0.8", optional = true }
+libloading = { version = "0.9", optional = true }

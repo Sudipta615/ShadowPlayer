@@ -385,7 +385,7 @@ zbus = { version = "6", optional = true }
 pollster = { version = "1.0", optional = true }
 # CLAP audio plugin host C-ABI bindings and dynamic library loader (`clap-host` feature).
 clap-sys = { version = "0.5", optional = true }
-libloading = { version = "0.8", optional = true }
+libloading = { version = "0.9", optional = true }
 
 # (WavPack previously used a runtime-loaded `libwavpack` via `libloading`;
 # removed — see `codec-wavpack` above. No native codec backend now needs
