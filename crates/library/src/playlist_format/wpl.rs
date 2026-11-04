@@ -1,7 +1,4 @@
-use super::{
-    all_tags, attr, decode_xml_entities, escape_xml, first_attr, path_for_playlist, tag_contents,
-};
-use super::{resolve, M3uEntry, ParsedPlaylist};
+use super::{all_tags, attr, escape_xml, path_for_playlist, resolve, M3uEntry, ParsedPlaylist};
 use std::path::Path;
 
 pub(crate) fn parse_wpl(text: &str, base_dir: Option<&Path>) -> ParsedPlaylist {

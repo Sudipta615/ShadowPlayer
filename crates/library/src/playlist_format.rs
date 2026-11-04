@@ -267,12 +267,9 @@ fn split_artist_title(value: Option<String>) -> (Option<String>, Option<String>)
 }
 
 #[cfg(test)]
-use std::path::PathBuf;
-
 mod tests {
     use super::*;
     use std::path::PathBuf;
-
     fn entry(path: &str, title: &str) -> M3uEntry {
         M3uEntry {
             path: PathBuf::from(path),

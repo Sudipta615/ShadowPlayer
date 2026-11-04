@@ -1,9 +1,4 @@
-use super::{
-    all_tags, attr, decode_xml_entities, escape_xml, first_attr, path_for_playlist,
-    split_artist_title, tag_contents,
-};
-use super::{file_uri, resolve};
-use super::{M3uEntry, ParsedPlaylist};
+use super::{path_for_playlist, resolve, split_artist_title, M3uEntry, ParsedPlaylist};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

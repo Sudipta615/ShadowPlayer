@@ -1,9 +1,6 @@
 use super::{
-    all_tags, attr, decode_xml_entities, escape_xml, first_attr, path_for_playlist,
-    split_artist_title, tag_contents,
+    decode_xml_entities, escape_xml, file_uri, resolve, tag_contents, M3uEntry, ParsedPlaylist,
 };
-use super::{file_uri, resolve};
-use super::{M3uEntry, ParsedPlaylist};
 use std::path::Path;
 
 pub(crate) fn parse_xspf(text: &str, base_dir: Option<&Path>) -> ParsedPlaylist {
