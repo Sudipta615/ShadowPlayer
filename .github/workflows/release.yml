@@ -31,7 +31,7 @@ jobs:
     name: Plan the build
     runs-on: ubuntu-latest
     outputs:
-      releases: ${{ steps.plan.outputs.releases }}
+      releases: ${{ steps.read.outputs.releases }}
       tag: ${{ steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
@@ -59,13 +59,15 @@ jobs:
           echo "Building $tag from workspace version $version."
 
       - name: Install cargo-dist
-        uses: taiki-e/install-action@cargo-dist@v0.28.0
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
 
       - name: Plan the release
         run: cargo dist plan --output-format=json > dist-plan.json
 
       - name: Read the plan
-        id: plan
+        id: read
         run: |
           set -euo pipefail
           releases="$(jq -r '.releases | join(",")' dist-plan.json)"
@@ -107,7 +109,9 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Install cargo-dist
-        uses: taiki-e/install-action@cargo-dist@v0.28.0
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
 
       - name: Build the distributable artefacts
         run: cargo dist build --target ${{ matrix.target }} --output-format=archive --with-aliases
