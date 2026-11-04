@@ -38,3 +38,9 @@ Thumbs.db
 # Nested workspaces (engine, rasterizer, opus-decoder) resolve from the root.
 crates/**/Cargo.lock
 .codegraph/
+
+# Agent-local artefacts (not product code)
+.agents/
+.github/context-mode/
+GEMINI.md
+skills-lock.json
