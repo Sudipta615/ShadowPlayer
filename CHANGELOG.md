@@ -4,6 +4,22 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Settings & Help layout.** The category rail is a fixed-width, elided nav column; content no longer runs under the scrollbar; the queue toggle is hidden on Settings and Help; and hover feedback snaps out instead of crossfading between rows.
+- **Equalizer studio.** Header, tab strip, section cards, preamp, and reset control rebuilt around content-sized tabs so the window can actually shrink to its 320 px minimum. Tabs with an engaged processing stage show a dot, and the master switch reads `ACTIVE` / `BYPASSED`.
+- **Smart playlist & Song Info dialogs.** Rule rows are cards with aligned field/operator/value controls, match mode is a visible choice, and both dialogs gain a footer with Cancel plus the primary action.
+- **Text on accent fills** now goes through `theme::on_fill`, which chooses white or dark ink by contrast, so pale custom accents stay readable.
+- **Interaction surfaces** are normalised when a theme loads, guaranteeing a visible hover delta even when a custom theme declares `bg_card_hover == bg_card`. Quiet action pills no longer pin their background with `Button::fill`, which used to suppress the hover state entirely.
+- **Settings dialogs** close on Escape and on a backdrop click through one owner (`ModalResponse::should_close`), so the key press cannot also be consumed by a focused text field.
+
+### Removed
+- **Frosted glass surfaces** and the artwork backdrop/blur pipeline, including its Settings toggle and the `theme/glass.rs` module. Cards, panels, and inputs are opaque theme surfaces.
+- The theme gallery's active-theme/preview strip: each card already carries its own Clear action.
+
+---
+
 ## [0.27.1] - 2026-10-31
 
 *Released with audio-engine 1.12.1. The player and the engine are versioned separately and released

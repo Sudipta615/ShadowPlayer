@@ -464,7 +464,11 @@ impl LoadedTheme {
 
         theme.play_button_shape = self.play_button;
         theme.is_light = self.metadata.is_light;
-        theme
+        // A custom theme may describe its hover surfaces as one RGB step from
+        // the card. Normalising once here means every consumer (settings rows,
+        // gallery cards, tabs, tables) gets hover feedback without each site
+        // inventing its own compensation.
+        theme.normalize_interaction_surfaces()
     }
 }
 

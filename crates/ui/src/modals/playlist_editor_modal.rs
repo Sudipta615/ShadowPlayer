@@ -442,7 +442,7 @@ pub fn show_playlist_editor(
                                     .color(theme.accent),
                             );
                             ui.label(
-                                egui::RichText::new(format!("• {} song(s)", playlist_tracks.len()))
+                                egui::RichText::new(format!("• {}", crate::components::count_label(playlist_tracks.len(), "song", "songs")))
                                     .font(crate::theme::font(12.0))
                                     .color(theme.text_muted),
                             );
@@ -628,7 +628,7 @@ pub fn show_playlist_editor(
                                     .color(theme.text_primary),
                             );
                             ui.label(
-                                egui::RichText::new(format!("({} total songs)", library_tracks.len()))
+                                egui::RichText::new(format!("({} total)", crate::components::count_label(library_tracks.len(), "song", "songs")))
                                     .font(crate::theme::font(11.0))
                                     .color(theme.text_muted),
                             );

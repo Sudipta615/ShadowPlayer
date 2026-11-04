@@ -30,11 +30,15 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let foreign_keys: i64 = conn.query_row("PRAGMA foreign_keys;", [], |r| r.get(0))?;
+    fn sqlite_failure(message: impl Into<String>) -> rusqlite::Error {
+        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(19), Some(message.into()))
+    }
+
     if foreign_keys != 1 {
-        warn!(
-            "SQLite foreign keys are OFF; deletes will not cascade and orphan \
-             rows will accumulate"
-        );
+        return Err(sqlite_failure(format!(
+            "expected SQLite PRAGMA foreign_keys to be 1, got {foreign_keys}; \
+                  ON DELETE CASCADE and orphan cleanup would be disabled"
+        )));
     }
 
     conn.execute(

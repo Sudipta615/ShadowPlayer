@@ -7,7 +7,7 @@ use super::super::widgets::{
 };
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius};
+use eframe::egui::{self, CornerRadius};
 
 pub(in crate::components::settings_tab) fn render_tools_category(
     ui: &mut egui::Ui,
@@ -68,7 +68,7 @@ pub(in crate::components::settings_tab) fn render_tools_category(
                             egui::RichText::new(tr!("Start Capture"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
-                                .color(Color32::WHITE),
+                                .color(crate::theme::on_fill(theme.accent)),
                         )
                         .fill(theme.accent)
                         .corner_radius(CornerRadius::same(theme.radius_md)),
@@ -84,7 +84,7 @@ pub(in crate::components::settings_tab) fn render_tools_category(
                             egui::RichText::new(tr!("Stop Capture"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
-                                .color(Color32::WHITE),
+                                .color(crate::theme::on_fill(theme.destructive)),
                         )
                         .fill(theme.destructive)
                         .corner_radius(CornerRadius::same(theme.radius_md)),
@@ -201,7 +201,7 @@ pub(in crate::components::settings_tab) fn render_tools_category(
                             egui::RichText::new(tr!("Recover Stream & Re-arm"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
-                                .color(Color32::WHITE),
+                                .color(crate::theme::on_fill(theme.accent)),
                         )
                         .fill(theme.accent)
                         .corner_radius(CornerRadius::same(theme.radius_md)),

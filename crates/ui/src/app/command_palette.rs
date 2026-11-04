@@ -52,7 +52,7 @@ impl ShadowPlayerApp {
             entries.push(PaletteEntry::new(
                 "Playlist",
                 pl.name.clone(),
-                format!("{} tracks", pl.track_count),
+                crate::components::count_label(pl.track_count as usize, "track", "tracks"),
                 PaletteAction::Nav(NavItem::Playlist(pl.id)),
             ));
         }

@@ -220,13 +220,22 @@ fn relative_time(unix_secs: i64) -> String {
     if ago < 60 {
         "just now".to_string()
     } else if ago < 3600 {
-        format!("{} min ago", ago / 60)
+        format!(
+            "{} ago",
+            crate::components::count_label((ago / 60) as usize, "min", "min")
+        )
     } else if ago < 86_400 {
-        format!("{} h ago", ago / 3600)
+        format!(
+            "{} ago",
+            crate::components::count_label((ago / 3600) as usize, "h", "h")
+        )
     } else if ago < 172_800 {
         "yesterday".to_string()
     } else {
-        format!("{} days ago", ago / 86_400)
+        format!(
+            "{} ago",
+            crate::components::count_label((ago / 86_400) as usize, "day", "days")
+        )
     }
 }
 

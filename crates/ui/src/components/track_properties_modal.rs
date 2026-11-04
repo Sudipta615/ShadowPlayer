@@ -157,7 +157,7 @@ pub fn show_track_properties_modal(
                     render_property_row(
                         ui,
                         "Play Count",
-                        &format!("{} times", track.play_count),
+                        &crate::components::count_label(track.play_count as usize, "time", "times"),
                         theme,
                     );
                     render_rating_row(ui, track.rating, theme);

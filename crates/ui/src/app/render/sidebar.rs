@@ -4,10 +4,10 @@ impl ShadowPlayerApp {
     pub(super) fn render_sidebar_panel(&mut self, ui: &mut egui::Ui) {
         // 8. Render Left Sidebar
         let window_w = ui.ctx().content_rect().width();
-        let sidebar_rail = window_w < 720.0;
+        let sidebar_rail = window_w < crate::layout::SIDEBAR_RAIL_BREAKPOINT;
         let sidebar_w = if sidebar_rail {
             60.0
-        } else if window_w < 1100.0 {
+        } else if window_w < crate::layout::SIDEBAR_COMPACT_BREAKPOINT {
             // Wide enough for "Help & Feedback" without clipping, narrow
             // enough to leave the table usable on a 900px tiled window.
             200.0

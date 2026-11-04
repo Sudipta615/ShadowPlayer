@@ -8,9 +8,13 @@ use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Sense, Strok
 use engine::dsp::limiter::LimiterMode;
 
 /// A rounded, bordered card with the panel's standard inner spacing.
+///
+/// The fill is the app background rather than a raised surface: sections on
+/// the panel already sit on `bg_window`, so one step *down* separates them
+/// without stacking two nearly identical greys on top of each other.
 pub(super) fn card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::NONE
-        .fill(theme.bg_card_hover)
+        .fill(theme.bg_app)
         .stroke(Stroke::new(1.0, theme.border_card))
         .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(Margin::symmetric(
@@ -52,28 +56,28 @@ pub(super) fn render_footer_controls(
     theme: &Theme,
     tab: EqTab,
 ) {
-    // The preamp card and a fixed-width reset button need roughly 420 px
-    // together. Below that, stacking them is what lets the panel actually stay
-    // at the width the user dragged it to instead of being forced wider by its
-    // content.
-    let stacked = ui.available_width() < 420.0;
+    // The preamp card and the reset button fit side by side on a normal
+    // window. Below that they stack, so the footer never imposes a minimum
+    // width on a panel the user deliberately narrowed.
+    let stacked = ui.available_width() < 360.0;
 
     if stacked {
         render_preamp_card(ui, state, actions, theme, None);
         ui.add_space(theme.space_xs);
         render_reset_button(ui, state, actions, theme, tab, None);
     } else {
-        let preamp_w = (ui.available_width() - 95.0 - theme.space_xl).max(200.0);
+        let reset_w = 96.0;
+        let preamp_w = (ui.available_width() - reset_w - theme.space_md).max(180.0);
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
             render_preamp_card(ui, state, actions, theme, Some(preamp_w));
-            render_reset_button(ui, state, actions, theme, tab, Some(95.0));
+            render_reset_button(ui, state, actions, theme, tab, Some(reset_w));
         });
     }
 }
 
-/// The shared master preamp. `width` is the card's outer width; `None` fills
-/// the available width (the stacked layout).
+/// The shared master preamp: one compact card with a label, a readout, and a
+/// single slider row.
 fn render_preamp_card(
     ui: &mut egui::Ui,
     state: &mut EqPanelState,
@@ -83,33 +87,31 @@ fn render_preamp_card(
 ) {
     // A preset or AutoEQ curve may compute a preamp outside the normal range.
     // Widen the control so the knob can actually represent it; otherwise the
-    // readout said −18 dB while the slider was pinned at −12 dB, and touching
-    // it silently reduced the headroom the curve needed.
+    // readout says −18 dB while the slider is pinned at −12 dB.
     let preamp_max = preamp_display_limit(state.preamp_db, state.extended_range);
-    let min_lbl = format!("-{preamp_max:.0}dB");
-    let max_lbl = format!("+{preamp_max:.0}dB");
+    let min_lbl = format!("-{preamp_max:.0}");
+    let max_lbl = format!("+{preamp_max:.0}");
 
     egui::Frame::NONE
-        .fill(theme.bg_card_hover)
+        .fill(theme.bg_app)
         .stroke(Stroke::new(1.0, theme.border_card))
         .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(Margin::symmetric(
-            theme.space_2xl as i8,
-            theme.space_md as i8,
+            theme.space_xl as i8,
+            theme.space_sm as i8,
         ))
         .show(ui, |ui| {
             if let Some(width) = width {
-                ui.set_width((width - 28.0).max(0.0));
+                ui.set_width((width - 24.0).max(0.0));
             }
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_xxs);
 
-                // Row 1: Label + Info Button
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
                     ui.label(
                         egui::RichText::new(tr!("Preamp (Master)"))
-                            .font(crate::theme::font(12.5))
+                            .font(crate::theme::font(11.5))
                             .strong()
                             .color(theme.text_primary),
                     );
@@ -119,21 +121,27 @@ fn render_preamp_card(
                         &crate::components::info_box::INFO_MASTER_PREAMP,
                         theme,
                     );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{:+.1} dB", state.preamp_db))
+                                .font(crate::theme::font(10.5))
+                                .color(theme.text_secondary),
+                        );
+                    });
                 });
 
-                // Row 2: Range Labels & Slider
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                     ui.label(
-                        egui::RichText::new(min_lbl)
-                            .font(crate::theme::font(10.5))
+                        egui::RichText::new(&min_lbl)
+                            .font(crate::theme::font(9.5))
                             .color(theme.text_muted),
                     );
 
-                    let slider_w = (ui.available_width() - 50.0).max(80.0);
+                    let slider_w = (ui.available_width() - 34.0).max(60.0);
                     let mut p = state.preamp_db;
                     ui.allocate_ui_with_layout(
-                        Vec2::new(slider_w, 20.0),
+                        Vec2::new(slider_w, 18.0),
                         egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                         |ui| {
                             if gradient_horizontal_slider(
@@ -150,24 +158,21 @@ fn render_preamp_card(
                     );
 
                     ui.label(
-                        egui::RichText::new(max_lbl)
-                            .font(crate::theme::font(10.5))
+                        egui::RichText::new(&max_lbl)
+                            .font(crate::theme::font(9.5))
                             .color(theme.text_muted),
-                    );
-                });
-
-                // Row 3: Readout
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{:+.1} dB", state.preamp_db))
-                            .font(crate::theme::font(11.5))
-                            .color(theme.text_secondary),
                     );
                 });
             });
         });
 }
 
+/// The per-tab reset control.
+///
+/// It is painted by hand for the same reason the tab buttons are: it has to
+/// look right at 96 px beside the preamp and at full width when the footer
+/// stacks, and the hover fill must sit *behind* the icon and label. Painting a
+/// fill after `ui.add(button)` would tint the content instead.
 fn render_reset_button(
     ui: &mut egui::Ui,
     state: &mut EqPanelState,
@@ -177,69 +182,71 @@ fn render_reset_button(
     width: Option<f32>,
 ) {
     let width = width.unwrap_or(ui.available_width());
-    let (reset_rect, reset_resp) = ui.allocate_exact_size(Vec2::new(width, 40.0), Sense::click());
-    reset_resp
-        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Reset this section"));
-    let _ = reset_resp
-        .clone()
-        .on_hover_text(tr!(Msg::SEE997457CAFF5C1B));
-    let rp = ui.painter_at(reset_rect);
-    let bg = if reset_resp.hovered() {
-        theme.accent
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 44.0), Sense::click());
+    let label = tr!(Msg::SEE997457CAFF5C1B);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+
+    // Snap the highlight out rather than crossfading it: a fade leaves the
+    // button half-lit while the pointer is already on the next control.
+    let hover_t = if resp.hovered() {
+        ui.ctx().animate_bool_with_time(
+            resp.id.with("eq_reset_hover"),
+            true,
+            theme.motion_time(0.1),
+        )
     } else {
-        theme.bg_card_hover
+        0.0
     };
-    rp.rect_filled(reset_rect, CornerRadius::same(theme.radius_lg), bg);
-    rp.rect_stroke(
-        reset_rect,
+
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(
+        rect,
         CornerRadius::same(theme.radius_lg),
-        Stroke::new(1.0, theme.border_card),
+        crate::theme::lerp_color(theme.bg_card_hover, theme.accent, hover_t),
+    );
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(theme.radius_lg),
+        Stroke::new(
+            1.0,
+            crate::theme::lerp_color(theme.border_card, theme.accent, hover_t),
+        ),
         egui::StrokeKind::Inside,
     );
 
-    // Centre the icon and the label as one group, so the button looks the same
-    // at 95 px and when it spans a narrow stacked footer.
-    let text_color = if reset_resp.hovered() {
-        Color32::WHITE
-    } else {
-        theme.text_primary
-    };
-    let icon_color = if reset_resp.hovered() {
-        Color32::WHITE
-    } else {
-        theme.accent_highlight
-    };
-    let font = crate::theme::font(13.0);
-    let galley = rp.layout_no_wrap("Reset".to_string(), font, text_color);
-    let icon_size = 16.0;
+    // Centre the icon and the label as one group so the button reads the same
+    // at 96 px and when it spans a stacked footer.
+    let text_color = crate::theme::lerp_color(
+        theme.text_primary,
+        crate::theme::on_fill(theme.accent),
+        hover_t,
+    );
+    let icon_color = crate::theme::lerp_color(
+        theme.accent_highlight,
+        crate::theme::on_fill(theme.accent),
+        hover_t,
+    );
+    let font = crate::theme::font(12.0);
+    let galley = painter.layout_no_wrap(tr!("Reset").to_owned(), font, text_color);
+    let icon_size = 15.0;
     let gap = 6.0;
     let group_w = icon_size + gap + galley.size().x;
-    let left = reset_rect.center().x - group_w / 2.0;
+    let left = rect.center().x - group_w / 2.0;
     let icon_rect = Rect::from_min_size(
-        Pos2::new(left, reset_rect.center().y - icon_size / 2.0),
+        Pos2::new(left, rect.center().y - icon_size / 2.0),
         Vec2::splat(icon_size),
     );
     crate::components::icons::draw_reset(ui, icon_rect, icon_color);
-    rp.galley(
+    painter.galley(
         Pos2::new(
             left + icon_size + gap,
-            reset_rect.center().y - galley.size().y / 2.0,
+            rect.center().y - galley.size().y / 2.0,
         ),
         galley,
         text_color,
     );
 
-    let tooltip = match tab {
-        EqTab::Graphic => "Reset Graphic EQ band sliders to 0.0 dB flat",
-        EqTab::Tone => "Reset Bass, Treble, Stereo Width, and Balance to defaults",
-        EqTab::Parametric => "Flatten every parametric band and reset the shared preamp",
-        EqTab::Dynamics => "Reset the limiter and all three compressor bands to defaults",
-        EqTab::Filters => "Reset crossfeed and correction to their bypassed defaults",
-        EqTab::Advanced => "Reset Advanced dynamic range and DSP processing modes to defaults",
-        _ => "Reset settings for this tab",
-    };
-
-    if reset_resp.on_hover_text(tooltip).clicked() {
+    if resp.on_hover_text(label).clicked() {
         apply_reset(state, actions, tab);
     }
 }
@@ -376,15 +383,36 @@ pub(super) fn gradient_horizontal_slider(
         changed = true;
     }
 
-    // Paint background track using theme token (clearly visible in both dark & light modes)
-    let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
+    let is_active = resp.hovered() || resp.dragged();
+    let anim_t = ui.ctx().animate_bool_with_time(
+        resp.id.with("eq_slider_active"),
+        is_active,
+        theme.motion_time(0.12),
+    );
+
+    // Paint background track using theme token
+    let track_h = egui::lerp(4.0..=5.0, anim_t);
+    let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), track_h));
     ui.painter().rect_filled(
         track_rect,
         CornerRadius::same(theme.radius_xs),
         theme.slider_track,
     );
 
-    // Paint active track up to thumb (single jade hue).
+    // Center 0.0 dB tick mark if 0.0 dB lies within range
+    if min < 0.0 && max > 0.0 {
+        let zero_t = ((0.0 - min) / (max - min)).clamp(0.0, 1.0);
+        let zero_x = rect.left() + zero_t * rect.width();
+        ui.painter().line_segment(
+            [
+                Pos2::new(zero_x, rect.center().y - 4.0),
+                Pos2::new(zero_x, rect.center().y + 4.0),
+            ],
+            Stroke::new(1.0, theme.text_muted.gamma_multiply(0.4)),
+        );
+    }
+
+    // Paint active track up to thumb
     let thumb_t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
     let thumb_x = rect.left() + thumb_t * rect.width();
     let filled_w = (thumb_x - track_rect.min.x).max(0.0);
@@ -400,25 +428,22 @@ pub(super) fn gradient_horizontal_slider(
         );
     }
 
-    // Paint circular thumb
+    // Paint circular thumb with animated halo
     let thumb_pos = Pos2::new(thumb_x, rect.center().y);
-    let is_hovered = resp.hovered() || resp.dragged();
+    let halo_radius = egui::lerp(7.0..=9.5, anim_t);
+    let halo_alpha = egui::lerp(0.18..=0.35, anim_t);
+    let inner_radius = egui::lerp(5.0..=6.0, anim_t);
 
     ui.painter().circle_filled(
         thumb_pos,
-        if is_hovered { 8.5 } else { 7.0 },
-        theme
-            .accent_highlight
-            .gamma_multiply(if is_hovered { 0.35 } else { 0.18 }),
+        halo_radius,
+        theme.accent_highlight.gamma_multiply(halo_alpha),
     );
-    ui.painter().circle_filled(
-        thumb_pos,
-        if is_hovered { 5.8 } else { 5.0 },
-        Color32::WHITE,
-    );
+    ui.painter()
+        .circle_filled(thumb_pos, inner_radius, Color32::WHITE);
     ui.painter().circle_stroke(
         thumb_pos,
-        if is_hovered { 5.8 } else { 5.0 },
+        inner_radius,
         Stroke::new(1.6, theme.accent_highlight),
     );
 
@@ -445,30 +470,123 @@ pub fn custom_toggle_switch(
         changed = true;
     }
 
+    let anim_t = ui.ctx().animate_bool_with_time(
+        resp.id.with("eq_toggle_thumb"),
+        *value,
+        theme.motion_time(0.12),
+    );
+    let hover_t = ui.ctx().animate_bool_with_time(
+        resp.id.with("eq_toggle_hover"),
+        resp.hovered(),
+        theme.motion_time(0.12),
+    );
+
     let p = ui.painter_at(rect);
-    let bg = if *value {
-        theme.accent
-    } else {
-        theme.border_card
-    };
+    let bg_off = crate::theme::lerp_color(theme.border_card, theme.bg_pill_hover, hover_t);
+    let bg = crate::theme::lerp_color(bg_off, theme.accent, anim_t);
     p.rect_filled(rect, CornerRadius::same(theme.radius_lg), bg);
 
-    let thumb_x = if *value {
-        rect.right() - 10.0
-    } else {
-        rect.left() + 10.0
-    };
+    let stroke_col = crate::theme::lerp_color(theme.border_card, theme.accent_highlight, anim_t);
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(theme.radius_lg),
+        Stroke::new(1.0, stroke_col),
+        egui::StrokeKind::Inside,
+    );
+
+    let thumb_x = egui::lerp((rect.left() + 10.0)..=(rect.right() - 10.0), anim_t);
     let thumb_pos = Pos2::new(thumb_x, rect.center().y);
+
+    if hover_t > 0.01 {
+        let halo_r = egui::lerp(7.5..=9.5, hover_t);
+        let halo_col =
+            crate::theme::lerp_color(theme.border_card, theme.accent, anim_t).gamma_multiply(0.25);
+        p.circle_filled(thumb_pos, halo_r, halo_col);
+    }
+
     p.circle_filled(thumb_pos, 7.5, Color32::WHITE);
 
     resp.on_hover_text(tooltip);
     changed
 }
 
+/// One option in a small mutually-exclusive set (limiter mode, compressor
+/// band, crossfeed view).
+///
+/// `Button::fill` applies to every widget state, so a filled selected pill in
+/// the same row also suppressed egui's hover feedback on its unselected
+/// neighbours. Painting the pill by hand restores that feedback and lets the
+/// selected label pick an ink colour that stays readable on the accent.
+pub(super) fn choice_pill(
+    ui: &mut egui::Ui,
+    label: &str,
+    selected: bool,
+    accent: Color32,
+    theme: &Theme,
+) -> egui::Response {
+    let text_color = if selected {
+        crate::theme::on_fill(accent)
+    } else {
+        theme.text_secondary
+    };
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), crate::theme::font(10.8), text_color);
+    let size = Vec2::new(galley.size().x + 18.0, 24.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, label));
+
+    // Hover snaps out instead of crossfading, so the pill the pointer left and
+    // the one it entered are never lit at the same time.
+    let hover_t = if resp.hovered() && !selected {
+        ui.ctx()
+            .animate_bool_with_time(resp.id.with("choice_hover"), true, theme.motion_time(0.1))
+    } else {
+        0.0
+    };
+
+    let painter = ui.painter_at(rect);
+    let radius = CornerRadius::same(theme.radius_sm);
+    if selected {
+        painter.rect_filled(rect, radius, accent);
+        painter.rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.0, crate::theme::with_alpha(accent, 200)),
+            egui::StrokeKind::Inside,
+        );
+    } else if hover_t > 0.01 {
+        painter.rect_filled(rect, radius, theme.bg_card_hover.gamma_multiply(hover_t));
+        painter.rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.0, theme.border_card.gamma_multiply(hover_t)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if resp.has_focus() {
+        painter.rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.5, theme.accent_highlight),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.galley(
+        Pos2::new(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        text_color,
+    );
+
+    resp
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tab Switcher Navigation
 // ─────────────────────────────────────────────────────────────────────────────
-
 fn is_tab_stage_active(tab: EqTab, state: &EqPanelState) -> bool {
     match tab {
         EqTab::Graphic => state.eq_enabled && state.eq_mode == config::EqMode::Graphic,
@@ -503,84 +621,144 @@ pub(super) fn render_tab_navigation(
         (EqTab::Advanced, tr!("Advanced")),
     ];
 
-    let spacing = 4.0;
-    let tab_h = 30.0;
-    let cols = tab_items.len() as f32;
-    let tab_w = ((ui.available_width() - 30.0 - spacing * (cols - 1.0)) / cols).clamp(62.0, 112.0);
-
     egui::Frame::NONE
-        .fill(theme.bg_card)
-        .stroke(Stroke::new(1.0, theme.border_card))
+        .fill(theme.bg_pill)
+        .stroke(Stroke::new(1.0, theme.border_subtle))
         .corner_radius(CornerRadius::same(theme.radius_lg))
         .inner_margin(Margin::symmetric(
-            theme.space_sm as i8,
+            theme.space_xs as i8,
             theme.space_xs as i8,
         ))
         .show(ui, |ui| {
-            ui.add_enabled_ui(state.eq_enabled, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(spacing, spacing);
+            // The strip stays interactive while the studio is bypassed: a tab
+            // that looks normal but ignores clicks is a dead control. The
+            // buttons dim themselves instead, so the bypassed state is still
+            // visible without trapping the user on one tab.
+            //
+            // Tabs are content-sized and wrap. A fixed seven-column grid
+            // needed ~500 px before it would shrink, which is what kept
+            // snapping the window back to a wide minimum.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
 
-                    for (tab, label) in tab_items {
-                        let is_sel = state.active_tab == tab;
-                        let is_active = is_tab_stage_active(tab, state);
-                        let (bg, text_col, font) = if is_sel {
-                            (theme.accent, Color32::WHITE, crate::theme::font(11.5))
-                        } else {
-                            (
-                                Color32::TRANSPARENT,
-                                theme.text_secondary,
-                                crate::theme::font(11.0),
-                            )
-                        };
-
-                        let btn = egui::Button::new(
-                            egui::RichText::new(label)
-                                .font(font)
-                                .strong()
-                                .color(text_col),
-                        )
-                        .fill(bg)
-                        .stroke(if is_sel {
-                            Stroke::new(1.0, theme.accent_highlight)
-                        } else {
-                            Stroke::NONE
-                        })
-                        .corner_radius(theme.control_radius())
-                        .min_size(Vec2::new(tab_w, tab_h));
-
-                        let resp = ui.add(btn);
-                        if is_active {
-                            let dot = Pos2::new(resp.rect.right() - 6.0, resp.rect.top() + 6.0);
-                            ui.painter().circle_filled(
-                                dot,
-                                2.5,
-                                if is_sel {
-                                    Color32::WHITE
-                                } else {
-                                    theme.accent_warm
-                                },
-                            );
-                        }
-                        if resp.clicked() {
-                            state.active_tab = tab;
-                            match tab {
-                                EqTab::Graphic => {
-                                    state.set_eq_mode(config::EqMode::Graphic);
-                                    actions.eq_mode_changed = true;
-                                }
-                                EqTab::Parametric => {
-                                    state.set_eq_mode(config::EqMode::Parametric);
-                                    actions.eq_mode_changed = true;
-                                    actions.eq_bands_changed = true;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                });
+                for (tab, label) in tab_items {
+                    render_tab_button(ui, state, actions, theme, tab, &label);
+                }
             });
         });
+}
+
+/// One content-width tab: it measures its own label so the row never forces a
+/// minimum width, and it paints background before text so a hover fill cannot
+/// cover the label.
+fn render_tab_button(
+    ui: &mut egui::Ui,
+    state: &mut EqPanelState,
+    actions: &mut EqPanelActions,
+    theme: &Theme,
+    tab: EqTab,
+    label: &str,
+) {
+    let is_sel = state.active_tab == tab;
+    let is_stage_on = is_tab_stage_active(tab, state);
+    // A bypassed studio dims its strip instead of freezing it: the tabs still
+    // switch, but no tab claims an engaged look while no stage is running.
+    let studio_on = state.eq_enabled;
+    let font = crate::theme::font(if is_sel { 11.5 } else { 11.0 });
+    let text_color = if is_sel && studio_on {
+        crate::theme::on_fill(theme.accent)
+    } else if studio_on {
+        theme.text_secondary
+    } else {
+        theme.text_dim
+    };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, text_color);
+    let dot_space = if is_stage_on { 12.0 } else { 0.0 };
+    let size = Vec2::new(galley.size().x + 20.0 + dot_space, 30.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, is_sel, label));
+
+    // Hover snaps out rather than fading: during a crossfade the tab being
+    // left and the tab being entered were both lit, which read as two tabs
+    // selected at once.
+    let hover_t = if resp.hovered() && !is_sel {
+        ui.ctx()
+            .animate_bool_with_time(resp.id.with("eq_tab_hover"), true, theme.motion_time(0.1))
+    } else {
+        0.0
+    };
+
+    let painter = ui.painter();
+    if is_sel {
+        let (fill, stroke) = if studio_on {
+            (theme.accent, theme.accent_highlight)
+        } else {
+            (theme.bg_card_hover, theme.border_subtle)
+        };
+        painter.rect_filled(rect, theme.control_radius(), fill);
+        painter.rect_stroke(
+            rect,
+            theme.control_radius(),
+            Stroke::new(1.0, stroke),
+            egui::StrokeKind::Inside,
+        );
+    } else if hover_t > 0.01 {
+        painter.rect_filled(
+            rect,
+            theme.control_radius(),
+            theme.bg_card_hover.gamma_multiply(hover_t),
+        );
+        painter.rect_stroke(
+            rect,
+            theme.control_radius(),
+            Stroke::new(1.0, theme.border_subtle.gamma_multiply(hover_t)),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    // A stage dot marks tabs whose processing stage is actually engaged, so
+    // "Dynamics" and "Filters" do not look idle while the limiter or
+    // crossfeed is running.
+    if is_stage_on {
+        painter.circle_filled(
+            Pos2::new(rect.right() - 9.0, rect.center().y),
+            2.6,
+            if !studio_on {
+                theme.text_dim
+            } else if is_sel {
+                crate::theme::on_fill(theme.accent)
+            } else {
+                theme.accent_warm
+            },
+        );
+    }
+
+    painter.galley(
+        Pos2::new(
+            rect.center().x - galley.size().x * 0.5 - dot_space * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        text_color,
+    );
+
+    if resp.clicked() {
+        state.active_tab = tab;
+        match tab {
+            EqTab::Graphic => {
+                state.set_eq_mode(config::EqMode::Graphic);
+                actions.eq_mode_changed = true;
+            }
+            EqTab::Parametric => {
+                state.set_eq_mode(config::EqMode::Parametric);
+                actions.eq_mode_changed = true;
+                actions.eq_bands_changed = true;
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]

@@ -202,13 +202,7 @@ impl ThemeManager {
     /// Create a new manager for the given application data directory.
     pub fn new(data_dir: &Path) -> Self {
         let themes_dir = data_dir.join("themes");
-        let source_custom_dir =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/theme/custom-theme");
-        let custom_themes_dir = if source_custom_dir.is_dir() {
-            source_custom_dir
-        } else {
-            themes_dir.join("custom-theme")
-        };
+        let custom_themes_dir = themes_dir.join("custom-theme");
         Self::new_with_custom_dir(data_dir, custom_themes_dir)
     }
 
@@ -240,13 +234,6 @@ impl ThemeManager {
         let _ = std::fs::create_dir_all(&self.themes_dir);
         let _ = std::fs::create_dir_all(&self.custom_themes_dir);
 
-        // Also scan src/theme/custom-theme if it is not already our custom_themes_dir
-        let source_custom_dir =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/theme/custom-theme");
-        if source_custom_dir.is_dir() && source_custom_dir != self.custom_themes_dir {
-            self.scan_directory(&source_custom_dir, &["shadowtheme", "json"]);
-        }
-
         // Scan themes directory (recursively scanning custom-theme/ and subfolders)
         self.scan_directory(&self.themes_dir.clone(), &["shadowtheme", "json"]);
         // Explicitly scan custom_themes_dir
@@ -270,38 +257,63 @@ impl ThemeManager {
     }
 
     fn scan_directory(&mut self, dir: &Path, extensions: &[&str]) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(e) => {
-                log::warn!("Could not read directory {:?}: {e}", dir);
-                return;
-            }
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                self.scan_directory(&path, extensions);
-                continue;
-            }
-
-            let matches_ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|ext| extensions.contains(&ext));
-
-            if !matches_ext {
-                continue;
-            }
-
-            match LoadedTheme::from_file(&path) {
-                Ok(theme) => {
-                    log::info!("Loaded theme '{}' from {:?}", theme.metadata.name, path);
-                    self.loaded_themes.push(theme);
-                }
+        let mut stack: Vec<PathBuf> = vec![dir.to_path_buf()];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(dir) = stack.pop() {
+            let canonical = match std::fs::canonicalize(&dir) {
+                Ok(p) => p,
                 Err(e) => {
-                    log::warn!("Failed to load theme {:?}: {e}", path);
-                    self.errors.push((path, e));
+                    log::warn!("Could not canonicalise directory {:?}: {e}", dir);
+                    continue;
+                }
+            };
+            // A symlink cycle would otherwise spin forever (or overflow the
+            // stack); canonical paths deduplicate directories we have already
+            // walked.
+            if !visited.insert(canonical.clone()) {
+                log::warn!("Skipping theme directory already visited: {:?}", canonical);
+                continue;
+            }
+            let entries = match std::fs::read_dir(&canonical) {
+                Ok(e) => e,
+                Err(e) => {
+                    log::warn!("Could not read directory {:?}: {e}", canonical);
+                    continue;
+                }
+            };
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let metadata = match path.metadata() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::warn!("Could not read metadata for {:?}: {e}", path);
+                        continue;
+                    }
+                };
+                if metadata.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+
+                let matches_ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|ext| extensions.contains(&ext));
+
+                if !matches_ext {
+                    continue;
+                }
+
+                match LoadedTheme::from_file(&path) {
+                    Ok(theme) => {
+                        log::info!("Loaded theme '{}' from {:?}", theme.metadata.name, path);
+                        self.loaded_themes.push(theme);
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to load theme {:?}: {e}", path);
+                        self.errors.push((path, e));
+                    }
                 }
             }
         }
@@ -673,8 +685,7 @@ mod tests {
     fn manager_initializes_custom_themes_dir() {
         let temp_dir = std::env::temp_dir().join("shadowplayer_test_themes_init");
         let manager = ThemeManager::new(&temp_dir);
-        let expected_source =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/theme/custom-theme");
+        let expected_source = temp_dir.join("themes").join("custom-theme");
         assert_eq!(manager.custom_themes_dir, expected_source);
 
         let isolated =

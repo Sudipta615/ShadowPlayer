@@ -335,9 +335,13 @@ impl<'a> AlbumsView<'a> {
                         .color(self.theme.text_primary),
                 );
                 ui.label(
-                    egui::RichText::new(format!("{} albums", self.albums.len()))
-                        .font(crate::theme::font(13.5))
-                        .color(self.theme.text_muted),
+                    egui::RichText::new(crate::components::count_label(
+                        self.albums.len(),
+                        "album",
+                        "albums",
+                    ))
+                    .font(crate::theme::font(13.5))
+                    .color(self.theme.text_muted),
                 );
             });
 
@@ -519,12 +523,28 @@ impl<'a> AlbumsView<'a> {
 
                                     let sub_str = if let Some(s) = summary {
                                         if let Some(yr) = s.year_display() {
-                                            format!("{} songs • {}", s.track_count, yr)
+                                            format!(
+                                                "{} • {}",
+                                                crate::components::count_label(
+                                                    s.track_count,
+                                                    "song",
+                                                    "songs"
+                                                ),
+                                                yr
+                                            )
                                         } else {
-                                            format!("{} songs", s.track_count)
+                                            crate::components::count_label(
+                                                s.track_count,
+                                                "song",
+                                                "songs",
+                                            )
                                         }
                                     } else {
-                                        format!("{} songs", album.track_count)
+                                        crate::components::count_label(
+                                            album.track_count as usize,
+                                            "song",
+                                            "songs",
+                                        )
                                     };
                                     p.text(
                                         Pos2::new(rect.min.x + 8.0, cover_rect.max.y + 37.0),

@@ -24,7 +24,7 @@ use super::controls::custom_toggle_switch;
 use super::{EqPanelActions, EqPanelState};
 use crate::theme::Theme;
 use config::CrossfeedProfile;
-use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
+use eframe::egui::{self, Vec2};
 
 /// Render the complete Headphone Crossfeed Studio card.
 pub fn render_crossfeed_card(
@@ -99,24 +99,9 @@ pub fn render_crossfeed_card(
                 ),
             ] {
                 let selected = state.crossfeed_view_mode == mode;
-                let btn = egui::Button::new(
-                    egui::RichText::new(label)
-                        .font(crate::theme::font(10.5))
-                        .color(if selected {
-                            Color32::WHITE
-                        } else {
-                            theme.text_secondary
-                        }),
-                )
-                .fill(if selected {
-                    theme.accent
-                } else {
-                    theme.bg_pill
-                })
-                .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius::same(theme.radius_sm));
-
-                if ui.add(btn).clicked() && !selected {
+                if super::controls::choice_pill(ui, &label, selected, theme.accent, theme).clicked()
+                    && !selected
+                {
                     state.crossfeed_view_mode = mode;
                 }
             }
@@ -149,24 +134,10 @@ pub fn render_crossfeed_card(
             ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, theme.space_xs);
             for preset in CalibratedCrossfeedPreset::ALL {
                 let selected = active_preset == preset;
-                let btn = egui::Button::new(
-                    egui::RichText::new(preset.label())
-                        .font(crate::theme::font(10.5))
-                        .color(if selected {
-                            Color32::WHITE
-                        } else {
-                            theme.text_secondary
-                        }),
-                )
-                .fill(if selected {
-                    theme.accent
-                } else {
-                    theme.bg_pill
-                })
-                .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius::same(theme.radius_sm));
-
-                if ui.add(btn).clicked() && !selected {
+                if super::controls::choice_pill(ui, &preset.label(), selected, theme.accent, theme)
+                    .clicked()
+                    && !selected
+                {
                     let (freq, q, delay) = preset.params();
                     state.crossfeed_profile = preset.engine_profile();
                     state.crossfeed_freq = freq;

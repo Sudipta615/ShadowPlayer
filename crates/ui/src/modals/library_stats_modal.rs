@@ -6,6 +6,7 @@
 //! can tell you that half your library is MP3 and that you have not played
 //! anything in three months feels like it knows your collection.
 
+use crate::components::noun;
 use crate::theme::Theme;
 use domain::models::Track;
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
@@ -168,10 +169,22 @@ pub fn show_library_stats_modal(
 
             // ── The headline numbers ───────────────────────────────────────
             let tiles: [(&str, String); 6] = [
-                ("Tracks", stats.tracks.to_string()),
-                ("Albums", stats.albums.to_string()),
-                ("Artists", stats.artists.to_string()),
-                ("Genres", stats.genres.to_string()),
+                (
+                    noun(stats.tracks, "Track", "Tracks"),
+                    stats.tracks.to_string(),
+                ),
+                (
+                    noun(stats.albums, "Album", "Albums"),
+                    stats.albums.to_string(),
+                ),
+                (
+                    noun(stats.artists, "Artist", "Artists"),
+                    stats.artists.to_string(),
+                ),
+                (
+                    noun(stats.genres, "Genre", "Genres"),
+                    stats.genres.to_string(),
+                ),
                 ("Running time", stats.total_duration_text()),
                 (
                     "On disk",
@@ -286,7 +299,10 @@ pub fn show_library_stats_modal(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
                 for (label, value) in [
-                    ("Plays", stats.total_plays.to_string()),
+                    (
+                        noun(stats.total_plays as usize, "Play", "Plays"),
+                        stats.total_plays.to_string(),
+                    ),
                     ("Never played", stats.never_played.to_string()),
                     ("Added this month", stats.added_recently.to_string()),
                 ] {
@@ -546,6 +562,14 @@ mod tests {
         );
         assert_eq!(stats.top_played[0].2, 5, "the most-played track first");
         assert_eq!(stats.total_duration_text(), "12 min");
+    }
+
+    #[test]
+    fn count_nouns_are_singular_only_at_one() {
+        assert_eq!(super::noun(0, "Genre", "Genres"), "Genres");
+        assert_eq!(super::noun(1, "Genre", "Genres"), "Genre");
+        assert_eq!(super::noun(2, "Genre", "Genres"), "Genres");
+        assert_eq!(super::noun(1, "Play", "Plays"), "Play");
     }
 
     #[test]

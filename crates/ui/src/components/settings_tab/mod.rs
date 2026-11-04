@@ -13,7 +13,7 @@
 //! `mod.rs` owns the tab strip and dispatches to the active category.
 
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod cards;
 mod categories;
@@ -65,214 +65,333 @@ pub fn show_settings_tab_extended(
 
         ui.add_space(theme.space_sm);
 
-        // 1. Two-column vertical master-detail layout:
-        // Left column: Vertical category tabs with open sub-headings under selected tab.
-        // Right column: Content cards scroll area.
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
+        // 1. Master-detail layout. Wide panes get the vertical category
+        // rail with in-page sub-headings; a narrow pane gets a wrapping chip
+        // row instead, because a fixed 224 px rail on a 640 px window would
+        // leave the cards less room than a phone.
+        if ui.available_width() >= SETTINGS_COMPACT_BREAKPOINT {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
-            // Left Navigation Column
-            let nav_w = 210.0;
-            ui.allocate_ui_with_layout(
-                Vec2::new(nav_w, ui.available_height()),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("settings_nav_scroll")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.set_width(nav_w - 8.0);
-                            ui.spacing_mut().item_spacing = Vec2::new(0.0, 4.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(SETTINGS_NAV_WIDTH, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| render_settings_nav(ui, state, theme),
+                );
 
-                            for category in SettingsCategory::ALL {
-                                let is_active = category == state.active_category;
-                                let fill = if is_active {
-                                    theme.bg_pill
-                                } else {
-                                    Color32::TRANSPARENT
-                                };
-                                let stroke = if is_active {
-                                    Stroke::new(1.0, theme.accent)
-                                } else {
-                                    Stroke::NONE
-                                };
+                // A hairline divider instead of a full-weight egui separator:
+                // the two columns are peers, not sections.
+                let divider_x = ui.cursor().left() + theme.space_xl * 0.5;
+                let divider_rect = Rect::from_min_max(
+                    Pos2::new(divider_x, ui.cursor().top()),
+                    Pos2::new(divider_x + 1.0, ui.cursor().top() + ui.available_height()),
+                );
+                ui.painter()
+                    .rect_filled(divider_rect, CornerRadius::ZERO, theme.border_subtle);
+                ui.add_space(theme.space_xl);
 
-                                let (rect, resp) = ui.allocate_exact_size(
-                                    Vec2::new(nav_w - 12.0, 36.0),
-                                    Sense::click(),
-                                );
-                                if resp.clicked() {
-                                    state.active_category = category;
-                                }
-
-                                if is_active {
-                                    ui.painter().rect(
-                                        rect,
-                                        theme.control_radius(),
-                                        fill,
-                                        stroke,
-                                        egui::StrokeKind::Inside,
-                                    );
-                                } else if resp.hovered() {
-                                    ui.painter().rect_filled(
-                                        rect,
-                                        theme.control_radius(),
-                                        theme.bg_card_hover,
-                                    );
-                                }
-
-                                // Icon
-                                let icon_rect = Rect::from_center_size(
-                                    Pos2::new(rect.min.x + 20.0, rect.center().y),
-                                    Vec2::splat(16.0),
-                                );
-                                let icon_color = if is_active {
-                                    theme.accent
-                                } else {
-                                    theme.text_muted
-                                };
-                                category.draw_icon(ui, icon_rect, icon_color);
-
-                                // Title
-                                let text_color = if is_active {
-                                    theme.text_primary
-                                } else {
-                                    theme.text_secondary
-                                };
-                                ui.painter().text(
-                                    Pos2::new(rect.min.x + 40.0, rect.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    category.title(),
-                                    if is_active {
-                                        crate::theme::font(13.0)
-                                    } else {
-                                        crate::theme::font(12.5)
-                                    },
-                                    text_color,
-                                );
-
-                                // When active: render open list of sub-headings below
-                                if is_active {
-                                    ui.add_space(2.0);
-                                    ui.vertical(|ui| {
-                                        ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-                                        for card in category.cards() {
-                                            let display_name = index::card_display_name(card);
-                                            let (sub_rect, sub_resp) = ui.allocate_exact_size(
-                                                Vec2::new(nav_w - 16.0, 26.0),
-                                                Sense::click(),
-                                            );
-                                            let is_sub_hovered = sub_resp.hovered();
-                                            if is_sub_hovered {
-                                                ui.painter().rect_filled(
-                                                    sub_rect,
-                                                    CornerRadius::same(theme.radius_sm),
-                                                    theme.bg_card_hover,
-                                                );
-                                            }
-                                            // Bullet dot
-                                            ui.painter().circle_filled(
-                                                Pos2::new(
-                                                    sub_rect.min.x + 24.0,
-                                                    sub_rect.center().y,
-                                                ),
-                                                2.5,
-                                                if is_sub_hovered {
-                                                    theme.accent
-                                                } else {
-                                                    theme.text_muted
-                                                },
-                                            );
-                                            // Sub-heading title
-                                            ui.painter().text(
-                                                Pos2::new(
-                                                    sub_rect.min.x + 36.0,
-                                                    sub_rect.center().y,
-                                                ),
-                                                egui::Align2::LEFT_CENTER,
-                                                display_name,
-                                                crate::theme::font(11.5),
-                                                if is_sub_hovered {
-                                                    theme.text_primary
-                                                } else {
-                                                    theme.text_secondary
-                                                },
-                                            );
-                                            if sub_resp.clicked() {
-                                                request_settings_jump(card);
-                                            }
-                                        }
-                                    });
-                                    ui.add_space(4.0);
-                                }
-                            }
-                        });
-                },
-            );
-
-            // Separator between navigation and cards
-            ui.separator();
-
-            // Right Detail Column: Active Category Content in vertical scroll
-            let right_w = ui.available_width();
-            ui.allocate_ui_with_layout(
-                Vec2::new(right_w, ui.available_height()),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("settings_main_scroll")
-                        .animated(!jump_pending)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
-
-                            match state.active_category {
-                                SettingsCategory::Playback => {
-                                    render_playback_category(ui, state, theme, extra, &mut actions);
-                                }
-                                SettingsCategory::Output => {
-                                    render_output_category(ui, state, theme, extra, &mut actions);
-                                }
-                                SettingsCategory::Spatial => {
-                                    render_spatial_category(ui, state, theme, &mut actions);
-                                }
-                                SettingsCategory::MixBus => {
-                                    render_mixbus_category(ui, state, theme, &mut actions);
-                                }
-                                SettingsCategory::Tools => {
-                                    render_tools_category(ui, state, theme, extra, &mut actions);
-                                }
-                                SettingsCategory::Converter => {
-                                    render_converter_category(
-                                        ui,
-                                        state,
-                                        theme,
-                                        extra,
-                                        &mut actions,
-                                    );
-                                }
-                                SettingsCategory::Library => {
-                                    render_library_category(ui, state, theme, extra, &mut actions);
-                                }
-                                SettingsCategory::Appearance => {
-                                    render_appearance_category(
-                                        ui,
-                                        state,
-                                        theme,
-                                        extra,
-                                        &mut actions,
-                                    );
-                                }
-                            }
-
-                            ui.add_space(32.0);
-                        });
-                },
-            );
-        });
+                let right_w = ui.available_width();
+                ui.allocate_ui_with_layout(
+                    Vec2::new(right_w, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("settings_main_scroll")
+                            .animated(!jump_pending)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
+                                render_active_category(ui, state, theme, extra, &mut actions);
+                                ui.add_space(32.0);
+                            });
+                    },
+                );
+            });
+        } else {
+            render_settings_nav_compact(ui, state, theme);
+            ui.add_space(theme.space_md);
+            egui::ScrollArea::vertical()
+                .id_salt("settings_main_scroll")
+                .animated(!jump_pending)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
+                    render_active_category(ui, state, theme, extra, &mut actions);
+                    ui.add_space(32.0);
+                });
+        }
     });
 
     actions
+}
+
+/// Width of the Settings category rail.
+///
+/// Wide enough for the longest category name plus its icon; anything longer is
+/// elided rather than painted over the content column.
+const SETTINGS_NAV_WIDTH: f32 = 224.0;
+/// Width below which the vertical rail is replaced by a wrapping chip row.
+///
+/// The shell owns this value already. Inventing a second breakpoint for
+/// Settings was how this page would drift: at one width the nav would
+/// already be a row of chips while the cards still thought they were on a
+/// narrow pane, or the reverse.
+pub const SETTINGS_COMPACT_BREAKPOINT: f32 = crate::layout::SETTINGS_COMPACT_BREAKPOINT;
+
+/// Dispatch the active category. Shared by the wide (rail) and narrow (chips)
+/// layouts so both render exactly the same page.
+fn render_active_category(
+    ui: &mut egui::Ui,
+    state: &mut SettingsTabState,
+    theme: &Theme,
+    extra: &SettingsExtraContext<'_>,
+    actions: &mut SettingsTabActions,
+) {
+    match state.active_category {
+        SettingsCategory::Playback => render_playback_category(ui, state, theme, extra, actions),
+        SettingsCategory::Output => render_output_category(ui, state, theme, extra, actions),
+        SettingsCategory::Spatial => render_spatial_category(ui, state, theme, actions),
+        SettingsCategory::MixBus => render_mixbus_category(ui, state, theme, actions),
+        SettingsCategory::Tools => render_tools_category(ui, state, theme, extra, actions),
+        SettingsCategory::Converter => {
+            render_converter_category(ui, state, theme, extra, actions);
+        }
+        SettingsCategory::Library => render_library_category(ui, state, theme, extra, actions),
+        SettingsCategory::Appearance => {
+            render_appearance_category(ui, state, theme, extra, actions);
+        }
+    }
+}
+
+/// The narrow-pane category switcher: one wrapping row of chips, the same
+/// control the rest of the app uses for a small mutually-exclusive choice.
+fn render_settings_nav_compact(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &Theme) {
+    let mut selected = state.active_category;
+    let options: Vec<(SettingsCategory, &str)> = SettingsCategory::ALL
+        .iter()
+        .map(|&category| (category, category.title()))
+        .collect();
+    if segment_picker(ui, &mut selected, &options, theme) {
+        state.active_category = selected;
+    }
+}
+
+/// Paint `text` on a single line, eliding with an ellipsis at `rect`'s width.
+///
+/// The category and card names come from the settings model, not from the
+/// layout, so a long one used to spill into the cards. Painting through a
+/// one-row `LayoutJob` both clips and truncates it.
+fn paint_elided(
+    ui: &egui::Ui,
+    rect: Rect,
+    text: &str,
+    font: egui::FontId,
+    color: eframe::egui::Color32,
+) {
+    let painter = ui.painter().with_clip_rect(rect);
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap.max_width = rect.width();
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = painter.layout_job(job);
+    painter.galley(
+        Pos2::new(rect.left(), rect.center().y - galley.size().y * 0.5),
+        galley,
+        color,
+    );
+}
+
+/// The category rail: one expandable item per settings category.
+fn render_settings_nav(ui: &mut egui::Ui, state: &mut SettingsTabState, theme: &Theme) {
+    egui::ScrollArea::vertical()
+        .id_salt("settings_nav_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let row_w = ui.available_width();
+            ui.set_width(row_w);
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, 3.0);
+
+            for category in SettingsCategory::ALL {
+                let is_active = category == state.active_category;
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(row_w, 38.0), Sense::click());
+                resp.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::Role::Button,
+                        true,
+                        is_active,
+                        category.title(),
+                    )
+                });
+                if resp.clicked() {
+                    state.active_category = category;
+                }
+
+                // Hover snaps out instead of fading out. A 120 ms crossfade
+                // left the previous category lit while the next one lit up,
+                // which read as "two tabs highlighted at once".
+                let hover_t = if resp.hovered() && !is_active {
+                    ui.ctx().animate_bool_with_time(
+                        resp.id.with("cat_hover"),
+                        true,
+                        theme.motion_time(0.1),
+                    )
+                } else {
+                    0.0
+                };
+
+                // Background first, content after: painting a hover fill over
+                // an already-drawn label tints (or hides) the label.
+                if is_active {
+                    let fill = crate::theme::lerp_color(theme.bg_pill, theme.accent, 0.14);
+                    ui.painter().rect(
+                        rect,
+                        theme.control_radius(),
+                        fill,
+                        Stroke::new(1.0, crate::theme::with_alpha(theme.accent, 80)),
+                        egui::StrokeKind::Inside,
+                    );
+                    let pill_rect = Rect::from_min_max(
+                        Pos2::new(rect.min.x + 3.0, rect.min.y + 9.0),
+                        Pos2::new(rect.min.x + 6.5, rect.max.y - 9.0),
+                    );
+                    ui.painter().rect_filled(
+                        pill_rect,
+                        CornerRadius::same(theme.radius_xs),
+                        theme.accent,
+                    );
+                } else if hover_t > 0.01 {
+                    ui.painter().rect_filled(
+                        rect,
+                        theme.control_radius(),
+                        theme.bg_card_hover.gamma_multiply(hover_t),
+                    );
+                    ui.painter().rect_stroke(
+                        rect,
+                        theme.control_radius(),
+                        Stroke::new(1.0, theme.border_subtle.gamma_multiply(hover_t)),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+
+                let icon_rect = Rect::from_center_size(
+                    Pos2::new(rect.min.x + 20.0, rect.center().y),
+                    Vec2::splat(16.0),
+                );
+                let icon_color = if is_active {
+                    theme.accent
+                } else {
+                    crate::theme::lerp_color(theme.text_muted, theme.text_secondary, hover_t)
+                };
+                category.draw_icon(ui, icon_rect, icon_color);
+
+                let text_color = if is_active {
+                    theme.text_primary
+                } else {
+                    crate::theme::lerp_color(theme.text_secondary, theme.text_primary, hover_t)
+                };
+                paint_elided(
+                    ui,
+                    Rect::from_min_max(
+                        Pos2::new(rect.min.x + 40.0, rect.min.y),
+                        Pos2::new(rect.max.x - 8.0, rect.max.y),
+                    ),
+                    category.title(),
+                    crate::theme::font(if is_active { 13.0 } else { 12.5 }),
+                    text_color,
+                );
+
+                if is_active {
+                    ui.add_space(3.0);
+                    render_category_contents(ui, category, theme, row_w);
+                    ui.add_space(5.0);
+                }
+            }
+
+            ui.add_space(theme.space_sm);
+        });
+}
+
+/// The active category's sub-headings, with a guide spine.
+fn render_category_contents(
+    ui: &mut egui::Ui,
+    category: SettingsCategory,
+    theme: &Theme,
+    row_w: f32,
+) {
+    let cards = category.cards();
+    let card_count = cards.len();
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+        for (idx, &card) in cards.iter().enumerate() {
+            let display_name = index::card_display_name(card);
+            let (sub_rect, sub_resp) =
+                ui.allocate_exact_size(Vec2::new(row_w, 26.0), Sense::click());
+            sub_resp
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, display_name));
+            let sub_hover_t = if sub_resp.hovered() {
+                ui.ctx().animate_bool_with_time(
+                    sub_resp.id.with("sub_hover"),
+                    true,
+                    theme.motion_time(0.1),
+                )
+            } else {
+                0.0
+            };
+
+            if sub_hover_t > 0.01 {
+                ui.painter().rect_filled(
+                    sub_rect,
+                    CornerRadius::same(theme.radius_sm),
+                    theme.bg_card_hover.gamma_multiply(sub_hover_t),
+                );
+            }
+
+            // Guide spine + branch tick, drawn behind the bullet.
+            let spine_x = sub_rect.min.x + 18.0;
+            let top_y = if idx == 0 {
+                sub_rect.center().y
+            } else {
+                sub_rect.min.y
+            };
+            let bottom_y = if idx == card_count - 1 {
+                sub_rect.center().y
+            } else {
+                sub_rect.max.y
+            };
+            ui.painter().line_segment(
+                [Pos2::new(spine_x, top_y), Pos2::new(spine_x, bottom_y)],
+                Stroke::new(1.0, theme.border_subtle.gamma_multiply(0.6)),
+            );
+            ui.painter().line_segment(
+                [
+                    Pos2::new(spine_x, sub_rect.center().y),
+                    Pos2::new(spine_x + 5.0, sub_rect.center().y),
+                ],
+                Stroke::new(1.0, theme.border_subtle.gamma_multiply(0.6)),
+            );
+
+            ui.painter().circle_filled(
+                Pos2::new(spine_x + 6.0, sub_rect.center().y),
+                2.2,
+                crate::theme::lerp_color(theme.text_muted, theme.accent, sub_hover_t),
+            );
+
+            paint_elided(
+                ui,
+                Rect::from_min_max(
+                    Pos2::new(sub_rect.min.x + 34.0, sub_rect.min.y),
+                    Pos2::new(sub_rect.max.x - 4.0, sub_rect.max.y),
+                ),
+                display_name,
+                crate::theme::font(11.5),
+                crate::theme::lerp_color(theme.text_secondary, theme.text_primary, sub_hover_t),
+            );
+
+            if sub_resp.clicked() {
+                request_settings_jump(card);
+            }
+        }
+    });
 }
 
 #[cfg(test)]

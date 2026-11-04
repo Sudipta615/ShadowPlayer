@@ -85,6 +85,10 @@ impl ShadowPlayerApp {
                             self.dsp_state.settings_tab.active_category =
                                 crate::components::settings_tab::SettingsCategory::Appearance
                         }
+                        "converter" => {
+                            self.dsp_state.settings_tab.active_category =
+                                crate::components::settings_tab::SettingsCategory::Converter
+                        }
                         _ => {}
                     }
                 }
@@ -488,6 +492,15 @@ impl ShadowPlayerApp {
                         let _ = self.track_repo.upsert(&track);
                     }
                     self.reload_library();
+
+                    // The generic modal selector above runs before the
+                    // synthetic rows exist, so `track_dsp` would open on an
+                    // empty list. Re-open it now that there is a track.
+                    if std::env::var("SHADOWPLAYER_EVAL_MODAL").as_deref() == Ok("track_dsp") {
+                        if let Some(track) = self.library_state.displayed_tracks.first().cloned() {
+                            self.open_track_dsp(&track);
+                        }
+                    }
                 }
 
                 // Synthetic listening history, so the charts and aggregates
@@ -618,10 +631,6 @@ impl ShadowPlayerApp {
                 }
                 if std::env::var("SHADOWPLAYER_EVAL_LIGHT").is_ok() {
                     self.theme = crate::theme::Theme::light();
-                }
-                if std::env::var("SHADOWPLAYER_EVAL_FROSTED").is_ok() {
-                    self.dsp_state.settings_tab.frosted_glass_enabled = true;
-                    self.sync_effective_theme();
                 }
                 if std::env::var("SHADOWPLAYER_EVAL_THEME_EDITOR").is_ok() {
                     self.app_state.active_nav = crate::components::sidebar::NavItem::Settings;

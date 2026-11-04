@@ -146,6 +146,13 @@ pub struct ShadowPlayerApp {
     /// egui's font atlas must be rebuilt before the next frame is drawn.
     applied_fonts: Option<ThemeFonts>,
     settings_dirty: bool,
+    /// Whether the persisted interface scale has been installed in egui.
+    /// The first frame must not treat egui's default zoom as a user change.
+    ui_scale_applied: bool,
+    /// Frames to skip before reading egui's zoom back. `set_zoom_factor`
+    /// applies at the next pass, so an immediate read would look like a user
+    /// change and overwrite the saved value with the old one.
+    ui_scale_grace: u8,
 
     pub theme_manager: ThemeManager,
     pub autotag_service: AutotagService,
@@ -334,6 +341,8 @@ impl ShadowPlayerApp {
             applied_theme: None,
             applied_fonts: None,
             settings_dirty: false,
+            ui_scale_applied: false,
+            ui_scale_grace: 0,
 
             theme_manager,
             autotag_service,
@@ -397,6 +406,7 @@ impl ShadowPlayerApp {
 impl eframe::App for ShadowPlayerApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.apply_interface_scale(&ctx);
         self.prepare_frame(&ctx, frame);
         let is_playing = self.poll_services(&ctx);
         self.eval_hook(&ctx);

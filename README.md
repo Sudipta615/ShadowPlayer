@@ -132,8 +132,10 @@ its own README, test matrix, and C ABI.
 - MPRIS2 on Linux, System Media Transport Controls on Windows, and Now Playing
   on macOS, including artwork and media-key transport.
 - Native file and folder pickers, including the XDG portal under Wayland.
-- Six interface languages: English, German, French, Spanish, Japanese, and
-  Chinese.
+- Six interface catalogues: English is complete; German is substantially
+  translated, and French, Spanish, Japanese, and Chinese are partial. Settings
+  shows each catalogue's exact coverage, and missing strings fall back to
+  English rather than showing a key.
 - Headless mode for servers and scripted listening sessions.
 - Light, dark, and OLED themes, plus custom `.shadowtheme` files with a live
   editor and WCAG AA contrast validation.
@@ -488,9 +490,12 @@ Deliberate product choices live in
   controls carry accessible names, and the main editing surfaces work from the
   keyboard. The app has not had a professional screen-reader audit, so the
   keyboard remains the most thoroughly exercised path.
-- **The long-form manual is English.** The interface catalogues cover English,
-  German, French, Spanish, Japanese, and Chinese; the Help manual's prose is
-  still English. Missing strings fall back to English instead of showing a key.
+- **The long-form manual is English.** Six interface catalogues ship, but only
+  English is complete: German is 65%, and French, Spanish, Japanese, and
+  Chinese are 31% of the English source keys at the time of writing. Settings
+  lists the live coverage and notes that missing strings fall back to English;
+  the Help manual's prose is English in every locale. See
+  [docs/LOCALIZATION.md](docs/LOCALIZATION.md).
 - **Engine-level boundaries are inherited in full.** The engine owns the
   precise contracts; these are the player-facing summaries. See the
   [engine limitations](crates/engine/README.md#-known-limitations) for each one
@@ -578,6 +583,8 @@ before touching DSP, the audio thread, or the C ABI.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — crate ownership, the signal
   path, and the realtime invariants.
+- [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md) — catalogue coverage, the
+  English fallback, and how to add a string or a locale.
 - [`SECURITY.md`](SECURITY.md) — how to report a vulnerability privately.
 - [`CHANGELOG.md`](CHANGELOG.md) — what changed between releases.
 

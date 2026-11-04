@@ -106,7 +106,7 @@ pub fn render_theme_gallery(
                     egui::RichText::new(category.label())
                         .font(crate::theme::font(11.0))
                         .color(if selected {
-                            Color32::WHITE
+                            crate::theme::on_fill(theme.accent)
                         } else {
                             theme.text_secondary
                         }),
@@ -146,8 +146,6 @@ pub fn render_theme_gallery(
                             .font(crate::theme::font(11.0))
                             .color(theme.text_secondary),
                     )
-                    .fill(theme.bg_pill)
-                    .stroke(Stroke::new(1.0, theme.border_subtle))
                     .corner_radius(CornerRadius::same(theme.radius_sm))
                     .min_size(Vec2::new(0.0, 24.0)),
                 )
@@ -164,8 +162,6 @@ pub fn render_theme_gallery(
                             .font(crate::theme::font(11.0))
                             .color(theme.text_secondary),
                     )
-                    .fill(theme.bg_pill)
-                    .stroke(Stroke::new(1.0, theme.border_subtle))
                     .corner_radius(CornerRadius::same(theme.radius_sm))
                     .min_size(Vec2::new(0.0, 24.0)),
                 )
@@ -184,7 +180,6 @@ pub fn render_theme_gallery(
                                 .strong()
                                 .color(theme.accent_warm),
                         )
-                        .fill(theme.bg_pill)
                         .stroke(Stroke::new(1.0, theme.accent_warm))
                         .corner_radius(CornerRadius::same(theme.radius_sm))
                         .min_size(Vec2::new(0.0, 24.0)),
@@ -226,13 +221,6 @@ pub fn render_theme_gallery(
         })
         .collect();
 
-    // A staged theme gets its own strip above the wall: the global "apply" and
-    // "clear" actions should not require finding the card again.
-    if let Some(staged) = filtered_cards.iter().find(|card| card.is_staged) {
-        render_preview_strip(ui, staged, theme, &mut actions);
-        ui.add_space(theme.space_sm);
-    }
-
     if filtered_cards.is_empty() {
         ui.add_space(theme.space_lg);
         ui.horizontal_wrapped(|ui| {
@@ -251,8 +239,6 @@ pub fn render_theme_gallery(
                                 .strong()
                                 .color(theme.accent_highlight),
                         )
-                        .fill(theme.bg_pill)
-                        .stroke(Stroke::new(1.0, theme.border_subtle))
                         .corner_radius(CornerRadius::same(theme.radius_sm))
                         .min_size(Vec2::new(0.0, 24.0)),
                     )
@@ -282,75 +268,6 @@ pub fn render_theme_gallery(
     }
 
     actions
-}
-
-fn render_preview_strip(
-    ui: &mut egui::Ui,
-    card: &ThemeCardInfo,
-    theme: &Theme,
-    actions: &mut GalleryActions,
-) {
-    egui::Frame::NONE
-        .fill(with_alpha(card.accent_warm, 18))
-        .stroke(Stroke::new(1.0, with_alpha(card.accent_warm, 150)))
-        .corner_radius(CornerRadius::same(theme.radius_md))
-        .inner_margin(Margin::symmetric(
-            theme.space_md as i8,
-            theme.space_xs as i8,
-        ))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let (dot, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-                ui.painter()
-                    .circle_filled(dot.center(), 4.0, card.accent_warm);
-                ui.label(
-                    egui::RichText::new(format!("Previewing {}", card.name))
-                        .font(crate::theme::font(11.5))
-                        .strong()
-                        .color(theme.text_primary),
-                );
-                ui.label(
-                    egui::RichText::new("· not applied")
-                        .font(crate::theme::font(10.5))
-                        .color(theme.text_muted),
-                );
-
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("Clear Preview")
-                                    .font(crate::theme::font(10.5))
-                                    .color(theme.accent_warm),
-                            )
-                            .fill(theme.bg_pill)
-                            .stroke(Stroke::new(1.0, theme.border_subtle))
-                            .corner_radius(CornerRadius::same(theme.radius_sm))
-                            .min_size(Vec2::new(0.0, 22.0)),
-                        )
-                        .clicked()
-                    {
-                        actions.cancel_preview = true;
-                    }
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("Apply")
-                                    .font(crate::theme::font(10.5))
-                                    .strong()
-                                    .color(Color32::WHITE),
-                            )
-                            .fill(card.accent)
-                            .corner_radius(CornerRadius::same(theme.radius_sm))
-                            .min_size(Vec2::new(0.0, 22.0)),
-                        )
-                        .clicked()
-                    {
-                        actions.apply_theme = Some(card.id.clone());
-                    }
-                });
-            });
-        });
 }
 
 fn render_theme_card(
@@ -386,7 +303,7 @@ fn render_theme_card(
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(0.0, host.space_xxs);
 
-            render_card_preview(ui, card, host);
+            render_card_preview(ui, card, host, actions);
 
             ui.add_space(host.space_xs);
 
@@ -405,9 +322,9 @@ fn render_theme_card(
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if card.is_active {
-                        status_badge(ui, "ACTIVE", card.accent, host);
+                        status_badge(ui, "✓ ACTIVE", card.accent, host);
                     } else if card.is_staged {
-                        status_badge(ui, "PREVIEW", card.accent_warm, host);
+                        status_badge(ui, "● PREVIEW", card.accent_warm, host);
                     } else {
                         let mode = if card.tags.iter().any(|t| t == "oled") {
                             "OLED"
@@ -506,7 +423,7 @@ fn render_theme_card(
                                 egui::RichText::new("Apply")
                                     .font(crate::theme::font(10.5))
                                     .strong()
-                                    .color(contrast_text_for(card.accent)),
+                                    .color(crate::theme::on_fill(card.accent)),
                             )
                             .fill(card.accent)
                             .corner_radius(CornerRadius::same(host.radius_sm))
@@ -542,41 +459,89 @@ fn render_theme_card(
     });
 
     let card_rect = response.response.rect;
-    if !card.is_active {
-        let hover_t = ui.ctx().animate_bool_with_time(
-            response.response.id.with("theme_card_hover"),
-            response.response.hovered(),
-            host.motion_time(0.12),
-        );
-        if hover_t > 0.0 {
-            ui.painter().rect_filled(
-                card_rect,
-                CornerRadius::same(host.radius_md),
-                with_alpha(Color32::WHITE, (hover_t * 7.0) as u8),
-            );
-            ui.painter().rect_stroke(
-                card_rect,
-                CornerRadius::same(host.radius_md),
-                Stroke::new(1.0, with_alpha(card.accent, (hover_t * 110.0) as u8)),
-                egui::StrokeKind::Inside,
-            );
-        }
-    }
+    let is_pointer_in = ui.rect_contains_pointer(card_rect);
+    let hover_t = ui.ctx().animate_bool_with_time(
+        response.response.id.with("theme_card_hover"),
+        is_pointer_in,
+        host.motion_time(0.14),
+    );
 
-    if host.frosted {
-        crate::theme::glass::paint_glass_sheen(
-            ui,
+    if card.is_active {
+        // Distinct persistent ambient glow for the active theme
+        ui.painter().rect_filled(
             card_rect,
             CornerRadius::same(host.radius_md),
-            host,
+            with_alpha(card.accent, 14),
+        );
+        ui.painter().rect_stroke(
+            card_rect,
+            CornerRadius::same(host.radius_md),
+            Stroke::new(2.0, card.accent),
+            egui::StrokeKind::Inside,
+        );
+    } else if hover_t > 0.0 {
+        // Soft luminous ambient accent bloom on hover
+        ui.painter().rect_filled(
+            card_rect,
+            CornerRadius::same(host.radius_md),
+            with_alpha(card.accent, (hover_t * 18.0) as u8),
+        );
+        let stroke_color = crate::theme::lerp_color(
+            if card.is_staged {
+                card.accent_warm
+            } else {
+                card.border_card
+            },
+            card.accent_highlight,
+            hover_t,
+        );
+        ui.painter().rect_stroke(
+            card_rect,
+            CornerRadius::same(host.radius_md),
+            Stroke::new(1.0 + hover_t * 0.8, stroke_color),
+            egui::StrokeKind::Inside,
         );
     }
 }
 
-fn render_card_preview(ui: &mut egui::Ui, card: &ThemeCardInfo, host: &Theme) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::hover());
+fn render_card_preview(
+    ui: &mut egui::Ui,
+    card: &ThemeCardInfo,
+    host: &Theme,
+    actions: &mut GalleryActions,
+) {
+    let (rect, preview_resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.0), Sense::click());
+    preview_resp.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            true,
+            format!("{}: {}", tr!("Preview theme"), card.name),
+        )
+    });
+    if preview_resp.clicked() && !card.is_active {
+        if card.is_staged {
+            actions.cancel_preview = true;
+        } else {
+            actions.preview_theme = Some(card.id.clone());
+        }
+    }
+    let _ = preview_resp.clone().on_hover_text(if card.is_active {
+        tr!("Current active theme")
+    } else if card.is_staged {
+        tr!("Click to clear preview")
+    } else {
+        tr!("Click to preview theme")
+    });
+
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, CornerRadius::same(host.radius_sm), card.bg_app);
+
+    let p_hover_t = ui.ctx().animate_bool_with_time(
+        preview_resp.id.with("preview_sheen"),
+        preview_resp.hovered(),
+        host.motion_time(0.12),
+    );
 
     // An accent rail and the surface sample: the two colours that carry most
     // of a theme's identity.
@@ -591,10 +556,19 @@ fn render_card_preview(ui: &mut egui::Ui, card: &ThemeCardInfo, host: &Theme) {
         CornerRadius::same(host.radius_xs),
         with_alpha(card.bg_card, 235),
     );
+    let inner_stroke_color = if p_hover_t > 0.0 {
+        crate::theme::lerp_color(
+            with_alpha(card.border_card, 180),
+            card.accent_highlight,
+            p_hover_t,
+        )
+    } else {
+        with_alpha(card.border_card, 180)
+    };
     painter.rect_stroke(
         inner,
         CornerRadius::same(host.radius_xs),
-        Stroke::new(1.0, with_alpha(card.border_card, 180)),
+        Stroke::new(1.0 + p_hover_t * 0.5, inner_stroke_color),
         egui::StrokeKind::Inside,
     );
 
@@ -672,24 +646,17 @@ fn draw_shape_swatch(
 fn status_badge(ui: &mut egui::Ui, text: &str, fill: Color32, host: &Theme) {
     egui::Frame::NONE
         .fill(fill)
+        .stroke(Stroke::new(1.0, with_alpha(Color32::WHITE, 36)))
         .corner_radius(CornerRadius::same(host.radius_xs))
-        .inner_margin(Margin::symmetric(4, 1))
+        .inner_margin(Margin::symmetric(6, 2))
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(text)
                     .font(crate::theme::mono_font(8.5))
                     .strong()
-                    .color(contrast_text_for(fill)),
+                    .color(crate::theme::on_fill(fill)),
             );
         });
-}
-
-fn contrast_text_for(bg: Color32) -> Color32 {
-    if super::contrast::luminance(bg) > 0.35 {
-        Color32::from_rgb(15, 23, 42)
-    } else {
-        Color32::WHITE
-    }
 }
 
 #[cfg(test)]

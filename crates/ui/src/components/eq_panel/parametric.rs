@@ -97,7 +97,7 @@ fn render_curve_card(
                     egui::RichText::new(tr!("Open AutoEQ"))
                         .font(font(11.5))
                         .strong()
-                        .color(Color32::WHITE),
+                        .color(crate::theme::on_fill(theme.accent)),
                 )
                 .fill(theme.accent)
                 .stroke(Stroke::NONE)
@@ -134,7 +134,6 @@ fn render_curve_card(
                         .font(font(11.0))
                         .color(theme.text_secondary),
                 )
-                .fill(theme.bg_pill)
                 .stroke(Stroke::NONE)
                 .corner_radius(theme.control_radius())
                 .min_size(Vec2::new(68.0, 24.0));
@@ -182,7 +181,6 @@ fn render_band_editor(
                     .font(font(11.0))
                     .color(theme.text_secondary),
             )
-            .fill(theme.bg_pill)
             .stroke(Stroke::NONE)
             .corner_radius(theme.control_radius())
             .min_size(Vec2::new(84.0, 24.0));

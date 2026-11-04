@@ -317,9 +317,13 @@ impl<'a> FoldersView<'a> {
                         .color(self.theme.text_primary),
                 );
                 ui.label(
-                    egui::RichText::new(format!("{} indexed folders", self.scan_roots.len()))
-                        .font(crate::theme::font(13.5))
-                        .color(self.theme.text_muted),
+                    egui::RichText::new(crate::components::count_label(
+                        self.scan_roots.len(),
+                        "indexed folder",
+                        "indexed folders",
+                    ))
+                    .font(crate::theme::font(13.5))
+                    .color(self.theme.text_muted),
                 );
             });
 

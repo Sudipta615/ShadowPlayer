@@ -96,9 +96,13 @@ impl<'a> GenresView<'a> {
                                 .color(self.theme.text_primary),
                         );
                         ui.label(
-                            egui::RichText::new(format!("{} songs", self.genre_tracks.len()))
-                                .font(crate::theme::font(12.5))
-                                .color(self.theme.text_muted),
+                            egui::RichText::new(crate::components::count_label(
+                                self.genre_tracks.len(),
+                                "song",
+                                "songs",
+                            ))
+                            .font(crate::theme::font(12.5))
+                            .color(self.theme.text_muted),
                         );
 
                         ui.add_space(4.0);
@@ -271,9 +275,13 @@ impl<'a> GenresView<'a> {
                         .color(self.theme.text_primary),
                 );
                 ui.label(
-                    egui::RichText::new(format!("{} genres", self.genres.len()))
-                        .font(crate::theme::font(13.5))
-                        .color(self.theme.text_muted),
+                    egui::RichText::new(crate::components::count_label(
+                        self.genres.len(),
+                        "genre",
+                        "genres",
+                    ))
+                    .font(crate::theme::font(13.5))
+                    .color(self.theme.text_muted),
                 );
             });
 
@@ -357,7 +365,11 @@ impl<'a> GenresView<'a> {
                                     p.text(
                                         Pos2::new(rect.min.x + 52.0, cy + 10.0),
                                         egui::Align2::LEFT_CENTER,
-                                        format!("{} songs", genre.track_count),
+                                        crate::components::count_label(
+                                            genre.track_count as usize,
+                                            "song",
+                                            "songs",
+                                        ),
                                         crate::theme::font(11.5),
                                         self.theme.text_muted,
                                     );

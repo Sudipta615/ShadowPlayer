@@ -41,7 +41,7 @@ impl ShadowPlayerApp {
                 Vec2::new(right_w, 38.0),
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| {
-                    self.render_topbar_actions(ui, window_w);
+                    self.render_topbar_actions(ui, window_w, true);
                 },
             );
             right_ui.add_space(self.theme.space_sm);

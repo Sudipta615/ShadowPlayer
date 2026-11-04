@@ -264,7 +264,7 @@ pub fn render_main_playback_view(
                 );
                 ui.label(
                     egui::RichText::new(format!(
-                        "({} tracks)",
+                        "  {} tracks",
                         library_state.displayed_tracks.len()
                     ))
                     .font(crate::theme::font(12.0))
@@ -283,7 +283,7 @@ pub fn render_main_playback_view(
                 );
                 ui.label(
                     egui::RichText::new(format!(
-                        "({} tracks, newest first)",
+                        "  {} tracks, newest first",
                         library_state.displayed_tracks.len()
                     ))
                     .font(crate::theme::font(12.0))
@@ -302,7 +302,7 @@ pub fn render_main_playback_view(
                 );
                 ui.label(
                     egui::RichText::new(format!(
-                        "({} tracks)",
+                        "  {} tracks",
                         library_state.displayed_tracks.len()
                     ))
                     .font(crate::theme::font(12.0))
@@ -321,7 +321,7 @@ pub fn render_main_playback_view(
                 );
                 ui.label(
                     egui::RichText::new(format!(
-                        "({} tracks)",
+                        "  {} tracks",
                         library_state.displayed_tracks.len()
                     ))
                     .font(crate::theme::font(12.0))
@@ -377,7 +377,7 @@ pub fn render_main_playback_view(
                 );
                 ui.label(
                     egui::RichText::new(format!(
-                        "({} tracks)",
+                        "  {} tracks",
                         library_state.displayed_tracks.len()
                     ))
                     .font(crate::theme::font(12.0))

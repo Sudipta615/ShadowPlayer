@@ -15,6 +15,7 @@ pub mod preset_io_service;
 pub mod recommendation_analysis_service;
 pub mod recommendation_service;
 pub mod scanner_service;
+pub mod transport;
 pub mod waveform_service;
 
 pub use artwork_fetch_service::{ArtworkFetchEvent, ArtworkFetchProgress, ArtworkFetchService};
@@ -43,4 +44,8 @@ pub use recommendation_service::{
     RecommendationEvent, RecommendationService, RecommendationSnapshot, RecommendationStats,
 };
 pub use scanner_service::ScannerService;
+pub use transport::{
+    apply_mpris_command, clamp_mpris_rate, loop_status_choice, loop_status_mpris, TransportHost,
+    TransportOutcome, MAX_MPRIS_RATE, MIN_MPRIS_RATE,
+};
 pub use waveform_service::WaveformService;

@@ -157,20 +157,78 @@ pub fn locale() -> Locale {
     ACTIVE_LOCALE.read().map(|l| *l).unwrap_or(Locale::English)
 }
 
+/// The compiled-in catalogue for a locale. English is the generated `Msg`
+/// enum itself, so it has no separate map.
+fn catalogue_for(locale: Locale) -> Option<&'static HashMap<String, String>> {
+    match locale {
+        Locale::English => None,
+        Locale::German => Some(&GERMAN),
+        Locale::French => Some(&FRENCH),
+        Locale::Spanish => Some(&SPANISH),
+        Locale::Japanese => Some(&JAPANESE),
+        Locale::Chinese => Some(&CHINESE),
+    }
+}
+
+/// How much of the English catalogue a shipped locale actually translates.
+///
+/// The UI shows this next to every language so a partial catalogue is never
+/// presented as a complete translation. `percent` floors rather than rounds:
+/// claiming 65% for 644 of 995 strings would overstate the work delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Coverage {
+    pub translated: usize,
+    pub total: usize,
+}
+
+impl Coverage {
+    pub fn percent(self) -> u32 {
+        self.translated
+            .checked_mul(100)
+            .and_then(|scaled| scaled.checked_div(self.total))
+            .unwrap_or(100) as u32
+    }
+
+    pub fn is_complete(self) -> bool {
+        self.translated >= self.total
+    }
+}
+
+/// Catalogue coverage for `locale`, counted against the English source keys.
+///
+/// Only keys that exist in English are counted, so a stale key in a
+/// translation file cannot inflate the number.
+pub fn coverage(locale: Locale) -> Coverage {
+    let total = Msg::ALL.len();
+    if locale == Locale::English {
+        return Coverage {
+            translated: total,
+            total,
+        };
+    }
+    let Some(catalogue) = catalogue_for(locale) else {
+        return Coverage {
+            translated: 0,
+            total,
+        };
+    };
+    let translated = Msg::ALL
+        .iter()
+        .filter(|msg| {
+            catalogue
+                .get(msg.key())
+                .is_some_and(|text| !text.trim().is_empty())
+        })
+        .count();
+    Coverage { translated, total }
+}
+
 /// Translate one message, falling back to English and reporting each missing
 /// key at most once.
 pub fn tr(msg: Msg) -> String {
     let locale = locale();
-    if locale == Locale::English {
+    let Some(catalogue) = catalogue_for(locale) else {
         return msg.english().to_string();
-    }
-    let catalogue = match locale {
-        Locale::English => unreachable!(),
-        Locale::German => &*GERMAN,
-        Locale::French => &*FRENCH,
-        Locale::Spanish => &*SPANISH,
-        Locale::Japanese => &*JAPANESE,
-        Locale::Chinese => &*CHINESE,
     };
     if let Some(text) = catalogue.get(msg.key()) {
         return text.clone();
@@ -331,6 +389,39 @@ mod tests {
         for key in zh.keys() {
             assert!(en.contains_key(key), "zh.json has unknown key {key}");
         }
+    }
+
+    #[test]
+    fn coverage_is_derived_from_the_catalogues() {
+        let en = english_catalogue();
+        for locale in Locale::ALL {
+            let expected = if locale == Locale::English {
+                en.len()
+            } else {
+                catalogue_for(locale)
+                    .expect("every non-English locale has a catalogue")
+                    .keys()
+                    .filter(|key| en.contains_key(*key))
+                    .count()
+            };
+            let actual = coverage(locale);
+            assert_eq!(actual.translated, expected, "{locale:?}");
+            assert_eq!(actual.total, en.len(), "{locale:?}");
+            assert!(actual.percent() <= 100);
+        }
+        assert!(coverage(Locale::English).is_complete());
+    }
+
+    #[test]
+    fn coverage_floors_instead_of_overstating() {
+        assert_eq!(
+            Coverage {
+                translated: 644,
+                total: 995
+            }
+            .percent(),
+            64
+        );
     }
 
     #[test]

@@ -453,6 +453,11 @@ pub fn show_eq_panel(
         .map(|[x, y]| Pos2::new(x, y))
         .unwrap_or_else(|| Pos2::new(default_x, default_y));
 
+    // Escape key dismisses the floating studio
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        state.is_open = false;
+    }
+
     // Floating studio panel styled directly with active design system tokens
     let win_response = Window::new("equalizer_floating_studio")
         .resizable(true)
@@ -468,9 +473,15 @@ pub fn show_eq_panel(
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0_f32, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_xl))
+                .shadow(egui::epaint::Shadow {
+                    offset: [0, 10],
+                    blur: 32,
+                    spread: 0,
+                    color: theme.shadow,
+                })
                 .inner_margin(Margin::symmetric(
-                    theme.space_5xl as i8,
-                    theme.space_3xl as i8,
+                    theme.space_4xl as i8,
+                    theme.space_2xl as i8,
                 )),
         )
         .show(ctx, |ui| {
@@ -528,7 +539,8 @@ pub fn show_eq_panel(
                     });
             });
 
-            // The whole studio is bypassed, so cover the content and say why.
+            // The whole studio is bypassed, so cover the content and provide an
+            // interactive affordance to re-enable it.
             if !eq_active {
                 let rect = ui.min_rect();
                 let overlay_rect = Rect::from_min_max(
@@ -542,30 +554,63 @@ pub fn show_eq_panel(
                 );
 
                 let badge_pos = overlay_rect.center();
-                let badge_text = "Equalizer Bypassed (Toggle Switch in Header to Enable)";
-                let font = crate::theme::font(12.5);
-                let galley =
-                    ui.painter()
-                        .layout_no_wrap(badge_text.to_string(), font, theme.text_muted);
-                let badge_rect =
-                    Rect::from_center_size(badge_pos, galley.size() + Vec2::new(26.0, 12.0));
-
-                ui.painter().rect_filled(
-                    badge_rect,
-                    CornerRadius::same(theme.radius_lg),
-                    theme.bg_pill,
+                let badge_text = "Equalizer Bypassed · Click to Enable";
+                let font = crate::theme::font(13.0);
+                let galley = ui.painter().layout_no_wrap(
+                    badge_text.to_string(),
+                    font.clone(),
+                    theme.text_primary,
                 );
+                let badge_rect =
+                    Rect::from_center_size(badge_pos, galley.size() + Vec2::new(32.0, 16.0));
+
+                let badge_resp = ui.interact(
+                    badge_rect,
+                    ui.make_persistent_id("eq_bypassed_interactive_badge"),
+                    Sense::click(),
+                );
+                badge_resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, tr!("Equalizer"))
+                });
+                let b_hover_t = ui.ctx().animate_bool_with_time(
+                    badge_resp.id.with("badge_hover"),
+                    badge_resp.hovered(),
+                    theme.motion_time(0.12),
+                );
+
+                let bg_color =
+                    crate::theme::lerp_color(theme.bg_card, theme.accent, b_hover_t * 0.85);
+                let text_color = if b_hover_t > 0.4 {
+                    crate::theme::on_fill(theme.accent)
+                } else {
+                    theme.text_primary
+                };
+                let stroke_color =
+                    crate::theme::lerp_color(theme.border_card, theme.accent_highlight, b_hover_t);
+
+                ui.painter()
+                    .rect_filled(badge_rect, CornerRadius::same(theme.radius_lg), bg_color);
                 ui.painter().rect_stroke(
                     badge_rect,
                     CornerRadius::same(theme.radius_lg),
-                    Stroke::new(1.0, theme.border_card),
+                    Stroke::new(1.0 + b_hover_t * 0.5, stroke_color),
                     egui::StrokeKind::Inside,
                 );
+                let text_galley =
+                    ui.painter()
+                        .layout_no_wrap(badge_text.to_string(), font, text_color);
                 ui.painter().galley(
-                    badge_rect.min + Vec2::new(13.0, 6.0),
-                    galley,
-                    theme.text_secondary,
+                    badge_rect.min + Vec2::new(16.0, 8.0),
+                    text_galley,
+                    text_color,
                 );
+
+                let _ = badge_resp.clone().on_hover_text("Enable the Equalizer");
+                if badge_resp.clicked() {
+                    state.eq_enabled = true;
+                    state.graphic_enabled = state.eq_mode == EqMode::Graphic;
+                    actions.eq_enabled_changed = Some(true);
+                }
             }
         });
 
@@ -607,63 +652,99 @@ fn render_header(
 ) {
     let ctx = ui.ctx().clone();
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
 
-        // Icon (Sliders)
-        let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::hover());
-        crate::components::icons::draw_equalizer_sliders(ui, icon_rect, theme.accent_warm);
-
-        // Title
-        ui.label(
-            egui::RichText::new(tr!("Equalizer"))
-                .font(crate::theme::font(17.5))
-                .strong()
-                .color(theme.text_primary),
+        // A soft accent badge anchors the title without a heavy rule.
+        let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(32.0, 32.0), Sense::hover());
+        ui.painter().rect_filled(
+            icon_rect,
+            CornerRadius::same(theme.radius_md),
+            crate::theme::with_alpha(theme.accent_warm, 28),
+        );
+        crate::components::icons::draw_equalizer_sliders(
+            ui,
+            icon_rect.shrink(9.0),
+            theme.accent_warm,
         );
 
-        ui.add_space(8.0);
+        // The right-hand controls have a known width, so the title column is
+        // bounded instead of letting a long status line force the window
+        // wider than the user dragged it.
+        let right_w = 26.0 + 38.0 + 52.0 + theme.space_sm * 3.0;
+        let title_w =
+            (ui.available_width() - 32.0 - theme.space_sm - right_w - theme.space_sm).max(90.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(title_w, 36.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_width(title_w);
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(tr!("Equalizer"))
+                            .font(crate::theme::font(17.0))
+                            .strong()
+                            .color(theme.text_primary),
+                    )
+                    .truncate(),
+                );
+                let status = if state.eq_enabled {
+                    match state.active_tab {
+                        EqTab::Graphic => tr!("Graphic EQ"),
+                        EqTab::Parametric => tr!("Parametric"),
+                        EqTab::Tone => tr!("Tone Controls"),
+                        EqTab::Dynamics => tr!("Dynamics"),
+                        EqTab::Filters => tr!("Filters"),
+                        EqTab::Effects => tr!("Creative Effects"),
+                        EqTab::Advanced => tr!("Advanced"),
+                    }
+                } else {
+                    tr!("BYPASSED")
+                };
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(status)
+                            .font(crate::theme::font(10.5))
+                            .color(if state.eq_enabled {
+                                theme.text_muted
+                            } else {
+                                theme.accent_warm
+                            }),
+                    )
+                    .truncate(),
+                );
+            },
+        );
 
-        // Master Toggle Switch: Enable Equalizer. This is the one enable
-        // state; the legacy `graphic_enabled` flag mirrors the selected mode so
-        // old chain presets keep loading correctly.
-        let mut eq_active = state.eq_enabled;
-        if custom_toggle_switch(ui, &mut eq_active, "Enable Equalizer", theme) {
-            state.eq_enabled = eq_active;
-            state.graphic_enabled = eq_active && state.eq_mode == EqMode::Graphic;
-            actions.eq_enabled_changed = Some(eq_active);
-        }
-
-        // Right-aligned actions: AutoEQ badge, More (⋮), and Close (✕)
+        // Right-aligned actions: master enable + close (✕)
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
 
-            // Close button (✕)
             let (close_rect, close_resp) =
                 ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
-            // The studio takes the keyboard focus when it opens, so the
-            // keyboard works straight away instead of staying wherever it
-            // was in the library behind.
             if !state.was_open {
                 ctx.memory_mut(|m| m.request_focus(close_resp.id));
             }
             close_resp.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::Button, true, "Close the DSP studio")
+                egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(Msg::S35EC68DAC50375CB))
             });
             let _ = close_resp
                 .clone()
                 .on_hover_text(tr!(Msg::S35EC68DAC50375CB));
+            let hover_t = ctx.animate_bool_with_time(
+                close_resp.id.with("eq_close_hover"),
+                close_resp.hovered(),
+                theme.motion_time(0.12),
+            );
             let cp = ui.painter_at(close_rect);
-            let close_bg = if close_resp.hovered() {
-                theme.destructive.gamma_multiply(0.2)
-            } else {
-                theme.bg_pill
-            };
-            cp.rect_filled(close_rect, CornerRadius::same(theme.radius_sm), close_bg);
-            let icon_col = if close_resp.hovered() {
-                theme.destructive
-            } else {
-                theme.text_secondary
-            };
+            let close_bg = crate::theme::lerp_color(
+                theme.bg_pill,
+                theme.destructive.gamma_multiply(0.25),
+                hover_t,
+            );
+            cp.rect_filled(close_rect, CornerRadius::same(theme.radius_md), close_bg);
+            let icon_col =
+                crate::theme::lerp_color(theme.text_secondary, theme.destructive, hover_t);
             crate::components::icons::draw_window_close(
                 ui,
                 close_rect.shrink2(Vec2::splat(6.0)),
@@ -675,11 +756,32 @@ fn render_header(
             {
                 state.is_open = false;
             }
+
+            // A labelled master switch. The bare switch next to the title read
+            // as decoration; "Enabled / Bypassed" says what the control does.
+            let mut eq_active = state.eq_enabled;
+            if custom_toggle_switch(ui, &mut eq_active, "Enable Equalizer", theme) {
+                state.eq_enabled = eq_active;
+                state.graphic_enabled = eq_active && state.eq_mode == EqMode::Graphic;
+                actions.eq_enabled_changed = Some(eq_active);
+            }
+            ui.label(
+                egui::RichText::new(if eq_active {
+                    tr!("ACTIVE")
+                } else {
+                    tr!("BYPASSED")
+                })
+                .font(crate::theme::font(10.5))
+                .strong()
+                .color(if eq_active {
+                    theme.accent_highlight
+                } else {
+                    theme.text_muted
+                }),
+            );
         });
     });
 
-    // Remember that it was open, so the focus is moved into it once, on the
-    // frame it opens.
     state.was_open = state.is_open;
 }
 

@@ -32,7 +32,7 @@ pub fn dismiss_open_info_box(ctx: &egui::Context) -> bool {
     true
 }
 
-/// Renders a clickable circular 'i' icon that opens a floating, glassmorphic info box
+/// Renders a clickable circular 'i' icon that opens a compact floating info card
 pub fn render_info_icon_button(
     ui: &mut egui::Ui,
     id_source: impl std::hash::Hash + std::fmt::Debug,
@@ -130,7 +130,7 @@ pub fn render_info_icon_button(
                     Pos2::ZERO,
                     Vec2::new(1280.0, 830.0),
                 ));
-        let box_width = 330.0_f32.min(screen_rect.width() - 40.0);
+        let box_width = 300.0_f32.min(screen_rect.width() - 40.0);
 
         // Position: prefer below-left of icon, clamped safely inside viewport
         let mut target_x = rect.left() - 10.0;
@@ -165,8 +165,8 @@ pub fn render_info_icon_button(
                         color: theme.shadow,
                     })
                     .inner_margin(Margin::symmetric(
-                        theme.space_2xl as i8,
-                        theme.space_xl as i8,
+                        theme.space_lg as i8,
+                        theme.space_lg as i8,
                     ));
 
                 let frame_resp = frame.show(ui, |ui| {

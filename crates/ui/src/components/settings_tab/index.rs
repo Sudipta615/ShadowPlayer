@@ -127,7 +127,7 @@ impl SettingsCategory {
                 "Application Instances",
                 "About ShadowPlayer",
             ],
-            Self::Appearance => &["Surface Material", "Theme Gallery", "Theme Editor"],
+            Self::Appearance => &["Interface", "Theme Gallery", "Theme Editor"],
         }
     }
 }
@@ -171,6 +171,7 @@ pub fn card_display_name(card: &str) -> &str {
         "Organize Files" => "Organize Files",
         "Application Instances" => "App Instances",
         "About ShadowPlayer" => "About ShadowPlayer",
+        "Interface" => "Interface",
         "Theme Gallery" => "Theme Gallery",
         "Theme Editor" => "Theme Editor",
         other => other,
@@ -908,16 +909,16 @@ pub static SETTINGS_INDEX: [SettingsEntry; 119] = [
         description: "Start background multi-threaded conversion worker or abort running job",
     },
     SettingsEntry {
-        category: SettingsCategory::Appearance,
-        card: "Surface Material",
-        label: "Frosted Glass Surfaces",
-        description: "Apply authentic frosted glass translucency and specular highlights across any active theme",
-    },
-    SettingsEntry {
         category: SettingsCategory::Library,
         card: "Interface & Language",
         label: "Reduce Motion",
         description: "Disable hover and transition animations across the interface",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Appearance,
+        card: "Interface",
+        label: "Interface Scale",
+        description: "Scales text and controls from 80% to 150%. Ctrl +/− and Ctrl+scroll also work.",
     },
 ];
 
@@ -957,8 +958,8 @@ pub(crate) fn scored_settings(query: &str) -> Vec<(i32, &'static SettingsEntry)>
 }
 
 /// Card headings are destinations too. Searching for "theme editor" used to
-/// find only the Frosted Glass row because only rows lived in the index; the
-/// gallery and editor were reachable by scrolling, not by search.
+/// find only a single row because only rows lived in the index; the gallery and
+/// editor were reachable by scrolling, not by search.
 pub(crate) fn scored_setting_cards(query: &str) -> Vec<(i32, SettingsCategory, &'static str)> {
     use crate::components::command_palette::fuzzy_score;
 

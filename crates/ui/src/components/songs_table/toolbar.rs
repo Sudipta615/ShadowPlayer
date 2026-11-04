@@ -52,9 +52,13 @@ pub(super) fn render_toolbar(ui: &mut Ui, toolbar: &mut TableToolbar<'_, '_>) {
 
         ui.label(
             egui::RichText::new(if quick_filter.is_active_filter() {
-                format!("{} songs · {} filter", track_count, quick_filter.label())
+                format!(
+                    "{} · {} filter",
+                    crate::components::count_label(track_count, "song", "songs"),
+                    quick_filter.label()
+                )
             } else {
-                format!("{} songs", track_count)
+                crate::components::count_label(track_count, "song", "songs")
             })
             .font(crate::theme::font(13.0))
             .color(theme.text_muted),

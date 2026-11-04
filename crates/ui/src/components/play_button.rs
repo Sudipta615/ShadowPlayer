@@ -17,6 +17,7 @@ use crate::theme::{lerp_color, with_alpha, Theme};
 pub fn play_button(ui: &mut Ui, size: f32, is_playing: bool, theme: &Theme) -> Response {
     let size = size.max(20.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    label(&response, ui.is_enabled(), is_playing);
     paint(ui, rect, &response, is_playing, theme);
     response
 }
@@ -33,8 +34,28 @@ pub fn play_button_at(
     theme: &Theme,
 ) -> Response {
     let response = ui.interact(rect, id, Sense::click());
+    label(&response, ui.is_enabled(), is_playing);
     paint(ui, rect, &response, is_playing, theme);
     response
+}
+
+/// Give the painted control a default accessible name.
+///
+/// Callers may attach a more specific label (for example the track title);
+/// this guarantees that no play/pause control is ever silent to a screen
+/// reader, including the decorative previews in the theme gallery.
+fn label(response: &Response, enabled: bool, is_playing: bool) {
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            enabled,
+            if is_playing {
+                tr!("Pause")
+            } else {
+                tr!("Play")
+            },
+        )
+    });
 }
 
 fn paint(ui: &Ui, rect: Rect, response: &Response, is_playing: bool, theme: &Theme) {
@@ -85,18 +106,16 @@ fn paint(ui: &Ui, rect: Rect, response: &Response, is_playing: bool, theme: &The
         StrokeKind::Inside,
     );
 
-    // A tiny specular highlight on the top-left of the control, matching the
-    // glass treatment used by the surrounding panes.
-    if theme.frosted {
-        painter.circle_filled(
-            Pos2::new(
-                button_rect.center().x - button_rect.width() * 0.18,
-                button_rect.center().y - button_rect.height() * 0.22,
-            ),
-            button_rect.width() * 0.16,
-            crate::theme::with_alpha(Color32::WHITE, 26),
-        );
-    }
+    // A tiny specular highlight on the top-left of the control so it reads as
+    // a physical key rather than a flat circle.
+    painter.circle_filled(
+        Pos2::new(
+            button_rect.center().x - button_rect.width() * 0.18,
+            button_rect.center().y - button_rect.height() * 0.22,
+        ),
+        button_rect.width() * 0.16,
+        crate::theme::with_alpha(Color32::WHITE, 26),
+    );
 
     let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(button_rect.height() * 0.42));
     if is_playing {

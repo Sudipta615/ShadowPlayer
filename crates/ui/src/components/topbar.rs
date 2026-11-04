@@ -87,7 +87,11 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
             if theme.is_light {
                 // Active light mode: glowing sun circle on left
                 painter.circle_filled(sun_center, 11.0, theme.sun_accent);
-                crate::components::icons::draw_sun(ui, sun_rect, Color32::WHITE);
+                crate::components::icons::draw_sun(
+                    ui,
+                    sun_rect,
+                    crate::theme::on_fill(theme.sun_accent),
+                );
                 crate::components::icons::draw_moon(ui, moon_rect, theme.text_muted);
             } else {
                 // Sun icon (dim) on left
@@ -95,7 +99,11 @@ pub fn render_window_controls(ui: &mut Ui, theme: &Theme) -> WindowControlsRespo
 
                 // Active dark mode Moon with glowing jade circle on right
                 painter.circle_filled(moon_center, 11.0, theme.accent);
-                crate::components::icons::draw_moon(ui, moon_rect, Color32::WHITE);
+                crate::components::icons::draw_moon(
+                    ui,
+                    moon_rect,
+                    crate::theme::on_fill(theme.accent),
+                );
             }
         },
     );

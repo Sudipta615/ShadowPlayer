@@ -226,7 +226,10 @@ impl ThemeEditorState {
         theme.radius_xl = radius("radius_xl", theme.radius_xl);
         theme.radius_pill = radius("radius_pill", theme.radius_pill);
         theme.play_button_shape = self.play_button_shape;
-        theme
+        // A saved theme gets its interaction surfaces normalised on load, so
+        // the live preview must do the same or it shows an invisible hover the
+        // applied theme will never have.
+        theme.normalize_interaction_surfaces()
     }
 
     /// Automatically adjust all text tokens so they satisfy WCAG 2.1 AA against host surfaces.
@@ -278,6 +281,45 @@ pub(super) enum SaveOutcome {
     Error(String),
 }
 
+/// Validate a theme file ID before it is used as a file name.
+///
+/// The ID becomes `<id>.shadowtheme` inside the user's custom-theme directory.
+/// A value like `../../foo` or `..\..\foo` must be rejected rather than
+/// joined onto that directory.
+fn validate_theme_id(id: &str) -> Result<(), String> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err("Name and file ID are required".to_string());
+    }
+    if id.len() > 64 {
+        return Err("Theme file ID must be at most 64 characters".to_string());
+    }
+    if id.starts_with('.') || id.ends_with('.') {
+        return Err("Theme file ID must not start or end with a dot".to_string());
+    }
+    if id.contains("..") {
+        return Err("Theme file ID must not contain '..'".to_string());
+    }
+    // Windows reserves these device names regardless of extension.
+    const RESERVED: &[&str] = &[
+        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+    if RESERVED.contains(&id.to_ascii_lowercase().as_str()) {
+        return Err("Theme file ID is a reserved system name".to_string());
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(
+            "Theme file ID may only contain letters, numbers, hyphens, underscores and dots"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn unique_theme_id(manager: &ThemeManager, base: &str) -> String {
     let base = base.trim();
     let base = if base.is_empty() {
@@ -285,12 +327,30 @@ fn unique_theme_id(manager: &ThemeManager, base: &str) -> String {
     } else {
         base
     };
+    // An invalid base can still be "saved as new"; make it a safe stem so the
+    // validation later accepts it.
+    let base = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let base = base.trim_matches('.');
+    let base = if base.is_empty() {
+        "my_custom_theme"
+    } else {
+        base
+    };
     let stem = match base.rsplit_once("_copy") {
-        Some((stem, suffix))
-            if !stem.is_empty()
+        Some((inner, suffix))
+            if !inner.is_empty()
                 && (suffix.is_empty() || suffix.chars().all(|c| c.is_ascii_digit())) =>
         {
-            stem
+            inner
         }
         _ => base,
     };
@@ -324,8 +384,11 @@ pub(super) fn save_current_theme(
 ) -> SaveOutcome {
     let id = state.id.trim().to_string();
     let name = state.name.trim().to_string();
-    if id.is_empty() || name.is_empty() {
-        return SaveOutcome::Error("Name and file ID are required".to_string());
+    if let Err(error) = validate_theme_id(&id) {
+        return SaveOutcome::Error(error);
+    }
+    if name.is_empty() {
+        return SaveOutcome::Error("Name is required".to_string());
     }
     if let Err(e) = validate_contrast(&state.colors) {
         return SaveOutcome::Error(format!("Cannot save: {e}"));
@@ -334,11 +397,17 @@ pub(super) fn save_current_theme(
     if save_as_new {
         state.id = unique_theme_id(manager, &id);
         state.name = format!("{name} Copy");
+        if let Err(error) = validate_theme_id(&state.id) {
+            return SaveOutcome::Error(error);
+        }
     }
 
     let filename = format!("{}.shadowtheme", state.id.trim());
-    let _ = std::fs::create_dir_all(&manager.custom_themes_dir);
     let target_path = manager.custom_themes_dir.join(&filename);
+    if !target_path.starts_with(&manager.custom_themes_dir) {
+        return SaveOutcome::Error("Invalid theme file name".to_string());
+    }
+    let _ = std::fs::create_dir_all(&manager.custom_themes_dir);
     if target_path.exists() && !force_overwrite {
         return SaveOutcome::NeedsOverwrite;
     }

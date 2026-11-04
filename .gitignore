@@ -37,3 +37,4 @@ Thumbs.db
 # Cargo lockfiles: the root workspace lockfile is the only authoritative one.
 # Nested workspaces (engine, rasterizer, opus-decoder) resolve from the root.
 crates/**/Cargo.lock
+.codegraph/

@@ -108,9 +108,13 @@ impl<'a> ArtistsView<'a> {
                                 .color(self.theme.text_primary),
                         );
                         ui.label(
-                            egui::RichText::new(format!("{} songs", self.artist_tracks.len()))
-                                .font(crate::theme::font(12.5))
-                                .color(self.theme.text_muted),
+                            egui::RichText::new(crate::components::count_label(
+                                self.artist_tracks.len(),
+                                "song",
+                                "songs",
+                            ))
+                            .font(crate::theme::font(12.5))
+                            .color(self.theme.text_muted),
                         );
 
                         ui.add_space(4.0);
@@ -299,9 +303,13 @@ impl<'a> ArtistsView<'a> {
                         .color(self.theme.text_primary),
                 );
                 ui.label(
-                    egui::RichText::new(format!("{} artists", self.artists.len()))
-                        .font(crate::theme::font(13.5))
-                        .color(self.theme.text_muted),
+                    egui::RichText::new(crate::components::count_label(
+                        self.artists.len(),
+                        "artist",
+                        "artists",
+                    ))
+                    .font(crate::theme::font(13.5))
+                    .color(self.theme.text_muted),
                 );
             });
 
@@ -434,7 +442,11 @@ impl<'a> ArtistsView<'a> {
                                         self.theme.text_primary,
                                     );
 
-                                    let sub_str = format!("{} songs", artist.track_count);
+                                    let sub_str = crate::components::count_label(
+                                        artist.track_count as usize,
+                                        "song",
+                                        "songs",
+                                    );
                                     p.text(
                                         Pos2::new(rect.center().x, rect.min.y + 116.0),
                                         egui::Align2::CENTER_CENTER,

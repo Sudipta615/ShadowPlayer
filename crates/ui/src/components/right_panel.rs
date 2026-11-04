@@ -53,7 +53,7 @@ impl<'a> RightPanel<'a> {
             save_lyrics: false,
         };
 
-        let card_rect = ui.vertical(|ui| {
+        ui.vertical(|ui| {
             ui.set_width(ui.available_width().max(220.0));
 
             // 1. Container Card for Queue/Lyrics (fits 8 items + Clear Queue button)
@@ -72,7 +72,7 @@ impl<'a> RightPanel<'a> {
                     self.theme.space_2xl as i8,
                 ));
 
-            let card_response = card_frame.show(ui, |ui| {
+            card_frame.show(ui, |ui| {
                 // Tab Switcher Pill — 2-way: Queue | Lyrics (matching mockup)
                 ui.horizontal(|ui| {
                     let switch_w = ui.available_width();
@@ -228,7 +228,11 @@ impl<'a> RightPanel<'a> {
                                 .map(|t| t.duration_secs)
                                 .sum();
                             let dur_str = format_duration(total_dur as f64);
-                            let summary_str = format!("{} songs • {}", display_len, dur_str);
+                            let summary_str = format!(
+                                "{} • {}",
+                                crate::components::count_label(display_len, "song", "songs"),
+                                dur_str
+                            );
 
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -679,6 +683,23 @@ impl<'a> RightPanel<'a> {
                                             );
                                         }
                                     });
+                            } else if track_id.is_none() {
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(40.0);
+                                    ui.label(
+                                        egui::RichText::new(tr!("No track playing yet."))
+                                            .font(crate::theme::font(13.5))
+                                            .color(self.theme.text_muted),
+                                    );
+                                    ui.add_space(6.0);
+                                    ui.label(
+                                        egui::RichText::new(
+                                            tr!("Play a track to see its lyrics here."),
+                                        )
+                                        .font(crate::theme::font(11.5))
+                                        .color(self.theme.text_dim),
+                                    );
+                                });
                             } else if !lyrics_resolved {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(40.0);
@@ -861,18 +882,7 @@ impl<'a> RightPanel<'a> {
                     }
                 }
             });
-            card_response.response.rect
-        })
-        .inner;
-
-        if self.theme.frosted {
-            crate::theme::glass::paint_glass_sheen(
-                ui,
-                card_rect,
-                CornerRadius::same(self.theme.radius_xl),
-                self.theme,
-            );
-        }
+        });
 
         action
     }

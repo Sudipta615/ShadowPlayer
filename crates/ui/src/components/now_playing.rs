@@ -103,7 +103,7 @@ impl<'a> NowPlayingCard<'a> {
                 },
             ));
 
-        let card_response = card_frame.show(ui, |ui| {
+        card_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(
                     if dense {
@@ -785,15 +785,6 @@ impl<'a> NowPlayingCard<'a> {
                 });
             });
         });
-        if self.theme.frosted {
-            crate::theme::glass::paint_glass_sheen(
-                ui,
-                card_response.response.rect,
-                CornerRadius::same(self.theme.radius_xl),
-                self.theme,
-            );
-        }
-
         events
     }
 }

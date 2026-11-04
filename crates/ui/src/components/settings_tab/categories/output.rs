@@ -11,7 +11,7 @@ use config::{
     DsdNoiseFilter, DsdOutput, FallbackPolicy, NoiseShaper, PrecisionMode, ResamplerFilter,
     ResamplerQuality, SampleRatePolicy, SdmModulator, SdmRate, UltrasonicFilter, VolumeMode,
 };
-use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Sense, Stroke, Vec2};
 
 /// The concrete output rates offered in the allowed-rates whitelist. Matching
 /// the engine's policy: the 44.1 kHz family and the 48 kHz family.
@@ -146,7 +146,11 @@ pub(in crate::components::settings_tab) fn render_output_category(
             crate::components::icons::draw_speaker(
                 ui,
                 icon_rect.shrink2(Vec2::splat(6.0)),
-                if state.bit_perfect { Color32::WHITE } else { theme.accent_highlight },
+                if state.bit_perfect {
+                    crate::theme::on_fill(theme.bit_perfect_green)
+                } else {
+                    theme.accent_highlight
+                },
                 false,
             );
 

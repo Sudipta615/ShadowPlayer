@@ -9,9 +9,18 @@ use domain::models::SyncedLyricLine;
 
 impl ShadowPlayerApp {
     /// Top-bar queue/theme/mini actions. Returns nothing; each button updates
-    /// the state it owns. Kept in one place so Settings and Help get the same
-    /// controls as library views.
-    pub(super) fn render_topbar_actions(&mut self, ui: &mut egui::Ui, window_w: f32) {
+    /// the state it owns. Kept in one place so every page gets the same
+    /// controls.
+    ///
+    /// `show_queue` is false on Settings and Help: those pages hide the right
+    /// panel entirely, so a queue toggle there would be a button that opens a
+    /// panel the page refuses to show.
+    pub(super) fn render_topbar_actions(
+        &mut self,
+        ui: &mut egui::Ui,
+        window_w: f32,
+        show_queue: bool,
+    ) {
         ui.spacing_mut().item_spacing.x = 6.0;
         let wide = window_w >= 1100.0;
         let queue_active = if wide {
@@ -19,13 +28,15 @@ impl ShadowPlayerApp {
         } else {
             self.app_state.right_overlay_open
         };
-        if render_action_button(
-            ui,
-            TopbarAction::Queue,
-            queue_active,
-            &self.theme,
-            "Queue & lyrics",
-        ) {
+        if show_queue
+            && render_action_button(
+                ui,
+                TopbarAction::Queue,
+                queue_active,
+                &self.theme,
+                "Queue & lyrics",
+            )
+        {
             if wide {
                 self.app_state.right_panel_visible = !self.app_state.right_panel_visible;
             } else {
@@ -175,12 +186,6 @@ impl ShadowPlayerApp {
         window_w: f32,
         playback: &PlaybackView<'_>,
     ) {
-        if self.theme.frosted {
-            let backdrop = playback
-                .current_track
-                .and_then(|track| self.artwork_service.backdrop_texture(ctx, &track.id));
-            crate::theme::glass::paint_backdrop(ui, &self.theme, backdrop.as_ref());
-        }
         self.render_sidebar_panel(ui);
         self.render_center_panel(ui, ctx, window_w, playback);
     }

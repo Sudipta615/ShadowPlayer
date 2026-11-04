@@ -322,7 +322,7 @@ impl<'a> SideBar<'a> {
                 ui,
                 Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
                 if is_active {
-                    Color32::WHITE
+                    crate::theme::on_fill(self.theme.accent)
                 } else {
                     self.theme.info
                 },
@@ -400,7 +400,7 @@ impl<'a> SideBar<'a> {
                 Vec2::new(13.0, 13.0),
             ),
             if is_active {
-                Color32::WHITE
+                crate::theme::on_fill(self.theme.accent)
             } else {
                 self.theme.info
             },
@@ -461,7 +461,7 @@ impl<'a> SideBar<'a> {
                 ui,
                 Rect::from_center_size(rect.center(), Vec2::splat(16.0)),
                 if is_active {
-                    Color32::WHITE
+                    crate::theme::on_fill(self.theme.accent)
                 } else {
                     self.theme.accent_warm
                 },
@@ -539,7 +539,7 @@ impl<'a> SideBar<'a> {
             ui,
             pl_icon_rect,
             if is_active {
-                Color32::WHITE
+                crate::theme::on_fill(self.theme.accent)
             } else {
                 self.theme.accent_warm
             },
@@ -564,7 +564,7 @@ impl<'a> SideBar<'a> {
             count_str,
             crate::theme::font(10.5),
             if is_active {
-                Color32::WHITE
+                crate::theme::on_fill(self.theme.accent)
             } else {
                 self.theme.text_muted
             },
@@ -721,19 +721,36 @@ impl<'a> SideBar<'a> {
         let icon_sub_rect = badge_rect.shrink2(Vec2::new(4.5, 4.5));
         match item {
             NavItem::Favorites => {
-                crate::components::icons::draw_heart(ui, icon_sub_rect, Color32::WHITE, true);
+                crate::components::icons::draw_heart(
+                    ui,
+                    icon_sub_rect,
+                    crate::theme::on_fill(badge_color),
+                    true,
+                );
             }
             NavItem::RecentlyPlayed => {
-                crate::components::icons::draw_clock(ui, icon_sub_rect, Color32::WHITE);
+                crate::components::icons::draw_clock(
+                    ui,
+                    icon_sub_rect,
+                    crate::theme::on_fill(badge_color),
+                );
             }
             NavItem::MostPlayed => {
-                crate::components::icons::draw_bar_chart(ui, icon_sub_rect, Color32::WHITE);
+                crate::components::icons::draw_bar_chart(
+                    ui,
+                    icon_sub_rect,
+                    crate::theme::on_fill(badge_color),
+                );
             }
             NavItem::RecentlyAdded => {
-                crate::components::icons::draw_trending_up(ui, icon_sub_rect, Color32::WHITE);
+                crate::components::icons::draw_trending_up(
+                    ui,
+                    icon_sub_rect,
+                    crate::theme::on_fill(badge_color),
+                );
             }
             _ => {
-                painter.circle_filled(badge_rect.center(), 3.5, Color32::WHITE);
+                painter.circle_filled(badge_rect.center(), 3.5, crate::theme::on_fill(badge_color));
             }
         }
 

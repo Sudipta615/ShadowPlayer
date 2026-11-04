@@ -7,7 +7,7 @@ use super::super::widgets::{
 };
 use super::super::{SettingsCategory, SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Sense, Vec2};
+use eframe::egui::{self, CornerRadius, Sense, Vec2};
 use std::path::PathBuf;
 
 pub(in crate::components::settings_tab) fn render_library_category(
@@ -38,17 +38,36 @@ pub(in crate::components::settings_tab) fn render_library_category(
                 egui::ComboBox::from_id_salt("settings_language")
                     .selected_text(language_label(current))
                     .show_ui(ui, |ui| {
-                        for (code, name) in [
-                            ("", tr!("Auto (system)").as_str()),
-                            ("en", "English"),
-                            ("de", "Deutsch"),
-                        ] {
-                            if ui.selectable_label(current == code, name).clicked() {
+                        if ui
+                            .selectable_label(current.is_empty(), tr!("Auto (system)"))
+                            .clicked()
+                        {
+                            actions.locale_changed = Some(String::new());
+                        }
+                        for locale in crate::i18n::Locale::ALL {
+                            let code = locale.code();
+                            let label = format!(
+                                "{} · {}%",
+                                locale.native_name(),
+                                crate::i18n::coverage(locale).percent()
+                            );
+                            if ui.selectable_label(current == code, label).clicked() {
                                 actions.locale_changed = Some(code.to_string());
                             }
                         }
                     });
             },
+        );
+
+        let active_coverage = crate::i18n::coverage(crate::i18n::locale());
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new(tr_args!(
+                "This interface is {percent}% translated; untranslated text falls back to English.",
+                "percent" => active_coverage.percent()
+            ))
+            .small()
+            .color(theme.text_muted),
         );
 
         if setting_item_toggle(
@@ -291,7 +310,7 @@ pub(in crate::components::settings_tab) fn render_library_category(
                         egui::RichText::new("Open Themes & Appearance →")
                             .font(crate::theme::font(12.0))
                             .strong()
-                            .color(Color32::WHITE),
+                            .color(crate::theme::on_fill(theme.accent)),
                     )
                     .fill(theme.accent)
                     .corner_radius(CornerRadius::same(theme.radius_md))
@@ -339,7 +358,7 @@ pub(in crate::components::settings_tab) fn render_library_category(
                     theme.bg_pill
                 },
                 if extra.is_scanning {
-                    Color32::WHITE
+                    crate::theme::on_fill(theme.accent_highlight)
                 } else {
                     theme.text_secondary
                 },
@@ -353,7 +372,14 @@ pub(in crate::components::settings_tab) fn render_library_category(
             &tr!("Indexed audio files in local SQLite library database"),
             theme,
             |ui| {
-                badge_label(ui, format!("{} tracks indexed", extra.track_count), theme);
+                badge_label(
+                    ui,
+                    format!(
+                        "{} indexed",
+                        crate::components::count_label(extra.track_count, "track", "tracks")
+                    ),
+                    theme,
+                );
             },
         );
 

@@ -13,7 +13,7 @@ Midnight) or custom user themes loaded from `.shadowtheme` files.
 The theming engine is organized into modular components under `crates/ui/src/theme/`:
 
 * **`tokens.rs`**: Defines the `Theme` value as a plain, `Copy` data struct without heap allocations in the rendering loop. Provides alpha blending (`with_alpha`) and color utilities.
-* **`glass.rs`**: Paints the defocused artwork backdrop and specular sheen used by frosted-glass surfaces. The backdrop is a cached 64×64 blur built from artwork the player has already decoded.
+* **`gallery.rs`**: Card wall for browsing and applying themes: search, category filtering, and per-card preview/edit actions. Each card carries its own Clear action, so there is no separate active-theme banner or preview strip above the grid.
 * **`fonts.rs`**: Theme typeface declarations, the bundled OFL font registry, role resolution with an always-available Inter fallback, and egui font-atlas installation.
 * **`system.rs`**: Built-in system theme presets:
   - `dark()` — *Obsidian Jade*: Deep obsidian surfaces with jade (#0F766E) and mint (#5EEAD4) highlights.
@@ -23,7 +23,6 @@ The theming engine is organized into modular components under `crates/ui/src/the
 * **`schema.rs`**: Theme file serialization supporting the `.shadowtheme` format.
 * **`manager.rs`**: Filesystem discovery across the `themes/` directory, active theme selection, and staged live preview lifecycle.
 * **`preview.rs`**: Sandbox rendering a mini playback shell with simulated album artwork, 3-track playlist table, transport controls, volume slider, and VU meters.
-* **`gallery.rs`**: Responsive compact card wall with search, category filtering (All, Dark, Light, OLED, Custom), per-card preview/apply/edit actions, an **Edit Active Theme** shortcut, and a staged-preview strip with a global clear action. Extra width becomes more columns rather than oversized cards.
 * **`editor/`**: In-app theme editor split into `mod.rs` (layout), `state.rs` (draft snapshot, dirtiness, save safety), and `widgets.rs` (preview and token controls). It offers grouped color pickers, a live player preview, transport silhouette selection, radii and font controls, real-time WCAG AA validation, auto-fix, and JSON file export.
 
 ---
@@ -74,11 +73,26 @@ The theming engine is organized into modular components under `crates/ui/src/the
 | `destructive` | Remove, delete, and destructive actions. |
 
 `Color32::WHITE` and `Color32::TRANSPARENT` are the only colour constants
-allowed outside `theme.rs` and the `theme` module. White is the foreground painted **on top of** an
-accent fill in both themes; transparent means "no fill". Neither is a skin or theme
-colour: custom themes must not change them, and every other colour — including
-translucent glows and fades, which go through `theme::with_alpha` — must come
-from the tokens above.
+allowed outside `theme.rs` and the `theme` module, and white is reserved for
+painted geometry (a slider thumb, a knob) rather than text. Text that sits **on
+top of** an accent fill must use `theme::on_fill(fill)`: it picks white or a
+dark ink by measured contrast, so a pale custom accent no longer renders white
+text on a near-white button. Neither constant is a skin or theme colour: custom
+themes must not change them, and every other colour — including translucent
+glows and fades, which go through `theme::with_alpha` — must come from the
+tokens above.
+
+### Interaction-surface floor
+
+`Theme::normalize_interaction_surfaces` runs once when a theme is loaded (from
+a preset or a user `.shadowtheme`) and again for the theme editor's live
+preview, and enforces a minimum contrast delta between
+`bg_card` and each of `bg_card_hover`, `bg_pill_hover`, `bg_card_active`, and
+`border_subtle`. A theme that declares an invisible hover (the common
+"`bg_card_hover` == `bg_card`" omission) is nudged towards black or white just
+far enough to be visible, in both light and dark modes. This is why hover
+feedback is reliable in the light Studio Mint theme even though its `bg_card` is
+pure white: the hover token is darkened on load instead of at each call site.
 
 ### Layout Tokens
 
@@ -244,7 +258,7 @@ ShadowPlayer includes an automated migration pipeline (`schema::migrate_theme_fi
 ## 5. UI Integration, Custom Themes & Live Staged Previews
 
 ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
-* **Surface Material**: **Frosted Glass Surfaces** turns cards, panels, and inputs into translucent panes over a defocused album-art backdrop, with a specular top sheen and bevel. Dense content (the songs table, Settings, and the gallery) sits on a stronger `content_panel_fill` scrim so the backdrop stays visible without putting moving artwork directly behind row text. The backdrop is only painted while the effect is enabled; disabling it restores the opaque theme surfaces.
+* **Opaque surfaces**: Cards, panels, and inputs are opaque theme surfaces. There is no backdrop blur pass and no artwork-driven transparency behind text, so a translucent custom theme cannot make rows unreadable while artwork changes.
 * **Reduce Motion**: **Library & App → Interface & Language → Reduce Motion** zeros the duration of hover and transition fades. Explicitly timed animations call `Theme::motion_time`, and egui's own `style.animation_time` is set to zero, so the preference reaches both the player chrome and the Settings surfaces.
 * **Custom Themes Folder (`themes/custom-theme/`)**: Custom user themes reside inside `<data_dir>/themes/custom-theme/`. The theme manager monitors this directory and loads all `.shadowtheme` and `.json` files.
 * **Bundled Custom Themes**: Thirty-two schema-v2 themes ship in `crates/ui/src/theme/custom-theme/`. They are embedded in the binary and written into `<data_dir>/themes/custom-theme/` on first launch, so a packaged build shows the same gallery as a source checkout. Existing files are never overwritten.

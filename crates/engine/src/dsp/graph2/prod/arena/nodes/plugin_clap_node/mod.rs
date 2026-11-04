@@ -207,12 +207,22 @@ fn param_event(id: u32, value: f64) -> clap_event_param_value {
 }
 
 #[cfg(feature = "clap-host")]
-unsafe extern "C" fn in_events_size(list: *const clap_input_events) -> u32 {
-    if list.is_null() || (*list).ctx.is_null() {
-        return 0;
+fn clap_boundary<R>(fallback: R, body: impl FnOnce() -> R) -> R {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(value) => value,
+        Err(_) => fallback,
     }
-    let events = (*list).ctx as *const Vec<clap_event_param_value>;
-    (*events).len() as u32
+}
+
+#[cfg(feature = "clap-host")]
+unsafe extern "C" fn in_events_size(list: *const clap_input_events) -> u32 {
+    clap_boundary(0, || {
+        if list.is_null() || (*list).ctx.is_null() {
+            return 0;
+        }
+        let events = (*list).ctx as *const Vec<clap_event_param_value>;
+        (*events).len() as u32
+    })
 }
 
 #[cfg(feature = "clap-host")]
@@ -220,15 +230,17 @@ unsafe extern "C" fn in_events_get(
     list: *const clap_input_events,
     index: u32,
 ) -> *const clap_event_header {
-    if list.is_null() || (*list).ctx.is_null() {
-        return std::ptr::null();
-    }
-    let events = &*((*list).ctx as *const Vec<clap_event_param_value>);
-    if let Some(ev) = events.get(index as usize) {
-        &ev.header as *const _
-    } else {
-        std::ptr::null()
-    }
+    clap_boundary(std::ptr::null(), || {
+        if list.is_null() || (*list).ctx.is_null() {
+            return std::ptr::null();
+        }
+        let events = &*((*list).ctx as *const Vec<clap_event_param_value>);
+        if let Some(ev) = events.get(index as usize) {
+            &ev.header as *const _
+        } else {
+            std::ptr::null()
+        }
+    })
 }
 
 #[cfg(feature = "clap-host")]
@@ -242,13 +254,15 @@ unsafe extern "C" fn stream_write_fn(
     buffer: *const c_void,
     size: u64,
 ) -> i64 {
-    if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
-        return -1;
-    }
-    let writer = &mut *((*stream).ctx as *mut ClapStreamWriter);
-    let bytes = std::slice::from_raw_parts(buffer as *const u8, size as usize);
-    writer.data.extend_from_slice(bytes);
-    size as i64
+    clap_boundary(-1, || {
+        if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
+            return -1;
+        }
+        let writer = &mut *((*stream).ctx as *mut ClapStreamWriter);
+        let bytes = std::slice::from_raw_parts(buffer as *const u8, size as usize);
+        writer.data.extend_from_slice(bytes);
+        size as i64
+    })
 }
 
 #[cfg(feature = "clap-host")]
@@ -263,21 +277,23 @@ unsafe extern "C" fn stream_read_fn(
     buffer: *mut c_void,
     size: u64,
 ) -> i64 {
-    if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
-        return -1;
-    }
-    let reader = &mut *((*stream).ctx as *mut ClapStreamReader<'_>);
-    let available = reader.data.len().saturating_sub(reader.pos);
-    let to_read = (size as usize).min(available);
-    if to_read > 0 {
-        std::ptr::copy_nonoverlapping(
-            reader.data[reader.pos..].as_ptr(),
-            buffer as *mut u8,
-            to_read,
-        );
-        reader.pos += to_read;
-    }
-    to_read as i64
+    clap_boundary(-1, || {
+        if stream.is_null() || (*stream).ctx.is_null() || buffer.is_null() {
+            return -1;
+        }
+        let reader = &mut *((*stream).ctx as *mut ClapStreamReader<'_>);
+        let available = reader.data.len().saturating_sub(reader.pos);
+        let to_read = (size as usize).min(available);
+        if to_read > 0 {
+            std::ptr::copy_nonoverlapping(
+                reader.data[reader.pos..].as_ptr(),
+                buffer as *mut u8,
+                to_read,
+            );
+            reader.pos += to_read;
+        }
+        to_read as i64
+    })
 }
 
 /// The CLAP Plugin Host Node.
@@ -393,7 +409,9 @@ static HOST_GUI_EXTENSION: clap_host_gui = clap_host_gui {
 
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_gui_resize_hints_changed(_host: *const clap_host) {
-    log::debug!("CLAP plugin changed its GUI resize hints");
+    clap_boundary((), || {
+        log::debug!("CLAP plugin changed its GUI resize hints");
+    })
 }
 
 #[cfg(feature = "clap-host")]
@@ -402,35 +420,41 @@ unsafe extern "C" fn clap_host_gui_request_resize(
     width: u32,
     height: u32,
 ) -> bool {
-    if let Some(context) = host_context(host) {
-        context.gui.width.store(width.max(1), Ordering::Relaxed);
-        context.gui.height.store(height.max(1), Ordering::Relaxed);
-    }
-    // A floating editor owns its own window sizing. Remember the request so
-    // the rack can show it, but do not claim the host resized anything.
-    false
+    clap_boundary(false, || {
+        if let Some(context) = host_context(host) {
+            context.gui.width.store(width.max(1), Ordering::Relaxed);
+            context.gui.height.store(height.max(1), Ordering::Relaxed);
+        }
+        // A floating editor owns its own window sizing. Remember the request so
+        // the rack can show it, but do not claim the host resized anything.
+        false
+    })
 }
 
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_gui_request_show(_host: *const clap_host) -> bool {
-    // The host has no async hand-off back to the engine thread here. Returning
-    // false is the honest answer; the user opens the editor from the rack.
-    false
+    clap_boundary(false, || {
+        // The host has no async hand-off back to the engine thread here. Returning
+        // false is the honest answer; the user opens the editor from the rack.
+        false
+    })
 }
 
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_gui_request_hide(_host: *const clap_host) -> bool {
-    false
+    clap_boundary(false, || false)
 }
 
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_gui_closed(host: *const clap_host, was_destroyed: bool) {
-    if let Some(context) = host_context(host) {
-        context.gui.open.store(false, Ordering::Relaxed);
-        if was_destroyed {
-            context.gui.destroyed.store(true, Ordering::Relaxed);
+    clap_boundary((), || {
+        if let Some(context) = host_context(host) {
+            context.gui.open.store(false, Ordering::Relaxed);
+            if was_destroyed {
+                context.gui.destroyed.store(true, Ordering::Relaxed);
+            }
         }
-    }
+    })
 }
 
 /// The host context a callback was handed, or `None` for a null/foreign host.
@@ -457,21 +481,24 @@ unsafe extern "C" fn clap_host_get_extension(
     _host: *const clap_host,
     extension_id: *const c_char,
 ) -> *const c_void {
-    if extension_id.is_null() {
-        return std::ptr::null();
-    }
-    let id = CStr::from_ptr(extension_id);
-    if id == CLAP_EXT_LOG {
-        return (&HOST_LOG_EXTENSION as *const clap_host_log).cast::<c_void>();
-    }
-    if id == CLAP_EXT_THREAD_CHECK {
-        return (&HOST_THREAD_CHECK_EXTENSION as *const clap_host_thread_check).cast::<c_void>();
-    }
-    if id == CLAP_EXT_GUI {
-        return (&HOST_GUI_EXTENSION as *const clap_host_gui).cast::<c_void>();
-    }
-    log::debug!("CLAP plugin asked for host extension {id:?}; this host does not implement it");
-    std::ptr::null()
+    clap_boundary(std::ptr::null(), || {
+        if extension_id.is_null() {
+            return std::ptr::null();
+        }
+        let id = CStr::from_ptr(extension_id);
+        if id == CLAP_EXT_LOG {
+            return (&HOST_LOG_EXTENSION as *const clap_host_log).cast::<c_void>();
+        }
+        if id == CLAP_EXT_THREAD_CHECK {
+            return (&HOST_THREAD_CHECK_EXTENSION as *const clap_host_thread_check)
+                .cast::<c_void>();
+        }
+        if id == CLAP_EXT_GUI {
+            return (&HOST_GUI_EXTENSION as *const clap_host_gui).cast::<c_void>();
+        }
+        log::debug!("CLAP plugin asked for host extension {id:?}; this host does not implement it");
+        std::ptr::null()
+    })
 }
 
 /// `clap.log`: forward plugin messages to the host's logger.
@@ -481,35 +508,39 @@ unsafe extern "C" fn clap_host_log_callback(
     severity: clap_log_severity,
     msg: *const c_char,
 ) {
-    // A plugin may log from its audio thread, and the host must not take a
-    // logging backend's lock there; a message that arrives mid-process is
-    // dropped rather than blocking the callback it came from.
-    if IN_CLAP_PROCESS.with(Cell::get) {
-        return;
-    }
-    let text = cstr_to_string(msg).unwrap_or_default();
-    match severity {
-        CLAP_LOG_FATAL | CLAP_LOG_ERROR => log::error!("CLAP plugin: {text}"),
-        CLAP_LOG_WARNING => log::warn!("CLAP plugin: {text}"),
-        CLAP_LOG_INFO => log::info!("CLAP plugin: {text}"),
-        CLAP_LOG_HOST_MISBEHAVING => {
-            log::error!("CLAP plugin reports the host misbehaving: {text}")
+    clap_boundary((), || {
+        // A plugin may log from its audio thread, and the host must not take a
+        // logging backend's lock there; a message that arrives mid-process is
+        // dropped rather than blocking the callback it came from.
+        if IN_CLAP_PROCESS.with(Cell::get) {
+            return;
         }
-        CLAP_LOG_PLUGIN_MISBEHAVING => {
-            log::warn!("CLAP plugin reports itself misbehaving: {text}")
+        let text = cstr_to_string(msg).unwrap_or_default();
+        match severity {
+            CLAP_LOG_FATAL | CLAP_LOG_ERROR => log::error!("CLAP plugin: {text}"),
+            CLAP_LOG_WARNING => log::warn!("CLAP plugin: {text}"),
+            CLAP_LOG_INFO => log::info!("CLAP plugin: {text}"),
+            CLAP_LOG_HOST_MISBEHAVING => {
+                log::error!("CLAP plugin reports the host misbehaving: {text}")
+            }
+            CLAP_LOG_PLUGIN_MISBEHAVING => {
+                log::warn!("CLAP plugin reports itself misbehaving: {text}")
+            }
+            _ => log::debug!("CLAP plugin: {text}"),
         }
-        _ => log::debug!("CLAP plugin: {text}"),
-    }
+    })
 }
 
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_is_main_thread(host: *const clap_host) -> bool {
-    host_context(host).is_some_and(|context| context.main_thread == std::thread::current().id())
+    clap_boundary(false, || {
+        host_context(host).is_some_and(|context| context.main_thread == std::thread::current().id())
+    })
 }
 
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_is_audio_thread(_host: *const clap_host) -> bool {
-    IN_CLAP_PROCESS.with(Cell::get)
+    clap_boundary(false, || IN_CLAP_PROCESS.with(Cell::get))
 }
 
 /// `clap_host::request_restart`.
@@ -520,12 +551,14 @@ unsafe extern "C" fn clap_host_is_audio_thread(_host: *const clap_host) -> bool 
 /// every block) so the degradation is visible instead of mysterious.
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_request_restart(_host: *const clap_host) {
-    if !RESTART_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
-        log::warn!(
-            "CLAP plugin requested a restart; this host does not restart live plugins — \
-             reload the plugin for the change to take effect"
-        );
-    }
+    clap_boundary((), || {
+        if !RESTART_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "CLAP plugin requested a restart; this host does not restart live plugins — \
+                 reload the plugin for the change to take effect"
+            );
+        }
+    })
 }
 
 /// `clap_host::request_process`.
@@ -535,12 +568,14 @@ unsafe extern "C" fn clap_host_request_restart(_host: *const clap_host) {
 /// the record.
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_request_process(_host: *const clap_host) {
-    if !PROCESS_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
-        log::debug!(
-            "CLAP plugin requested an immediate process; this host processes every block on \
-             its own schedule"
-        );
-    }
+    clap_boundary((), || {
+        if !PROCESS_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
+            log::debug!(
+                "CLAP plugin requested an immediate process; this host processes every block on \
+                 its own schedule"
+            );
+        }
+    })
 }
 
 /// `clap_host::request_callback`.
@@ -550,12 +585,14 @@ unsafe extern "C" fn clap_host_request_process(_host: *const clap_host) {
 /// beats a plugin waiting forever.
 #[cfg(feature = "clap-host")]
 unsafe extern "C" fn clap_host_request_callback(_host: *const clap_host) {
-    if !CALLBACK_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
-        log::warn!(
-            "CLAP plugin requested a main-thread callback; this host provides no timer or \
-             fd extension, so the callback cannot be delivered"
-        );
-    }
+    clap_boundary((), || {
+        if !CALLBACK_REQUEST_LOGGED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "CLAP plugin requested a main-thread callback; this host provides no timer or \
+                 fd extension, so the callback cannot be delivered"
+            );
+        }
+    })
 }
 
 /// What a plugin's own `clap.audio-ports` declaration says about its main bus.
@@ -699,9 +736,14 @@ fn run_clap_process(inst: &mut ClapInstance, planes: &mut [&mut [f32]]) -> clap_
         let plugin = &*inst.plugin;
         if let Some(process) = plugin.process {
             // The flag is what makes `clap.thread-check` answer truthfully if
-            // the plugin asks while it is being processed.
+            // the plugin asks while it is being processed. A plugin that panics
+            // must not unwind across the FFI boundary; treat it as a process
+            // error so it is removed from the chain instead of UB.
             IN_CLAP_PROCESS.with(|flag| flag.set(true));
-            status = process(inst.plugin, &process_data);
+            status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                process(inst.plugin, &process_data)
+            }))
+            .unwrap_or(CLAP_PROCESS_ERROR);
             IN_CLAP_PROCESS.with(|flag| flag.set(false));
         }
     }

@@ -11,7 +11,7 @@
 
 use super::{EqPanelActions, EqPanelState};
 use crate::theme::{font, Theme};
-use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Margin, Stroke, Vec2};
 
 /// Height of one preset row. Uniform because the scroll area virtualizes on it.
 /// Two lines: the identity/actions and the metadata/device actions. That keeps
@@ -40,7 +40,6 @@ pub(super) fn render_preset_library(
                         .font(font(11.0))
                         .color(theme.text_secondary),
                 )
-                .fill(theme.bg_pill)
                 .stroke(Stroke::NONE)
                 .corner_radius(CornerRadius::same(theme.radius_sm))
                 .min_size(Vec2::new(128.0, 24.0));
@@ -159,7 +158,6 @@ pub(super) fn render_preset_library(
                                     .font(font(10.5))
                                     .color(theme.text_primary),
                             )
-                            .fill(theme.bg_pill)
                             .stroke(Stroke::NONE)
                             .corner_radius(CornerRadius::same(theme.radius_sm))
                             .min_size(Vec2::new(44.0, 20.0));
@@ -314,7 +312,8 @@ fn render_save_box(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
                 let save = egui::Button::new(
-                    egui::RichText::new(tr!("Confirm Save")).color(Color32::WHITE),
+                    egui::RichText::new(tr!("Confirm Save"))
+                        .color(crate::theme::on_fill(theme.accent)),
                 )
                 .fill(theme.accent)
                 .stroke(Stroke::NONE)

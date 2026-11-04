@@ -12,7 +12,7 @@ use super::controls::{
 };
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
+use eframe::egui::{self, Vec2};
 use engine::dsp::limiter::LimiterMode;
 use std::ops::RangeInclusive;
 
@@ -91,23 +91,9 @@ fn render_limiter_card(
                 (LimiterMode::ClipperLimiter, tr!("Clipper + Limiter")),
             ] {
                 let selected = state.limiter_mode == mode;
-                let button = egui::Button::new(
-                    egui::RichText::new(label)
-                        .font(crate::theme::font(10.5))
-                        .color(if selected {
-                            Color32::WHITE
-                        } else {
-                            theme.text_secondary
-                        }),
-                )
-                .fill(if selected {
-                    theme.accent
-                } else {
-                    theme.bg_pill
-                })
-                .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius::same(theme.radius_sm));
-                if ui.add(button).clicked() && !selected {
+                if super::controls::choice_pill(ui, &label, selected, theme.accent, theme).clicked()
+                    && !selected
+                {
                     state.limiter_mode = mode;
                     actions.limiter_mode_changed = Some(mode);
                 }
@@ -219,23 +205,8 @@ fn render_compressor_card(
             ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
             for (band, label) in [(0, tr!("Low")), (1, tr!("Mid")), (2, tr!("High"))] {
                 let selected = state.comp_band == band;
-                let button = egui::Button::new(
-                    egui::RichText::new(label)
-                        .font(crate::theme::font(11.0))
-                        .color(if selected {
-                            Color32::WHITE
-                        } else {
-                            theme.text_secondary
-                        }),
-                )
-                .fill(if selected {
-                    theme.accent
-                } else {
-                    theme.bg_pill
-                })
-                .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius::same(theme.radius_sm));
-                if ui.add(button).clicked() {
+                if super::controls::choice_pill(ui, &label, selected, theme.accent, theme).clicked()
+                {
                     state.comp_band = band;
                 }
             }

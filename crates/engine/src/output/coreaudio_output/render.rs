@@ -137,6 +137,46 @@ pub unsafe extern "C-unwind" fn render_io_proc(
     _output_time: NonNull<AudioTimeStamp>,
     client_data: *mut c_void,
 ) -> i32 {
+    // Unwinding across the CoreAudio C callback is still undefined behaviour
+    // for the HAL's frames. Catch panics here and emit silence instead.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        render_io_proc_inner(
+            _device,
+            _now,
+            _input_data,
+            _input_time,
+            output_data,
+            _output_time,
+            client_data,
+        )
+    })) {
+        Ok(code) => code,
+        Err(_) => {
+            // SAFETY: `client_data` is the leaked RenderContext established at
+            // AudioDeviceCreateIOProcID and is valid until destroyed.
+            if !client_data.is_null() {
+                let ctx = unsafe { &*(client_data as *const RenderContext) };
+                // SAFETY: `output_data` is valid for the duration of the call.
+                let out = unsafe { output_data.as_ref() };
+                zero_output(out, ctx.bytes_per_sample);
+                ctx.underruns.fetch_add(1, Ordering::Relaxed);
+                ctx.in_callback.store(false, Ordering::Release);
+            }
+            0
+        }
+    }
+}
+
+/// The IO proc body. Panics are caught by [`render_io_proc`].
+unsafe fn render_io_proc_inner(
+    _device: AudioObjectID,
+    _now: NonNull<AudioTimeStamp>,
+    _input_data: NonNull<AudioBufferList>,
+    _input_time: NonNull<AudioTimeStamp>,
+    output_data: NonNull<AudioBufferList>,
+    _output_time: NonNull<AudioTimeStamp>,
+    client_data: *mut c_void,
+) -> i32 {
     // SAFETY: `client_data` is the leaked RenderContext from start().
     let ctx = unsafe { &*(client_data as *const RenderContext) };
     let _guard = CallbackGuard::new(&ctx.in_callback);

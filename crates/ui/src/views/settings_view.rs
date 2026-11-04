@@ -26,8 +26,9 @@ pub struct SettingsViewActions {
     pub cancel_theme_preview: bool,
     pub reload_themes: bool,
     pub import_theme: bool,
-    pub frosted_glass_changed: Option<bool>,
     pub reduce_motion_changed: Option<bool>,
+    /// The interface scale slider changed (egui zoom factor).
+    pub ui_scale_changed: Option<f32>,
     /// User pressed "Fetch Missing Artwork".
     pub open_artwork_fetch: bool,
     /// Play or stop the crossfade audition.
@@ -168,11 +169,11 @@ pub fn render_settings_view(
         if s_actions.import_theme {
             view_actions.import_theme = true;
         }
-        if let Some(enabled) = s_actions.frosted_glass_changed {
-            view_actions.frosted_glass_changed = Some(enabled);
-        }
         if let Some(enabled) = s_actions.reduce_motion_changed {
             view_actions.reduce_motion_changed = Some(enabled);
+        }
+        if let Some(scale) = s_actions.ui_scale_changed {
+            view_actions.ui_scale_changed = Some(scale);
         }
         if s_actions.open_artwork_fetch {
             view_actions.open_artwork_fetch = true;

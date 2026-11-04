@@ -33,8 +33,12 @@ impl ShadowPlayerApp {
             self.app_state.current_sort_order = app_settings.sort_order;
             self.app_state.is_grid_view = app_settings.view_mode == domain::models::ViewMode::Grid;
             self.window_size = (
-                app_settings.window_width.max(1080.0),
-                app_settings.window_height.max(640.0),
+                app_settings
+                    .window_width
+                    .max(crate::layout::MIN_WINDOW_WIDTH),
+                app_settings
+                    .window_height
+                    .max(crate::layout::MIN_WINDOW_HEIGHT),
             );
             self.coordinator.set_shuffle(app_settings.shuffle);
             self.coordinator.set_repeat_mode(app_settings.repeat_mode);
@@ -53,6 +57,14 @@ impl ShadowPlayerApp {
                 app_settings.volume
             };
             self.session.set_volume(eff_vol);
+
+            // The interface scale lives in AppSettings, not the DSP blob: the
+            // next launch has to apply it before the first frame. Project it
+            // into the settings state the Appearance card edits. This stays
+            // inside the `Ok(app_settings)` arm so a failed load cannot apply
+            // a stale scale.
+            self.dsp_state.settings_tab.ui_scale =
+                crate::layout::clamp_ui_scale(app_settings.ui_scale);
         }
 
         // 1b. Song-table layout: column shares and row density. Stored as its
@@ -117,9 +129,6 @@ impl ShadowPlayerApp {
                     self.dsp_state.settings_tab = saved;
                     self.dsp_state.settings_tab.clap = clap;
                     self.dsp_state.settings_tab.allow_multiple_instances = allow_multiple;
-                    if self.dsp_state.settings_tab.frosted_glass_enabled {
-                        self.theme = self.theme.with_frosted_glass(true);
-                    }
                     self.theme.reduce_motion = self.dsp_state.settings_tab.reduce_motion;
                 }
                 Err(e) => {
@@ -127,6 +136,9 @@ impl ShadowPlayerApp {
                 }
             }
         }
+
+        // The interface scale is projected inside the `Ok(app_settings)` arm
+        // above, where the value is still in scope.
 
         // 4. Directories of individually imported song files (shown in Settings)
         if let Ok(Some(json)) = self.settings_repo.get_value("imported_file_dirs") {
@@ -193,6 +205,51 @@ impl ShadowPlayerApp {
         }
     }
 
+    /// Install the persisted interface scale, then keep egui's zoom and the
+    /// setting in step.
+    ///
+    /// egui already handles Ctrl +/− and Ctrl+scroll; reading the resulting
+    /// zoom back means those shortcuts persist too, instead of resetting on
+    /// the next launch. `ui_scale_grace` covers the frame between
+    /// `set_zoom_factor` and the pass where egui applies it.
+    pub(super) fn apply_interface_scale(&mut self, ctx: &egui::Context) {
+        if !self.ui_scale_applied {
+            let scale = crate::layout::clamp_ui_scale(self.dsp_state.settings_tab.ui_scale);
+            self.dsp_state.settings_tab.ui_scale = scale;
+            ctx.set_zoom_factor(scale);
+            self.ui_scale_applied = true;
+            self.ui_scale_grace = 2;
+            return;
+        }
+
+        if self.ui_scale_grace > 0 {
+            self.ui_scale_grace -= 1;
+            return;
+        }
+
+        let actual = ctx.zoom_factor();
+        let target = self.dsp_state.settings_tab.ui_scale;
+        if (actual - target).abs() > 0.001 {
+            let clamped = crate::layout::clamp_ui_scale(actual);
+            if (clamped - actual).abs() > 0.001 {
+                ctx.set_zoom_factor(clamped);
+                self.ui_scale_grace = 2;
+            }
+            self.dsp_state.settings_tab.ui_scale = clamped;
+            self.settings_dirty = true;
+        }
+    }
+
+    /// Change the interface scale from the Appearance card. The caller has
+    /// already applied `ctx.set_zoom_factor`; this keeps the projection and
+    /// the dirty flag in step.
+    pub(super) fn set_interface_scale(&mut self, scale: f32) {
+        let scale = crate::layout::clamp_ui_scale(scale);
+        self.dsp_state.settings_tab.ui_scale = scale;
+        self.settings_dirty = true;
+        self.ui_scale_grace = 2;
+    }
+
     pub fn save_persisted_settings(&self) {
         // 1. Save AppSettings
         let app_settings = domain::models::AppSettings {
@@ -228,6 +285,7 @@ impl ShadowPlayerApp {
             } else {
                 self.window_size.1
             },
+            ui_scale: self.dsp_state.settings_tab.ui_scale,
             locale: self.locale.clone(),
         };
         if let Err(e) = self.settings_repo.save(&app_settings) {
@@ -336,11 +394,11 @@ impl ShadowPlayerApp {
         }
     }
 
-    /// Update effective theme combining active or staged theme with frosted glass modifier.
+    /// Recompute the effective theme from the active/staged theme and the
+    /// user's motion preference.
     pub(in crate::app) fn sync_effective_theme(&mut self) {
         let base = self.theme_manager.effective_theme();
-        let mut effective =
-            base.with_frosted_glass(self.dsp_state.settings_tab.frosted_glass_enabled);
+        let mut effective = base;
         effective.reduce_motion = self.dsp_state.settings_tab.reduce_motion;
         self.theme = effective;
         self.applied_theme = None;

@@ -189,6 +189,19 @@ fn clear_callback_state() {
 /// processing; we ignore those and only fill on normal switches.
 #[cfg(windows)]
 unsafe extern "C" fn asio_buffer_switch(double_buffer_index: i32, direct_process: ASIOBool) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        asio_buffer_switch_inner(double_buffer_index, direct_process)
+    }));
+    if result.is_err() {
+        // A panicking render path must not unwind across the driver's C
+        // callback: that is undefined behaviour. Fill with the same silence the
+        // normal underflow path uses, then count it as an underrun.
+        asio_fill_silence(double_buffer_index, direct_process);
+    }
+}
+
+#[cfg(windows)]
+unsafe fn asio_buffer_switch_inner(double_buffer_index: i32, direct_process: ASIOBool) {
     let state_ptr = ACTIVE_STATE.load(Ordering::Acquire);
     let Some(state) = state_ptr.as_ref() else {
         return;
@@ -214,6 +227,47 @@ unsafe extern "C" fn asio_buffer_switch(double_buffer_index: i32, direct_process
         state
             .context
             .render_block(&buffer_ptrs, state.context.buffer_size_frames);
+    }
+}
+
+/// Last-ditch silence for a panicking ASIO callback.
+///
+/// Deliberately does nothing beyond zeroing the driver buffers and bumping
+/// `underrun_count`: the callback may not allocate, lock, or log on the
+/// audio thread.
+#[cfg(windows)]
+unsafe fn asio_fill_silence(double_buffer_index: i32, direct_process: ASIOBool) {
+    let state_ptr = ACTIVE_STATE.load(Ordering::Acquire);
+    // SAFETY: `ACTIVE_STATE` is only cleared after `driver.stop()`, and the
+    // callback is invoked by the driver, not by this process on a stale pointer.
+    let Some(state) = (unsafe { state_ptr.as_ref() }) else {
+        return;
+    };
+    if direct_process != ASIO_FALSE || state.buffer_infos.is_empty() || double_buffer_index < 0 {
+        return;
+    }
+    let buf_idx = double_buffer_index as usize;
+    if buf_idx >= state.buffer_ptr_sets.len() {
+        return;
+    }
+    state.context.underrun_count.fetch_add(1, Ordering::Relaxed);
+    let frames = state.context.buffer_size_frames;
+    for &buf in &state.buffer_ptr_sets[buf_idx] {
+        if buf.is_null() {
+            continue;
+        }
+        if state.dsd_mode {
+            let bytes = frames
+                .saturating_mul(state.context.dsd_frame_width.max(1))
+                .saturating_div(state.context.num_channels.max(1));
+            // SAFETY: driver-allocated buffers; `bytes` matches the DSD path.
+            unsafe { std::ptr::write_bytes(buf as *mut u8, 0x69, bytes) };
+        } else {
+            let bytes =
+                frames.saturating_mul(render::sample_type_byte_size(state.context.sample_type));
+            // SAFETY: driver-allocated buffers; `bytes` matches the PCM path.
+            unsafe { std::ptr::write_bytes(buf as *mut u8, 0, bytes) };
+        }
     }
 }
 

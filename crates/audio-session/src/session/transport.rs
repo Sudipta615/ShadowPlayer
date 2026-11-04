@@ -159,6 +159,15 @@ impl AudioSession {
         self.handle.current_source()
     }
 
+    /// Current source as a file path, without exposing `AudioSource` to the caller.
+    #[inline]
+    pub fn current_file_path(&self) -> Option<std::path::PathBuf> {
+        self.handle
+            .current_source()
+            .as_ref()
+            .and_then(|source| source.as_path().map(std::path::Path::to_path_buf))
+    }
+
     #[inline]
     pub fn analyzer_snapshot(&self) -> engine::dsp::AnalyzerSnapshot {
         self.handle.analyzer().snapshot()

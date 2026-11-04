@@ -4,44 +4,27 @@ impl ShadowPlayerApp {
     /// Apply one transport command from any controller (MPRIS, media keys,
     /// the loopback socket, or a future input source).
     pub(super) fn apply_transport_command(&mut self, ctx: &egui::Context, cmd: MprisCommand) {
-        match cmd {
-            MprisCommand::Play => self.session.play(),
-            MprisCommand::Pause => self.session.pause(),
-            MprisCommand::PlayPause => self.coordinator.toggle_play_pause(),
-            MprisCommand::Stop => {
-                self.session.pause();
-                self.session.seek(0.0);
-            }
-            MprisCommand::Next => self.coordinator.next(),
-            MprisCommand::Previous => self.coordinator.previous(),
-            MprisCommand::SeekRelative(delta) => {
-                let cur = self.session.position_secs_compensated();
-                let dur = self
-                    .coordinator
-                    .current_track()
-                    .map(|t| t.duration_secs)
-                    .unwrap_or(f32::MAX);
-                self.session.seek((cur + delta as f32).clamp(0.0, dur));
-            }
-            MprisCommand::SetPosition(pos) => {
-                self.session.seek(pos.max(0.0) as f32);
-            }
-            MprisCommand::SetVolume(v) => {
-                self.app_state.volume = v.clamp(0.0, 1.0);
-                self.app_state.is_muted = false;
-                self.session.set_volume(self.app_state.volume);
-                self.settings_dirty = true;
-            }
-            MprisCommand::Raise => {
-                // A minimized window must be restored before focus means
-                // anything; both commands are harmless on a visible window.
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-            MprisCommand::Quit => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
+        let outcome = crate::services::transport::apply_mpris_command(
+            cmd,
+            &mut crate::services::transport::TransportHost {
+                session: &self.session,
+                coordinator: Some(&mut self.coordinator),
+            },
+        );
+        if let Some(volume) = outcome.volume {
+            self.app_state.volume = volume;
+            self.app_state.is_muted = false;
+            self.settings_dirty = true;
+        }
+        if outcome.raise {
+            // A minimized window must be restored before focus means
+            // anything; both commands are harmless on a visible window.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        if outcome.quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
@@ -72,6 +55,14 @@ impl ShadowPlayerApp {
                 .unwrap_or(0.0),
             position_secs: self.session.position_secs_compensated() as f64,
             volume: self.app_state.volume,
+            loop_status: crate::services::transport::loop_status_mpris(
+                self.coordinator.repeat_mode(),
+            )
+            .to_string(),
+            shuffle: self.coordinator.is_shuffle(),
+            rate: crate::services::transport::clamp_mpris_rate(
+                self.session.playback_info().speed as f64,
+            ),
             art_url,
         };
         self.mpris_service.publish(snapshot.clone());

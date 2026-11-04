@@ -1,6 +1,6 @@
 //! Helpers shared by the app's floating dialogs.
 
-use eframe::egui::{self, CornerRadius, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Sense, Stroke, Vec2};
 
 use crate::theme::Theme;
 
@@ -54,13 +54,22 @@ pub fn show_modal_scrollable(
     // The title row, the separator and the frame's margins.
     let max_body_h = (screen.height() - 110.0).max(120.0);
 
-    egui::Modal::new(egui::Id::unique(id))
+    let response = egui::Modal::new(egui::Id::unique(id))
         .frame(
             egui::Frame::popup(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
-                .corner_radius(CornerRadius::same(theme.radius_lg))
-                .inner_margin(egui::Margin::same(theme.space_3xl as i8)),
+                .corner_radius(CornerRadius::same(theme.radius_xl))
+                .shadow(egui::epaint::Shadow {
+                    offset: [0, 10],
+                    blur: 28,
+                    spread: 0,
+                    color: theme.shadow,
+                })
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_3xl as i8,
+                    theme.space_2xl as i8,
+                )),
         )
         .backdrop_color(theme.modal_backdrop)
         .show(ctx, |ui| {
@@ -76,13 +85,27 @@ pub fn show_modal_scrollable(
                         .color(theme.text_primary),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
-                    let color = if resp.hovered() {
-                        theme.text_primary
-                    } else {
-                        theme.text_muted
-                    };
-                    crate::components::icons::draw_window_close(ui, rect.shrink(5.0), color);
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+                    let hover_t = ctx.animate_bool_with_time(
+                        resp.id.with("modal_close_hover"),
+                        resp.hovered(),
+                        theme.motion_time(0.12),
+                    );
+
+                    // Soft animated pill background on hover
+                    if hover_t > 0.0 {
+                        let bg = crate::theme::lerp_color(
+                            Color32::TRANSPARENT,
+                            theme.bg_pill_hover,
+                            hover_t,
+                        );
+                        ui.painter().circle_filled(rect.center(), 13.0, bg);
+                    }
+
+                    let icon_color =
+                        crate::theme::lerp_color(theme.text_muted, theme.text_primary, hover_t);
+                    crate::components::icons::draw_window_close(ui, rect.shrink(7.0), icon_color);
+
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::Button, true, "Close")
                     });
@@ -92,9 +115,14 @@ pub fn show_modal_scrollable(
                     }
                 });
             });
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
+            ui.add_space(theme.space_xs);
+            // Subtle, elegant separator line
+            let sep_rect = ui.allocate_space(Vec2::new(ui.available_width(), 1.0)).1;
+            ui.painter().line_segment(
+                [sep_rect.left_top(), sep_rect.right_top()],
+                Stroke::new(1.0, theme.border_subtle),
+            );
+            ui.add_space(theme.space_sm);
 
             egui::ScrollArea::vertical()
                 .id_salt("modal_body_scroll")
@@ -111,7 +139,10 @@ pub fn show_modal_scrollable(
             ui.add_space(6.0);
         });
 
-    close_requested
+    // Escape and a click on the backdrop dismiss the dialog. `should_close`
+    // consumes the key press, so the dialog's text fields do not also react to
+    // it, and it is the single owner of the dismissal gesture.
+    close_requested || response.should_close()
 }
 
 /// Show a modal dialog with no title row.
@@ -131,7 +162,13 @@ pub fn show_modal_bare(
             egui::Frame::popup(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
-                .corner_radius(CornerRadius::same(theme.radius_lg))
+                .corner_radius(CornerRadius::same(theme.radius_xl))
+                .shadow(egui::epaint::Shadow {
+                    offset: [0, 10],
+                    blur: 28,
+                    spread: 0,
+                    color: theme.shadow,
+                })
                 .inner_margin(egui::Margin::same(theme.space_lg as i8)),
         )
         .backdrop_color(theme.modal_backdrop)
@@ -140,8 +177,7 @@ pub fn show_modal_bare(
             ui.set_max_width(width);
             body(ui);
         });
-    // A click on the backdrop dismisses the dialog.
-    response.backdrop_response.clicked()
+    response.should_close()
 }
 
 /// Show a modal dialog in the app's own chrome.
@@ -164,13 +200,22 @@ pub fn show_modal(
     let mut close_requested = false;
     let modal_id = egui::Id::unique(id);
 
-    egui::Modal::new(modal_id)
+    let response = egui::Modal::new(modal_id)
         .frame(
             egui::Frame::popup(&ctx.style_of(ctx.theme()))
                 .fill(theme.bg_card)
                 .stroke(Stroke::new(1.0, theme.border_card))
                 .corner_radius(CornerRadius::same(theme.radius_xl))
-                .inner_margin(egui::Margin::same(theme.space_3xl as i8)),
+                .shadow(egui::epaint::Shadow {
+                    offset: [0, 10],
+                    blur: 28,
+                    spread: 0,
+                    color: theme.shadow,
+                })
+                .inner_margin(egui::Margin::symmetric(
+                    theme.space_3xl as i8,
+                    theme.space_2xl as i8,
+                )),
         )
         .backdrop_color(theme.modal_backdrop)
         .show(ctx, |ui| {
@@ -186,13 +231,27 @@ pub fn show_modal(
                         .color(theme.text_primary),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
-                    let color = if resp.hovered() {
-                        theme.text_primary
-                    } else {
-                        theme.text_muted
-                    };
-                    crate::components::icons::draw_window_close(ui, rect.shrink(5.0), color);
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+                    let hover_t = ctx.animate_bool_with_time(
+                        resp.id.with("modal_close_hover"),
+                        resp.hovered(),
+                        theme.motion_time(0.12),
+                    );
+
+                    // Soft animated pill background on hover
+                    if hover_t > 0.0 {
+                        let bg = crate::theme::lerp_color(
+                            Color32::TRANSPARENT,
+                            theme.bg_pill_hover,
+                            hover_t,
+                        );
+                        ui.painter().circle_filled(rect.center(), 13.0, bg);
+                    }
+
+                    let icon_color =
+                        crate::theme::lerp_color(theme.text_muted, theme.text_primary, hover_t);
+                    crate::components::icons::draw_window_close(ui, rect.shrink(7.0), icon_color);
+
                     resp.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::Button, true, "Close")
                     });
@@ -202,12 +261,17 @@ pub fn show_modal(
                     }
                 });
             });
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
+            ui.add_space(theme.space_xs);
+            // Subtle, elegant separator line
+            let sep_rect = ui.allocate_space(Vec2::new(ui.available_width(), 1.0)).1;
+            ui.painter().line_segment(
+                [sep_rect.left_top(), sep_rect.right_top()],
+                Stroke::new(1.0, theme.border_subtle),
+            );
+            ui.add_space(theme.space_sm);
 
             body(ui);
         });
 
-    close_requested
+    close_requested || response.should_close()
 }

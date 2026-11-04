@@ -19,7 +19,7 @@ use crossbeam::channel::{unbounded, Receiver};
 use eframe::egui;
 
 /// A transport request originating from the desktop (media keys, shell UI).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MprisCommand {
     Play,
     Pause,
@@ -32,6 +32,12 @@ pub enum MprisCommand {
     /// Seek to an absolute position, in seconds.
     SetPosition(f64),
     SetVolume(f32),
+    /// Set the MPRIS `LoopStatus` ("None", "Track" or "Playlist").
+    SetLoopStatus(String),
+    /// Set MPRIS `Shuffle` on or off.
+    SetShuffle(bool),
+    /// Set MPRIS `Rate` in the advertised 0.5..=2.0 range.
+    SetRate(f64),
     /// Bring the application window to the front.
     Raise,
     /// Request the application to quit.
@@ -102,8 +108,25 @@ pub struct MprisSnapshot {
     pub length_secs: f64,
     pub position_secs: f64,
     pub volume: f32,
+    /// MPRIS `LoopStatus`: "None", "Track" or "Playlist".
+    #[serde(default = "default_loop_status")]
+    pub loop_status: String,
+    /// MPRIS `Shuffle`.
+    #[serde(default)]
+    pub shuffle: bool,
+    /// MPRIS `Rate` in the advertised 0.5..=2.0 range.
+    #[serde(default = "default_rate")]
+    pub rate: f64,
     /// `file://` URL of the current cover art, if known.
     pub art_url: Option<String>,
+}
+
+fn default_loop_status() -> String {
+    "None".to_string()
+}
+
+fn default_rate() -> f64 {
+    1.0
 }
 
 /// Owns the MPRIS2 D-Bus service and the command/snapshot channels.
@@ -679,27 +702,45 @@ mod linux {
 
         #[zbus(property)]
         fn loop_status(&self) -> String {
-            "None".to_string()
+            let snapshot = self.snap();
+            if snapshot.loop_status.is_empty() {
+                let mode = crate::services::transport::loop_status_mpris(
+                    domain::models::RepeatModeChoice::Off,
+                );
+                return mode.to_string();
+            }
+            snapshot.loop_status
         }
 
         #[zbus(property)]
-        fn set_loop_status(&self, _status: String) {}
+        fn set_loop_status(&self, status: String) {
+            self.send(MprisCommand::SetLoopStatus(status));
+        }
 
         #[zbus(property)]
         fn rate(&self) -> f64 {
-            1.0
+            let rate = self.snap().rate;
+            if rate.is_finite() {
+                crate::services::transport::clamp_mpris_rate(rate)
+            } else {
+                1.0
+            }
         }
 
         #[zbus(property)]
-        fn set_rate(&self, _rate: f64) {}
+        fn set_rate(&self, rate: f64) {
+            self.send(MprisCommand::SetRate(rate));
+        }
 
         #[zbus(property)]
         fn shuffle(&self) -> bool {
-            false
+            self.snap().shuffle
         }
 
         #[zbus(property)]
-        fn set_shuffle(&self, _shuffle: bool) {}
+        fn set_shuffle(&self, shuffle: bool) {
+            self.send(MprisCommand::SetShuffle(shuffle));
+        }
 
         #[zbus(property)]
         fn metadata(&self) -> HashMap<String, Variant<'static>> {
@@ -723,12 +764,12 @@ mod linux {
 
         #[zbus(property)]
         fn minimum_rate(&self) -> f64 {
-            0.5
+            crate::services::transport::MIN_MPRIS_RATE
         }
 
         #[zbus(property)]
         fn maximum_rate(&self) -> f64 {
-            2.0
+            crate::services::transport::MAX_MPRIS_RATE
         }
 
         #[zbus(property)]

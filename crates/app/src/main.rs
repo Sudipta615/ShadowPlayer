@@ -18,7 +18,8 @@ use audio_session::AudioSession;
 use database::{Database, QueueRepo, ScrobbleRepo, SettingsRepo, TrackRepo};
 use eframe::egui::Vec2;
 use log::info;
-use ui::services::{ControlService, MprisCommand, MprisSnapshot};
+use ui::layout::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
+use ui::services::{ControlService, MprisSnapshot};
 use ui::ShadowPlayerApp;
 
 /// One-time removal of the development demo library that older builds seeded
@@ -99,11 +100,9 @@ fn eval_mode_data_dir() -> Option<PathBuf> {
     None
 }
 
-/// The smallest normal window. The responsive shell keeps all three primary
-/// columns (Sidebar, Content, Queue Drawer) visible at this size;
-/// the mini player has its own smaller floor.
-const MIN_WINDOW_WIDTH: f32 = 1080.0;
-const MIN_WINDOW_HEIGHT: f32 = 640.0;
+// The window floor lives in `ui::layout` next to the breakpoints it has to
+// agree with: the old local 1080 px floor made the 720 px sidebar rail
+// unreachable. The mini player has its own smaller floor.
 
 /// The application's own icon, in the form the window manager asks for.
 ///
@@ -214,46 +213,22 @@ fn run_headless(
         let mut quit = false;
         if let Some(control) = &control_service {
             while let Some(command) = control.try_recv() {
-                match command {
-                    MprisCommand::Play => session.play(),
-                    MprisCommand::Pause => session.pause(),
-                    MprisCommand::PlayPause => {
-                        if session.is_playing() {
-                            session.pause();
-                        } else {
-                            session.play();
-                        }
-                    }
-                    MprisCommand::Stop => session.stop(),
-                    MprisCommand::Next => session.next(),
-                    MprisCommand::Previous => session.previous(),
-                    MprisCommand::SeekRelative(delta) => {
-                        let target = (session.position_secs_compensated() as f64 + delta)
-                            .max(0.0)
-                            .min(session.duration_secs().max(0.0) as f64);
-                        session.seek(target as f32);
-                    }
-                    MprisCommand::SetPosition(position) => {
-                        let target = position
-                            .max(0.0)
-                            .min(session.duration_secs().max(0.0) as f64);
-                        session.seek(target as f32);
-                    }
-                    MprisCommand::SetVolume(volume) => {
-                        session.set_volume(volume.clamp(0.0, 1.0));
-                    }
-                    MprisCommand::Raise => {}
-                    MprisCommand::Quit => {
-                        info!("Headless mode: quit requested");
-                        quit = true;
-                    }
+                let outcome = ui::services::transport::apply_mpris_command(
+                    command,
+                    &mut ui::services::transport::TransportHost {
+                        session: session.as_ref(),
+                        coordinator: None,
+                    },
+                );
+                if outcome.quit {
+                    info!("Headless mode: quit requested");
+                    quit = true;
                 }
             }
 
-            let current_path = match session.current_source() {
-                Some(engine::AudioSource::File(path)) => Some(path),
-                _ => None,
-            };
+            // The session exposes the current file path without leaking
+            // `engine::AudioSource` into this binary.
+            let current_path = session.current_file_path();
             if let Some(path) = current_path.as_ref() {
                 if last_track.as_ref().map(|track| &track.path) != Some(path) {
                     last_track = tracks.get_by_path(path).ok().flatten();
@@ -293,6 +268,9 @@ fn run_headless(
                 },
                 position_secs: session.position_secs_compensated() as f64,
                 volume: session.volume(),
+                loop_status: "None".to_string(),
+                shuffle: false,
+                rate: session.playback_info().speed as f64,
                 art_url: None,
             };
             control.publish(snapshot);

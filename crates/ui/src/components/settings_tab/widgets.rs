@@ -51,8 +51,16 @@ pub fn dual_tone_slider(
         }
     }
 
+    let is_active = resp.hovered() || resp.dragged();
+    let anim_t = ui.ctx().animate_bool_with_time(
+        resp.id.with("dual_slider_active"),
+        is_active,
+        theme.motion_time(0.12),
+    );
+
     // Background track (clearly visible in both dark & light modes)
-    let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
+    let track_h = egui::lerp(4.0..=5.0, anim_t);
+    let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), track_h));
     ui.painter().rect_filled(
         track_rect,
         CornerRadius::same(theme.radius_xs),
@@ -75,19 +83,24 @@ pub fn dual_tone_slider(
         );
     }
 
-    // Thumb knob
+    // Thumb knob with smooth animation
     let thumb_pos = Pos2::new(thumb_x, rect.center().y);
-    let is_hovered = resp.hovered() || resp.dragged();
+    let halo_radius = egui::lerp(6.0..=8.5, anim_t);
+    let halo_alpha = egui::lerp(0.18..=0.35, anim_t);
+    let inner_radius = egui::lerp(5.0..=5.5, anim_t);
+
     ui.painter().circle_filled(
         thumb_pos,
-        if is_hovered { 7.5 } else { 6.0 },
-        theme
-            .accent_highlight
-            .gamma_multiply(if is_hovered { 0.35 } else { 0.18 }),
+        halo_radius,
+        theme.accent_highlight.gamma_multiply(halo_alpha),
     );
-    ui.painter().circle_filled(thumb_pos, 5.0, Color32::WHITE);
     ui.painter()
-        .circle_stroke(thumb_pos, 5.0, Stroke::new(1.2, theme.accent_highlight));
+        .circle_filled(thumb_pos, inner_radius, Color32::WHITE);
+    ui.painter().circle_stroke(
+        thumb_pos,
+        inner_radius,
+        Stroke::new(1.3, theme.accent_highlight),
+    );
 
     changed
 }
@@ -129,14 +142,6 @@ pub fn setting_card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(
                 crate::theme::with_alpha(theme.accent_highlight, (hover_t * 38.0) as u8),
             ),
             egui::StrokeKind::Inside,
-        );
-    }
-    if theme.frosted {
-        crate::theme::glass::paint_glass_sheen(
-            ui,
-            card_rect,
-            CornerRadius::same(theme.radius_xl),
-            theme,
         );
     }
 }
@@ -399,39 +404,46 @@ pub fn toggle_switch(ui: &mut egui::Ui, value: &mut bool, theme: &Theme) -> bool
         *value = !*value;
         changed = true;
     }
+
+    let anim_t = ui.ctx().animate_bool_with_time(
+        resp.id.with("settings_toggle_thumb"),
+        *value,
+        theme.motion_time(0.12),
+    );
+    let hover_t = ui.ctx().animate_bool_with_time(
+        resp.id.with("settings_toggle_hover"),
+        resp.hovered(),
+        theme.motion_time(0.12),
+    );
+
     let painter = ui.painter_at(rect);
-    let bg_color = if *value {
-        theme.accent
-    } else if resp.hovered() {
-        theme.bg_pill.linear_multiply(1.2)
-    } else {
-        theme.bg_pill
-    };
-    let border_stroke = if *value {
-        Stroke::new(1.0, theme.accent_highlight)
-    } else {
-        Stroke::new(1.0, theme.border_card)
-    };
+    let bg_off = crate::theme::lerp_color(theme.bg_pill, theme.bg_pill_hover, hover_t);
+    let bg_color = crate::theme::lerp_color(bg_off, theme.accent, anim_t);
+    let border_stroke_color =
+        crate::theme::lerp_color(theme.border_card, theme.accent_highlight, anim_t);
+
     painter.rect(
         rect,
         CornerRadius::same(theme.radius_lg),
         bg_color,
-        border_stroke,
+        Stroke::new(1.0, border_stroke_color),
         egui::StrokeKind::Inside,
     );
 
     let radius = 7.0;
-    let knob_center_x = if *value {
-        rect.max.x - radius - 3.0
-    } else {
-        rect.min.x + radius + 3.0
-    };
+    let knob_center_x = egui::lerp(
+        (rect.min.x + radius + 3.0)..=(rect.max.x - radius - 3.0),
+        anim_t,
+    );
     let knob_pos = Pos2::new(knob_center_x, rect.center().y);
-    let knob_color = if *value {
-        Color32::WHITE
-    } else {
-        theme.text_secondary
-    };
+    let knob_color = crate::theme::lerp_color(theme.text_secondary, Color32::WHITE, anim_t);
+
+    if hover_t > 0.01 {
+        let halo_r = egui::lerp(7.0..=9.0, hover_t);
+        let halo_col =
+            crate::theme::lerp_color(theme.border_card, theme.accent, anim_t).gamma_multiply(0.2);
+        painter.circle_filled(knob_pos, halo_r, halo_col);
+    }
     painter.circle_filled(knob_pos, radius, knob_color);
 
     changed
@@ -444,55 +456,124 @@ pub fn segment_picker<T: Clone + PartialEq>(
     theme: &Theme,
 ) -> bool {
     let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
-        for (val, lbl) in options {
-            let is_sel = selected == val;
-            let btn = egui::Button::new(
-                egui::RichText::new(*lbl)
-                    .font(crate::theme::font(11.8))
-                    .color(if is_sel {
-                        Color32::WHITE
+    egui::Frame::NONE
+        .fill(theme.bg_pill)
+        .stroke(Stroke::new(1.0, theme.border_subtle))
+        .corner_radius(CornerRadius::same(theme.radius_md))
+        .inner_margin(egui::Margin::same(theme.space_xxs as i8))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+                for (val, lbl) in options {
+                    let is_sel = selected == val;
+                    let text_col = if is_sel {
+                        crate::theme::on_fill(theme.accent)
                     } else {
                         theme.text_secondary
-                    }),
-            )
-            .fill(if is_sel { theme.accent } else { theme.bg_pill })
-            .stroke(if is_sel {
-                Stroke::new(1.0, theme.accent_highlight)
-            } else {
-                Stroke::new(1.0, theme.border_card)
-            })
-            .corner_radius(CornerRadius::same(theme.radius_sm))
-            .min_size(Vec2::new(0.0, 26.0));
+                    };
+                    // Measure first, then paint. A `Button` cannot do this:
+                    // its fill covers every state, and painting a hover rect
+                    // after `ui.add` would tint the label instead of sitting
+                    // behind it.
+                    let galley = ui.painter().layout_no_wrap(
+                        (*lbl).to_owned(),
+                        crate::theme::font(11.8),
+                        text_col,
+                    );
+                    let size = Vec2::new(galley.size().x + 16.0, 24.0);
+                    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::selected(egui::Role::Button, true, is_sel, *lbl)
+                    });
 
-            if ui.add(btn).clicked() && !is_sel {
-                *selected = val.clone();
-                changed = true;
-            }
-        }
-    });
+                    // Hover snaps out rather than fading, so the segment the
+                    // pointer left and the one it entered are never both lit.
+                    let hover_t = if resp.hovered() && !is_sel {
+                        ui.ctx().animate_bool_with_time(
+                            resp.id.with("seg_hover"),
+                            true,
+                            theme.motion_time(0.1),
+                        )
+                    } else {
+                        0.0
+                    };
+
+                    let painter = ui.painter();
+                    if is_sel {
+                        painter.rect_filled(
+                            rect,
+                            CornerRadius::same(theme.radius_sm),
+                            theme.accent,
+                        );
+                        painter.rect_stroke(
+                            rect,
+                            CornerRadius::same(theme.radius_sm),
+                            Stroke::new(1.0, theme.accent_highlight),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else if hover_t > 0.01 {
+                        painter.rect_filled(
+                            rect,
+                            CornerRadius::same(theme.radius_sm),
+                            theme.bg_pill_hover.gamma_multiply(hover_t),
+                        );
+                    }
+                    if resp.has_focus() {
+                        painter.rect_stroke(
+                            rect,
+                            CornerRadius::same(theme.radius_sm),
+                            Stroke::new(1.5, theme.accent_highlight),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+
+                    painter.galley(
+                        Pos2::new(
+                            rect.center().x - galley.size().x * 0.5,
+                            rect.center().y - galley.size().y * 0.5,
+                        ),
+                        galley,
+                        text_col,
+                    );
+
+                    if resp.clicked() && !is_sel {
+                        *selected = val.clone();
+                        changed = true;
+                    }
+                }
+            });
+        });
     changed
 }
 
+/// A compact action pill.
+///
+/// An unselected pill leaves its fill and stroke to the style, so it inherits
+/// the theme's `bg_pill` / `bg_pill_hover` pair and the accent border on hover.
+/// Setting them here would override every state — `Button::fill` and
+/// `Button::stroke` are explicitly state-independent — and leave a quiet
+/// action with no hover feedback at all. A selected pill is a state, so it pins
+/// the accent fill instead.
 pub fn pill_btn(label: impl Into<String>, selected: bool, theme: &Theme) -> egui::Button<'static> {
-    egui::Button::new(
+    let button = egui::Button::new(
         egui::RichText::new(label.into())
             .font(crate::theme::font(11.5))
             .color(if selected {
-                Color32::WHITE
+                crate::theme::on_fill(theme.accent)
             } else {
                 theme.text_secondary
             }),
     )
-    .fill(if selected {
-        theme.accent
-    } else {
-        theme.bg_pill
-    })
-    .stroke(Stroke::new(1.0, theme.border_card))
     .corner_radius(CornerRadius::same(theme.radius_sm))
-    .min_size(Vec2::new(0.0, 24.0))
+    .min_size(Vec2::new(0.0, 24.0));
+
+    if selected {
+        button
+            .fill(theme.accent)
+            .stroke(Stroke::new(1.0, theme.accent_highlight))
+    } else {
+        button
+    }
 }
 
 pub(super) fn badge_label_toned(
@@ -550,10 +631,15 @@ pub(super) fn badge_label(ui: &mut egui::Ui, text: impl Into<String>, theme: &Th
 /// A language picker shows every language in its own language: a reader who
 /// does not know the current one still finds theirs.
 pub(super) fn language_label(preference: &str) -> String {
-    match preference {
-        "" => tr!("Auto (system)"),
-        "en" => "English".to_string(),
-        "de" => "Deutsch".to_string(),
-        other => other.to_string(),
+    if preference.is_empty() {
+        return tr!("Auto (system)");
+    }
+    match crate::i18n::Locale::from_code(preference) {
+        Some(locale) => format!(
+            "{} · {}%",
+            locale.native_name(),
+            crate::i18n::coverage(locale).percent()
+        ),
+        None => preference.to_string(),
     }
 }

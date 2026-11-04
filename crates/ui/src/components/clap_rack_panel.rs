@@ -355,7 +355,10 @@ fn render_unloaded(
         egui::RichText::new(if library.plugins.len() == 1 {
             "This library contains one plugin:".to_string()
         } else {
-            format!("{} plugins in this library:", library.plugins.len())
+            format!(
+                "{} in this library:",
+                crate::components::count_label(library.plugins.len(), "plugin", "plugins")
+            )
         })
         .font(crate::theme::font(11.5))
         .color(theme.text_primary),

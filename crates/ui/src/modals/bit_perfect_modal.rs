@@ -6,6 +6,23 @@ use engine::diagnostics::BitPerfectCause;
 use crate::state::DspState;
 use crate::theme::Theme;
 
+/// Strip the `Option<...>` wrapper the engine reports and name the
+/// negotiated backend in plain language. None means no output info.
+fn backend_label(raw: Option<&str>) -> &'static str {
+    match raw {
+        Some(s) if s.contains("ExclusiveAlsa") => "ALSA exclusive",
+        Some(s) if s.contains("ExclusiveWasapi") => "WASAPI exclusive",
+        Some(s) if s.contains("ExclusiveCoreAudioHog") => "CoreAudio hog",
+        Some(s) if s.contains("ExclusiveAsio") => "ASIO exclusive",
+        Some(s) if s.contains("PipeWire") => "PipeWire",
+        Some(s) if s.contains("Jack") => "JACK",
+        Some(s) if s.contains("Null") => "Null sink",
+        Some(s) if s.contains("Custom") => "Custom",
+        Some(_) => "Platform default",
+        None => "Hardware",
+    }
+}
+
 /// Render the Live Bit-Perfect Signal Path Inspector & Diagnostic Modal
 pub fn show_bit_perfect_modal(
     ctx: &egui::Context,
@@ -156,9 +173,7 @@ pub fn show_bit_perfect_modal(
                     "Resampler\nDirect"
                 };
 
-                let out_text = engine_stats.map(|s| {
-                    format!("DAC Endpoint\n{}", s.output_backend)
-                }).unwrap_or_else(|| "DAC Endpoint\nHardware".into());
+                let out_text = format!("DAC Endpoint\n{}", backend_label(engine_stats.map(|s| s.output_backend.as_str())));
 
                 let stages = [
                     (src_text, true),

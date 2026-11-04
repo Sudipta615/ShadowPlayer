@@ -229,12 +229,14 @@ pub struct SettingsTabState {
     pub theme_gallery: crate::theme::ThemeGalleryState,
     #[serde(skip)]
     pub theme_editor: crate::theme::ThemeEditorState,
-    /// Apply translucent frosted glass surfaces and optical specular rims
-    /// across any active theme.
-    pub frosted_glass_enabled: bool,
     /// Disable hover and transition animations for users who are sensitive to
     /// motion. Explicitly timed fades consult [`crate::theme::Theme::motion_time`].
     pub reduce_motion: bool,
+    /// Interface scale (egui zoom factor). Persisted in `AppSettings`, not in
+    /// this blob, because the next launch has to apply it before the first
+    /// frame; this is the live projection the Appearance card edits.
+    #[serde(skip)]
+    pub ui_scale: f32,
 
     // Legacy collapsible section flags preserved for compatibility
     pub section_playback: bool,
@@ -356,8 +358,8 @@ impl Default for SettingsTabState {
 
             theme_gallery: crate::theme::ThemeGalleryState::default(),
             theme_editor: crate::theme::ThemeEditorState::default(),
-            frosted_glass_enabled: false,
             reduce_motion: false,
+            ui_scale: crate::layout::UI_SCALE_DEFAULT,
 
             section_playback: true,
             section_output: false,
@@ -512,8 +514,9 @@ pub struct SettingsTabActions {
     pub cancel_theme_preview: bool,
     pub reload_themes: bool,
     pub import_theme: bool,
-    pub frosted_glass_changed: Option<bool>,
     pub reduce_motion_changed: Option<bool>,
+    /// The interface scale slider changed (egui zoom factor, 0.8–1.5).
+    pub ui_scale_changed: Option<f32>,
 
     // Audio Converter actions
     pub start_file_conversion: bool,

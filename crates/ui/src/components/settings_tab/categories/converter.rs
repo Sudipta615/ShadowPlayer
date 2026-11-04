@@ -4,7 +4,7 @@
 use super::super::widgets::{card_header, pill_btn, setting_card, setting_item, toggle_switch};
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Vec2};
+use eframe::egui::{self, CornerRadius, Vec2};
 use media_tools::transcode::OutputFormat;
 
 pub(in crate::components::settings_tab) fn render_converter_category(
@@ -276,7 +276,7 @@ pub(in crate::components::settings_tab) fn render_converter_category(
                                     egui::RichText::new("Cancel")
                                         .font(crate::theme::font(12.0))
                                         .strong()
-                                        .color(Color32::WHITE),
+                                        .color(crate::theme::on_fill(theme.destructive)),
                                 )
                                 .fill(theme.destructive)
                                 .corner_radius(CornerRadius::same(theme.radius_md)),
@@ -296,7 +296,7 @@ pub(in crate::components::settings_tab) fn render_converter_category(
                                     .font(crate::theme::font(12.0))
                                     .strong()
                                     .color(if can_start {
-                                        Color32::WHITE
+                                        crate::theme::on_fill(theme.accent)
                                     } else {
                                         theme.text_dim
                                     }),

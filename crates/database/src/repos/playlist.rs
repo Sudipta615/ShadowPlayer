@@ -464,8 +464,8 @@ fn rule_to_clause(rule: &SmartRule) -> Option<(String, Vec<SqlValue>)> {
                 None
             } else {
                 Some((
-                    format!("{col} LIKE ?"),
-                    vec![SqlValue::Text(format!("%{v}%"))],
+                    format!("{col} LIKE ? ESCAPE '\\'"),
+                    vec![SqlValue::Text(like_substring(v))],
                 ))
             }
         }
@@ -474,8 +474,8 @@ fn rule_to_clause(rule: &SmartRule) -> Option<(String, Vec<SqlValue>)> {
                 None
             } else {
                 Some((
-                    format!("({col} IS NULL OR {col} NOT LIKE ?)"),
-                    vec![SqlValue::Text(format!("%{v}%"))],
+                    format!("({col} IS NULL OR {col} NOT LIKE ? ESCAPE '\\')"),
+                    vec![SqlValue::Text(like_substring(v))],
                 ))
             }
         }

@@ -88,6 +88,24 @@ pub fn on_positive_fill() -> Color32 {
     Color32::BLACK
 }
 
+/// The most legible foreground for text drawn on `fill`.
+///
+/// Accent colours are not guaranteed to be dark. A custom theme may ship a
+/// bright amber or lime accent, where white text fails WCAG while near-black
+/// text passes comfortably. Hard-coding `Color32::WHITE` on an accent fill is
+/// what produced unreadable selected tabs in light and pastel themes; every
+/// selected chip, tab, badge, and primary button asks here instead.
+pub fn on_fill(fill: Color32) -> Color32 {
+    const DARK_INK: Color32 = Color32::from_rgb(15, 23, 42);
+    if super::contrast::contrast_ratio(Color32::WHITE, fill)
+        >= super::contrast::contrast_ratio(DARK_INK, fill)
+    {
+        Color32::WHITE
+    } else {
+        DARK_INK
+    }
+}
+
 /// Parse a `#RRGGBB` or `#RRGGBBAA` hex colour string.
 pub fn parse_hex_color(hex: &str) -> Option<Color32> {
     let hex = hex.trim().strip_prefix('#').unwrap_or(hex.trim());
@@ -184,9 +202,6 @@ pub struct Theme {
     // Theme personality
     /// Silhouette used by the primary play/pause transport control.
     pub play_button_shape: PlayButtonShape,
-    /// True when the translucent frosted-glass surface treatment is active.
-    /// Components use this to add specular sheens and a live backdrop.
-    pub frosted: bool,
     /// True when the user has asked for reduced motion. Components use
     /// [`Theme::motion_time`] so hover and transition fades snap instead of
     /// animating; egui's own animations follow the style set in
@@ -226,7 +241,6 @@ impl Default for Theme {
 impl Theme {
     /// Toggle between dark and light themes.
     pub fn toggle(&mut self) {
-        let frosted = self.frosted;
         let reduce_motion = self.reduce_motion;
         *self = if self.is_light {
             Self::dark()
@@ -234,9 +248,6 @@ impl Theme {
             Self::light()
         };
         self.reduce_motion = reduce_motion;
-        if frosted {
-            *self = self.with_frosted_glass(true);
-        }
     }
 
     /// Returns true if this theme is OLED Midnight (pure black background).
@@ -295,17 +306,27 @@ impl Theme {
 
     /// The fill behind dense content (tables, settings cards) in the central
     /// content area.
-    ///
-    /// Frosted mode keeps the backdrop visible at the window edges, but a
-    /// fully transparent content panel puts a moving/blurred image directly
-    /// behind row text. This scrim sits between the backdrop and the cards:
-    /// the glass still reads as glass, while the table stays legible.
     pub fn content_panel_fill(&self) -> Color32 {
-        if self.frosted {
-            with_alpha(self.bg_app, if self.is_light { 196 } else { 172 })
-        } else {
-            self.bg_app
-        }
+        self.bg_app
+    }
+
+    /// Guarantee that an interaction surface is visibly different from the
+    /// surface it sits on.
+    ///
+    /// Custom themes routinely declare a `bg_card_hover` that is only one or
+    /// two RGB steps from `bg_card`. On a light theme that is a ~1.08:1
+    /// contrast ratio — technically a different colour, visually no hover at
+    /// all. Settings rows, theme cards, and tab strips then look broken even
+    /// though the code paints a hover. This nudges the hover toward the
+    /// theme's text polarity (lighter on dark, darker on light) until the
+    /// difference clears a perceptible floor, preserving hue.
+    pub fn normalize_interaction_surfaces(mut self) -> Self {
+        self.bg_card_hover = ensure_surface_delta(self.bg_card, self.bg_card_hover, self.is_light);
+        self.bg_pill_hover = ensure_surface_delta(self.bg_pill, self.bg_pill_hover, self.is_light);
+        self.bg_card_active =
+            ensure_surface_delta(self.bg_card, self.bg_card_active, self.is_light);
+        self.border_subtle = ensure_surface_delta(self.bg_card, self.border_subtle, self.is_light);
+        self
     }
 
     /// Apply theme styles to egui context.
@@ -331,19 +352,28 @@ impl Theme {
         visuals.widgets.noninteractive.corner_radius = rounding;
 
         visuals.widgets.inactive.bg_fill = self.bg_pill;
+        visuals.widgets.inactive.weak_bg_fill = self.bg_pill;
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, self.border_subtle);
         visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, self.text_secondary);
         visuals.widgets.inactive.corner_radius = rounding;
 
         visuals.widgets.hovered.bg_fill = self.bg_pill_hover;
+        visuals.widgets.hovered.weak_bg_fill = self.bg_pill_hover;
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, self.accent_highlight);
         visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, self.text_primary);
         visuals.widgets.hovered.corner_radius = rounding;
 
         visuals.widgets.active.bg_fill = self.accent;
+        visuals.widgets.active.weak_bg_fill = self.accent;
         visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, self.accent_highlight);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
+        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, on_fill(self.accent));
         visuals.widgets.active.corner_radius = rounding;
+
+        visuals.widgets.open.bg_fill = self.bg_pill_hover;
+        visuals.widgets.open.weak_bg_fill = self.bg_pill_hover;
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, self.accent_highlight);
+        visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, self.text_primary);
+        visuals.widgets.open.corner_radius = rounding;
 
         visuals.selection.bg_fill = self.accent;
         visuals.selection.stroke = Stroke::new(1.0_f32, self.accent_highlight);
@@ -351,14 +381,31 @@ impl Theme {
         visuals.window_corner_radius = CornerRadius::same(self.radius_xl);
         visuals.window_stroke = Stroke::new(1.0_f32, self.border_card);
         visuals.menu_corner_radius = CornerRadius::same(self.radius_lg);
+        visuals.popup_shadow = egui::epaint::Shadow {
+            offset: [0, 6],
+            blur: 20,
+            spread: 0,
+            color: self.shadow,
+        };
+        visuals.window_shadow = egui::epaint::Shadow {
+            offset: [0, 10],
+            blur: 32,
+            spread: 0,
+            color: self.shadow,
+        };
 
         ctx.set_visuals(visuals);
 
         let mut style = (*ctx.style_of(ctx.theme())).clone();
         style.spacing.item_spacing = Vec2::new(10.0, 10.0);
         style.spacing.window_margin = Margin::same(20);
-        style.spacing.button_padding = Vec2::new(14.0, 8.0);
-        style.spacing.interact_size.y = 36.0;
+        style.spacing.button_padding = Vec2::new(12.0, 7.0);
+        style.spacing.interact_size.y = 34.0;
+        style.spacing.menu_margin = Margin::same(6);
+        style.spacing.combo_width = 160.0;
+        style.spacing.icon_width = 16.0;
+        style.spacing.icon_spacing = 6.0;
+        style.spacing.tooltip_width = 360.0;
         // Reserve a gutter between scrollable content and the scrollbar.
         // egui's floating scrollbars are painted over the content area by
         // default, so cards ended up underneath the handle. The margin moves
@@ -366,7 +413,7 @@ impl Theme {
         // ones) and keeps the bar legible without changing every call site.
         style.spacing.scroll.content_margin = Margin {
             left: 0,
-            right: 10,
+            right: 18,
             top: 0,
             bottom: 10,
         };
@@ -381,58 +428,34 @@ impl Theme {
         .into();
         ctx.set_style_of(ctx.theme(), style);
     }
+}
 
-    /// Return a copy of this theme with translucent frosted glass surfaces
-    /// and optical specular edge highlights applied across cards and panels.
-    ///
-    /// This only supplies the *surface* half of the effect. The app paints a
-    /// blurred artwork backdrop behind the shell whenever [`Theme::frosted`]
-    /// is true, so these alpha values reveal a soft, defocused image instead
-    /// of the desktop or a flat panel colour.
-    pub fn with_frosted_glass(&self, enabled: bool) -> Self {
-        let mut theme = *self;
-        theme.frosted = enabled;
-        if !enabled {
-            return theme;
-        }
+/// How far an interaction surface must move away from its base before the
+/// change reads as feedback rather than a rendering artefact.
+const MIN_SURFACE_DELTA: f32 = 1.16;
 
-        // Translucent surface opacities. Sidebar and inputs stay a little more
-        // opaque than cards so navigation and text remain comfortably legible;
-        // cards are the most transparent because they sit directly over the
-        // blurred artwork.
-        let (sidebar_a, card_a, hover_a, active_a, pill_a, pill_hover_a, input_a) = if self.is_light
-        {
-            (212, 168, 194, 214, 176, 202, 204)
-        } else {
-            (204, 148, 178, 202, 160, 190, 188)
-        };
-
-        theme.bg_sidebar = with_alpha(self.bg_sidebar, sidebar_a);
-        theme.bg_card = with_alpha(self.bg_card, card_a);
-        theme.bg_card_hover = with_alpha(self.bg_card_hover, hover_a);
-        theme.bg_card_active = with_alpha(self.bg_card_active, active_a);
-        theme.bg_pill = with_alpha(self.bg_pill, pill_a);
-        theme.bg_pill_hover = with_alpha(self.bg_pill_hover, pill_hover_a);
-        theme.bg_input = with_alpha(self.bg_input, input_a);
-        theme.bg_active_row = with_alpha(self.bg_active_row, hover_a);
-
-        // Specular rim / micro-bevel highlights: glass edges catch light and
-        // create a delicate 1 px contour. A stronger shadow lifts the pane off
-        // the blurred backdrop instead of letting it dissolve into it.
-        if self.is_light {
-            theme.border_card = Color32::from_rgba_unmultiplied(255, 255, 255, 176);
-            theme.border_subtle = Color32::from_rgba_unmultiplied(255, 255, 255, 132);
-            theme.border_input = Color32::from_rgba_unmultiplied(55, 72, 68, 150);
-            theme.shadow = Color32::from_rgba_unmultiplied(31, 46, 43, 76);
-        } else {
-            theme.border_card = Color32::from_rgba_unmultiplied(255, 255, 255, 46);
-            theme.border_subtle = Color32::from_rgba_unmultiplied(255, 255, 255, 28);
-            theme.border_input = Color32::from_rgba_unmultiplied(190, 214, 209, 96);
-            theme.shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 150);
-        }
-
-        theme
+/// Nudge `surface` away from `base` until the two are perceptibly different.
+///
+/// The walk is capped at 18% toward the theme's text polarity, so a theme with
+/// an intentionally subtle hover keeps its character while gaining a floor the
+/// eye can actually see.
+fn ensure_surface_delta(base: Color32, surface: Color32, is_light: bool) -> Color32 {
+    if base.a() == 0 || super::contrast::contrast_ratio(surface, base) >= MIN_SURFACE_DELTA {
+        return surface;
     }
+    let target = if is_light {
+        Color32::from_rgb(15, 23, 42)
+    } else {
+        Color32::WHITE
+    };
+    let mut candidate = surface;
+    for step in 1..=18 {
+        candidate = lerp_color(surface, target, step as f32 * 0.01);
+        if super::contrast::contrast_ratio(candidate, base) >= MIN_SURFACE_DELTA {
+            return candidate;
+        }
+    }
+    candidate
 }
 
 #[cfg(test)]
@@ -481,5 +504,36 @@ mod tests {
                 "default controls should use the rounded control scale"
             );
         }
+    }
+
+    #[test]
+    fn interaction_surfaces_are_never_invisible() {
+        let mut theme = Theme::light();
+        // A custom theme whose hover is one RGB step from the card.
+        theme.bg_card = Color32::from_rgb(255, 255, 255);
+        theme.bg_card_hover = Color32::from_rgb(253, 254, 254);
+        theme.bg_pill = Color32::from_rgb(240, 240, 240);
+        theme.bg_pill_hover = Color32::from_rgb(239, 240, 240);
+
+        let normalized = theme.normalize_interaction_surfaces();
+        assert!(
+            crate::theme::contrast::contrast_ratio(normalized.bg_card_hover, normalized.bg_card)
+                >= 1.16,
+            "card hover must be perceptible"
+        );
+        assert!(
+            crate::theme::contrast::contrast_ratio(normalized.bg_pill_hover, normalized.bg_pill)
+                >= 1.16,
+            "pill hover must be perceptible"
+        );
+    }
+
+    #[test]
+    fn on_fill_picks_the_readable_ink() {
+        assert_eq!(on_fill(Color32::from_rgb(15, 118, 110)), Color32::WHITE);
+        assert_eq!(
+            on_fill(Color32::from_rgb(250, 204, 21)),
+            Color32::from_rgb(15, 23, 42)
+        );
     }
 }

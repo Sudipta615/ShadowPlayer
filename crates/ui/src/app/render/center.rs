@@ -28,7 +28,7 @@ impl ShadowPlayerApp {
                 let is_help_view = self.app_state.active_nav == NavItem::Help;
                 let show_right_panel = !is_help_view
                     && self.app_state.active_nav != NavItem::Settings
-                    && window_w >= 1100.0
+                    && window_w >= crate::layout::RIGHT_PANEL_BREAKPOINT
                     && self.app_state.right_panel_visible;
                 let right_w = if show_right_panel {
                     if window_w >= 1280.0 {
@@ -88,7 +88,7 @@ impl ShadowPlayerApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    self.render_topbar_actions(ui, window_w);
+                                    self.render_topbar_actions(ui, window_w, true);
                                 },
                             );
                         } else {
@@ -135,7 +135,7 @@ impl ShadowPlayerApp {
                                 .color(self.theme.text_primary),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            self.render_topbar_actions(ui, window_w);
+                            self.render_topbar_actions(ui, window_w, false);
 
                             // The engine's state belongs with the page's
                             // title, not in a second heading row below it.
@@ -391,13 +391,13 @@ impl ShadowPlayerApp {
                             self.sync_effective_theme();
                             self.toasts.info("Themes reloaded");
                         }
-                        if sv_actions.frosted_glass_changed.is_some() {
-                            self.sync_effective_theme();
-                            self.settings_dirty = true;
-                        }
                         if sv_actions.reduce_motion_changed.is_some() {
                             self.sync_effective_theme();
                             self.settings_dirty = true;
+                        }
+                        if let Some(scale) = sv_actions.ui_scale_changed {
+                            ctx.set_zoom_factor(crate::layout::clamp_ui_scale(scale));
+                            self.set_interface_scale(scale);
                         }
                         if sv_actions.import_theme {
                             if let Some(paths) = rfd::FileDialog::new()

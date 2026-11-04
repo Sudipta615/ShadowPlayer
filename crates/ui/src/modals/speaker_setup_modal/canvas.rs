@@ -14,6 +14,9 @@ pub fn render_soundstage_canvas(
 ) {
     let desired_size = Vec2::new(ui.available_width(), 220.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, true, tr!("Speaker placement"))
+    });
 
     let painter = ui.painter_at(rect);
     painter.rect_filled(

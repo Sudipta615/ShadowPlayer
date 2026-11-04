@@ -71,7 +71,6 @@ impl Theme {
             spectrum_gradient_hi: Color32::from_rgb(94, 234, 212),
 
             play_button_shape: super::tokens::PlayButtonShape::Rounded,
-            frosted: false,
             reduce_motion: false,
 
             radius_xs: 2,
@@ -148,7 +147,6 @@ impl Theme {
             spectrum_gradient_hi: Color32::from_rgb(11, 111, 102),
 
             play_button_shape: super::tokens::PlayButtonShape::Rounded,
-            frosted: false,
             reduce_motion: false,
 
             radius_xs: 2,

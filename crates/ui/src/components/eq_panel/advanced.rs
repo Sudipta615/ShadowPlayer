@@ -4,7 +4,7 @@
 use super::controls::{custom_toggle_switch, gradient_horizontal_slider, render_footer_controls};
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, CornerRadius, Margin, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, Margin, Sense, Stroke, Vec2};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. Tab 3: Advanced Settings (Max Dynamic Range, Headroom, M/S, Dither, AutoEQ)
@@ -190,7 +190,7 @@ pub(super) fn render_advanced_tab(
                             egui::RichText::new(tr!("Open AutoEQ"))
                                 .font(crate::theme::font(12.0))
                                 .strong()
-                                .color(Color32::WHITE),
+                                .color(crate::theme::on_fill(theme.accent)),
                         )
                         .fill(theme.accent)
                         .stroke(Stroke::NONE)

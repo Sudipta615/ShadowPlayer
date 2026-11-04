@@ -493,6 +493,13 @@ pub struct AppSettings {
     pub allow_multiple_instances: bool,
     pub window_width: f32,
     pub window_height: f32,
+    /// Interface scale, as an egui zoom factor.
+    ///
+    /// `1.0` is the design size. Values below 1 shrink text and controls for
+    /// small displays; values above 1 enlarge them for high-DPI or
+    /// low-vision use. Kept in `AppSettings` because the next launch has to
+    /// apply it before the first frame.
+    pub ui_scale: f32,
     /// The interface language.
     ///
     /// Empty means "ask the environment": the POSIX locale variables decide,
@@ -519,6 +526,7 @@ impl Default for AppSettings {
             allow_multiple_instances: false,
             window_width: 1280.0,
             window_height: 800.0,
+            ui_scale: 1.0,
             locale: String::new(),
         }
     }

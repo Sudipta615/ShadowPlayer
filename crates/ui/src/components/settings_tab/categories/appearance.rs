@@ -1,6 +1,6 @@
 //! The Appearance category: theme gallery and editor.
 
-use super::super::widgets::{card_header, setting_card, setting_item_toggle};
+use super::super::widgets::{card_header, pill_btn, setting_card, setting_item};
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
 use eframe::egui;
@@ -16,38 +16,59 @@ pub(in crate::components::settings_tab) fn render_appearance_category(
         return;
     };
 
-    // Card 1: Surface Material (Frosted Glass Optics)
+    // Card 1: Interface scale
     setting_card(ui, theme, |ui| {
         card_header(
             ui,
-            crate::components::icons::draw_moon,
-            "Surface Material",
-            "Translucency, optical specular highlights, and ambient bloom across themes",
+            crate::components::icons::draw_grid_icon,
+            &tr!("Interface"),
+            &tr!("Size of text and controls across the whole player"),
             Some((
-                if state.frosted_glass_enabled {
-                    "ACTIVE"
+                if (state.ui_scale - crate::layout::UI_SCALE_DEFAULT).abs() < 0.001 {
+                    "DEFAULT"
                 } else {
-                    "OFF"
+                    "CUSTOM"
                 },
                 theme.bg_pill,
-                if state.frosted_glass_enabled {
-                    theme.accent
+                if (state.ui_scale - crate::layout::UI_SCALE_DEFAULT).abs() < 0.001 {
+                    theme.text_muted
                 } else {
-                    theme.text_dim
+                    theme.accent_highlight
                 },
             )),
             theme,
         );
 
-        if setting_item_toggle(
+        setting_item(
             ui,
-            "Frosted Glass Surfaces",
-            "Render cards and panels with authentic translucency, micro-bevel specular rims, and ambient artwork bloom across any active theme",
+            &tr!("Interface Scale"),
+            &tr!("Scales text and controls from 80% to 150%. Ctrl +/− and Ctrl+scroll also work."),
             theme,
-            &mut state.frosted_glass_enabled,
-        ) {
-            actions.frosted_glass_changed = Some(state.frosted_glass_enabled);
-        }
+            |ui| {
+                let mut scale = state.ui_scale;
+                let response = ui.add(
+                    egui::Slider::new(
+                        &mut scale,
+                        crate::layout::UI_SCALE_MIN..=crate::layout::UI_SCALE_MAX,
+                    )
+                    .step_by(0.05)
+                    .fixed_decimals(2)
+                    .suffix("x"),
+                );
+                if response.changed() {
+                    state.ui_scale = scale;
+                    actions.ui_scale_changed = Some(scale);
+                }
+                if ui
+                    .add(pill_btn(tr!("Reset"), false, theme))
+                    .on_hover_text(tr!("Return to the design size (100%)"))
+                    .clicked()
+                {
+                    state.ui_scale = crate::layout::UI_SCALE_DEFAULT;
+                    actions.ui_scale_changed = Some(crate::layout::UI_SCALE_DEFAULT);
+                }
+            },
+        );
     });
 
     ui.add_space(theme.space_md);
@@ -134,7 +155,7 @@ pub(in crate::components::settings_tab) fn render_appearance_category(
 
     ui.add_space(theme.space_md);
 
-    // Card 3: In-App Theme Editor
+    // Card 2: In-App Theme Editor
     let mut saved_theme = None;
     let editor_open = state.theme_editor.is_open;
     let editor_dirty = editor_open && state.theme_editor.is_dirty();

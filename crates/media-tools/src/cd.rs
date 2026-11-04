@@ -334,6 +334,9 @@ impl CdRipper {
                         track.first_sector + sector
                     )));
                 }
+                // `paranoia_read` returns a full raw sector (`CDIO_CD_FRAMESIZE_RAW`
+                // bytes = `CD_SAMPLES_PER_SECTOR` i16 values). The API returns
+                // no length, so a non-null pointer is the sector's memory.
                 let samples = unsafe { std::slice::from_raw_parts(pointer, CD_SAMPLES_PER_SECTOR) };
                 pcm.extend_from_slice(samples);
                 if !progress(RipProgress {
