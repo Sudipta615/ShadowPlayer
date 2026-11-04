@@ -4,7 +4,7 @@ use super::{
 };
 use super::{file_uri, resolve};
 use super::{M3uEntry, ParsedPlaylist};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) fn parse_xspf(text: &str, base_dir: Option<&Path>) -> ParsedPlaylist {
     let title = tag_contents(text, "title")

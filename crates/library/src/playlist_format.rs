@@ -15,7 +15,7 @@
 //! entry that cannot be read is skipped; one bad line must not lose the other
 //! hundred tracks.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::m3u::{parse_m3u, relative_to, resolve, write_m3u, M3uEntry};
 
@@ -124,6 +124,7 @@ mod xml_helpers;
 mod xspf;
 
 pub(crate) use asx::*;
+pub use m3u::{parse_playlist_text, write_playlist};
 pub(crate) use pls::*;
 pub(crate) use wpl::*;
 pub(crate) use xml_helpers::*;
@@ -183,51 +184,6 @@ pub fn parse_playlist(path: &Path) -> std::io::Result<Vec<ParsedPlaylist>> {
     }
     let format = sniff_format(&bytes, Some(path));
     Ok(vec![parse_playlist_text(&text, path, format)])
-}
-
-/// Parse playlist text as a known format.
-pub fn parse_playlist_text(text: &str, path: &Path, format: PlaylistFormat) -> ParsedPlaylist {
-    let base = path.parent();
-    match format {
-        PlaylistFormat::M3u | PlaylistFormat::M3u8 => ParsedPlaylist {
-            title: None,
-            entries: parse_m3u(text, base),
-        },
-        PlaylistFormat::Pls => parse_pls(text, base),
-        PlaylistFormat::Xspf => parse_xspf(text, base),
-        PlaylistFormat::Asx => parse_asx(text, base),
-        PlaylistFormat::Wpl => parse_wpl(text, base),
-    }
-}
-
-/// Serialize a playlist in `format`.
-///
-/// `base_dir` is the directory the playlist is being written into. Formats
-/// that accept relative paths use one where possible, so a playlist moved
-/// together with its music keeps working.
-pub fn write_playlist(
-    format: PlaylistFormat,
-    entries: &[M3uEntry],
-    base_dir: Option<&Path>,
-) -> String {
-    match format {
-        PlaylistFormat::M3u => write_m3u(entries, base_dir),
-        PlaylistFormat::M3u8 => {
-            let body = write_m3u(entries, base_dir);
-            // A BOM marks the file as UTF-8 for players that otherwise guess a
-            // legacy code page. ASCII-only playlists need no marker and stay
-            // readable by the oldest readers.
-            if body.is_ascii() {
-                body
-            } else {
-                format!("\u{feff}{body}")
-            }
-        }
-        PlaylistFormat::Pls => write_pls(entries, base_dir),
-        PlaylistFormat::Xspf => write_xspf(entries),
-        PlaylistFormat::Asx => write_asx(entries, base_dir),
-        PlaylistFormat::Wpl => write_wpl(entries, base_dir),
-    }
 }
 
 // ── PLS ─────────────────────────────────────────────────────────────────────
@@ -311,8 +267,11 @@ fn split_artist_title(value: Option<String>) -> (Option<String>, Option<String>)
 }
 
 #[cfg(test)]
+use std::path::PathBuf;
+
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn entry(path: &str, title: &str) -> M3uEntry {
         M3uEntry {

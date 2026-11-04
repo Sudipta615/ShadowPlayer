@@ -2,7 +2,7 @@ use super::{
     all_tags, attr, decode_xml_entities, escape_xml, first_attr, path_for_playlist, tag_contents,
 };
 use super::{resolve, M3uEntry, ParsedPlaylist};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) fn parse_asx(text: &str, base_dir: Option<&Path>) -> ParsedPlaylist {
     let title = tag_contents(text, "title")

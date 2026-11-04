@@ -4,9 +4,9 @@ use super::{
 use super::{parse_m3u, write_m3u};
 use super::{M3uEntry, ParsedPlaylist, PlaylistFormat};
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-fn parse_playlist_text(text: &str, path: &Path, format: PlaylistFormat) -> ParsedPlaylist {
+pub fn parse_playlist_text(text: &str, path: &Path, format: PlaylistFormat) -> ParsedPlaylist {
     let base = path.parent();
     match format {
         PlaylistFormat::M3u | PlaylistFormat::M3u8 => ParsedPlaylist {
@@ -25,7 +25,11 @@ fn parse_playlist_text(text: &str, path: &Path, format: PlaylistFormat) -> Parse
 /// `base_dir` is the directory the playlist is being written into. Formats
 /// that accept relative paths use one where possible, so a playlist moved
 /// together with its music keeps working.
-fn write_playlist(format: PlaylistFormat, entries: &[M3uEntry], base_dir: Option<&Path>) -> String {
+pub fn write_playlist(
+    format: PlaylistFormat,
+    entries: &[M3uEntry],
+    base_dir: Option<&Path>,
+) -> String {
     match format {
         PlaylistFormat::M3u => write_m3u(entries, base_dir),
         PlaylistFormat::M3u8 => {
