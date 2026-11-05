@@ -2,12 +2,22 @@
 //!
 //! Extends parametric EQ with per-band dynamics detection, enabling
 //! level-dependent frequency cuts and boosts with zero zipper noise.
+//!
+//! Each band runs on the Cytomic/Simper trapezoidal SVF
+//! ([`crate::dsp::equalizer::SvfFilter`]): frequency/Q updates touch only
+//! the tuning coefficients `g/k`, and dynamic gain changes touch only the
+//! output tap `k·(G−1)`. The previous implementation recomputed RBJ biquad
+//! coefficients every 32 frames and stepped them — the modulation weakness
+//! Cytomic's design exists to remove — so a gain change could zipper at
+//! sub-block rate and paid transcendental calls on the audio path. Here a
+//! sub-block update is one detector pass, one `powf` for the tap, and one
+//! SVF pass.
 
-use crate::dsp::biquad::{BiquadCoeffsF64, BiquadStateF64};
 use crate::dsp::dynamics::{
     ChannelLinkMode, DetectionMode, DetectorConfig, DynamicsDetector, SidechainFilter,
 };
 use crate::dsp::equalizer::types::EqFilterType;
+use crate::dsp::equalizer::{SvfFilter, SvfMode};
 
 /// Maximum number of dynamic EQ bands.
 pub const MAX_DYNAMIC_EQ_BANDS: usize = 8;
@@ -118,16 +128,39 @@ impl From<&DynamicEqBandParams> for config::DynamicEqBandConfig {
     }
 }
 
-/// A single dynamic EQ band processor with dedicated detector and smoothed biquad filters.
+/// A single dynamic EQ band processor with dedicated detector and SVF core.
 #[derive(Debug, Clone)]
 pub struct DynamicEqBand {
     params: DynamicEqBandParams,
     detector: DynamicsDetector,
-    state_l: BiquadStateF64,
-    state_r: BiquadStateF64,
-    coeffs: BiquadCoeffsF64,
+    svf_l: SvfFilter<f64>,
+    svf_r: SvfFilter<f64>,
     current_gain_db: f32,
     sample_rate: f32,
+}
+
+/// Map the band's filter type to the SVF mode that realises it.
+fn svf_mode(filter_type: EqFilterType) -> SvfMode {
+    match filter_type {
+        EqFilterType::Peaking => SvfMode::Peaking,
+        EqFilterType::LowShelf => SvfMode::LowShelf,
+        EqFilterType::HighShelf => SvfMode::HighShelf,
+        EqFilterType::LowPass => SvfMode::LowPass,
+        EqFilterType::HighPass => SvfMode::HighPass,
+        EqFilterType::Bandpass => SvfMode::BandPass,
+        EqFilterType::Notch => SvfMode::Notch,
+        EqFilterType::AllPass => SvfMode::AllPass,
+    }
+}
+
+/// One-pole smoothing step for a sub-block of `frames`, from a time constant.
+fn subblock_alpha(tau_ms: f32, sample_rate: f32, frames: usize) -> f32 {
+    let tau_secs = (tau_ms.max(0.01) / 1000.0).max(1e-6);
+    let denom = (tau_secs * sample_rate.max(1.0)) as f64;
+    if denom <= 0.0 || !denom.is_finite() {
+        return 1.0;
+    }
+    (1.0 - (-(frames as f64) / denom).exp()).clamp(0.0, 1.0) as f32
 }
 
 impl DynamicEqBand {
@@ -149,19 +182,11 @@ impl DynamicEqBand {
             },
         };
 
-        let coeffs = params.filter_type.to_filter_type().compute_coeffs(
-            sr,
-            params.frequency,
-            params.static_gain_db,
-            params.q,
-        );
-
         let mut band = Self {
             params,
             detector: DynamicsDetector::new(sr, det_config),
-            state_l: BiquadStateF64::default(),
-            state_r: BiquadStateF64::default(),
-            coeffs,
+            svf_l: SvfFilter::new(sr as f64),
+            svf_r: SvfFilter::new(sr as f64),
             current_gain_db: params.static_gain_db,
             sample_rate: sr,
         };
@@ -190,10 +215,11 @@ impl DynamicEqBand {
     /// Reset internal filter and detector states.
     pub fn reset(&mut self) {
         self.detector.reset();
-        self.state_l.reset();
-        self.state_r.reset();
+        self.svf_l.reset();
+        self.svf_r.reset();
         self.current_gain_db = self.params.static_gain_db;
-        self.recompute_coeffs(self.current_gain_db);
+        self.apply_tuning();
+        self.apply_gain(self.current_gain_db);
     }
 
     /// Reconfigure detector and filters from active params.
@@ -213,17 +239,25 @@ impl DynamicEqBand {
         };
         self.detector.set_config(det_config);
         self.current_gain_db = self.params.static_gain_db;
-        self.recompute_coeffs(self.current_gain_db);
+        self.apply_tuning();
+        self.apply_gain(self.current_gain_db);
     }
 
-    fn recompute_coeffs(&mut self, gain_db: f32) {
-        let effective_gain = if self.params.enabled { gain_db } else { 0.0 };
-        self.coeffs = self.params.filter_type.to_filter_type().compute_coeffs(
-            self.sample_rate,
-            self.params.frequency,
-            effective_gain,
-            self.params.q,
-        );
+    /// Push frequency/Q into both SVF cores (state is preserved, so a
+    /// freq/Q edit cannot click).
+    fn apply_tuning(&mut self) {
+        let fc = self.params.frequency as f64;
+        let q = self.params.q as f64;
+        self.svf_l.set_params(fc, q);
+        self.svf_r.set_params(fc, q);
+    }
+
+    /// Push dynamic gain into both SVF cores. Disabled bands force 0 dB —
+    /// a disabled band is a passthrough, not a silent zero.
+    fn apply_gain(&mut self, gain_db: f32) {
+        let db = if self.params.enabled { gain_db } else { 0.0 };
+        self.svf_l.set_gain_db(db as f64);
+        self.svf_r.set_gain_db(db as f64);
     }
 
     /// Process a stereo block of audio through this band.
@@ -303,21 +337,31 @@ impl DynamicEqBand {
                 self.params.static_gain_db
             };
 
-            // Smooth gain transition across sub-blocks to prevent zipper noise
-            let smoothing_alpha = 0.5f32;
+            // Smooth the gain in *parameter* space with coefficients derived
+            // from the specified attack/release (one-pole per sub-block),
+            // then push it through the SVF tap. The previous fixed
+            // `alpha = 0.5` ignored attack/release entirely.
             if !self.current_gain_db.is_finite() {
                 self.current_gain_db = self.params.static_gain_db;
             }
-            self.current_gain_db += smoothing_alpha * (target_gain_db - self.current_gain_db);
-            self.recompute_coeffs(self.current_gain_db);
+            let alpha = if target_gain_db < self.current_gain_db {
+                subblock_alpha(self.params.attack_ms, self.sample_rate, chunk_len)
+            } else {
+                subblock_alpha(self.params.release_ms, self.sample_rate, chunk_len)
+            };
+            self.current_gain_db += alpha * (target_gain_db - self.current_gain_db);
+            self.apply_gain(self.current_gain_db);
 
-            // 3. Filter the audio samples in this sub-block (vectorized stereo cascade)
-            crate::dsp::biquad::BiquadState::process_stereo_block(
-                &mut self.state_l,
-                &mut self.state_r,
+            // 3. Filter this sub-block through the SVF cores. Gain changes
+            // only scale the tap, so no coefficient recomputation happens
+            // here (the audio-thread cost of the old design).
+            let mode = svf_mode(self.params.filter_type);
+            SvfFilter::process_stereo_block(
+                &mut self.svf_l,
+                &mut self.svf_r,
                 &mut left[offset..offset + chunk_len],
                 &mut right[offset..offset + chunk_len],
-                &self.coeffs,
+                mode,
             );
 
             offset += chunk_len;
