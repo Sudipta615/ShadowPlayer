@@ -4,7 +4,10 @@ use super::headroom;
 use super::types::{EqBand, EqBandParams, EqFilterType, MAX_EQ_BANDS};
 use crate::dsp::biquad::{FilterType, SmoothedBiquad};
 use crate::dsp::filter_design::{design, BandwidthMode, FilterDesign};
-use crate::{buffer::AudioFrame, dsp::gain::GainProcessor};
+use crate::{
+    buffer::AudioFrame,
+    dsp::gain::{db_to_linear, GainProcessor},
+};
 
 /// Parametric EQ processor — configurable multi-band equaliser
 ///
@@ -376,8 +379,7 @@ impl ParametricEq {
         self.preamp_db = clamped;
         // Target only. The applied gain ramps toward it, so a preamp change
         // is a fade rather than a click.
-        self.preamp
-            .set_gain_unclamped(10.0_f32.powf(clamped / 20.0));
+        self.preamp.set_gain_unclamped(db_to_linear(clamped));
     }
 
     /// Set post-EQ gain in dB
@@ -393,8 +395,7 @@ impl ParametricEq {
         self.post_gain_db = clamped;
         // Target only — see `set_preamp_db`. The linear equivalent is still
         // computed here rather than per sample, so `process_f64` does no powf.
-        self.post_gain
-            .set_gain_unclamped(10.0_f32.powf(clamped / 20.0));
+        self.post_gain.set_gain_unclamped(db_to_linear(clamped));
     }
 
     /// Current static pre-EQ headroom in dB (≤ 0; 0 = unity).
@@ -457,8 +458,7 @@ impl ParametricEq {
         // Target only — see `set_preamp_db`. This is the hot one:
         // `refresh_auto_headroom` calls this on every band edit, so before the
         // ramp an ordinary EQ tweak stepped the whole signal.
-        self.headroom
-            .set_gain_unclamped(10.0_f32.powf(clamped / 20.0));
+        self.headroom.set_gain_unclamped(db_to_linear(clamped));
         // Track the manual value only when auto headroom is not the one
         // driving the knob; auto updates must not clobber it.
         if !self.auto_headroom {
@@ -483,7 +483,7 @@ impl ParametricEq {
         } else {
             self.headroom_db = self.manual_headroom_db;
             self.headroom
-                .set_gain_unclamped(10.0_f32.powf(self.manual_headroom_db / 20.0));
+                .set_gain_unclamped(db_to_linear(self.manual_headroom_db));
         }
     }
 

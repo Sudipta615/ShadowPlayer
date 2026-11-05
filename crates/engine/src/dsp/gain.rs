@@ -3,6 +3,15 @@
 use crate::buffer::AudioFrame;
 use crate::dsp::float::AudioFloat;
 
+/// `10^(dB/20)` via `exp2(dB · log2(10)/20)` — numerically identical to the
+/// `powf` reference (equivalence-pinned by test) and faster on targets with
+/// `exp2` hardware. Used on control-thread setters only; the DSP path never
+/// converts dB to linear.
+pub fn db_to_linear(db: f32) -> f32 {
+    const DB_TO_EXP2: f32 = 0.166_096_4; // log2(10)/20
+    (db * DB_TO_EXP2).exp2()
+}
+
 /// Simple gain/volume control with smooth ramping to avoid zipper noise.
 ///
 /// Generic over `T: AudioFloat` (defaults to `f32`).
@@ -546,6 +555,17 @@ impl FadeProcessor {
 
 #[cfg(test)]
 mod tests {
+    use super::db_to_linear;
+
+    #[test]
+    fn db_to_linear_matches_powf_reference() {
+        for db in [-48.0, -12.0, -3.0, -0.3, 0.0, 0.3, 3.0, 6.0, 12.0, 48.0] {
+            let a = db_to_linear(db);
+            let b = 10f32.powf(db / 20.0);
+            assert!((a - b).abs() / b < 1e-6, "{db} dB: {a} vs {b}");
+        }
+    }
+
     use super::*;
 
     #[test]

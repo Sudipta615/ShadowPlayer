@@ -69,7 +69,9 @@ pub use equalizer::{
     SvfFilter, SvfMode, MAX_DYNAMIC_EQ_BANDS, MAX_EQ_BANDS,
 };
 pub use float::AudioFloat;
-pub use gain::{FadeProcessor, FadeState, GainProcessor, GainProcessorF32, GainProcessorF64};
+pub use gain::{
+    db_to_linear, FadeProcessor, FadeState, GainProcessor, GainProcessorF32, GainProcessorF64,
+};
 pub use graphic_eq::GraphicEq;
 pub use limiter::{LimiterMode, LookaheadLimiter, TruePeakMode};
 pub use loudness::{
