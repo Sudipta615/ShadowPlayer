@@ -15,8 +15,8 @@
 //!   cannot disagree.
 //! * [`FilterDesign`] — which prototype maps the analog response onto the
 //!   digital one: the engine's historical cookbook bilinear transform, the
-//!   Nyquist-compensated octave form, or Vicanek's matched second-order
-//!   design.
+//!   Nyquist-compensated octave form, Vicanek's matched second-order design,
+//!   or the Nyquist-matched (Orfanidis-style) design.
 //! * [`design`] — one entry point producing [`BiquadCoeffs<f64>`] from any
 //!   combination of the above. With `Bandwidth::Q` and `FilterDesign::Bilinear`
 //!   it **delegates** to the existing constructors, so the engine's default
@@ -34,6 +34,7 @@
 //! | `alpha = sin(ω₀)·sinh(ln2/2 · bw · ω₀/sin ω₀)` | RBJ cookbook case 2 as implemented in Equalizer APO (`filters/BiQuad.cpp`) and bmc0/dsp (`biquad.c`, width `o`) |
 //! | `alpha = sin(ω₀)/2 · sqrt((A + 1/A)(1/S − 1) + 2)` | RBJ cookbook case 3, same two implementations (width `s`) |
 //! | Vicanek matched design | Martin Vicanek, *Matched Second Order Digital Filters*, as ported by Signalsmith Audio (`filters.h`, `BiquadDesign::vicanek`) |
+//! | Orfanidis-style Nyquist matching | Nyquist-matched (Orfanidis, JAES 45(6) 444–455) peaking / high-shelf shapes (`biquad.rs` decramped); centre gain + DC/Nyquist exactness is test-pinned |
 //! | Butterworth section Q `1/(2·sin(π/N·(k − ½)))` | bmc0/dsp `parse_width` (`bwN`), the standard Butterworth pole placement |
 //! | `|H|²` from `φ = sin²(ω/2)` | J. O. Smith's allpass/energy identity, in the exact arrangement Equalizer APO's `BiQuad::gainAt` uses |
 //!
@@ -45,7 +46,7 @@ use config::{Bandwidth, MAX_OCTAVES, MAX_SLOPE, MIN_OCTAVES, MIN_SLOPE};
 
 /// Which prototype maps the analog filter onto the digital one.
 ///
-/// The three differ *only* in how they handle frequency warping near Nyquist
+/// The variants differ *only* in how they handle frequency warping near Nyquist
 /// (and, for [`Self::Vicanek`], how the zeros are chosen once the poles are
 /// fixed). Two filters designed with the same width and different prototypes
 /// have the same gain at `f₀` and the same DC/Nyquist asymptotes; they differ
@@ -72,6 +73,13 @@ pub enum FilterDesign {
     /// behaviour and a peaking band's skirt shape close to the analog
     /// prototype instead of forcing them to the bilinear image.
     Vicanek,
+    /// Nyquist-matched (Orfanidis-style) design: peaking and high-shelf
+    /// shapes that hold their analog gain at the centre and pass to DC /
+    /// Nyquist without bilinear cramping. Available for `Peaking` and
+    /// `Highshelf` only; every other type falls back to the
+    /// bandwidth-compensated cookbook design, exactly like Vicanek's shelf
+    /// fallback. Delegates to `BiquadCoeffs::{peaking,highshelf}_decramped`.
+    Orfanidis,
 }
 
 /// Which model a band's stored `Q` means.
@@ -139,6 +147,21 @@ pub fn design(
         // Shelves and all-passes have no Vicanek closed form; Signalsmith
         // falls back to the bandwidth-compensated cookbook design, and so do
         // we — the fallback is deliberate, not a silent gap.
+    }
+
+    if filter_design == FilterDesign::Orfanidis {
+        let q = (0.5 / inv2q.max(1e-12)).clamp(0.01, 100.0) as f32;
+        match kind {
+            FilterType::Peaking => {
+                return BiquadCoeffs::<f64>::peaking_decramped(sr, f0, gain as f32, q);
+            }
+            FilterType::Highshelf => {
+                return BiquadCoeffs::<f64>::highshelf_decramped(sr, f0, gain as f32, q);
+            }
+            _ => {
+                // No closed form for other types; deliberate fallback.
+            }
+        }
     }
 
     cookbook(kind, cos_w0, alpha, gain)
@@ -782,6 +805,55 @@ mod tests {
     }
 
     #[test]
+    fn the_orfanidis_peak_holds_its_centre_and_edges() {
+        for (freq, gain) in [(1_000.0_f32, 6.0_f32), (1_000.0, -6.0), (16_000.0, 6.0)] {
+            let coeffs = design(
+                FilterType::Peaking,
+                FilterDesign::Orfanidis,
+                SR,
+                freq,
+                gain,
+                Bandwidth::Q(1.0),
+            );
+            assert!(
+                close(
+                    magnitude_db_at(&coeffs, freq as f64, SR_F64),
+                    gain as f64,
+                    0.05
+                ),
+                "{gain} dB Orfanidis peak at {freq} Hz measured {:.3} dB",
+                magnitude_db_at(&coeffs, freq as f64, SR_F64)
+            );
+            assert!(
+                magnitude_db_at(&coeffs, 20.0, SR_F64).abs() < 0.2,
+                "DC must be ~0 dB"
+            );
+            assert!(
+                magnitude_db_at(&coeffs, SR_F64 * 0.499, SR_F64).abs() < 0.2,
+                "Nyquist must be ~0 dB"
+            );
+        }
+    }
+
+    #[test]
+    fn the_orfanidis_highshelf_reaches_its_dc_gain() {
+        let coeffs = design(
+            FilterType::Highshelf,
+            FilterDesign::Orfanidis,
+            SR,
+            1_000.0,
+            6.0,
+            Bandwidth::Q(0.707),
+        );
+        assert!(
+            close(magnitude_db_at(&coeffs, 20.0, SR_F64), 6.0, 0.1),
+            "high shelf DC: {:.3} dB",
+            magnitude_db_at(&coeffs, 20.0, SR_F64)
+        );
+        assert!(magnitude_db_at(&coeffs, SR_F64 * 0.499, SR_F64).abs() < 0.2);
+    }
+
+    #[test]
     fn invalid_parameters_never_produce_non_finite_coefficients() {
         for width in [
             Bandwidth::Q(f32::NAN),
@@ -795,6 +867,7 @@ mod tests {
                     FilterDesign::Bilinear,
                     FilterDesign::NyquistOctaves,
                     FilterDesign::Vicanek,
+                    FilterDesign::Orfanidis,
                 ] {
                     let c = design(kind, design_kind, 0.0, f32::NAN, f32::NAN, width);
                     assert!(

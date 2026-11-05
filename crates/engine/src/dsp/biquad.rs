@@ -300,7 +300,7 @@ impl<T: AudioFloat> BiquadCoeffs<T> {
         Self::from_f64_raw(b0, b1, b2, a1, a2)
     }
 
-    /// Band-pass filter (constant skirt gain)
+    /// Band-pass filter (constant 0 dB peak gain)
     pub fn bandpass(sample_rate: f32, freq: f32, q: f32) -> Self {
         let (sr, f, qv) = Self::validate_params(sample_rate, freq, q);
         let w0 = 2.0 * std::f64::consts::PI * f / sr;
