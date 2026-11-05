@@ -41,12 +41,12 @@ use crate::dsp::biquad::BiquadCoeffs;
 /// to *locate* each lobe; refinement measures its apex.
 const SWEEP_POINTS: usize = 1024;
 
-/// How many of the strongest sweep lobes get golden-section refinement.
-/// Between adjacent peaking bands the total curve can have several local
-/// maxima; the highest one wins, and this many covers a dense graphic curve
-/// without making the estimate expensive.
-const REFINED_LOBES: usize = 8;
-
+/// No cap on refinement by count: with up to 64 bands the curve can have
+/// 64 local maxima, and overlapping sub-half lobes can sum above either
+/// individual peak. Refining all of them costs tens of magnitude
+/// evaluations — cheap on the command thread — and erring toward over-
+/// estimating is the safe direction (`-boost` headroom).
+///
 /// Converge to this log-frequency distance (natural log of the frequency).
 const REFINE_TOLERANCE_LN: f64 = 1e-4;
 
@@ -153,7 +153,7 @@ fn sweep_and_refine(coeffs: &[BiquadCoeffs<f64>], sample_rate: f64, lo: f64, hi:
 
     // Local maxima, strongest first. The endpoints are covered by the analytic
     // DC/Nyquist evaluation, so only interior turns are candidates.
-    let mut lobes: Vec<(f64, usize)> = Vec::with_capacity(REFINED_LOBES * 2);
+    let mut lobes: Vec<(f64, usize)> = Vec::with_capacity(64);
     for i in 1..SWEEP_POINTS {
         if values[i] >= values[i - 1] && values[i] >= values[i + 1] {
             lobes.push((values[i], i));
@@ -161,11 +161,10 @@ fn sweep_and_refine(coeffs: &[BiquadCoeffs<f64>], sample_rate: f64, lo: f64, hi:
     }
     lobes.sort_by(|a, b| b.0.total_cmp(&a.0));
 
-    for &(sampled, index) in lobes.iter().take(REFINED_LOBES) {
-        if sampled < best * 0.5 {
-            // A lobe this far below the best one cannot hold the maximum.
-            break;
-        }
+    // Refine every local maximum (no 0.5 early-exit): two overlapping
+    // sub-half lobes can sum above either peak alone, and an underestimate
+    // here means the limiter must catch the EQ's own boost.
+    for &(_, index) in &lobes {
         let a = log_lo + (index as f64 - 1.0) * step;
         let b = log_lo + (index as f64 + 1.0) * step;
         let refined = refine(coeffs, sample_rate, a, b);
