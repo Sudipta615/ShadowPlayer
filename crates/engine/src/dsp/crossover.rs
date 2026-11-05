@@ -1,7 +1,9 @@
 //! Selectable crossover filter architectures.
 //!
-//! Provides minimum-phase (Linkwitz-Riley), linear-phase (FIR), and mixed-phase
-//! crossover filters with explicit latency, CPU cost, and phase behavior reporting.
+//! Provides minimum-phase (Linkwitz-Riley) and linear-phase (FIR) crossover
+//! filters with explicit latency, CPU cost, and phase behavior reporting.
+//! `MixedPhase` is a reserved variant (LR4 IIR today) and reports honestly
+//! as minimum-phase until a FIR high-side exists.
 
 use crate::dsp::biquad::{BiquadCoeffsF64, BiquadStateF64};
 use config::CrossoverSlope;
@@ -35,7 +37,11 @@ pub enum CrossoverArchitecture {
     LinkwitzRiley(CrossoverSlope),
     /// Linear-phase complementary FIR crossover with windowed-sinc kernels.
     LinearPhaseFir { num_taps: usize },
-    /// Mixed-phase: Linkwitz-Riley low crossover + Linear-phase high crossover.
+    /// Reserved for a mixed-phase design (IIR low + FIR high). The FIR
+    /// high-side is not yet implemented; this variant currently runs the
+    /// LR4 IIR chain and reports `MinimumPhase` / `Low` tier honestly
+    /// (see `phase_behavior` / `cpu_tier`) rather than advertising a
+    /// linear-phase high side that does not exist.
     MixedPhase,
 }
 
@@ -114,7 +120,8 @@ impl Crossover2Way {
         match self.arch {
             CrossoverArchitecture::LinkwitzRiley(_) => CrossoverPhaseBehavior::MinimumPhase,
             CrossoverArchitecture::LinearPhaseFir { .. } => CrossoverPhaseBehavior::LinearPhase,
-            CrossoverArchitecture::MixedPhase => CrossoverPhaseBehavior::MixedPhase,
+            // MixedPhase runs the LR4 IIR chain; never report LinearPhase/Mixed.
+            CrossoverArchitecture::MixedPhase => CrossoverPhaseBehavior::MinimumPhase,
         }
     }
 
@@ -138,7 +145,7 @@ impl Crossover2Way {
                     CrossoverCpuTier::High
                 }
             }
-            CrossoverArchitecture::MixedPhase => CrossoverCpuTier::Medium,
+            CrossoverArchitecture::MixedPhase => CrossoverCpuTier::Low,
         }
     }
 
@@ -256,7 +263,9 @@ impl Crossover2Way {
         match self.arch {
             CrossoverArchitecture::LinkwitzRiley(slope) => {
                 let q_values: Vec<f32> = match slope {
-                    CrossoverSlope::Db12 => vec![0.5],
+                    // LR2 = single 2nd-order Butterworth section (Q = 1/sqrt(2)).
+                    // A single Q=0.5 biquad is neither Butterworth nor LR2.
+                    CrossoverSlope::Db12 => vec![std::f32::consts::FRAC_1_SQRT_2],
                     CrossoverSlope::Db24 => vec![
                         std::f32::consts::FRAC_1_SQRT_2,
                         std::f32::consts::FRAC_1_SQRT_2,
@@ -453,13 +462,43 @@ mod tests {
             &mut high_r,
         );
 
-        // For LR4 (Db24), low + high = allpass with unit magnitude response
-        for i in 512..n {
-            let sum_l = low_l[i] + high_l[i];
-            let sum_r = low_r[i] + high_r[i];
-            assert!(sum_l.abs() <= 1.05, "LR4 sum magnitude should be unity");
-            assert!(sum_r.abs() <= 1.05, "LR4 sum magnitude should be unity");
-        }
+        // For LR4 (Db24), low + high is all-pass: unit *magnitude*, with a
+        // phase shift. Per-sample |sum| therefore oscillates (it is ~0.87 at
+        // some samples of a 1 kHz sine). Measure the steady-state amplitude
+        // (peak over a full window) — a wrong filter shows magnitude ≠ 1.
+        let peak_sum = |low: &[f64], high: &[f64]| {
+            low.iter()
+                .zip(high.iter())
+                .skip(512)
+                .map(|(a, b)| (a + b).abs())
+                .fold(0.0f64, f64::max)
+        };
+        let ps_l = peak_sum(&low_l, &high_l);
+        let ps_r = peak_sum(&low_r, &high_r);
+        assert!((ps_l - 1.0).abs() < 0.05, "LR4 sum amplitude L={ps_l}");
+        assert!((ps_r - 1.0).abs() < 0.05, "LR4 sum amplitude R={ps_r}");
+    }
+
+    #[test]
+    fn test_lr2_is_a_butterworth_section_and_mixed_reports_minimum_phase() {
+        let lr2 = Crossover2Way::new(
+            CrossoverArchitecture::LinkwitzRiley(CrossoverSlope::Db12),
+            48_000.0,
+            1000.0,
+        );
+        // LR2 must be a single Butterworth 2nd-order section: fc is -3.01 dB.
+        assert_eq!(lr2.lr_lp_coeffs.len(), 1);
+        let c = lr2.lr_lp_coeffs[0];
+        let db = crate::dsp::filter_design::magnitude_db_at(&c, 1000.0, 48_000.0);
+        assert!(
+            (db + 3.0103).abs() < 0.05,
+            "LR2 must be -3.01 dB at fc, got {db}"
+        );
+
+        let mixed = Crossover2Way::new(CrossoverArchitecture::MixedPhase, 48_000.0, 1000.0);
+        assert_eq!(mixed.phase_behavior(), CrossoverPhaseBehavior::MinimumPhase);
+        assert_eq!(mixed.cpu_tier(), CrossoverCpuTier::Low);
+        assert_eq!(mixed.latency_samples(), 0);
     }
 
     #[test]
