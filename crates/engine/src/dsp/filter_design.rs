@@ -853,6 +853,119 @@ mod tests {
         assert!(magnitude_db_at(&coeffs, SR_F64 * 0.499, SR_F64).abs() < 0.2);
     }
 
+    /// Golden vectors from an independent Python RBJ implementation
+    /// (cookbook equations, f64). Unlike the self-consistent
+    /// `design` vs `evaluate_magnitude` checks, these pin the exact
+    /// coefficient words a typo would move.
+    #[test]
+    fn rbj_golden_vectors_match_independent_reference() {
+        // (kind, freq, gain, q, [b0,b1,b2,a1,a2])
+        let cases: &[(FilterType, f32, f32, f32, [f64; 5])] = &[
+            (
+                FilterType::Peaking,
+                1000.0,
+                6.0,
+                1.0,
+                [
+                    1.0439530869903351,
+                    -1.8953207239365961,
+                    0.86772228475985658,
+                    -1.8953207239365961,
+                    0.91167537175019153,
+                ],
+            ),
+            (
+                FilterType::Peaking,
+                16000.0,
+                -9.0,
+                4.31,
+                [
+                    0.90688515902195899,
+                    0.85567766065785378,
+                    0.80447016229374912,
+                    0.85567766065785378,
+                    0.71135532131570833,
+                ],
+            ),
+            (
+                FilterType::Lowshelf,
+                200.0,
+                6.0,
+                0.707,
+                [
+                    1.006446518467452,
+                    -1.9686077924935919,
+                    0.96311455562203341,
+                    -1.9688455470085819,
+                    0.9693233195744958,
+                ],
+            ),
+            (
+                FilterType::Highshelf,
+                4000.0,
+                -3.0,
+                0.9,
+                [
+                    0.74850580296318525,
+                    -0.97118159852610697,
+                    0.40388122461293557,
+                    -1.409207491951171,
+                    0.59041292100118503,
+                ],
+            ),
+        ];
+        for (kind, freq, gain, q, want) in cases {
+            let c = design(
+                *kind,
+                FilterDesign::Bilinear,
+                SR,
+                *freq,
+                *gain,
+                Bandwidth::Q(*q),
+            );
+            let got = [c.b0, c.b1, c.b2, c.a1, c.a2];
+            for (g, w) in got.iter().zip(want.iter()) {
+                // Inputs are f32 (as the API takes); the Python reference
+                // used f64 inputs, so the words agree to f32 rounding.
+                assert!(
+                    (g - w).abs() < 1e-6,
+                    "{kind:?} {freq} Hz {gain} dB Q={q}: got {got:?}, want {want:?}"
+                );
+            }
+        }
+    }
+
+    /// The Vicanek notch heuristic (`inv2q *= 1 − 0.5·f̂`) exists so the
+    /// notch does not close before Nyquist. Pin what it must guarantee:
+    /// a deep null at the centre and near-unity away from it, including
+    /// near Nyquist.
+    #[test]
+    fn the_vicanek_notch_null_holds_near_nyquist() {
+        for (freq, q) in [(1_000.0_f32, 10.0_f32), (16_000.0, 10.0), (16_000.0, 2.0)] {
+            let coeffs = design(
+                FilterType::Notch,
+                FilterDesign::Vicanek,
+                SR,
+                freq,
+                0.0,
+                Bandwidth::Q(q),
+            );
+            let centre = magnitude_db_at(&coeffs, freq as f64, SR_F64);
+            assert!(
+                centre < -60.0,
+                "notch at {freq} Hz Q={q} centre {centre:.1} dB must be deep"
+            );
+            // An octave away the notch is essentially transparent.
+            let away = magnitude_db_at(&coeffs, (freq as f64) * 2.0, SR_F64);
+            if (freq as f64) * 2.0 < SR_F64 * 0.49 {
+                assert!(
+                    away.abs() < 1.0,
+                    "notch at {freq} Hz must be near unity an octave away, got {away:.2} dB"
+                );
+            }
+        }
+    }
+
     #[test]
     fn invalid_parameters_never_produce_non_finite_coefficients() {
         for width in [
