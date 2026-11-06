@@ -106,10 +106,28 @@ pub fn on_fill(fill: Color32) -> Color32 {
     }
 }
 
-/// Parse a `#RRGGBB` or `#RRGGBBAA` hex colour string.
+/// Parse a `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA` hex colour string.
 pub fn parse_hex_color(hex: &str) -> Option<Color32> {
     let hex = hex.trim().strip_prefix('#').unwrap_or(hex.trim());
     match hex.len() {
+        3 => {
+            let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
+            let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
+            let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
+            Some(Color32::from_rgb(r * 17, g * 17, b * 17))
+        }
+        4 => {
+            let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
+            let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
+            let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
+            let a = u8::from_str_radix(&hex[3..4], 16).ok()?;
+            Some(Color32::from_rgba_unmultiplied(
+                r * 17,
+                g * 17,
+                b * 17,
+                a * 17,
+            ))
+        }
         6 => {
             let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
             let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
@@ -124,6 +142,207 @@ pub fn parse_hex_color(hex: &str) -> Option<Color32> {
             Some(Color32::from_rgba_unmultiplied(r, g, b, a))
         }
         _ => None,
+    }
+}
+
+/// Convert HSL (h: 0..=360, s: 0..=1, l: 0..=1) to RGB (0..=255).
+pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    let h = ((h % 360.0) + 360.0) % 360.0;
+    let s = s.clamp(0.0, 1.0);
+    let l = l.clamp(0.0, 1.0);
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let h_prime = h / 60.0;
+    let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = if h_prime < 1.0 {
+        (c, x, 0.0)
+    } else if h_prime < 2.0 {
+        (x, c, 0.0)
+    } else if h_prime < 3.0 {
+        (0.0, c, x)
+    } else if h_prime < 4.0 {
+        (0.0, x, c)
+    } else if h_prime < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    let m = l - c / 2.0;
+    (
+        ((r1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((g1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((b1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
+}
+
+/// Convert RGB (0..=255) to HSL (h: 0..=360, s: 0..=1, l: 0..=1).
+pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let l = (max + min) / 2.0;
+    if delta.abs() < 1e-5 {
+        return (0.0, 0.0, l);
+    }
+    let s = if l > 0.5 {
+        delta / (2.0 - max - min)
+    } else {
+        delta / (max + min)
+    };
+    let h = if (max - r).abs() < 1e-5 {
+        ((g - b) / delta + if g < b { 6.0 } else { 0.0 }) * 60.0
+    } else if (max - g).abs() < 1e-5 {
+        ((b - r) / delta + 2.0) * 60.0
+    } else {
+        ((r - g) / delta + 4.0) * 60.0
+    };
+    (h, s, l)
+}
+
+/// Parse any standard color format:
+/// - Hex: `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`
+/// - RGB: `rgb(r, g, b)`, `rgba(r, g, b, a)`
+/// - HSL: `hsl(h, s, l)`, `hsla(h, s, l, a)`
+pub fn parse_color_code(input: &str) -> Option<Color32> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Try hex first
+    if let Some(c) = parse_hex_color(trimmed) {
+        return Some(c);
+    }
+
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("rgb(") || lower.starts_with("rgba(") {
+        let inside = lower
+            .trim_start_matches("rgba(")
+            .trim_start_matches("rgb(")
+            .trim_end_matches(')')
+            .trim();
+        let parts: Vec<&str> = inside
+            .split([',', '/', ' '])
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if parts.len() >= 3 {
+            let parse_channel = |s: &str| -> Option<u8> {
+                if let Some(pct) = s.strip_suffix('%') {
+                    let v: f32 = pct.parse().ok()?;
+                    Some(((v / 100.0) * 255.0).round().clamp(0.0, 255.0) as u8)
+                } else {
+                    let v: f32 = s.parse().ok()?;
+                    Some(v.round().clamp(0.0, 255.0) as u8)
+                }
+            };
+            let r = parse_channel(parts[0])?;
+            let g = parse_channel(parts[1])?;
+            let b = parse_channel(parts[2])?;
+            let a = if parts.len() >= 4 {
+                let s = parts[3];
+                if let Some(pct) = s.strip_suffix('%') {
+                    let v: f32 = pct.parse().ok()?;
+                    ((v / 100.0) * 255.0).round().clamp(0.0, 255.0) as u8
+                } else {
+                    let v: f32 = s.parse().ok()?;
+                    if v <= 1.0 {
+                        (v * 255.0).round().clamp(0.0, 255.0) as u8
+                    } else {
+                        v.round().clamp(0.0, 255.0) as u8
+                    }
+                }
+            } else {
+                255
+            };
+            return Some(Color32::from_rgba_unmultiplied(r, g, b, a));
+        }
+    } else if lower.starts_with("hsl(") || lower.starts_with("hsla(") {
+        let inside = lower
+            .trim_start_matches("hsla(")
+            .trim_start_matches("hsl(")
+            .trim_end_matches(')')
+            .trim();
+        let parts: Vec<&str> = inside
+            .split([',', '/', ' '])
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if parts.len() >= 3 {
+            let h: f32 = parts[0].trim_end_matches("deg").parse().ok()?;
+            let s: f32 = if let Some(pct) = parts[1].strip_suffix('%') {
+                pct.parse::<f32>().ok()? / 100.0
+            } else {
+                let v: f32 = parts[1].parse().ok()?;
+                if v > 1.0 {
+                    v / 100.0
+                } else {
+                    v
+                }
+            };
+            let l: f32 = if let Some(pct) = parts[2].strip_suffix('%') {
+                pct.parse::<f32>().ok()? / 100.0
+            } else {
+                let v: f32 = parts[2].parse().ok()?;
+                if v > 1.0 {
+                    v / 100.0
+                } else {
+                    v
+                }
+            };
+            let a = if parts.len() >= 4 {
+                let s = parts[3];
+                if let Some(pct) = s.strip_suffix('%') {
+                    let v: f32 = pct.parse().ok()?;
+                    ((v / 100.0) * 255.0).round().clamp(0.0, 255.0) as u8
+                } else {
+                    let v: f32 = s.parse().ok()?;
+                    if v <= 1.0 {
+                        (v * 255.0).round().clamp(0.0, 255.0) as u8
+                    } else {
+                        v.round().clamp(0.0, 255.0) as u8
+                    }
+                }
+            } else {
+                255
+            };
+            let (r, g, b) = hsl_to_rgb(h, s, l);
+            return Some(Color32::from_rgba_unmultiplied(r, g, b, a));
+        }
+    }
+
+    None
+}
+
+/// Format a `Color32` into a `rgb(r, g, b)` or `rgba(r, g, b, a)` string.
+pub fn format_rgb_color(color: Color32) -> String {
+    if color.a() == 255 {
+        format!("rgb({}, {}, {})", color.r(), color.g(), color.b())
+    } else {
+        format!(
+            "rgba({}, {}, {}, {:.2})",
+            color.r(),
+            color.g(),
+            color.b(),
+            color.a() as f32 / 255.0
+        )
+    }
+}
+
+/// Format a `Color32` into a `hsl(h, s%, l%)` or `hsla(h, s%, l%, a)` string.
+pub fn format_hsl_color(color: Color32) -> String {
+    let (h, s, l) = rgb_to_hsl(color.r(), color.g(), color.b());
+    if color.a() == 255 {
+        format!("hsl({:.0}, {:.0}%, {:.0}%)", h, s * 100.0, l * 100.0)
+    } else {
+        format!(
+            "hsla({:.0}, {:.0}%, {:.0}%, {:.2})",
+            h,
+            s * 100.0,
+            l * 100.0,
+            color.a() as f32 / 255.0
+        )
     }
 }
 
@@ -535,5 +754,29 @@ mod tests {
             on_fill(Color32::from_rgb(250, 204, 21)),
             Color32::from_rgb(15, 23, 42)
         );
+    }
+
+    #[test]
+    fn parse_color_code_supports_hex_rgb_hsl() {
+        assert_eq!(
+            super::parse_color_code("#fff"),
+            Some(Color32::from_rgb(255, 255, 255))
+        );
+        assert_eq!(
+            super::parse_color_code("#38BDF8"),
+            Some(Color32::from_rgb(0x38, 0xBD, 0xF8))
+        );
+        assert_eq!(
+            super::parse_color_code("rgb(56, 189, 248)"),
+            Some(Color32::from_rgb(56, 189, 248))
+        );
+        assert_eq!(
+            super::parse_color_code("rgba(56, 189, 248, 1.0)"),
+            Some(Color32::from_rgba_unmultiplied(56, 189, 248, 255))
+        );
+        let hsl_red = super::parse_color_code("hsl(0, 100%, 50%)").unwrap();
+        assert_eq!(hsl_red, Color32::from_rgb(255, 0, 0));
+        let hsl_blue = super::parse_color_code("hsl(240, 100%, 50%)").unwrap();
+        assert_eq!(hsl_blue, Color32::from_rgb(0, 0, 255));
     }
 }

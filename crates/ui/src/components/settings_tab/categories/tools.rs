@@ -36,7 +36,7 @@ pub(in crate::components::settings_tab) fn render_tools_category(
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.capture_path)
                     .hint_text(tr!(Msg::S4DB11DCD6DB5E805))
-                    .desired_width(180.0)
+                    .desired_width(260.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
             },
@@ -50,7 +50,7 @@ pub(in crate::components::settings_tab) fn render_tools_category(
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.capture_device)
                     .hint_text(tr!(Msg::S6D98136CAD659CFD))
-                    .desired_width(180.0)
+                    .desired_width(260.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
             },
@@ -116,7 +116,7 @@ pub(in crate::components::settings_tab) fn render_tools_category(
             |ui| {
                 let edit = egui::TextEdit::singleline(&mut state.loudness_tag_path)
                     .hint_text(tr!("/path/to/song.flac…"))
-                    .desired_width(180.0)
+                    .desired_width(260.0)
                     .font(crate::theme::font(12.0));
                 ui.add(edit);
                 if ui

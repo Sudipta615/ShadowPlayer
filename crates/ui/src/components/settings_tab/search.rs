@@ -111,7 +111,7 @@ pub(super) fn render_settings_search_results(
                 let frame = egui::Frame::NONE
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.border_subtle))
-                    .corner_radius(CornerRadius::same(theme.radius_md))
+                    .corner_radius(CornerRadius::same(theme.radius_lg))
                     .inner_margin(egui::Margin::symmetric(
                         theme.space_xl as i8,
                         theme.space_md as i8,
@@ -119,40 +119,62 @@ pub(super) fn render_settings_search_results(
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(label)
-                                    .font(crate::theme::font(12.5))
-                                    .strong()
-                                    .color(theme.text_primary),
+                            ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+
+                            // Category icon chip
+                            let (icon_rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
+                            ui.painter().rect_filled(
+                                icon_rect,
+                                CornerRadius::same(theme.radius_sm),
+                                theme.bg_pill,
                             );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
+                            category.draw_icon(ui, icon_rect.shrink(5.0), theme.accent_highlight);
+
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+
+                                ui.horizontal(|ui| {
                                     ui.label(
-                                        egui::RichText::new(category.title())
-                                            .font(crate::theme::mono_font(10.0))
-                                            .color(theme.text_muted),
+                                        egui::RichText::new(label)
+                                            .font(crate::theme::font(13.0))
+                                            .strong()
+                                            .color(theme.text_primary),
                                     );
-                                },
-                            );
-                        });
-                        ui.label(
-                            egui::RichText::new(location)
-                                .font(crate::theme::font(11.0))
-                                .color(theme.text_secondary),
-                        );
-                        if let Some(description) = description {
-                            if !description.is_empty() {
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(description)
-                                            .font(crate::theme::font(10.5))
-                                            .color(theme.text_dim),
-                                    )
-                                    .truncate(),
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                egui::RichText::new("Jump ➔")
+                                                    .font(crate::theme::font(10.5))
+                                                    .color(theme.accent),
+                                            );
+                                        },
+                                    );
+                                });
+
+                                // Context Breadcrumb: Category > Card Section
+                                let breadcrumb = format!("{}  ›  {}", category.title(), location);
+                                ui.label(
+                                    egui::RichText::new(breadcrumb)
+                                        .font(crate::theme::font(10.8))
+                                        .color(theme.text_secondary),
                                 );
-                            }
-                        }
+
+                                if let Some(description) = description {
+                                    if !description.is_empty() {
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(description)
+                                                    .font(crate::theme::font(10.5))
+                                                    .color(theme.text_dim),
+                                            )
+                                            .truncate(),
+                                        );
+                                    }
+                                }
+                            });
+                        });
                     });
 
                 let response = frame.response.interact(Sense::click());

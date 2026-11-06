@@ -75,14 +75,14 @@ fn render_limiter_card(
             .color(theme.text_secondary),
         );
 
-        // Mode
+        // Mode — label on its own row so the five pills have room to breathe.
+        ui.label(
+            egui::RichText::new(tr!("Limiter mode"))
+                .font(crate::theme::font(10.5))
+                .color(theme.text_muted),
+        );
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, 0.0);
-            ui.label(
-                egui::RichText::new(tr!("Limiter mode"))
-                    .font(crate::theme::font(11.0))
-                    .color(theme.text_muted),
-            );
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xs, theme.space_xxs);
             for (mode, label) in [
                 (LimiterMode::Transparent, tr!("Transparent")),
                 (LimiterMode::Saturate, tr!("Saturate")),
@@ -291,11 +291,22 @@ fn toggle_row(
     mut on_changed: impl FnMut(bool),
 ) {
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(label)
-                .font(crate::theme::font(11.5))
-                .color(theme.text_secondary),
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+
+        // Fixed label column matching slider_row so toggle and slider rows
+        // share the same left-aligned label column.
+        ui.allocate_ui_with_layout(
+            Vec2::new(SLIDER_LABEL_W, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .font(crate::theme::font(11.0))
+                        .color(theme.text_secondary),
+                );
+            },
         );
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if custom_toggle_switch(ui, value, label, theme) {
                 on_changed(*value);
@@ -303,6 +314,11 @@ fn toggle_row(
         });
     });
 }
+
+/// A labelled slider row with a fixed label column so all sliders within a
+/// card start at the same x position regardless of label length.
+const SLIDER_LABEL_W: f32 = 90.0;
+const SLIDER_READOUT_W: f32 = 56.0;
 
 #[allow(clippy::too_many_arguments)]
 fn slider_row(
@@ -316,27 +332,45 @@ fn slider_row(
     mut on_changed: impl FnMut(),
 ) {
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(label)
-                .font(crate::theme::font(11.0))
-                .color(theme.text_secondary),
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+
+        // Fixed-width label column — all sliders align at the same left edge.
+        ui.allocate_ui_with_layout(
+            Vec2::new(SLIDER_LABEL_W, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .font(crate::theme::font(11.0))
+                        .color(theme.text_secondary),
+                );
+            },
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(format(*value))
-                    .font(crate::theme::font(10.5))
-                    .color(theme.text_muted),
-            );
-            let width = (ui.available_width() - 8.0).max(80.0);
-            ui.allocate_ui_with_layout(
-                Vec2::new(width, 18.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    if gradient_horizontal_slider(ui, value, range, default, theme) {
-                        on_changed();
-                    }
-                },
-            );
-        });
+
+        // Slider fills the remaining space minus a fixed readout column.
+        let readout_text = format(*value);
+        let slider_w = (ui.available_width() - SLIDER_READOUT_W - theme.space_sm).max(60.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(slider_w, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                if gradient_horizontal_slider(ui, value, range, default, theme) {
+                    on_changed();
+                }
+            },
+        );
+
+        // Right-aligned readout in its own fixed column.
+        ui.allocate_ui_with_layout(
+            Vec2::new(SLIDER_READOUT_W, 18.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(readout_text)
+                        .font(crate::theme::font(10.5))
+                        .color(theme.text_muted),
+                );
+            },
+        );
     });
 }

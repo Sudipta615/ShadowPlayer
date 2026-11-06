@@ -108,14 +108,21 @@ fn render_correction_card(
         );
 
         ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(tr!("Impulse response file"))
-                    .font(crate::theme::font(11.0))
-                    .color(theme.text_secondary),
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(LABEL_W, 18.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.label(
+                        egui::RichText::new(tr!("Impulse response file"))
+                            .font(crate::theme::font(11.0))
+                            .color(theme.text_secondary),
+                    );
+                },
             );
             ui.add(
                 egui::TextEdit::singleline(&mut state.correction_ir_path)
-                    .desired_width((ui.available_width() - 100.0).max(120.0))
+                    .desired_width((ui.available_width() - 90.0).max(120.0))
                     .hint_text(tr!("Path to .wav IR")),
             );
             if ui.button(tr!("Load IR…")).clicked() {
@@ -176,6 +183,9 @@ fn card(ui: &mut egui::Ui, theme: &Theme, add_contents: impl FnOnce(&mut egui::U
         });
 }
 
+const LABEL_W: f32 = 135.0;
+const READOUT_W: f32 = 56.0;
+
 #[allow(clippy::too_many_arguments)]
 fn slider_row(
     ui: &mut egui::Ui,
@@ -188,27 +198,45 @@ fn slider_row(
     mut on_changed: impl FnMut(f32),
 ) {
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(label)
-                .font(crate::theme::font(11.0))
-                .color(theme.text_secondary),
+        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
+
+        // Fixed-width label column matching file-loader row for vertical alignment.
+        ui.allocate_ui_with_layout(
+            Vec2::new(LABEL_W, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .font(crate::theme::font(11.0))
+                        .color(theme.text_secondary),
+                );
+            },
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(format(*value))
-                    .font(crate::theme::font(10.5))
-                    .color(theme.text_muted),
-            );
-            let width = (ui.available_width() - 8.0).max(80.0);
-            ui.allocate_ui_with_layout(
-                Vec2::new(width, 18.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    if gradient_horizontal_slider(ui, value, range, default, theme) {
-                        on_changed(*value);
-                    }
-                },
-            );
-        });
+
+        // Slider fills the space between label and readout.
+        let readout_text = format(*value);
+        let slider_w = (ui.available_width() - READOUT_W - theme.space_sm).max(60.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(slider_w, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                if gradient_horizontal_slider(ui, value, range, default, theme) {
+                    on_changed(*value);
+                }
+            },
+        );
+
+        // Fixed readout column.
+        ui.allocate_ui_with_layout(
+            Vec2::new(READOUT_W, 18.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(readout_text)
+                        .font(crate::theme::font(10.5))
+                        .color(theme.text_muted),
+                );
+            },
+        );
     });
 }

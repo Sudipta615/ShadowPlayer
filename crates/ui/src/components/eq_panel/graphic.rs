@@ -62,6 +62,11 @@ pub(super) fn render_graphic_eq_tab(
             );
         });
 
+        // Subtle divider separating band topology chips from preset management.
+        ui.add_space(theme.space_xxs);
+        ui.separator();
+        ui.add_space(theme.space_xxs);
+
         // ── Presets, save, and curve import/export ───────────────────────────────
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, theme.space_xs);
@@ -117,6 +122,7 @@ pub(super) fn render_graphic_eq_tab(
                             let is_sel = state.selected_preset == preset
                                 && state.selected_custom_preset_idx.is_none();
                             if ui.selectable_label(is_sel, preset.name()).clicked() {
+                                state.push_undo();
                                 state.selected_preset = preset;
                                 state.selected_custom_preset_idx = None;
                                 apply_active_preset(state, actions);
@@ -137,6 +143,7 @@ pub(super) fn render_graphic_eq_tab(
                                     ui.selectable_label(is_sel, &cp.name).clicked()
                                 };
                                 if clicked {
+                                    state.push_undo();
                                     state.selected_preset = EqPreset::Custom;
                                     state.selected_custom_preset_idx = Some(idx);
                                     apply_active_preset(state, actions);
@@ -145,6 +152,27 @@ pub(super) fn render_graphic_eq_tab(
                         }
                     });
             });
+
+            // Quick 1-click popular preset chips
+            for &(preset, lbl) in &[
+                (EqPreset::Flat, "Flat"),
+                (EqPreset::BassBoost, "Bass+"),
+                (EqPreset::VocalBoost, "Vocal"),
+                (EqPreset::TrebleBoost, "Treble+"),
+            ] {
+                let is_sel =
+                    state.selected_preset == preset && state.selected_custom_preset_idx.is_none();
+                if super::controls::choice_pill(ui, lbl, is_sel, theme.accent_warm, theme)
+                    .on_hover_text(format!("One-click {} preset", preset.name()))
+                    .clicked()
+                    && !is_sel
+                {
+                    state.push_undo();
+                    state.selected_preset = preset;
+                    state.selected_custom_preset_idx = None;
+                    apply_active_preset(state, actions);
+                }
+            }
 
             let save_btn = egui::Button::new(
                 egui::RichText::new(tr!("Save"))
@@ -275,13 +303,12 @@ pub(super) fn render_graphic_eq_tab(
         }
     });
 
-    // ── Preamp before the canvas ─────────────────────────────────────────────
-    // The shared preamp is the level control for the curve that follows. It
-    // used to sit after a canvas that could grow to 500 px, which pushed it
-    // below the fold in the default window. Keeping it above the canvas makes
-    // the control visible on open, and the canvas below now has a firm cap.
-    render_footer_controls(ui, state, actions, theme, EqTab::Graphic);
-
     // ── Spline Canvas with Vertical Stems & Interactive Curve ────────────────
     render_spline_eq_canvas(ui, state, actions, theme);
+
+    // ── Bottom Controls: Preamp + Tab-Specific Reset ─────────────────────────
+    // Placed at the bottom for consistency with all other EQ tabs. The canvas
+    // is clamped to 280 px max, so the footer remains accessible in the default
+    // window without hiding behind an oversized plot.
+    render_footer_controls(ui, state, actions, theme, EqTab::Graphic);
 }

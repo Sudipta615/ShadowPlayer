@@ -52,6 +52,10 @@ pub struct ThemeEditorState {
     pub play_button_shape: PlayButtonShape,
     pub fonts: ThemeFonts,
     pub status_message: Option<(String, bool)>, // (message, is_error)
+    /// Currently selected token in the Color Studio (e.g. "accent", "bg_app").
+    pub selected_token: Option<String>,
+    /// Scratch buffer for typing hex, rgb, or hsl color codes.
+    pub color_code_text: String,
     saved: EditorSnapshot,
     pub(super) pending_overwrite: bool,
     pub(super) pending_action: Option<PendingAction>,
@@ -71,6 +75,8 @@ impl Default for ThemeEditorState {
             play_button_shape: PlayButtonShape::Circle,
             fonts: ThemeFonts::default(),
             status_message: None,
+            selected_token: Some("accent".to_string()),
+            color_code_text: String::new(),
             saved: EditorSnapshot::default(),
             pending_overwrite: false,
             pending_action: None,
@@ -103,6 +109,31 @@ impl ThemeEditorState {
         self.radii.insert("radius_xl".into(), theme.radius_xl);
         self.radii.insert("radius_pill".into(), theme.radius_pill);
         self.play_button_shape = theme.play_button_shape;
+        if self.selected_token.is_none() {
+            self.selected_token = Some("accent".to_string());
+        }
+        if let Some(ref t) = self.selected_token {
+            if let Some(col) = self.colors.get(t) {
+                self.color_code_text = format_hex_color(*col);
+            }
+        }
+    }
+
+    /// Select an active token for the Color Studio and sync the text buffer.
+    pub fn select_token(&mut self, token: &str) {
+        self.selected_token = Some(token.to_string());
+        if let Some(color) = self.colors.get(token) {
+            self.color_code_text = format_hex_color(*color);
+        }
+    }
+
+    /// Update the colour of the currently selected token.
+    pub fn set_selected_token_color(&mut self, new_color: Color32) {
+        if let Some(ref token) = self.selected_token {
+            if let Some(color) = self.colors.get_mut(token) {
+                *color = new_color;
+            }
+        }
     }
 
     fn snapshot(&self) -> EditorSnapshot {

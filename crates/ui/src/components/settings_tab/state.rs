@@ -19,6 +19,17 @@ use std::path::PathBuf;
 // State
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Experience persona mode for the Settings view:
+/// - `Standard`: Curated high-fidelity playback, device selection, library, and appearance.
+/// - `ProStudio`: Full mastering laboratory including spatial 3D radar, matrix FIR routing,
+///   multitrack mix bus, DSD modulators, and batch utilities.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
+pub enum SettingsViewMode {
+    #[default]
+    Standard,
+    ProStudio,
+}
+
 /// Everything the settings panel needs to remember between launches.
 ///
 /// Serde lives **on this struct** rather than on a hand-written mirror. The
@@ -31,6 +42,7 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct SettingsTabState {
     pub active_category: SettingsCategory,
+    pub view_mode: SettingsViewMode,
 
     /// The Settings search box. Scratch state: a query is not a preference.
     #[serde(skip)]
@@ -251,6 +263,7 @@ impl Default for SettingsTabState {
     fn default() -> Self {
         Self {
             active_category: SettingsCategory::Playback,
+            view_mode: SettingsViewMode::Standard,
             search_query: String::new(),
 
             speed: 1.0,
@@ -649,5 +662,19 @@ mod tests {
         assert_eq!(back.resampler_cutoff_ratio, 0.87);
         assert_eq!(back.dac_warmup_ms, 120);
         assert_eq!(back.allowed_sample_rates, vec![44_100, 96_000]);
+    }
+
+    #[test]
+    fn settings_view_mode_round_trips_and_defaults_to_standard() {
+        let state: SettingsTabState = serde_json::from_str("{}").expect("default settings");
+        assert_eq!(state.view_mode, SettingsViewMode::Standard);
+
+        let pro_state = SettingsTabState {
+            view_mode: SettingsViewMode::ProStudio,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&pro_state).unwrap();
+        let back: SettingsTabState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.view_mode, SettingsViewMode::ProStudio);
     }
 }

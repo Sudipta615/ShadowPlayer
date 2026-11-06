@@ -17,6 +17,42 @@ pub enum SettingsCategory {
     Appearance,
 }
 
+/// Logical semantic groups for settings categories in the navigation rail:
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CategoryGroup {
+    PlaybackAndHardware,
+    AudioLabAndDsp,
+    Utilities,
+    SystemAndInterface,
+}
+
+impl CategoryGroup {
+    pub const ALL: [CategoryGroup; 4] = [
+        CategoryGroup::PlaybackAndHardware,
+        CategoryGroup::AudioLabAndDsp,
+        CategoryGroup::Utilities,
+        CategoryGroup::SystemAndInterface,
+    ];
+
+    pub fn title(&self) -> &'static str {
+        match self {
+            Self::PlaybackAndHardware => "PLAYBACK & HARDWARE",
+            Self::AudioLabAndDsp => "STUDIO LAB & DSP",
+            Self::Utilities => "UTILITIES & MEDIA",
+            Self::SystemAndInterface => "SYSTEM & INTERFACE",
+        }
+    }
+
+    pub fn categories(&self) -> &'static [SettingsCategory] {
+        match self {
+            Self::PlaybackAndHardware => &[SettingsCategory::Playback, SettingsCategory::Output],
+            Self::AudioLabAndDsp => &[SettingsCategory::Spatial, SettingsCategory::MixBus],
+            Self::Utilities => &[SettingsCategory::Tools, SettingsCategory::Converter],
+            Self::SystemAndInterface => &[SettingsCategory::Library, SettingsCategory::Appearance],
+        }
+    }
+}
+
 impl SettingsCategory {
     pub const ALL: [SettingsCategory; 8] = [
         SettingsCategory::Playback,
@@ -39,6 +75,32 @@ impl SettingsCategory {
             Self::Converter => "File Converter",
             Self::Library => "Library & App",
             Self::Appearance => "Themes & Appearance",
+        }
+    }
+
+    pub fn group(&self) -> CategoryGroup {
+        match self {
+            Self::Playback | Self::Output => CategoryGroup::PlaybackAndHardware,
+            Self::Spatial | Self::MixBus => CategoryGroup::AudioLabAndDsp,
+            Self::Tools | Self::Converter => CategoryGroup::Utilities,
+            Self::Library | Self::Appearance => CategoryGroup::SystemAndInterface,
+        }
+    }
+
+    pub fn is_pro(&self) -> bool {
+        matches!(self, Self::Spatial | Self::MixBus | Self::Converter)
+    }
+
+    pub fn subtitle(&self) -> &'static str {
+        match self {
+            Self::Playback => "Speed, transitions & loudness",
+            Self::Output => "Audio backend, device & DAC",
+            Self::Spatial => "3D soundstage, radar & HRTF",
+            Self::MixBus => "Multitrack, sidechain & routing",
+            Self::Tools => "Capture, recovery & CD ripper",
+            Self::Converter => "Batch encoding & formatting",
+            Self::Library => "Music folders & scan rules",
+            Self::Appearance => "Themes, scale & styling",
         }
     }
 

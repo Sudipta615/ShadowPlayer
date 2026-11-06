@@ -380,23 +380,25 @@ impl<'a> NowPlayingCard<'a> {
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             let avail_w = ui.available_width();
-                            // The right-hand group (the EQ and sleep-timer
-                            // buttons) is a fixed 68 px; the transport group
-                            // takes what is left. The padding is what centres
-                            // the transport group in the space between the
-                            // artwork and the right-hand group, and it
-                            // shrinks rather than letting the row overlap.
-                            let right_group_w = 68.0;
-                            let transport_w = (avail_w - right_group_w).max(120.0);
-                            let left_pad = ((transport_w - 210.0) / 2.0).max(0.0);
-                            ui.add_space(left_pad);
-                            let gap = if avail_w < 380.0 {
-                                8.0
+                            // Right-hand utility cluster: 5 buttons (EQ, Signal Path,
+                            // Zones, Loudness, Sleep Timer), each 28 px wide with 6 px gap.
+                            let right_btn_w = 28.0;
+                            let right_btn_gap = 6.0;
+                            let right_group_w = (5.0 * right_btn_w) + (4.0 * right_btn_gap);
+                            let play_size = (art_size.x * 0.30).clamp(32.0, 44.0);
+                            let gap = if avail_w < 440.0 {
+                                6.0
                             } else if compact {
-                                12.0
+                                10.0
                             } else {
-                                20.0
+                                16.0
                             };
+                            let transport_content_w =
+                                22.0 + 24.0 + play_size + 24.0 + 22.0 + (gap * 4.0);
+                            let transport_avail = (avail_w - right_group_w - self.theme.space_md)
+                                .max(transport_content_w);
+                            let left_pad = ((transport_avail - transport_content_w) / 2.0).max(0.0);
+                            ui.add_space(left_pad);
                             ui.spacing_mut().item_spacing = Vec2::new(gap, 0.0);
 
                             // Shuffle Button
@@ -452,7 +454,6 @@ impl<'a> NowPlayingCard<'a> {
                             // Play/Pause: one shared control so every theme's
                             // silhouette (circle, rounded, pill, square) is
                             // honoured here as well as in the mini/full views.
-                            let play_size = (art_size.x * 0.30).clamp(32.0, 48.0);
                             let play_resp = crate::components::play_button::play_button(
                                 ui,
                                 play_size,
@@ -521,17 +522,20 @@ impl<'a> NowPlayingCard<'a> {
                                 events.toggle_repeat = true;
                             }
 
-                            // EQ Panel Button - RIGHT ALIGNED
+                            // Utility Buttons (EQ, Audio Path, Zones, Loudness, Timer) - RIGHT ALIGNED
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
+                                    ui.spacing_mut().item_spacing = Vec2::new(right_btn_gap, 0.0);
+
+                                    // 1. EQ Panel Button
                                     let (eq_slot, eq_resp) = ui.allocate_exact_size(
-                                        Vec2::new(28.0, row_h),
+                                        Vec2::new(right_btn_w, row_h),
                                         Sense::click(),
                                     );
                                     let eq_rect = Rect::from_center_size(
                                         eq_slot.center(),
-                                        Vec2::new(28.0, 28.0),
+                                        Vec2::new(26.0, 26.0),
                                     );
                                     let ep = ui.painter_at(eq_rect);
                                     let is_active = self.is_eq_open;
@@ -563,7 +567,7 @@ impl<'a> NowPlayingCard<'a> {
                                         Stroke::new(1.0_f32, border_color),
                                         egui::StrokeKind::Inside,
                                     );
-                                    let icon_rect = eq_rect.shrink2(Vec2::new(4.0, 4.0));
+                                    let icon_rect = eq_rect.shrink2(Vec2::new(3.5, 3.5));
                                     crate::components::icons::draw_equalizer_sliders(
                                         ui, icon_rect, icon_color,
                                     );
@@ -582,9 +586,9 @@ impl<'a> NowPlayingCard<'a> {
                                         events.open_eq_panel = true;
                                     }
 
-                                    // Audio Path / Bit-Perfect Inspector Button
+                                    // 2. Audio Path / Bit-Perfect Inspector Button
                                     let (ap_slot, ap_resp) = ui.allocate_exact_size(
-                                        Vec2::new(30.0, row_h),
+                                        Vec2::new(right_btn_w, row_h),
                                         Sense::click(),
                                     );
                                     let ap_rect = Rect::from_center_size(
@@ -623,9 +627,9 @@ impl<'a> NowPlayingCard<'a> {
                                         events.open_bit_perfect = true;
                                     }
 
-                                    // Audio Zones & Multi-Room Hub Button
+                                    // 3. Audio Zones & Multi-Room Hub Button
                                     let (zone_slot, zone_resp) = ui.allocate_exact_size(
-                                        Vec2::new(30.0, row_h),
+                                        Vec2::new(right_btn_w, row_h),
                                         Sense::click(),
                                     );
                                     let zone_rect = Rect::from_center_size(
@@ -647,18 +651,26 @@ impl<'a> NowPlayingCard<'a> {
                                         events.open_zones = true;
                                     }
 
-                                    // Loudness Inspector Button
+                                    // 4. Loudness Inspector Button
                                     let (ld_slot, ld_resp) = ui.allocate_exact_size(
-                                        Vec2::new(30.0, row_h),
+                                        Vec2::new(right_btn_w, row_h),
                                         Sense::click(),
                                     );
                                     let ld_rect = Rect::from_center_size(
                                         ld_slot.center(),
-                                        Vec2::new(22.0, 22.0),
+                                        Vec2::new(26.0, 26.0),
                                     );
+                                    let ld_p = ui.painter_at(ld_rect);
+                                    let ld_bg = if ld_resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else {
+                                        self.theme.bg_pill
+                                    };
+                                    ld_p.rect_filled(ld_rect, CornerRadius::same(self.theme.radius_sm), ld_bg);
+                                    ld_p.rect_stroke(ld_rect, CornerRadius::same(self.theme.radius_sm), Stroke::new(1.0_f32, self.theme.border_subtle), egui::StrokeKind::Inside);
                                     crate::components::icons::draw_bar_chart(
                                         ui,
-                                        ld_rect,
+                                        ld_rect.shrink2(Vec2::new(3.0, 3.0)),
                                         self.theme.text_secondary,
                                     );
                                     ld_resp.widget_info(|| {
@@ -675,14 +687,14 @@ impl<'a> NowPlayingCard<'a> {
                                         events.open_loudness = true;
                                     }
 
-                                    // Sleep Timer Button (with a small preset popup)
+                                    // 5. Sleep Timer Button (with preset popup)
                                     let (tm_slot, tm_resp) = ui.allocate_exact_size(
-                                        Vec2::new(30.0, row_h),
+                                        Vec2::new(right_btn_w, row_h),
                                         Sense::click(),
                                     );
                                     let tm_rect = Rect::from_center_size(
                                         tm_slot.center(),
-                                        Vec2::new(22.0, 22.0),
+                                        Vec2::new(26.0, 26.0),
                                     );
                                     let timer_active = self.sleep_timer_label.is_some();
                                     let tm_icon_col = if timer_active {
@@ -690,7 +702,22 @@ impl<'a> NowPlayingCard<'a> {
                                     } else {
                                         self.theme.text_secondary
                                     };
-                                    crate::components::icons::draw_clock(ui, tm_rect, tm_icon_col);
+                                    let tm_p = ui.painter_at(tm_rect);
+                                    let tm_bg = if tm_resp.hovered() {
+                                        self.theme.bg_card_hover
+                                    } else if timer_active {
+                                        self.theme.accent_warm.linear_multiply(0.18)
+                                    } else {
+                                        self.theme.bg_pill
+                                    };
+                                    let tm_border = if timer_active {
+                                        self.theme.accent_warm
+                                    } else {
+                                        self.theme.border_subtle
+                                    };
+                                    tm_p.rect_filled(tm_rect, CornerRadius::same(self.theme.radius_sm), tm_bg);
+                                    tm_p.rect_stroke(tm_rect, CornerRadius::same(self.theme.radius_sm), Stroke::new(1.0_f32, tm_border), egui::StrokeKind::Inside);
+                                    crate::components::icons::draw_clock(ui, tm_rect.shrink2(Vec2::new(3.0, 3.0)), tm_icon_col);
 
                                     let menu_id = ui.make_persistent_id("sleep_timer_menu");
                                     let mut menu_open =

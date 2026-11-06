@@ -370,18 +370,53 @@ pub(super) fn render_slider_card(
 
                 // Row 3: Gradient Slider
                 ui.add_space(2.0);
-                if gradient_horizontal_slider(ui, value, range, default_val, theme) {
+                if gradient_horizontal_slider(ui, value, range.clone(), default_val, theme) {
                     on_changed(*value);
                 }
 
-                // Row 4: Numeric Readout Centered Below Slider
+                // Row 4: Numeric Readout Centered Below Slider (Click to type exact value)
                 ui.add_space(1.0);
                 ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(format_val(*value))
-                            .font(crate::theme::font(12.0))
-                            .color(theme.text_secondary),
-                    );
+                    let id = ui.make_persistent_id(title).with("slider_num_edit");
+                    let is_editing =
+                        ui.data(|d| d.get_temp::<bool>(id.with("editing")).unwrap_or(false));
+                    if is_editing {
+                        let mut text = ui
+                            .data(|d| d.get_temp::<String>(id.with("text")))
+                            .unwrap_or_else(|| format!("{:.1}", *value));
+                        let resp = ui.add(
+                            egui::TextEdit::singleline(&mut text)
+                                .desired_width(55.0)
+                                .font(crate::theme::mono_font(11.0)),
+                        );
+                        if resp.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            if let Ok(parsed) = text.trim().parse::<f32>() {
+                                *value = parsed.clamp(*range.start(), *range.end());
+                                on_changed(*value);
+                            }
+                            ui.data_mut(|d| d.insert_temp(id.with("editing"), false));
+                        } else {
+                            ui.data_mut(|d| d.insert_temp(id.with("text"), text));
+                        }
+                    } else {
+                        let resp = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format_val(*value))
+                                    .font(crate::theme::font(12.0))
+                                    .color(theme.text_secondary),
+                            )
+                            .sense(Sense::click()),
+                        );
+                        if resp
+                            .on_hover_text("Click to type exact numeric value")
+                            .clicked()
+                        {
+                            ui.data_mut(|d| {
+                                d.insert_temp(id.with("editing"), true);
+                                d.insert_temp(id.with("text"), format!("{:.1}", *value));
+                            });
+                        }
+                    }
                 });
             });
         });

@@ -51,6 +51,16 @@ pub fn dual_tone_slider(
         }
     }
 
+    if resp.double_clicked() {
+        if range.contains(&0.0) {
+            *value = 0.0;
+            changed = true;
+        } else if range.contains(&1.0) {
+            *value = 1.0;
+            changed = true;
+        }
+    }
+
     let is_active = resp.hovered() || resp.dragged();
     let anim_t = ui.ctx().animate_bool_with_time(
         resp.id.with("dual_slider_active"),
@@ -211,12 +221,18 @@ pub fn card_header_with_info(
                                 theme.space_xxs as i8,
                             ))
                             .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(badge_text)
-                                        .font(crate::theme::font(10.5))
-                                        .strong()
-                                        .color(fg),
-                                );
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+                                    let (dot_rect, _) =
+                                        ui.allocate_exact_size(Vec2::splat(6.0), Sense::hover());
+                                    ui.painter().circle_filled(dot_rect.center(), 2.8, fg);
+                                    ui.label(
+                                        egui::RichText::new(badge_text)
+                                            .font(crate::theme::font(10.0))
+                                            .strong()
+                                            .color(fg),
+                                    );
+                                });
                             });
                     }
                 });
@@ -233,9 +249,12 @@ pub fn card_header_with_info(
 
     apply_setting_jump(title, &header_resp, header_resp.rect, ui, theme);
 
-    ui.add_space(2.0);
-    ui.separator();
-    ui.add_space(2.0);
+    ui.add_space(theme.space_xs);
+    let (sep_rect, _) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter()
+        .rect_filled(sep_rect, CornerRadius::ZERO, theme.border_subtle);
+    ui.add_space(theme.space_xs);
 }
 
 pub fn setting_item(

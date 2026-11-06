@@ -261,7 +261,7 @@ ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
 * **Opaque surfaces**: Cards, panels, and inputs are opaque theme surfaces. There is no backdrop blur pass and no artwork-driven transparency behind text, so a translucent custom theme cannot make rows unreadable while artwork changes.
 * **Reduce Motion**: **Library & App → Interface & Language → Reduce Motion** zeros the duration of hover and transition fades. Explicitly timed animations call `Theme::motion_time`, and egui's own `style.animation_time` is set to zero, so the preference reaches both the player chrome and the Settings surfaces.
 * **Custom Themes Folder (`themes/custom-theme/`)**: Custom user themes reside inside `<data_dir>/themes/custom-theme/`. The theme manager monitors this directory and loads all `.shadowtheme` and `.json` files.
-* **Bundled Custom Themes**: Thirty-two schema-v2 themes ship in `crates/ui/src/theme/custom-theme/`. They are embedded in the binary and written into `<data_dir>/themes/custom-theme/` on first launch, so a packaged build shows the same gallery as a source checkout. Existing files are never overwritten.
+* **Bundled Custom Themes**: Thirty-three schema-v2 themes ship in `crates/ui/src/theme/custom-theme/` (alongside the starter example template `example_ocean_night.shadowtheme`). They are embedded in the binary and written into `<data_dir>/themes/custom-theme/` on first launch, so a packaged build shows the same gallery as a source checkout. Existing files are never overwritten.
 
 | Theme | Mood | Mode | Typefaces |
 | :--- | :--- | :--- | :--- |
@@ -297,8 +297,9 @@ ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
 | Citrus Press | Lemon cream, burnt-orange ink, squeeze of green | Light | Bricolage / DM Sans |
 | Adobe Rose | Sun-baked clay, dusty rose, turquoise window | Light | Fraunces / DM Sans |
 | Silverprint | Cool silver, graphite type, signal-red mark | Light | Space Grotesk / Inter |
+| Smoked Glass | Frosted smoked obsidian glass, specular rims, icy glow | Dark | Inter |
 
-All thirty-two declare the full 29 required colour tokens plus the 11 optional
+All thirty-three declare the full 29 required colour tokens plus the 11 optional
 tokens, and override every radius step. The theme-level radius scale is what
 distinguishes an angular editorial theme such as *Paper & Ink* from a soft,
 pill-shaped theme such as *Lilac Air*.

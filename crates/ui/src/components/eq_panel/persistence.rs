@@ -1,6 +1,8 @@
 //! Serialisable snapshot of the EQ studio for app persistence.
 
-use super::{CrossfeedViewMode, CustomEqPreset, EqPanelState, EqPreset, EqTab, ParametricBand};
+use super::{
+    CrossfeedViewMode, CustomEqPreset, EqPanelState, EqPreset, EqTab, EqViewMode, ParametricBand,
+};
 use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,8 @@ pub struct PersistentEqState {
     pub window_pos: Option<[f32; 2]>,
     /// The last size the user dragged the studio to. `None` means the default.
     pub window_size: Option<[f32; 2]>,
+    #[serde(default)]
+    pub view_mode: EqViewMode,
     pub active_tab: EqTab,
     pub eq_enabled: bool,
     /// `None` in state written before the mode existed; `apply_to` infers it
@@ -81,6 +85,7 @@ impl From<&EqPanelState> for PersistentEqState {
             is_open: s.is_open,
             window_pos: s.window_pos,
             window_size: s.window_size,
+            view_mode: s.view_mode,
             active_tab: s.active_tab,
             eq_enabled: s.eq_enabled,
             eq_mode: Some(s.eq_mode),
@@ -146,6 +151,7 @@ impl PersistentEqState {
         state.window_size = self
             .window_size
             .filter(|[w, h]| w.is_finite() && h.is_finite() && *w > 0.0 && *h > 0.0);
+        state.view_mode = self.view_mode;
         state.active_tab = self.active_tab;
         // Before the explicit mode existed the header master was the OR of
         // the two layer flags. A persisted graphic layer that was on is

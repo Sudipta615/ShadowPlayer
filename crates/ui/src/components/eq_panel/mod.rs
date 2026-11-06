@@ -30,16 +30,20 @@ mod curve;
 mod dynamics;
 mod filters;
 mod graphic;
+mod header;
 mod parametric;
 mod persistence;
 mod preset_library;
 mod presets;
+mod quick_tune;
 mod tone;
 
 use advanced::render_advanced_tab;
 use dynamics::render_dynamics_tab;
 use filters::render_filters_tab;
 use graphic::render_graphic_eq_tab;
+use header::render_header;
+use quick_tune::render_quick_tune_view;
 use tone::render_tone_acoustics_tab;
 
 pub use actions::{EqPanelActions, PresetBindRequest, PresetSaveRequest};
@@ -49,6 +53,30 @@ pub use persistence::PersistentEqState;
 pub use controls::custom_toggle_switch;
 pub use parametric::ParametricBand;
 pub use presets::{CustomEqPreset, EqPreset};
+
+/// Studio Persona View: Quick Tune macro dashboard vs Studio Pro multi-stage mastering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EqViewMode {
+    #[default]
+    StudioPro,
+    QuickTune,
+}
+
+/// Lightweight snapshot of state for instant A/B audition comparison.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EqSnapshot {
+    pub graphic_gains: [f32; 64],
+    pub graphic_layout: GraphicEqLayout,
+    pub preamp_db: f32,
+    pub bass_shelf_db: f32,
+    pub treble_shelf_db: f32,
+    pub stereo_width: f32,
+    pub balance: f32,
+    pub crossfeed_enabled: bool,
+    pub limiter_enabled: bool,
+    pub compressor_enabled: bool,
+    pub eq_mode: EqMode,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EqTab {
@@ -85,6 +113,18 @@ pub struct EqPanelState {
     /// shrunk panel reopened at the default size and egui's content-driven
     /// auto-expansion made it look like the resize had been ignored.
     pub window_size: Option<[f32; 2]>,
+    /// Active studio persona: Quick Tune acoustic dashboard vs Studio Pro mastering.
+    pub view_mode: EqViewMode,
+    /// Whether we are currently auditioning slot A (false) or comparison slot B (true).
+    pub is_auditioning_b: bool,
+    /// Stored state for comparison slot A.
+    pub snapshot_a: Option<EqSnapshot>,
+    /// Stored state for comparison slot B.
+    pub snapshot_b: Option<EqSnapshot>,
+    /// Curve undo history buffer.
+    pub undo_stack: Vec<[f32; 64]>,
+    /// Curve redo history buffer.
+    pub redo_stack: Vec<[f32; 64]>,
 
     // Parametric (legacy / AutoEQ targets)
     /// The single master switch. The graphic and parametric layers are both
@@ -241,11 +281,105 @@ impl Default for EqPanelState {
             fx: config::FxConfig::default(),
             window_pos: None,
             window_size: None,
+            view_mode: EqViewMode::StudioPro,
+            is_auditioning_b: false,
+            snapshot_a: None,
+            snapshot_b: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 }
 
 impl EqPanelState {
+    /// Capture current audible settings as an `EqSnapshot` for comparison.
+    pub fn current_snapshot(&self) -> EqSnapshot {
+        EqSnapshot {
+            graphic_gains: self.graphic_gains,
+            graphic_layout: self.graphic_layout.clone(),
+            preamp_db: self.preamp_db,
+            bass_shelf_db: self.bass_shelf_db,
+            treble_shelf_db: self.treble_shelf_db,
+            stereo_width: self.stereo_width,
+            balance: self.balance,
+            crossfeed_enabled: self.crossfeed_enabled,
+            limiter_enabled: self.limiter_enabled,
+            compressor_enabled: self.compressor_enabled,
+            eq_mode: self.eq_mode,
+        }
+    }
+
+    /// Restore settings from an `EqSnapshot`.
+    pub fn apply_snapshot(&mut self, snap: &EqSnapshot) {
+        self.graphic_gains = snap.graphic_gains;
+        self.graphic_layout = snap.graphic_layout.clone();
+        self.preamp_db = snap.preamp_db;
+        self.graphic_preamp_db = snap.preamp_db;
+        self.bass_shelf_db = snap.bass_shelf_db;
+        self.treble_shelf_db = snap.treble_shelf_db;
+        self.stereo_width = snap.stereo_width;
+        self.balance = snap.balance;
+        self.crossfeed_enabled = snap.crossfeed_enabled;
+        self.limiter_enabled = snap.limiter_enabled;
+        self.compressor_enabled = snap.compressor_enabled;
+        self.eq_mode = snap.eq_mode;
+    }
+
+    /// Record a curve checkpoint for undo.
+    pub fn push_undo(&mut self) {
+        if self.undo_stack.last() != Some(&self.graphic_gains) {
+            self.undo_stack.push(self.graphic_gains);
+            if self.undo_stack.len() > 25 {
+                self.undo_stack.remove(0);
+            }
+            self.redo_stack.clear();
+        }
+    }
+
+    /// Undo last curve tweak.
+    pub fn undo(&mut self) -> bool {
+        if let Some(prev) = self.undo_stack.pop() {
+            self.redo_stack.push(self.graphic_gains);
+            self.graphic_gains = prev;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redo curve tweak.
+    pub fn redo(&mut self) -> bool {
+        if let Some(next) = self.redo_stack.pop() {
+            self.undo_stack.push(self.graphic_gains);
+            self.graphic_gains = next;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Toggle between A/B audition slots with zero latency.
+    pub fn toggle_ab_audition(&mut self) {
+        if !self.is_auditioning_b {
+            self.snapshot_a = Some(self.current_snapshot());
+            if self.snapshot_b.is_none() {
+                let mut flat_snap = self.current_snapshot();
+                flat_snap.graphic_gains = [0.0; 64];
+                flat_snap.preamp_db = 0.0;
+                self.snapshot_b = Some(flat_snap);
+            }
+            if let Some(b) = self.snapshot_b.clone() {
+                self.apply_snapshot(&b);
+                self.is_auditioning_b = true;
+            }
+        } else {
+            self.snapshot_b = Some(self.current_snapshot());
+            if let Some(a) = self.snapshot_a.clone() {
+                self.apply_snapshot(&a);
+                self.is_auditioning_b = false;
+            }
+        }
+    }
     /// Switch band topology while preserving the visible curve.
     ///
     /// The old implementation changed the layout and then re-applied the
@@ -270,6 +404,7 @@ impl EqPanelState {
 
     /// Flatten the graphic curve and its shared preamp.
     pub fn reset_graphic_eq(&mut self) {
+        self.push_undo();
         self.graphic_gains.fill(0.0);
         self.preamp_db = 0.0;
         self.graphic_preamp_db = 0.0;
@@ -430,11 +565,11 @@ pub fn show_eq_panel(
         .unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 830.0)));
     let min_size = crate::dialog::min_dialog_size();
     let max_size = Vec2::new(
-        880.0_f32.min((screen.width() - 20.0).max(min_size.x)),
+        920.0_f32.min((screen.width() - 20.0).max(min_size.x)),
         (screen.height() - 40.0).max(min_size.y),
     );
-    let default_w = 760.0_f32.min(max_size.x);
-    let default_h = 560.0_f32.min(max_size.y);
+    let default_w = 800.0_f32.min(max_size.x);
+    let default_h = 580.0_f32.min(max_size.y);
     // Restore the size the user last dragged to. Clamp it to the current
     // screen so a monitor change cannot open the panel off-screen.
     let initial_size = state
@@ -490,54 +625,71 @@ pub fn show_eq_panel(
             // ── 1. Top Header Bar (Always Enabled) ───────────────────────────
             render_header(ui, state, &mut actions, theme);
 
-            // ── 2. Tab Switcher ──────────────────────────────────────────────
-            controls::render_tab_navigation(ui, state, &mut actions, theme);
-
-            // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
-            // The master switch is the one enable state for the entire studio.
-            // Every tab describes a stage that runs through the EQ graph, so a
-            // bypassed EQ greys all of them out together instead of leaving
-            // Dynamics, Filters and Effects looking editable.
             let eq_active = state.eq_enabled;
             let content_start_y = ui.cursor().top();
 
-            ui.add_enabled_ui(eq_active, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
+            if state.view_mode == EqViewMode::QuickTune {
+                ui.add_enabled_ui(eq_active, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("eq_quick_tune_scroll_area")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            render_quick_tune_view(ui, state, &mut actions, theme);
+                        });
+                });
+            } else {
+                // ── 2. Tab Switcher (Signal Flow Pipeline) ───────────────────────
+                controls::render_tab_navigation(ui, state, &mut actions, theme);
 
-                egui::ScrollArea::vertical()
-                    .id_salt("eq_tabs_scroll_area")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
-                        match state.active_tab {
-                            EqTab::Graphic => {
-                                render_graphic_eq_tab(ui, state, &mut actions, theme);
+                // ── 3. Enabled UI Wrapper with Visual Greying-Out ─────────────────
+                // The master switch is the one enable state for the entire studio.
+                // Every tab describes a stage that runs through the EQ graph, so a
+                // bypassed EQ greys all of them out together instead of leaving
+                // Dynamics, Filters and Effects looking editable.
+                ui.add_enabled_ui(eq_active, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("eq_tabs_scroll_area")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
+                            match state.active_tab {
+                                EqTab::Graphic => {
+                                    render_graphic_eq_tab(ui, state, &mut actions, theme);
+                                }
+                                EqTab::Parametric => {
+                                    parametric::render_parametric_tab(
+                                        ui,
+                                        state,
+                                        &mut actions,
+                                        theme,
+                                    );
+                                }
+                                EqTab::Tone => {
+                                    render_tone_acoustics_tab(ui, state, &mut actions, theme);
+                                }
+                                EqTab::Dynamics => {
+                                    render_dynamics_tab(ui, state, &mut actions, theme);
+                                }
+                                EqTab::Filters => {
+                                    render_filters_tab(ui, state, &mut actions, theme);
+                                }
+                                EqTab::Advanced => {
+                                    render_advanced_tab(ui, state, &mut actions, theme);
+                                }
+                                EqTab::Effects => {
+                                    actions.fx_changed |=
+                                        crate::components::fx_panel::render_fx_tab(
+                                            ui,
+                                            &mut state.fx,
+                                            theme,
+                                        );
+                                }
                             }
-                            EqTab::Parametric => {
-                                parametric::render_parametric_tab(ui, state, &mut actions, theme);
-                            }
-                            EqTab::Tone => {
-                                render_tone_acoustics_tab(ui, state, &mut actions, theme);
-                            }
-                            EqTab::Dynamics => {
-                                render_dynamics_tab(ui, state, &mut actions, theme);
-                            }
-                            EqTab::Filters => {
-                                render_filters_tab(ui, state, &mut actions, theme);
-                            }
-                            EqTab::Advanced => {
-                                render_advanced_tab(ui, state, &mut actions, theme);
-                            }
-                            EqTab::Effects => {
-                                actions.fx_changed |= crate::components::fx_panel::render_fx_tab(
-                                    ui,
-                                    &mut state.fx,
-                                    theme,
-                                );
-                            }
-                        }
-                    });
-            });
+                        });
+                });
+            }
 
             // The whole studio is bypassed, so cover the content and provide an
             // interactive affordance to re-enable it.
@@ -638,151 +790,6 @@ pub fn show_eq_panel(
     }
 
     actions
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. Header Bar
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn render_header(
-    ui: &mut egui::Ui,
-    state: &mut EqPanelState,
-    actions: &mut EqPanelActions,
-    theme: &Theme,
-) {
-    let ctx = ui.ctx().clone();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
-
-        // A soft accent badge anchors the title without a heavy rule.
-        let (icon_rect, _) = ui.allocate_exact_size(Vec2::new(32.0, 32.0), Sense::hover());
-        ui.painter().rect_filled(
-            icon_rect,
-            CornerRadius::same(theme.radius_md),
-            crate::theme::with_alpha(theme.accent_warm, 28),
-        );
-        crate::components::icons::draw_equalizer_sliders(
-            ui,
-            icon_rect.shrink(9.0),
-            theme.accent_warm,
-        );
-
-        // The right-hand controls have a known width, so the title column is
-        // bounded instead of letting a long status line force the window
-        // wider than the user dragged it.
-        let right_w = 26.0 + 38.0 + 52.0 + theme.space_sm * 3.0;
-        let title_w =
-            (ui.available_width() - 32.0 - theme.space_sm - right_w - theme.space_sm).max(90.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(title_w, 36.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_max_width(title_w);
-                ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(tr!("Equalizer"))
-                            .font(crate::theme::font(17.0))
-                            .strong()
-                            .color(theme.text_primary),
-                    )
-                    .truncate(),
-                );
-                let status = if state.eq_enabled {
-                    match state.active_tab {
-                        EqTab::Graphic => tr!("Graphic EQ"),
-                        EqTab::Parametric => tr!("Parametric"),
-                        EqTab::Tone => tr!("Tone Controls"),
-                        EqTab::Dynamics => tr!("Dynamics"),
-                        EqTab::Filters => tr!("Filters"),
-                        EqTab::Effects => tr!("Creative Effects"),
-                        EqTab::Advanced => tr!("Advanced"),
-                    }
-                } else {
-                    tr!("BYPASSED")
-                };
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(status)
-                            .font(crate::theme::font(10.5))
-                            .color(if state.eq_enabled {
-                                theme.text_muted
-                            } else {
-                                theme.accent_warm
-                            }),
-                    )
-                    .truncate(),
-                );
-            },
-        );
-
-        // Right-aligned actions: master enable + close (✕)
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(theme.space_sm, 0.0);
-
-            let (close_rect, close_resp) =
-                ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
-            if !state.was_open {
-                ctx.memory_mut(|m| m.request_focus(close_resp.id));
-            }
-            close_resp.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::Button, true, tr!(Msg::S35EC68DAC50375CB))
-            });
-            let _ = close_resp
-                .clone()
-                .on_hover_text(tr!(Msg::S35EC68DAC50375CB));
-            let hover_t = ctx.animate_bool_with_time(
-                close_resp.id.with("eq_close_hover"),
-                close_resp.hovered(),
-                theme.motion_time(0.12),
-            );
-            let cp = ui.painter_at(close_rect);
-            let close_bg = crate::theme::lerp_color(
-                theme.bg_pill,
-                theme.destructive.gamma_multiply(0.25),
-                hover_t,
-            );
-            cp.rect_filled(close_rect, CornerRadius::same(theme.radius_md), close_bg);
-            let icon_col =
-                crate::theme::lerp_color(theme.text_secondary, theme.destructive, hover_t);
-            crate::components::icons::draw_window_close(
-                ui,
-                close_rect.shrink2(Vec2::splat(6.0)),
-                icon_col,
-            );
-            if close_resp
-                .on_hover_text(tr!(Msg::S99DFAE3E6EE98739))
-                .clicked()
-            {
-                state.is_open = false;
-            }
-
-            // A labelled master switch. The bare switch next to the title read
-            // as decoration; "Enabled / Bypassed" says what the control does.
-            let mut eq_active = state.eq_enabled;
-            if custom_toggle_switch(ui, &mut eq_active, "Enable Equalizer", theme) {
-                state.eq_enabled = eq_active;
-                state.graphic_enabled = eq_active && state.eq_mode == EqMode::Graphic;
-                actions.eq_enabled_changed = Some(eq_active);
-            }
-            ui.label(
-                egui::RichText::new(if eq_active {
-                    tr!("ACTIVE")
-                } else {
-                    tr!("BYPASSED")
-                })
-                .font(crate::theme::font(10.5))
-                .strong()
-                .color(if eq_active {
-                    theme.accent_highlight
-                } else {
-                    theme.text_muted
-                }),
-            );
-        });
-    });
-
-    state.was_open = state.is_open;
 }
 
 #[cfg(test)]

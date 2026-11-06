@@ -155,6 +155,7 @@ pub(super) fn render_spline_eq_canvas(
             changed = true;
         }
         if changed {
+            state.push_undo();
             state.graphic_gains[band] = gain;
             state.selected_preset = EqPreset::Custom;
             state.selected_custom_preset_idx = None;
@@ -184,6 +185,7 @@ pub(super) fn render_spline_eq_canvas(
                     let new_gain = (norm * (2.0 * max_db) - max_db).clamp(-max_db, max_db);
                     let rounded_gain = (new_gain * 10.0).round() / 10.0;
                     if (state.graphic_gains[i] - rounded_gain).abs() > 0.05 {
+                        state.push_undo();
                         state.graphic_gains[i] = rounded_gain;
                         state.selected_preset = EqPreset::Custom;
                         state.selected_custom_preset_idx = None;
@@ -197,6 +199,7 @@ pub(super) fn render_spline_eq_canvas(
         if canvas_resp.double_clicked() {
             if let Some(pos) = pointer_pos {
                 if band_rect.contains(Pos2::new(pos.x, plot_rect.center().y)) {
+                    state.push_undo();
                     state.graphic_gains[i] = 0.0;
                     state.selected_preset = EqPreset::Custom;
                     state.selected_custom_preset_idx = None;
@@ -282,6 +285,43 @@ pub(super) fn render_spline_eq_canvas(
     };
     let spline_pts = catmull_rom_spline(&node_positions, segments_per_band);
 
+    // Glowing acoustic energy fill between zero-dB line and the spline curve
+    let zero_y = y_for_db(0.0);
+    if spline_pts.len() >= 2 {
+        let mut fill_mesh = egui::Mesh::default();
+        let fill_color = theme.accent_highlight.gamma_multiply(0.12);
+        for w in spline_pts.windows(2) {
+            let p0 = w[0];
+            let p1 = w[1];
+            let b0 = Pos2::new(p0.x, zero_y.clamp(plot_rect.top(), plot_rect.bottom()));
+            let b1 = Pos2::new(p1.x, zero_y.clamp(plot_rect.top(), plot_rect.bottom()));
+            let idx = fill_mesh.vertices.len() as u32;
+            fill_mesh.vertices.push(egui::epaint::Vertex {
+                pos: b0,
+                uv: egui::epaint::WHITE_UV,
+                color: fill_color.gamma_multiply(0.2),
+            });
+            fill_mesh.vertices.push(egui::epaint::Vertex {
+                pos: p0,
+                uv: egui::epaint::WHITE_UV,
+                color: fill_color,
+            });
+            fill_mesh.vertices.push(egui::epaint::Vertex {
+                pos: p1,
+                uv: egui::epaint::WHITE_UV,
+                color: fill_color,
+            });
+            fill_mesh.vertices.push(egui::epaint::Vertex {
+                pos: b1,
+                uv: egui::epaint::WHITE_UV,
+                color: fill_color.gamma_multiply(0.2),
+            });
+            fill_mesh.add_triangle(idx, idx + 1, idx + 2);
+            fill_mesh.add_triangle(idx, idx + 2, idx + 3);
+        }
+        painter.add(egui::Shape::mesh(fill_mesh));
+    }
+
     for w in spline_pts.windows(2) {
         painter.line_segment([w[0], w[1]], Stroke::new(2.4, theme.accent_highlight));
     }
@@ -333,7 +373,11 @@ pub(super) fn render_spline_eq_canvas(
             pos.y + 18.0
         };
         let tip_pos = Pos2::new(pos.x, tip_y);
-        let tip_str = format!("{}: {:+.1} dB", format_exact_frequency(freq), gain);
+        let tip_str = format!(
+            "{}: {:+.1} dB · Double-click: 0 dB",
+            format_exact_frequency(freq),
+            gain
+        );
 
         let font = crate::theme::font(11.0);
         let galley = painter.layout_no_wrap(tip_str, font, theme.text_primary);

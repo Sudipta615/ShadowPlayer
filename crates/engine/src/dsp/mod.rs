@@ -102,7 +102,6 @@ pub use neural::{
     ActivationType, DenseLayer, GruLayer, NeuralDeclipper, NeuralLayer, NeuralModel,
     NeuralProcessor,
 };
-pub use neural::{ActivationType, DenseLayer, GruLayer, NeuralDeclipper, NeuralLayer, NeuralModel, NeuralProcessor};
 pub use parameters::{
     ParameterCurve, ParameterDescriptor, ParameterId, ParameterRegistry, ParameterSmoothing,
     ParameterUnit,

@@ -266,3 +266,77 @@ fn exported_parametric_text_reimports_to_the_same_curve() {
     assert!((reparsed.preamp_db + 2.0).abs() < 1e-6);
     assert!((reparsed.bands[0].gain_db + 4.0).abs() < 1e-6);
 }
+
+#[test]
+fn undo_redo_curve_buffer_preserves_history() {
+    let mut state = EqPanelState::default();
+    assert!(!state.undo());
+    assert!(!state.redo());
+
+    // Step 1: Push undo before tweaking
+    state.push_undo();
+    state.graphic_gains[0] = 3.5;
+
+    // Step 2: Push undo again before second tweak
+    state.push_undo();
+    state.graphic_gains[0] = 6.0;
+
+    // Undo step 2
+    assert!(state.undo());
+    assert!((state.graphic_gains[0] - 3.5).abs() < 1e-4);
+
+    // Undo step 1
+    assert!(state.undo());
+    assert!((state.graphic_gains[0] - 0.0).abs() < 1e-4);
+
+    // Redo step 1
+    assert!(state.redo());
+    assert!((state.graphic_gains[0] - 3.5).abs() < 1e-4);
+
+    // Redo step 2
+    assert!(state.redo());
+    assert!((state.graphic_gains[0] - 6.0).abs() < 1e-4);
+    assert!(!state.redo());
+}
+
+#[test]
+fn ab_audition_swaps_and_restores_slots() {
+    let mut state = EqPanelState::default();
+    state.graphic_gains[0] = 5.0;
+    state.preamp_db = -2.5;
+
+    // Toggle to Slot B (saves current state to Slot A, baseline to Slot B)
+    state.toggle_ab_audition();
+    assert!(state.is_auditioning_b);
+
+    // Modify Slot B
+    state.graphic_gains[0] = 0.0;
+    state.preamp_db = 0.0;
+
+    // Toggle back to Slot A
+    state.toggle_ab_audition();
+    assert!(!state.is_auditioning_b);
+    assert!((state.graphic_gains[0] - 5.0).abs() < 1e-4);
+    assert!((state.preamp_db - (-2.5)).abs() < 1e-4);
+
+    // Toggle to Slot B again
+    state.toggle_ab_audition();
+    assert!(state.is_auditioning_b);
+    assert!((state.graphic_gains[0] - 0.0).abs() < 1e-4);
+    assert!((state.preamp_db - 0.0).abs() < 1e-4);
+}
+
+#[test]
+fn view_mode_persists_round_trip() {
+    let state = EqPanelState {
+        view_mode: EqViewMode::QuickTune,
+        ..Default::default()
+    };
+
+    let persistent = PersistentEqState::from(&state);
+    assert_eq!(persistent.view_mode, EqViewMode::QuickTune);
+
+    let mut restored = EqPanelState::default();
+    persistent.apply_to(&mut restored);
+    assert_eq!(restored.view_mode, EqViewMode::QuickTune);
+}

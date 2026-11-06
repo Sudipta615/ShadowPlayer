@@ -78,7 +78,7 @@ impl MiniPlayer<'_> {
             );
         }
 
-        let actions_w = 96.0;
+        let actions_w = 110.0;
         let info_left = art_rect.max.x + 9.0;
         let info_rect = Rect::from_min_max(
             Pos2::new(info_left, content.min.y),
@@ -138,8 +138,8 @@ impl MiniPlayer<'_> {
         let left = actions.max_rect().min.x;
         let previous = button(
             &mut actions,
-            left + 10.0,
-            24.0,
+            left + 12.0,
+            22.0,
             crate::components::icons::draw_skip_prev,
         );
         let _ = previous.clone().on_hover_text(tr!(Msg::S9C2CFDED8ECFF47F));
@@ -149,7 +149,7 @@ impl MiniPlayer<'_> {
             events.previous = true;
         }
         // Play/pause
-        let play_rect = Rect::from_center_size(Pos2::new(left + 38.0, cy), Vec2::splat(30.0));
+        let play_rect = Rect::from_center_size(Pos2::new(left + 41.0, cy), Vec2::splat(28.0));
         let play_id = actions.scope_id().with("mini_play");
         let play_resp = crate::components::play_button::play_button_at(
             &mut actions,
@@ -173,8 +173,8 @@ impl MiniPlayer<'_> {
         }
         let next = button(
             &mut actions,
-            left + 64.0,
-            24.0,
+            left + 70.0,
+            22.0,
             crate::components::icons::draw_skip_next,
         );
         let _ = next.clone().on_hover_text(tr!(Msg::SDC4932D8AABB325F));
@@ -182,7 +182,7 @@ impl MiniPlayer<'_> {
         if next.clicked() {
             events.next = true;
         }
-        let restore_rect = Rect::from_center_size(Pos2::new(left + 88.0, cy), Vec2::splat(22.0));
+        let restore_rect = Rect::from_center_size(Pos2::new(left + 96.0, cy), Vec2::splat(20.0));
         let restore = actions.interact(
             restore_rect,
             actions.scope_id().with("mini_restore"),

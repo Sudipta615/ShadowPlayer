@@ -126,7 +126,7 @@ pub(in crate::components::settings_tab) fn render_converter_category(
                     let mut dir_str = state.converter_output_dir.to_string_lossy().into_owned();
                     let edit = egui::TextEdit::singleline(&mut dir_str)
                         .hint_text("Default (source file directory)")
-                        .desired_width(180.0)
+                        .desired_width(240.0)
                         .font(crate::theme::font(12.0));
                     if ui.add(edit).changed() {
                         state.converter_output_dir = std::path::PathBuf::from(dir_str);

@@ -9,7 +9,8 @@ use super::manager::ThemeManager;
 use super::tokens::{with_alpha, PlayButtonShape, Theme};
 use state::{save_current_theme, PendingAction, SaveOutcome};
 use widgets::{
-    color_picker_row, field_label, font_role_input, render_live_preview, section_heading,
+    color_picker_row, field_label, font_role_input, render_color_studio, render_live_preview,
+    section_heading,
 };
 
 pub use state::ThemeEditorState;
@@ -349,6 +350,11 @@ pub fn render_theme_editor(
             }
         }
     });
+
+    ui.add_space(theme.space_md);
+
+    // Color Wheel Studio for infinite color combinations and code parsing.
+    render_color_studio(ui, state, theme);
 
     ui.add_space(theme.space_md);
 
