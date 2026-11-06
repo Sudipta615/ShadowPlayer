@@ -32,6 +32,8 @@ struct BandCompressor {
     ratio: f32,
     /// Cached slope `1 - 1/R` to avoid division per sample in `gain_for_envelope`.
     slope: f64,
+    attack_ms: f32,
+    release_ms: f32,
     attack_coeff: f32,
     release_coeff: f32,
     makeup_gain: f32, // linear
@@ -84,6 +86,8 @@ impl BandCompressor {
             threshold_db_cached: threshold_db.max(-100.0),
             ratio,
             slope,
+            attack_ms,
+            release_ms,
             attack_coeff: (-1.0 / (attack_ms * 0.001 * sample_rate)).exp(),
             release_coeff: (-1.0 / (release_ms * 0.001 * sample_rate)).exp(),
             makeup_gain: 10.0_f32.powf(makeup_db / 20.0),
@@ -254,6 +258,11 @@ pub struct MultibandCompressor {
     xover_mid_high_l: CrossoverFilter,
     xover_mid_high_r: CrossoverFilter,
 
+    // Phase alignment for Low band to match the Mid/High split's LR4 allpass shift
+    allpass_mid_high_l: BiquadState<f64>,
+    allpass_mid_high_r: BiquadState<f64>,
+    allpass_mid_high_coeffs: BiquadCoeffs<f64>,
+
     // Compressors (stereo-linked by default: one shared gain per band)
     comp_low_l: BandCompressor,
     comp_low_r: BandCompressor,
@@ -355,6 +364,14 @@ impl MultibandCompressor {
             xover_mid_high_l: CrossoverFilter::new(sample_rate, freq_mid_high),
             xover_mid_high_r: CrossoverFilter::new(sample_rate, freq_mid_high),
 
+            allpass_mid_high_l: BiquadState::default(),
+            allpass_mid_high_r: BiquadState::default(),
+            allpass_mid_high_coeffs: BiquadCoeffs::allpass(
+                sample_rate,
+                freq_mid_high,
+                std::f32::consts::FRAC_1_SQRT_2,
+            ),
+
             comp_low_l,
             comp_low_r,
             comp_mid_l,
@@ -379,38 +396,26 @@ impl MultibandCompressor {
         // Preserve user-configured band parameters across sample rate changes.
 
         let enabled = self.enabled;
-        let old_rate = self.sample_rate;
 
-        // Snapshot the current band parameters so we can restore them after
-        // rebuilding the crossover filters (whose coefficients depend on the
-        // new sample rate). Feature settings (knee/detector/link) round-trip
-        // directly; attack/release coefficients are inverted back to ms.
-        let snapshot = |comp: &BandCompressor,
-                        sr: f32|
-         -> (f32, f32, f32, f32, f32, f32, CompressorDetector, bool) {
-            (
-                comp.threshold_db_cached,
-                comp.ratio,
-                if comp.attack_coeff > 0.0 && comp.attack_coeff < 1.0 && sr > 0.0 {
-                    (-1.0 / (sr * comp.attack_coeff.ln())) * 1000.0
-                } else {
-                    0.0001
-                },
-                if comp.release_coeff > 0.0 && comp.release_coeff < 1.0 && sr > 0.0 {
-                    (-1.0 / (sr * comp.release_coeff.ln())) * 1000.0
-                } else {
-                    0.001
-                },
-                20.0 * comp.makeup_gain.log10(),
-                comp.knee_db,
-                comp.detector,
-                comp.stereo_link,
-            )
-        };
+        // Snapshot the current band parameters using directly stored attack/release ms
+        // to avoid numerical inversion drift.
+        let snapshot =
+            |comp: &BandCompressor| -> (f32, f32, f32, f32, f32, f32, CompressorDetector, bool) {
+                (
+                    comp.threshold_db_cached,
+                    comp.ratio,
+                    comp.attack_ms,
+                    comp.release_ms,
+                    20.0 * comp.makeup_gain.log10(),
+                    comp.knee_db,
+                    comp.detector,
+                    comp.stereo_link,
+                )
+            };
 
-        let low_params = snapshot(&self.comp_low_l, old_rate);
-        let mid_params = snapshot(&self.comp_mid_l, old_rate);
-        let high_params = snapshot(&self.comp_high_l, old_rate);
+        let low_params = snapshot(&self.comp_low_l);
+        let mid_params = snapshot(&self.comp_mid_l);
+        let high_params = snapshot(&self.comp_high_l);
 
         // Rebuild at the new sample rate with default band params, then
         // re-apply the snapshotted user params.
@@ -586,11 +591,19 @@ impl MultibandCompressor {
         }
 
         // Split Left
-        let (l_low, l_mid_high) = self.xover_low_mid_l.process_f64(left);
+        let (l_low_raw, l_mid_high) = self.xover_low_mid_l.process_f64(left);
+        // Phase align Low band with Mid/High split (compensating for the mid/high LR4 allpass shift)
+        let l_low = self
+            .allpass_mid_high_l
+            .process(l_low_raw, &self.allpass_mid_high_coeffs);
         let (l_mid, l_high) = self.xover_mid_high_l.process_f64(l_mid_high);
 
         // Split Right
-        let (r_low, r_mid_high) = self.xover_low_mid_r.process_f64(right);
+        let (r_low_raw, r_mid_high) = self.xover_low_mid_r.process_f64(right);
+        // Phase align Low band with Mid/High split
+        let r_low = self
+            .allpass_mid_high_r
+            .process(r_low_raw, &self.allpass_mid_high_coeffs);
         let (r_mid, r_high) = self.xover_mid_high_r.process_f64(r_mid_high);
 
         // Compress (stereo-linked per band by default)
@@ -637,6 +650,8 @@ impl MultibandCompressor {
         self.xover_low_mid_r.reset();
         self.xover_mid_high_l.reset();
         self.xover_mid_high_r.reset();
+        self.allpass_mid_high_l.reset();
+        self.allpass_mid_high_r.reset();
 
         self.comp_low_l.reset();
         self.comp_low_r.reset();
@@ -824,5 +839,33 @@ mod tests {
             rl > 0.9 * 0.9,
             "RMS detector should barely react to a single transient: {rl}"
         );
+    }
+
+    #[test]
+    fn test_multiband_crossover_phase_aligned_spectrum() {
+        let sr = 48_000.0;
+        let mut mb = MultibandCompressor::new(sr);
+        mb.set_enabled(true);
+
+        // Test frequencies including the crossover frequencies (250 Hz, 4000 Hz)
+        let freqs = [60.0, 150.0, 250.0, 500.0, 1000.0, 2500.0, 4000.0, 8000.0];
+        for f in freqs {
+            mb.reset();
+            let w = std::f64::consts::TAU * f / sr as f64;
+            let mut peak_out: f64 = 0.0;
+            // Let the filter settle over 4000 samples
+            for i in 0..4000 {
+                let x = (w * i as f64).sin();
+                let (ol, _) = mb.process_f64(x, x);
+                if i > 2500 {
+                    peak_out = peak_out.max(ol.abs());
+                }
+            }
+            let diff_db = 20.0 * peak_out.log10().abs();
+            assert!(
+                diff_db < 0.2,
+                "Frequency {f} Hz reconstruction error too large: {diff_db:.4} dB"
+            );
+        }
     }
 }

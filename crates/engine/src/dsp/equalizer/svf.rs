@@ -14,28 +14,22 @@
 //! 2. **Multi-mode Coherency**: Low-pass, high-pass, band-pass, notch, and
 //!    peaking outputs are derived simultaneously from the same shared state
 //!    variables.
-//! 3. **Linear Gain Tap**: Changing the peak/bell gain only scales an output
-//!    feedforward tap rather than recomputing the feedback denominator $a_1, a_2$.
+//! 3. **Linear Gain Tap**: Changing the peak/bell gain only scales output
+//!    feedforward taps rather than recomputing denominator polynomials.
 //!
-//! # What the gain-shaped outputs are (and are not)
+//! # Cytomic Exact Mixing Formulations
 //!
-//! The bell output is Simper's `m0 = 1, m1 = k·(G − 1), m2 = 0` tap set, which
-//! is the same magnitude response as the RBJ peaking biquad to within the
-//! difference between trapezoidal prewarping and the cookbook's
-//! `alpha = sin(ω₀)/(2Q)` (measured: < 0.07 dB at Q = 1, < 0.7 dB for a
-//! Q = 0.9 band at 10 kHz).
+//! Implements Andy Simper's exact trapezoidal formulations (`SvfLinearTrapOptimised2`):
+//! - **Bell / Peaking**: damping parameter $k$ is scaled by $A = 10^{\text{gain\_db} / 40}$
+//!   ($k_A = 1 / (Q \cdot A)$) and mixed with $m_0 = 1, m_1 = k_A(A^2 - 1), m_2 = 0$.
+//!   This guarantees bit-exact inverse cancellation between boost ($+G$ dB) and cut ($-G$ dB).
+//! - **Low Shelf**: prewarped frequency is shifted ($g_{\text{ls}} = g / \sqrt{A}$) with
+//!   coefficients $m_0 = 1, m_1 = k(A - 1), m_2 = A^2 - 1$.
+//! - **High Shelf**: prewarped frequency is shifted ($g_{\text{hs}} = g \cdot \sqrt{A}$) with
+//!   coefficients $m_0 = A^2, m_1 = -k(A - 1)A, m_2 = 1 - A^2$.
 //!
-//! The shelf outputs are the **LP/HP-scaled** shelf family:
-//! `y = x + (G − 1)·lowpass` (low shelf) and `y = x + (G − 1)·highpass`
-//! (high shelf). They reach exactly `G` at the flat end and exactly 1 at the
-//! other, so the asymptotes are the ones a shelf is defined by, but the
-//! transition is *not* byte-for-byte the RBJ shelf: RBJ's shelving filters put
-//! the gain into their denominator (`β = 2·√A·α`), which a filter with a fixed
-//! `k = 1/Q` cannot reproduce. A band that must match an imported RBJ shelf
-//! coefficient-for-coefficient uses [`crate::dsp::biquad::FilterType`]
-//! (which is what [`super::ParametricEq`] runs); this filter is the choice when
-//! the cutoff has to move without state explosions, where the scaled shelves'
-//! fixed denominator is the whole point.
+//! Both shelving responses preserve exact halfway gain in dB at $f_c$ and machine-precision
+//! boost/cut symmetry.
 //!
 //! # Precision
 //!
@@ -69,8 +63,16 @@ pub struct SvfFilter<T: AudioFloat = f64> {
     a1: T,
     a2: T,
     a3: T,
-    // Bell / shelf linear gain
+    // Output mixing coefficients (Cytomic m0, m1, m2)
+    m0: T,
+    m1: T,
+    m2: T,
+    // Tuning parameters
+    cutoff_hz: T,
+    q: T,
+    gain_db: T,
     gain_linear: T,
+    mode: SvfMode,
     // Sample rate
     sample_rate: T,
 }
@@ -97,14 +99,97 @@ impl<T: AudioFloat> SvfFilter<T> {
             a1: T::zero(),
             a2: T::zero(),
             a3: T::zero(),
+            m0: T::one(),
+            m1: T::zero(),
+            m2: T::zero(),
+            cutoff_hz: T::from_f64(1000.0),
+            q: T::from_f64(std::f64::consts::FRAC_1_SQRT_2),
+            gain_db: T::zero(),
             gain_linear: T::one(),
+            mode: SvfMode::LowPass,
             sample_rate: sr,
         };
-        filter.set_params(
-            T::from_f64(1000.0),
-            T::from_f64(1.0 / std::f64::consts::SQRT_2),
-        );
+        filter.recompute_coeffs();
         filter
+    }
+
+    /// Recompute all internal filter and mixing coefficients.
+    fn recompute_coeffs(&mut self) {
+        let pi = T::from_f64(std::f64::consts::PI);
+        let min_fc = T::from_f64(10.0);
+        let max_fc = (self.sample_rate * T::from_f64(0.499)).max(min_fc);
+        let fc = if self.cutoff_hz.is_finite() {
+            self.cutoff_hz.clamp(min_fc, max_fc)
+        } else {
+            T::from_f64(1000.0)
+        };
+        let q_clamped = if self.q.is_finite() {
+            self.q.clamp(T::from_f64(0.01), T::from_f64(100.0))
+        } else {
+            T::from_f64(std::f64::consts::FRAC_1_SQRT_2)
+        };
+
+        // A = 10^(gain_db / 40)
+        let a = if self.gain_db.is_finite() {
+            (T::from_f64(10.0)).powf(self.gain_db / T::from_f64(40.0))
+        } else {
+            T::one()
+        };
+        let a = if a.is_finite() && a > T::zero() {
+            a
+        } else {
+            T::one()
+        };
+
+        let base_g = (pi * fc / self.sample_rate).tan();
+        let base_g = if base_g.is_finite() && base_g >= T::zero() {
+            base_g
+        } else {
+            T::from_f64(1.0)
+        };
+        let base_k = T::one() / q_clamped;
+
+        let mut g = base_g;
+        let mut k = base_k;
+
+        let (m0, m1, m2) = match self.mode {
+            SvfMode::LowPass => (T::zero(), T::zero(), T::one()),
+            SvfMode::HighPass => (T::one(), -k, -T::one()),
+            SvfMode::BandPass => (T::zero(), T::one(), T::zero()),
+            SvfMode::Notch => (T::one(), -k, T::zero()),
+            SvfMode::Peaking => {
+                // Cytomic bell: k_A = 1 / (Q * A)
+                k = T::one() / (q_clamped * a);
+                (T::one(), k * (a * a - T::one()), T::zero())
+            }
+            SvfMode::LowShelf => {
+                // Cytomic low shelf: g_ls = g / sqrt(A)
+                g = base_g / a.sqrt();
+                (T::one(), k * (a - T::one()), a * a - T::one())
+            }
+            SvfMode::HighShelf => {
+                // Cytomic high shelf: g_hs = g * sqrt(A)
+                g = base_g * a.sqrt();
+                (a * a, -k * (a - T::one()) * a, T::one() - a * a)
+            }
+            SvfMode::AllPass => (T::one(), -T::from_f64(2.0) * k, T::zero()),
+        };
+
+        self.g = g;
+        self.k = k;
+        self.m0 = m0;
+        self.m1 = m1;
+        self.m2 = m2;
+
+        let denom = T::one() + g * (g + k);
+        let a1 = if denom.abs() > T::from_f64(1e-12) {
+            T::one() / denom
+        } else {
+            T::one()
+        };
+        self.a1 = a1;
+        self.a2 = g * a1;
+        self.a3 = g * self.a2;
     }
 
     /// Update cutoff frequency and Q factor.
@@ -113,41 +198,9 @@ impl<T: AudioFloat> SvfFilter<T> {
     /// Q is clamped between 0.01 and 100.0.
     #[inline]
     pub fn set_params(&mut self, cutoff_hz: T, q: T) {
-        let fc_val = if cutoff_hz.is_finite() {
-            cutoff_hz
-        } else {
-            T::from_f64(1000.0)
-        };
-        let q_val = if q.is_finite() {
-            q
-        } else {
-            T::from_f64(std::f64::consts::FRAC_1_SQRT_2)
-        };
-        let pi = T::from_f64(std::f64::consts::PI);
-        let min_fc = T::from_f64(10.0);
-        let max_fc = (self.sample_rate * T::from_f64(0.499)).max(min_fc);
-        let fc = fc_val.clamp(min_fc, max_fc);
-
-        let q_clamped = q_val.clamp(T::from_f64(0.01), T::from_f64(100.0));
-
-        // Prewarped frequency parameter g = tan(pi * fc / fs)
-        let g = (pi * fc / self.sample_rate).tan();
-        self.g = if g.is_finite() {
-            g.max(T::zero())
-        } else {
-            T::from_f64(1.0)
-        };
-        self.k = T::one() / q_clamped;
-
-        let denom = T::one() + self.g * (self.g + self.k);
-        let a1 = if denom.abs() > T::from_f64(1e-12) {
-            T::one() / denom
-        } else {
-            T::one()
-        };
-        self.a1 = a1;
-        self.a2 = self.g * self.a1;
-        self.a3 = self.g * self.a2;
+        self.cutoff_hz = cutoff_hz;
+        self.q = q;
+        self.recompute_coeffs();
     }
 
     /// Set gain in decibels for peaking and shelving responses.
@@ -158,8 +211,10 @@ impl<T: AudioFloat> SvfFilter<T> {
         } else {
             T::zero()
         };
+        self.gain_db = db;
         // linear = 10^(gain_db / 20)
         self.gain_linear = (T::from_f64(10.0)).powf(db / T::from_f64(20.0));
+        self.recompute_coeffs();
     }
 
     /// Set linear gain directly.
@@ -171,6 +226,23 @@ impl<T: AudioFloat> SvfFilter<T> {
             T::one()
         };
         self.gain_linear = gl;
+        self.gain_db = T::from_f64(20.0) * gl.log10();
+        self.recompute_coeffs();
+    }
+
+    /// Set the active operating mode.
+    #[inline]
+    pub fn set_mode(&mut self, mode: SvfMode) {
+        if self.mode != mode {
+            self.mode = mode;
+            self.recompute_coeffs();
+        }
+    }
+
+    /// Return the active operating mode.
+    #[inline]
+    pub fn mode(&self) -> SvfMode {
+        self.mode
     }
 
     /// Reset internal state memories to silence.
@@ -180,10 +252,44 @@ impl<T: AudioFloat> SvfFilter<T> {
         self.s2 = T::zero();
     }
 
+    /// Process a single sample using the preconfigured mode and coefficients.
+    #[inline(always)]
+    pub fn process_sample(&mut self, x: T) -> T {
+        if !x.is_finite() {
+            self.s1 = T::zero();
+            self.s2 = T::zero();
+            return T::zero();
+        }
+
+        let two = T::from_f64(2.0);
+        let v0 = x;
+        let v3 = v0 - self.s2;
+        let v1 = self.a1 * self.s1 + self.a2 * v3;
+        let v2 = self.s2 + self.a2 * self.s1 + self.a3 * v3;
+
+        let new_s1 = two * v1 - self.s1;
+        let new_s2 = two * v2 - self.s2;
+        self.s1 = T::from_f64(crate::buffer::flush_denormal_f64(new_s1.to_f64()));
+        self.s2 = T::from_f64(crate::buffer::flush_denormal_f64(new_s2.to_f64()));
+
+        let out = self.m0 * v0 + self.m1 * v1 + self.m2 * v2;
+        if out.is_finite() {
+            out
+        } else {
+            self.s1 = T::zero();
+            self.s2 = T::zero();
+            T::zero()
+        }
+    }
+
     /// Process a single sample and return all simultaneous filter outputs:
     /// `(low_pass, band_pass, high_pass, notch)`
     #[inline(always)]
     pub fn process_multimode(&mut self, x: T) -> (T, T, T, T) {
+        if self.mode != SvfMode::LowPass {
+            self.set_mode(SvfMode::LowPass);
+        }
+
         if !x.is_finite() {
             self.s1 = T::zero();
             self.s2 = T::zero();
@@ -218,121 +324,36 @@ impl<T: AudioFloat> SvfFilter<T> {
     /// Process a sample in peaking/bell mode with the configured gain.
     #[inline(always)]
     pub fn process_peaking(&mut self, x: T) -> T {
-        let (_, bp, _, _) = self.process_multimode(x);
-        let out = x + (self.gain_linear - T::one()) * self.k * bp;
-        if out.is_finite() {
-            out
-        } else {
-            T::zero()
-        }
+        self.set_mode(SvfMode::Peaking);
+        self.process_sample(x)
     }
 
     /// Process a sample in low-shelf mode.
     #[inline(always)]
     pub fn process_lowshelf(&mut self, x: T) -> T {
-        let (lp, _, _, _) = self.process_multimode(x);
-        let out = x + (self.gain_linear - T::one()) * lp;
-        if out.is_finite() {
-            out
-        } else {
-            T::zero()
-        }
+        self.set_mode(SvfMode::LowShelf);
+        self.process_sample(x)
     }
 
     /// Process a sample in high-shelf mode.
     #[inline(always)]
     pub fn process_highshelf(&mut self, x: T) -> T {
-        let (_, _, hp, _) = self.process_multimode(x);
-        let out = x + (self.gain_linear - T::one()) * hp;
-        if out.is_finite() {
-            out
-        } else {
-            T::zero()
-        }
+        self.set_mode(SvfMode::HighShelf);
+        self.process_sample(x)
     }
 
     /// Process a sample according to the specified [`SvfMode`].
     #[inline(always)]
     pub fn process(&mut self, x: T, mode: SvfMode) -> T {
-        match mode {
-            SvfMode::LowPass => {
-                let (lp, _, _, _) = self.process_multimode(x);
-                lp
-            }
-            SvfMode::HighPass => {
-                let (_, _, hp, _) = self.process_multimode(x);
-                hp
-            }
-            SvfMode::BandPass => {
-                let (_, bp, _, _) = self.process_multimode(x);
-                bp
-            }
-            SvfMode::Notch => {
-                let (_, _, _, notch) = self.process_multimode(x);
-                notch
-            }
-            SvfMode::Peaking => self.process_peaking(x),
-            SvfMode::LowShelf => self.process_lowshelf(x),
-            SvfMode::HighShelf => self.process_highshelf(x),
-            SvfMode::AllPass => {
-                let (lp, bp, hp, _) = self.process_multimode(x);
-                let out = hp - self.k * bp + lp;
-                if out.is_finite() {
-                    out
-                } else {
-                    T::zero()
-                }
-            }
-        }
+        self.set_mode(mode);
+        self.process_sample(x)
     }
 
     /// Process a block of samples in place for the given mode.
     pub fn process_block(&mut self, buffer: &mut [T], mode: SvfMode) {
-        match mode {
-            SvfMode::LowPass => {
-                for s in buffer.iter_mut() {
-                    let (lp, _, _, _) = self.process_multimode(*s);
-                    *s = lp;
-                }
-            }
-            SvfMode::HighPass => {
-                for s in buffer.iter_mut() {
-                    let (_, _, hp, _) = self.process_multimode(*s);
-                    *s = hp;
-                }
-            }
-            SvfMode::BandPass => {
-                for s in buffer.iter_mut() {
-                    let (_, bp, _, _) = self.process_multimode(*s);
-                    *s = bp;
-                }
-            }
-            SvfMode::Notch => {
-                for s in buffer.iter_mut() {
-                    let (_, _, _, notch) = self.process_multimode(*s);
-                    *s = notch;
-                }
-            }
-            SvfMode::Peaking => {
-                for s in buffer.iter_mut() {
-                    *s = self.process_peaking(*s);
-                }
-            }
-            SvfMode::LowShelf => {
-                for s in buffer.iter_mut() {
-                    *s = self.process_lowshelf(*s);
-                }
-            }
-            SvfMode::HighShelf => {
-                for s in buffer.iter_mut() {
-                    *s = self.process_highshelf(*s);
-                }
-            }
-            SvfMode::AllPass => {
-                for s in buffer.iter_mut() {
-                    *s = self.process(*s, SvfMode::AllPass);
-                }
-            }
+        self.set_mode(mode);
+        for s in buffer.iter_mut() {
+            *s = self.process_sample(*s);
         }
     }
 
@@ -352,9 +373,6 @@ impl<T: AudioFloat> SvfFilter<T> {
     }
 
     /// Process a stereo block through a stereo pair of SVF filters in place.
-    ///
-    /// Hoists the filter mode dispatch out of the per-sample loop to maximize instruction
-    /// cache efficiency and auto-vectorization.
     pub fn process_stereo_block(
         left_filter: &mut Self,
         right_filter: &mut Self,
@@ -362,64 +380,12 @@ impl<T: AudioFloat> SvfFilter<T> {
         right: &mut [T],
         mode: SvfMode,
     ) {
+        left_filter.set_mode(mode);
+        right_filter.set_mode(mode);
         let n = left.len().min(right.len());
-        match mode {
-            SvfMode::LowPass => {
-                for i in 0..n {
-                    let (lp, _, _, _) = left_filter.process_multimode(left[i]);
-                    left[i] = lp;
-                    let (rp, _, _, _) = right_filter.process_multimode(right[i]);
-                    right[i] = rp;
-                }
-            }
-            SvfMode::HighPass => {
-                for i in 0..n {
-                    let (_, _, hp, _) = left_filter.process_multimode(left[i]);
-                    left[i] = hp;
-                    let (_, _, rp, _) = right_filter.process_multimode(right[i]);
-                    right[i] = rp;
-                }
-            }
-            SvfMode::BandPass => {
-                for i in 0..n {
-                    let (_, bp, _, _) = left_filter.process_multimode(left[i]);
-                    left[i] = bp;
-                    let (_, rp, _, _) = right_filter.process_multimode(right[i]);
-                    right[i] = rp;
-                }
-            }
-            SvfMode::Notch => {
-                for i in 0..n {
-                    let (_, _, _, notch) = left_filter.process_multimode(left[i]);
-                    left[i] = notch;
-                    let (_, _, _, rp) = right_filter.process_multimode(right[i]);
-                    right[i] = rp;
-                }
-            }
-            SvfMode::Peaking => {
-                for i in 0..n {
-                    left[i] = left_filter.process_peaking(left[i]);
-                    right[i] = right_filter.process_peaking(right[i]);
-                }
-            }
-            SvfMode::LowShelf => {
-                for i in 0..n {
-                    left[i] = left_filter.process_lowshelf(left[i]);
-                    right[i] = right_filter.process_lowshelf(right[i]);
-                }
-            }
-            SvfMode::HighShelf => {
-                for i in 0..n {
-                    left[i] = left_filter.process_highshelf(left[i]);
-                    right[i] = right_filter.process_highshelf(right[i]);
-                }
-            }
-            SvfMode::AllPass => {
-                for i in 0..n {
-                    left[i] = left_filter.process(left[i], SvfMode::AllPass);
-                    right[i] = right_filter.process(right[i], SvfMode::AllPass);
-                }
-            }
+        for i in 0..n {
+            left[i] = left_filter.process_sample(left[i]);
+            right[i] = right_filter.process_sample(right[i]);
         }
     }
 }
@@ -668,5 +634,76 @@ mod tests {
                 "Right sample {i} mismatch"
             );
         }
+    }
+
+    #[test]
+    fn test_svf_cytomic_boost_cut_peaking_symmetry() {
+        let mut boost = SvfFilter::<f64>::new(48000.0);
+        let mut cut = SvfFilter::<f64>::new(48000.0);
+        boost.set_params(1000.0, 1.414);
+        cut.set_params(1000.0, 1.414);
+        boost.set_gain_db(6.0);
+        cut.set_gain_db(-6.0);
+
+        let mut max_err: f64 = 0.0;
+        for i in 0..1000 {
+            let x = if i == 0 { 1.0 } else { 0.0 };
+            let y = cut.process_peaking(boost.process_peaking(x));
+            let err = (y - x).abs();
+            if err > max_err {
+                max_err = err;
+            }
+        }
+        assert!(
+            max_err < 1e-12,
+            "Peaking boost + cut must cancel to numerical precision, max error {max_err}"
+        );
+    }
+
+    #[test]
+    fn test_svf_cytomic_boost_cut_shelving_symmetry() {
+        // Low Shelf
+        let mut ls_boost = SvfFilter::<f64>::new(48000.0);
+        let mut ls_cut = SvfFilter::<f64>::new(48000.0);
+        ls_boost.set_params(300.0, std::f64::consts::FRAC_1_SQRT_2);
+        ls_cut.set_params(300.0, std::f64::consts::FRAC_1_SQRT_2);
+        ls_boost.set_gain_db(9.0);
+        ls_cut.set_gain_db(-9.0);
+
+        let mut max_err_ls: f64 = 0.0;
+        for i in 0..1000 {
+            let x = if i == 0 { 1.0 } else { 0.0 };
+            let y = ls_cut.process_lowshelf(ls_boost.process_lowshelf(x));
+            let err = (y - x).abs();
+            if err > max_err_ls {
+                max_err_ls = err;
+            }
+        }
+        assert!(
+            max_err_ls < 1e-12,
+            "LowShelf boost + cut must cancel to numerical precision, max error {max_err_ls}"
+        );
+
+        // High Shelf
+        let mut hs_boost = SvfFilter::<f64>::new(48000.0);
+        let mut hs_cut = SvfFilter::<f64>::new(48000.0);
+        hs_boost.set_params(5000.0, std::f64::consts::FRAC_1_SQRT_2);
+        hs_cut.set_params(5000.0, std::f64::consts::FRAC_1_SQRT_2);
+        hs_boost.set_gain_db(9.0);
+        hs_cut.set_gain_db(-9.0);
+
+        let mut max_err_hs: f64 = 0.0;
+        for i in 0..1000 {
+            let x = if i == 0 { 1.0 } else { 0.0 };
+            let y = hs_cut.process_highshelf(hs_boost.process_highshelf(x));
+            let err = (y - x).abs();
+            if err > max_err_hs {
+                max_err_hs = err;
+            }
+        }
+        assert!(
+            max_err_hs < 1e-12,
+            "HighShelf boost + cut must cancel to numerical precision, max error {max_err_hs}"
+        );
     }
 }

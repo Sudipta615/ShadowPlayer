@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.28.0] - 2026-11-06
 
-*Released with audio-engine 1.13.0. The player and the engine are versioned separately and released
+*Released with audio-engine 1.14.0. The player and the engine are versioned separately and released
 together; the startup log prints both.*
 
 ### Added & Integrated
@@ -18,6 +18,14 @@ together; the startup log prints both.*
 - **Persistent Speaker Setup & Acoustic Alignment.** `SpeakerSetupModalState` is now serialized to durable settings storage across sessions, preserving calibrated speaker distances, arrival delay compensation, level trims, and subwoofer Linkwitz-Riley crossovers.
 
 ### Fixed & Optimized (Engine & DSP)
+- **Zero-Latency Hybrid Partitioned Convolution (NUPC).** Implemented non-uniform partitioned convolution combining direct time-domain FIR filtering for head partition ($B$ frames) with frequency-domain overlap-add tail partitions, eliminating input latency while maintaining strict zero heap allocations on the audio thread.
+- **Real-Time Neural Audio Inference Subsystem.** Built lock-free real-time neural inference engine (`dsp::neural`) with linear projections, non-linear activations (ReLU, LeakyReLU, Tanh, GELU, Sigmoid), residual skips, and deep declipping model support.
+- **Fast FFT Sweep Deconvolution.** Upgraded `EssSweep::deconvolve_into` from $O(N \times M)$ time-domain correlation to $O(N \log N)$ complex FFT deconvolution via `rustfft`.
+- **Delaunay HRTF Triangulation.** Replaced $O(N^4)$ brute-force triangulation in `spatial::hrtf::interpolate` with incremental 3D convex hull Delaunay triangulation.
+- **Andy Simper SVF State Variable Filter.** Corrected $k_A$ damping, $(m_0, m_1, m_2)$ mixer tap mappings, and shelving bilinear frequency prewarping in `equalizer/svf.rs`.
+- **Bitmasked FIR Crossover Buffer.** Eliminated inner loop `% cap` modulo operations in `FirCrossover` using $2B$ power-of-two circular double-buffering and bitwise masking.
+- **Multiband Compressor Phase Compensation.** Added 2nd-order allpass phase compensation to the Low band in `MultibandCompressor`, resolving 3-way crossover recombination phase cancellation.
+- **ADAA Antialiased Limiter Saturation.** Implemented 1st-order Anti-Derivative Anti-Aliasing (ADAA) tanh soft-knee saturation in `limiter.rs` with L'Hôpital numerical conditioning.
 - **Decramped Orfanidis Shelf Filters.** Implemented true high-shelf bilinear prewarping ($\omega_g = \omega_0 / g^{0.25}$) and numerator mapping in `biquad.rs` and `filter_design.rs`, eliminating low-shelf inversion on treble shelf boosts/cuts.
 - **Dynamic EQ Boost Ballistics.** Corrected attack/release envelope selection for positive dynamic gains in `DynamicEqBand::process_stereo_block`, applying attack dynamics on transient peaks.
 - **Zero-Allocation 3-Way Crossover.** Preallocated scratch buffers in `Crossover3Way` eliminating audio-thread heap allocations, and added delay alignment compensation to the High band to match Mid/Low filter latency.

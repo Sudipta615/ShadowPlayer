@@ -28,6 +28,7 @@ pub mod loudness;
 pub mod meters;
 pub mod modulation;
 pub mod multiband_compressor;
+pub mod neural;
 pub mod parameters;
 pub mod pipeline;
 #[cfg(feature = "resample")]
@@ -97,6 +98,11 @@ pub use crossfeed::Crossfeed;
 pub use deterministic::{compare_buffers, DeterministicMode, EquivalenceClass};
 pub use meters::{ProfessionalMeterSnapshot, ProfessionalMeters};
 pub use multiband_compressor::MultibandCompressor;
+pub use neural::{
+    ActivationType, DenseLayer, GruLayer, NeuralDeclipper, NeuralLayer, NeuralModel,
+    NeuralProcessor,
+};
+pub use neural::{ActivationType, DenseLayer, GruLayer, NeuralDeclipper, NeuralLayer, NeuralModel, NeuralProcessor};
 pub use parameters::{
     ParameterCurve, ParameterDescriptor, ParameterId, ParameterRegistry, ParameterSmoothing,
     ParameterUnit,

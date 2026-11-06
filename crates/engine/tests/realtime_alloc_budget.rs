@@ -268,6 +268,41 @@ fn the_svf_stage_allocates_nothing_while_processing_samples() {
 }
 
 #[test]
+fn the_neural_processor_stage_allocates_nothing_while_processing_blocks() {
+    let mut proc = engine::dsp::neural::NeuralProcessor::tube_preamp();
+    proc.set_enabled(true);
+    proc.set_drive_db(6.0);
+    proc.set_wet_mix(0.8);
+
+    let mut left = vec![0.25f32; 512];
+    let mut right = vec![-0.25f32; 512];
+
+    for _ in 0..4 {
+        proc.process_block(&mut left, &mut right);
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..128 {
+            proc.process_block(&mut left, &mut right);
+        }
+    });
+    assert_eq!(allocations, 0, "the neural processor must not allocate");
+
+    let mut declipper = engine::dsp::neural::NeuralDeclipper::new(0.95);
+    declipper.set_enabled(true);
+    for _ in 0..4 {
+        declipper.process_block(&mut left, &mut right);
+    }
+
+    let declip_allocs = allocations_during(|| {
+        for _ in 0..128 {
+            declipper.process_block(&mut left, &mut right);
+        }
+    });
+    assert_eq!(declip_allocs, 0, "the neural declipper must not allocate");
+}
+
+#[test]
 fn the_bass_enhancer_stage_allocates_nothing_while_processing_blocks() {
     let mut enhancer = engine::dsp::bass_enhancer::BassEnhancer::new(48_000.0);
     enhancer.set_enabled(true);
@@ -611,4 +646,34 @@ fn the_dac_correction_bank_allocates_nothing_while_processing_blocks() {
     });
     assert_eq!(allocations, 0, "DAC correction allocated on the audio path");
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn the_zero_latency_convolution_engine_allocates_nothing_while_processing_blocks() {
+    use engine::dsp::convolution::ConvolutionEngine;
+
+    let mut engine = ConvolutionEngine::new(48_000.0, 2048);
+    let ir = vec![(0.05f32, 0.05f32); 1536];
+    engine.load_ir_from_samples(&ir).expect("ir loaded");
+    engine.set_enabled(true);
+    engine.set_zero_latency(true);
+
+    let mut left = vec![0.1f32; 512];
+    let mut right = vec![-0.1f32; 512];
+
+    // Warm up
+    for _ in 0..4 {
+        engine.process_block(&mut left, &mut right);
+    }
+
+    let allocations = allocations_during(|| {
+        for _ in 0..64 {
+            engine.process_block(&mut left, &mut right);
+        }
+    });
+
+    assert_eq!(
+        allocations, 0,
+        "zero-latency convolution engine allocated {allocations} times during processing"
+    );
 }

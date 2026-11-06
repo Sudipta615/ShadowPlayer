@@ -48,58 +48,159 @@ pub fn barycentric_sphere(query: Vec3, v0: Vec3, v1: Vec3, v2: Vec3) -> Option<[
 
 /// Compute 3D convex hull / spherical Delaunay triangulation for points on the unit sphere.
 /// For points on S^2, the convex hull facets form the exact spherical Delaunay triangulation.
+///
+/// Implemented using an incremental 3D convex hull algorithm running in O(N^2) worst-case
+/// time rather than O(N^4), allowing standard SOFA datasets (N >= 1,000) to triangulate in
+/// milliseconds instead of stalling the process.
 pub fn triangulate_sphere(points: &[Vec3]) -> Vec<SphericalTriangle> {
     let n = points.len();
     if n < 4 {
         return Vec::new();
     }
 
-    let mut triangles = Vec::new();
+    // Step 1: Find 4 non-coplanar points to form the initial tetrahedron
+    let i0 = 0;
+    let mut i1 = 0;
+    let mut max_d = -1.0f32;
+    for i in 1..n {
+        let d = (points[i] - points[i0]).length();
+        if d > max_d {
+            max_d = d;
+            i1 = i;
+        }
+    }
+    if max_d < 1e-4 {
+        return Vec::new();
+    }
 
-    // Direct Gift-Wrapping / Facet search for spherical points:
-    // A facet (i, j, k) belongs to the convex hull of points on S^2 iff
-    // the normal n = (p_j - p_i) x (p_k - p_i) points outwards and all points lie
-    // on or behind the plane.
+    let mut i2 = 0;
+    let mut max_area = -1.0f32;
+    let v01 = points[i1] - points[i0];
     for i in 0..n {
-        for j in (i + 1)..n {
-            for k in (j + 1)..n {
-                let pi = points[i];
-                let pj = points[j];
-                let pk = points[k];
+        if i == i0 || i == i1 {
+            continue;
+        }
+        let cr = v01.cross(points[i] - points[i0]);
+        let area = cr.length();
+        if area > max_area {
+            max_area = area;
+            i2 = i;
+        }
+    }
+    if max_area < 1e-4 {
+        return Vec::new();
+    }
 
-                let norm = (pj - pi).cross(pk - pi);
-                let norm_len = norm.length();
-                if norm_len < 1e-6 {
-                    continue;
-                }
+    let mut i3 = 0;
+    let mut max_vol = -1.0f32;
+    let n012 = v01.cross(points[i2] - points[i0]);
+    for i in 0..n {
+        if i == i0 || i == i1 || i == i2 {
+            continue;
+        }
+        let vol = n012.dot(points[i] - points[i0]).abs();
+        if vol > max_vol {
+            max_vol = vol;
+            i3 = i;
+        }
+    }
+    if max_vol < 1e-4 {
+        return Vec::new();
+    }
 
-                // Orient normal so that origin is strictly inside (plane d > 0)
-                let d = norm.dot(pi);
-                let (norm, d, a, b, c) = if d < 0.0 {
-                    (-norm, -d, i, k, j)
-                } else {
-                    (norm, d, i, j, k)
-                };
+    // Centroid of initial tetrahedron
+    let centroid = (points[i0] + points[i1] + points[i2] + points[i3]) * 0.25;
 
-                let mut valid = true;
-                for (m, &pm) in points.iter().enumerate() {
-                    if m == i || m == j || m == k {
-                        continue;
-                    }
-                    if norm.dot(pm) > d + 1e-4 {
-                        valid = false;
-                        break;
-                    }
-                }
+    struct Face {
+        a: usize,
+        b: usize,
+        c: usize,
+        normal: Vec3,
+    }
 
-                if valid {
-                    triangles.push(SphericalTriangle::new(a, b, c));
-                }
+    let make_face = |a: usize, b: usize, c: usize| -> Face {
+        let mut nm = (points[b] - points[a]).cross(points[c] - points[a]);
+        // Ensure normal points outward from the interior centroid
+        if nm.dot(points[a] - centroid) < 0.0 {
+            nm = -nm;
+            Face {
+                a,
+                b: c,
+                c: b,
+                normal: nm.normalized().unwrap_or(Vec3::Y),
+            }
+        } else {
+            Face {
+                a,
+                b,
+                c,
+                normal: nm.normalized().unwrap_or(Vec3::Y),
+            }
+        }
+    };
+
+    let mut faces = vec![
+        make_face(i0, i1, i2),
+        make_face(i0, i2, i3),
+        make_face(i0, i3, i1),
+        make_face(i1, i3, i2),
+    ];
+
+    let tet_indices = [i0, i1, i2, i3];
+
+    // Incremental hull: process each remaining point
+    for i in 0..n {
+        if tet_indices.contains(&i) {
+            continue;
+        }
+        let pt = points[i];
+
+        // Find visible faces
+        let mut any_visible = false;
+        for f in &faces {
+            if f.normal.dot(pt - points[f.a]) > 1e-6 {
+                any_visible = true;
+                break;
+            }
+        }
+        if !any_visible {
+            continue;
+        }
+
+        let mut visible = Vec::new();
+        let mut non_visible = Vec::new();
+        for f in faces.drain(..) {
+            if f.normal.dot(pt - points[f.a]) > 1e-6 {
+                visible.push(f);
+            } else {
+                non_visible.push(f);
+            }
+        }
+
+        // Find horizon edges: edges belonging to visible faces that are not shared by two visible faces
+        use std::collections::HashMap;
+        let mut edge_count: HashMap<(usize, usize), (usize, usize, u8)> = HashMap::new();
+        for f in &visible {
+            let edges = [(f.a, f.b), (f.b, f.c), (f.c, f.a)];
+            for (u, v) in edges {
+                let key = if u < v { (u, v) } else { (v, u) };
+                let entry = edge_count.entry(key).or_insert((u, v, 0));
+                entry.2 += 1;
+            }
+        }
+
+        faces = non_visible;
+        for (_, (u, v, count)) in edge_count {
+            if count == 1 {
+                faces.push(make_face(u, v, i));
             }
         }
     }
 
-    triangles
+    faces
+        .into_iter()
+        .map(|f| SphericalTriangle::new(f.a, f.b, f.c))
+        .collect()
 }
 
 /// Spherical HRTF interpolator for irregular direction sets.
@@ -136,7 +237,7 @@ impl SphericalHrtfInterpolator {
     }
 
     /// Find enclosing triangle and barycentric weights for a query direction.
-    /// Falls back to 3 nearest neighbors if no spherical triangle contains the query directly.
+    /// Falls back to 3 nearest neighbors without heap allocations if no spherical triangle contains the query directly.
     pub fn find_weights(&self, query: Vec3) -> (SphericalTriangle, [f32; 3]) {
         let q = query.normalized().unwrap_or(Vec3::Y);
 
@@ -150,22 +251,33 @@ impl SphericalHrtfInterpolator {
             }
         }
 
-        // Fallback: 3 nearest neighbors on the sphere by cosine distance (dot product)
-        let mut dists = self
-            .points
-            .iter()
-            .enumerate()
-            .map(|(idx, &p)| (idx, 1.0 - q.dot(p)))
-            .collect::<Vec<_>>();
-        dists.sort_by(|a, b| a.1.total_cmp(&b.1));
+        // Realtime-safe zero-allocation fallback: 3 nearest neighbors by cosine distance (dot product)
+        let mut best_i = [0usize; 3];
+        let mut best_d = [f32::INFINITY; 3];
 
-        let i0 = dists[0].0;
-        let i1 = dists.get(1).map(|x| x.0).unwrap_or(i0);
-        let i2 = dists.get(2).map(|x| x.0).unwrap_or(i1);
+        for (idx, &p) in self.points.iter().enumerate() {
+            let d = 1.0 - q.dot(p);
+            if d < best_d[0] {
+                best_d[2] = best_d[1];
+                best_i[2] = best_i[1];
+                best_d[1] = best_d[0];
+                best_i[1] = best_i[0];
+                best_d[0] = d;
+                best_i[0] = idx;
+            } else if d < best_d[1] {
+                best_d[2] = best_d[1];
+                best_i[2] = best_i[1];
+                best_d[1] = d;
+                best_i[1] = idx;
+            } else if d < best_d[2] {
+                best_d[2] = d;
+                best_i[2] = idx;
+            }
+        }
 
-        let d0 = dists[0].1.max(1e-6);
-        let d1 = dists.get(1).map(|x| x.1.max(1e-6)).unwrap_or(d0);
-        let d2 = dists.get(2).map(|x| x.1.max(1e-6)).unwrap_or(d1);
+        let d0 = best_d[0].max(1e-6);
+        let d1 = best_d[1].max(1e-6);
+        let d2 = best_d[2].max(1e-6);
 
         let inv0 = 1.0 / d0;
         let inv1 = 1.0 / d1;
@@ -173,7 +285,7 @@ impl SphericalHrtfInterpolator {
         let sum = inv0 + inv1 + inv2;
 
         (
-            SphericalTriangle::new(i0, i1, i2),
+            SphericalTriangle::new(best_i[0], best_i[1], best_i[2]),
             [inv0 / sum, inv1 / sum, inv2 / sum],
         )
     }

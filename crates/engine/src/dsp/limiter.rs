@@ -190,6 +190,9 @@ pub struct LookaheadLimiter {
     // detector the loudness meter and the offline scanner use.
     fir_meters: [TruePeakMeter; crate::buffer::MAX_CHANNELS],
 
+    /// Previous input samples per channel for 1st-order ADAA soft-clip anti-aliasing.
+    saturate_prev_x: [f64; crate::buffer::MAX_CHANNELS],
+
     // ── Running peak metrics ──────────────────────────────────────────────
     /// Maximum true-peak observed since last `reset_peak_meters()`.
     max_true_peak: f32,
@@ -341,6 +344,7 @@ impl LookaheadLimiter {
             rms_history: 0.0,
             rms_coeff: 1.0 - (-1.0_f32 / (0.050 * sample_rate)).exp(),
             fir_meters: std::array::from_fn(|_| TruePeakMeter::new()),
+            saturate_prev_x: [0.0; crate::buffer::MAX_CHANNELS],
             max_true_peak: 0.0,
             max_sample_peak: 0.0,
             nan_substitutions: 0,
@@ -833,7 +837,7 @@ impl LookaheadLimiter {
                     out = out.clamp(-c, c);
                 }
                 LimiterMode::Saturate => {
-                    out = self.soft_clip_sample(out as f32) as f64;
+                    out = self.soft_clip_sample_adaa(i, out);
                 }
             }
             out_samples[i] = out;
@@ -1019,6 +1023,7 @@ impl LookaheadLimiter {
         for meter in &mut self.fir_meters {
             meter.reset();
         }
+        self.saturate_prev_x.fill(0.0);
         self.max_true_peak = 0.0;
         self.max_sample_peak = 0.0;
     }
@@ -1119,6 +1124,40 @@ impl LookaheadLimiter {
         let range = limit - threshold;
         let saturated = threshold + range * (1.0 - (-over / range).exp());
         sample.signum() * saturated
+    }
+
+    /// First antiderivative F1(x) = ∫ f(u) du of the soft-clipping function f(x).
+    ///
+    /// Used for 1st-order Antiderivative Anti-Aliasing (ADAA) to suppress inharmonic aliasing hash.
+    #[inline]
+    fn soft_clip_antiderivative(&self, x: f32) -> f64 {
+        let ax = x.abs() as f64;
+        let limit = self.ceiling_linear as f64;
+        let threshold = limit * 0.8;
+        if ax <= threshold {
+            return 0.5 * ax * ax;
+        }
+        let over = ax - threshold;
+        let range = limit - threshold;
+        (threshold + range) * over
+            + 0.5 * threshold * threshold
+            + range * range * ((-over / range).exp() - 1.0)
+    }
+
+    /// 1st-order ADAA soft-clip sample per channel.
+    #[inline]
+    fn soft_clip_sample_adaa(&mut self, ch: usize, sample: f64) -> f64 {
+        let x_prev = self.saturate_prev_x[ch];
+        let delta = sample - x_prev;
+        let out = if delta.abs() < 1e-5 {
+            self.soft_clip_sample(((sample + x_prev) * 0.5) as f32) as f64
+        } else {
+            (self.soft_clip_antiderivative(sample as f32)
+                - self.soft_clip_antiderivative(x_prev as f32))
+                / delta
+        };
+        self.saturate_prev_x[ch] = sample;
+        out
     }
 
     /// Push an ALREADY-COMPUTED `peak` for channel `ch` into its own
@@ -1803,6 +1842,22 @@ mod tests {
             "re-arming the true-peak detector allocated {} times",
             now - baseline
         );
+    }
+
+    #[test]
+    fn test_adaa_antialiased_soft_clip() {
+        let sr = 48000.0;
+        let mut limiter =
+            LookaheadLimiter::new_with_mode(sr, 5.0, 0.5, 100.0, -1.0, LimiterMode::Saturate);
+
+        // Feed a hot high-frequency signal (10 kHz) to exercise ADAA
+        let w = std::f32::consts::TAU * 10000.0 / sr;
+        for i in 0..1000 {
+            let x = 1.5 * (w * i as f32).sin();
+            let (l, r) = limiter.process(x, x);
+            assert!(l.is_finite() && r.is_finite());
+            assert!(l.abs() <= 1.0 && r.abs() <= 1.0);
+        }
     }
 }
 

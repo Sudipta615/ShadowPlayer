@@ -232,25 +232,32 @@ impl Crossover2Way {
             CrossoverArchitecture::LinearPhaseFir { .. } => {
                 let taps_len = self.fir_taps.len();
                 let center_delay = (taps_len - 1) / 2;
-                let cap = self.fir_delay_l.len();
+                let cap = self.fir_delay_l.len() / 2;
+                let mask = cap - 1;
 
                 for i in 0..n {
                     let wp = self.fir_write_pos;
-                    self.fir_delay_l[wp] = left_in[i];
-                    self.fir_delay_r[wp] = right_in[i];
+                    let sample_l = left_in[i];
+                    let sample_r = right_in[i];
 
-                    // Direct convolution for linear-phase low-pass
+                    // Mirror writes across both halves of the double buffer
+                    self.fir_delay_l[wp] = sample_l;
+                    self.fir_delay_l[wp + cap] = sample_l;
+                    self.fir_delay_r[wp] = sample_r;
+                    self.fir_delay_r[wp + cap] = sample_r;
+
+                    // Direct convolution without modulo indexing (linear contiguous memory)
+                    let base = wp + cap;
                     let mut lp_l = 0.0f64;
                     let mut lp_r = 0.0f64;
-                    for k in 0..taps_len {
-                        let idx = (wp + cap - k) % cap;
-                        let tap = self.fir_taps[k];
+                    for (k, &tap) in self.fir_taps.iter().enumerate() {
+                        let idx = base - k;
                         lp_l += tap * self.fir_delay_l[idx];
                         lp_r += tap * self.fir_delay_r[idx];
                     }
 
                     // Complementary high-pass: HP = Delayed - LP
-                    let delayed_idx = (wp + cap - center_delay) % cap;
+                    let delayed_idx = base - center_delay;
                     let delayed_l = self.fir_delay_l[delayed_idx];
                     let delayed_r = self.fir_delay_r[delayed_idx];
 
@@ -259,7 +266,7 @@ impl Crossover2Way {
                     high_l[i] = delayed_l - lp_l;
                     high_r[i] = delayed_r - lp_r;
 
-                    self.fir_write_pos = (wp + 1) % cap;
+                    self.fir_write_pos = (wp + 1) & mask;
                 }
             }
         }
@@ -364,8 +371,9 @@ impl Crossover2Way {
                 }
                 self.fir_taps = taps;
                 let cap = (nt * 2).next_power_of_two();
-                self.fir_delay_l = vec![0.0; cap];
-                self.fir_delay_r = vec![0.0; cap];
+                // Double buffer capacity to allow linear contiguous access without wrapping
+                self.fir_delay_l = vec![0.0; cap * 2];
+                self.fir_delay_r = vec![0.0; cap * 2];
                 self.fir_write_pos = 0;
             }
         }
@@ -475,14 +483,15 @@ impl Crossover3Way {
         // Align High band with Low/Mid when latency exists (e.g. LinearPhaseFir)
         if self.high_delay_len > 0 {
             let cap = self.high_delay_l.len();
+            let mask = cap - 1;
             for i in 0..n {
                 let wp = self.high_delay_pos;
-                let rp = (wp + cap - self.high_delay_len) % cap;
+                let rp = (wp + cap - self.high_delay_len) & mask;
                 self.high_delay_l[wp] = high_l[i];
                 self.high_delay_r[wp] = high_r[i];
                 high_l[i] = self.high_delay_l[rp];
                 high_r[i] = self.high_delay_r[rp];
-                self.high_delay_pos = (wp + 1) % cap;
+                self.high_delay_pos = (wp + 1) & mask;
             }
         }
     }

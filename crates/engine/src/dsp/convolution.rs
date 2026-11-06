@@ -118,6 +118,10 @@ pub struct ConvolutionEngine {
     ifft_workspace_output_left: Vec<f32>,
     ifft_workspace_spectrum_right: Vec<Complex<f32>>,
     ifft_workspace_output_right: Vec<f32>,
+    fft_scratch_forward_left: Vec<Complex<f32>>,
+    fft_scratch_forward_right: Vec<Complex<f32>>,
+    fft_scratch_inverse_left: Vec<Complex<f32>>,
+    fft_scratch_inverse_right: Vec<Complex<f32>>,
 
     fft_workspace_input_left_f64: Vec<f64>,
     fft_workspace_output_left_f64: Vec<Complex<f64>>,
@@ -129,6 +133,10 @@ pub struct ConvolutionEngine {
     ifft_workspace_output_left_f64: Vec<f64>,
     ifft_workspace_spectrum_right_f64: Vec<Complex<f64>>,
     ifft_workspace_output_right_f64: Vec<f64>,
+    fft_scratch_forward_left_f64: Vec<Complex<f64>>,
+    fft_scratch_forward_right_f64: Vec<Complex<f64>>,
+    fft_scratch_inverse_left_f64: Vec<Complex<f64>>,
+    fft_scratch_inverse_right_f64: Vec<Complex<f64>>,
 
     ir_loaded: bool,
     /// The rate the loaded partitions are valid for. It is the stream rate at
@@ -150,6 +158,19 @@ pub struct ConvolutionEngine {
     // Legacy fields maintained for test inspection / API compatibility
     pub overlap_left: Vec<f32>,
     pub overlap_right: Vec<f32>,
+
+    // ── Zero-Latency Hybrid Partitioned Convolution (NUPC) ──────────────
+    zero_latency: bool,
+    head_ir_left_rev: Vec<f32>,
+    head_ir_right_rev: Vec<f32>,
+    head_history_left: Vec<f32>,
+    head_history_right: Vec<f32>,
+    head_wp: usize,
+    head_ir_left_rev_f64: Vec<f64>,
+    head_ir_right_rev_f64: Vec<f64>,
+    head_history_left_f64: Vec<f64>,
+    head_history_right_f64: Vec<f64>,
+    head_wp_f64: usize,
 }
 
 impl ConvolutionEngine {
@@ -171,6 +192,10 @@ impl ConvolutionEngine {
 
         let fft_out_len = fft_forward.make_output_vec().len();
         let ifft_out_len = fft_inverse.make_output_vec().len();
+        let fft_scratch_len = fft_forward.make_scratch_vec().len();
+        let ifft_scratch_len = fft_inverse.make_scratch_vec().len();
+        let fft_scratch_len_f64 = fft_forward_f64.make_scratch_vec().len();
+        let ifft_scratch_len_f64 = fft_inverse_f64.make_scratch_vec().len();
 
         // The history is grown on the (control-path) IR load to the actual
         // partition count. Preallocating `max_ir_length / block_size` slots
@@ -234,6 +259,10 @@ impl ConvolutionEngine {
             ifft_workspace_output_left: vec![0.0; ifft_out_len],
             ifft_workspace_spectrum_right: vec![Complex::new(0.0, 0.0); spectrum_len],
             ifft_workspace_output_right: vec![0.0; ifft_out_len],
+            fft_scratch_forward_left: vec![Complex::new(0.0, 0.0); fft_scratch_len],
+            fft_scratch_forward_right: vec![Complex::new(0.0, 0.0); fft_scratch_len],
+            fft_scratch_inverse_left: vec![Complex::new(0.0, 0.0); ifft_scratch_len],
+            fft_scratch_inverse_right: vec![Complex::new(0.0, 0.0); ifft_scratch_len],
 
             fft_workspace_input_left_f64: vec![0.0; fft_size],
             fft_workspace_output_left_f64: vec![Complex::new(0.0, 0.0); fft_out_len],
@@ -245,6 +274,10 @@ impl ConvolutionEngine {
             ifft_workspace_output_left_f64: vec![0.0; ifft_out_len],
             ifft_workspace_spectrum_right_f64: vec![Complex::new(0.0, 0.0); spectrum_len],
             ifft_workspace_output_right_f64: vec![0.0; ifft_out_len],
+            fft_scratch_forward_left_f64: vec![Complex::new(0.0, 0.0); fft_scratch_len_f64],
+            fft_scratch_forward_right_f64: vec![Complex::new(0.0, 0.0); fft_scratch_len_f64],
+            fft_scratch_inverse_left_f64: vec![Complex::new(0.0, 0.0); ifft_scratch_len_f64],
+            fft_scratch_inverse_right_f64: vec![Complex::new(0.0, 0.0); ifft_scratch_len_f64],
 
             ir_loaded: false,
             ir_loaded_sample_rate: None,
@@ -255,6 +288,18 @@ impl ConvolutionEngine {
 
             overlap_left: vec![0.0; fft_size * 2],
             overlap_right: vec![0.0; fft_size * 2],
+
+            zero_latency: false,
+            head_ir_left_rev: vec![0.0; block_size],
+            head_ir_right_rev: vec![0.0; block_size],
+            head_history_left: vec![0.0; block_size * 2],
+            head_history_right: vec![0.0; block_size * 2],
+            head_wp: 0,
+            head_ir_left_rev_f64: vec![0.0; block_size],
+            head_ir_right_rev_f64: vec![0.0; block_size],
+            head_history_left_f64: vec![0.0; block_size * 2],
+            head_history_right_f64: vec![0.0; block_size * 2],
+            head_wp_f64: 0,
         }
     }
 
@@ -335,6 +380,25 @@ impl ConvolutionEngine {
         self.ir_partitions_right = partitions_r;
         self.ir_partitions_left_f64 = partitions_l_f64;
         self.ir_partitions_right_f64 = partitions_r_f64;
+
+        // Populate time-domain reversed head IR for zero-latency hybrid convolution (from f32)
+        self.head_ir_left_rev.fill(0.0);
+        self.head_ir_right_rev.fill(0.0);
+        self.head_ir_left_rev_f64.fill(0.0);
+        self.head_ir_right_rev_f64.fill(0.0);
+        let head_count = len.min(bs);
+        for (i, &sample) in ir_samples.iter().take(head_count).enumerate() {
+            let rev_idx = bs - 1 - i;
+            self.head_ir_left_rev[rev_idx] = sample.0;
+            self.head_ir_left_rev_f64[rev_idx] = sample.0 as f64;
+            if is_stereo {
+                self.head_ir_right_rev[rev_idx] = sample.1;
+                self.head_ir_right_rev_f64[rev_idx] = sample.1 as f64;
+            } else {
+                self.head_ir_right_rev[rev_idx] = sample.0;
+                self.head_ir_right_rev_f64[rev_idx] = sample.0 as f64;
+            }
+        }
 
         // Ensure input spectra history buffer has enough slots
         let spectrum_len = self.fft_size / 2 + 1;
@@ -434,6 +498,25 @@ impl ConvolutionEngine {
         self.ir_partitions_right = partitions_r;
         self.ir_partitions_left_f64 = partitions_l_f64;
         self.ir_partitions_right_f64 = partitions_r_f64;
+
+        // Populate time-domain reversed head IR for zero-latency hybrid convolution (from f64)
+        self.head_ir_left_rev.fill(0.0);
+        self.head_ir_right_rev.fill(0.0);
+        self.head_ir_left_rev_f64.fill(0.0);
+        self.head_ir_right_rev_f64.fill(0.0);
+        let head_count = len.min(bs);
+        for (i, &sample) in ir_samples.iter().take(head_count).enumerate() {
+            let rev_idx = bs - 1 - i;
+            self.head_ir_left_rev[rev_idx] = sample.0 as f32;
+            self.head_ir_left_rev_f64[rev_idx] = sample.0;
+            if is_stereo {
+                self.head_ir_right_rev[rev_idx] = sample.1 as f32;
+                self.head_ir_right_rev_f64[rev_idx] = sample.1;
+            } else {
+                self.head_ir_right_rev[rev_idx] = sample.0 as f32;
+                self.head_ir_right_rev_f64[rev_idx] = sample.0;
+            }
+        }
 
         let spectrum_len = self.fft_size / 2 + 1;
         while self.input_spectra_left.len() < self.num_partitions {
@@ -726,21 +809,47 @@ impl ConvolutionEngine {
             return (left, right);
         }
 
-        self.input_buffer_left[self.input_count] = left;
-        self.input_buffer_right[self.input_count] = right;
-        self.input_count += 1;
+        if self.zero_latency {
+            let (tail_l, tail_r) = if self.output_available > 0 {
+                let out_l = self.output_fifo_left[self.output_read_pos];
+                let out_r = self.output_fifo_right[self.output_read_pos];
+                self.output_read_pos += 1;
+                self.output_available -= 1;
+                if self.output_available == 0 {
+                    self.output_read_pos = 0;
+                }
+                (out_l, out_r)
+            } else {
+                (0.0, 0.0)
+            };
 
-        if self.input_count >= self.block_size {
-            self.process_partition_block();
-        }
+            let bs = self.block_size;
+            let mask = bs - 1;
+            let wp = self.head_wp;
+            self.head_history_left[wp] = left;
+            self.head_history_left[wp + bs] = left;
+            self.head_history_right[wp] = right;
+            self.head_history_right[wp + bs] = right;
 
-        if self.output_available > 0 {
-            let out_l = self.output_fifo_left[self.output_read_pos];
-            let out_r = self.output_fifo_right[self.output_read_pos];
-            self.output_read_pos += 1;
-            self.output_available -= 1;
-            if self.output_available == 0 {
-                self.output_read_pos = 0;
+            let slice_l = &self.head_history_left[wp + 1..wp + 1 + bs];
+            let slice_r = &self.head_history_right[wp + 1..wp + 1 + bs];
+            let ir_l = &self.head_ir_left_rev[..bs];
+            let ir_r = &self.head_ir_right_rev[..bs];
+
+            let head_l: f32 = slice_l.iter().zip(ir_l.iter()).map(|(&x, &h)| x * h).sum();
+            let head_r: f32 = slice_r.iter().zip(ir_r.iter()).map(|(&x, &h)| x * h).sum();
+
+            self.head_wp = (wp + 1) & mask;
+
+            let conv_l = head_l + tail_l;
+            let conv_r = head_r + tail_r;
+
+            self.input_buffer_left[self.input_count] = left;
+            self.input_buffer_right[self.input_count] = right;
+            self.input_count += 1;
+
+            if self.input_count >= bs {
+                self.process_partition_block();
             }
 
             if (self.current_wet_mix - self.wet_mix).abs() > 1e-5 {
@@ -749,12 +858,40 @@ impl ConvolutionEngine {
                 self.current_wet_mix = self.wet_mix;
             }
             let mix = self.current_wet_mix;
-            let mixed_l = left * (1.0 - mix) + out_l * mix;
-            let mixed_r = right * (1.0 - mix) + out_r * mix;
+            let mixed_l = left * (1.0 - mix) + conv_l * mix;
+            let mixed_r = right * (1.0 - mix) + conv_r * mix;
             (mixed_l, mixed_r)
         } else {
-            let mix = self.current_wet_mix;
-            (left * (1.0 - mix), right * (1.0 - mix))
+            self.input_buffer_left[self.input_count] = left;
+            self.input_buffer_right[self.input_count] = right;
+            self.input_count += 1;
+
+            if self.input_count >= self.block_size {
+                self.process_partition_block();
+            }
+
+            if self.output_available > 0 {
+                let out_l = self.output_fifo_left[self.output_read_pos];
+                let out_r = self.output_fifo_right[self.output_read_pos];
+                self.output_read_pos += 1;
+                self.output_available -= 1;
+                if self.output_available == 0 {
+                    self.output_read_pos = 0;
+                }
+
+                if (self.current_wet_mix - self.wet_mix).abs() > 1e-5 {
+                    self.current_wet_mix += 0.001 * (self.wet_mix - self.current_wet_mix);
+                } else {
+                    self.current_wet_mix = self.wet_mix;
+                }
+                let mix = self.current_wet_mix;
+                let mixed_l = left * (1.0 - mix) + out_l * mix;
+                let mixed_r = right * (1.0 - mix) + out_r * mix;
+                (mixed_l, mixed_r)
+            } else {
+                let mix = self.current_wet_mix;
+                (left * (1.0 - mix), right * (1.0 - mix))
+            }
         }
     }
 
@@ -772,29 +909,71 @@ impl ConvolutionEngine {
             return sample;
         }
 
-        self.input_buffer_left[self.input_count] = sample;
-        self.input_count += 1;
-        if self.input_count >= self.block_size {
-            self.process_partition_block_mono();
-        }
+        if self.zero_latency {
+            let tail = if self.output_available > 0 {
+                let out = self.output_fifo_left[self.output_read_pos];
+                self.output_read_pos += 1;
+                self.output_available -= 1;
+                if self.output_available == 0 {
+                    self.output_read_pos = 0;
+                }
+                out
+            } else {
+                0.0
+            };
 
-        if self.output_available > 0 {
-            let out = self.output_fifo_left[self.output_read_pos];
-            self.output_read_pos += 1;
-            self.output_available -= 1;
-            if self.output_available == 0 {
-                self.output_read_pos = 0;
+            let bs = self.block_size;
+            let mask = bs - 1;
+            let wp = self.head_wp;
+            self.head_history_left[wp] = sample;
+            self.head_history_left[wp + bs] = sample;
+
+            let slice = &self.head_history_left[wp + 1..wp + 1 + bs];
+            let ir = &self.head_ir_left_rev[..bs];
+            let head: f32 = slice.iter().zip(ir.iter()).map(|(&x, &h)| x * h).sum();
+
+            self.head_wp = (wp + 1) & mask;
+
+            let conv = head + tail;
+
+            self.input_buffer_left[self.input_count] = sample;
+            self.input_count += 1;
+            if self.input_count >= bs {
+                self.process_partition_block_mono();
             }
+
             if (self.current_wet_mix - self.wet_mix).abs() > 1e-5 {
                 self.current_wet_mix += 0.001 * (self.wet_mix - self.current_wet_mix);
             } else {
                 self.current_wet_mix = self.wet_mix;
             }
             let mix = self.current_wet_mix;
-            sample * (1.0 - mix) + out * mix
+            sample * (1.0 - mix) + conv * mix
         } else {
-            let mix = self.current_wet_mix;
-            sample * (1.0 - mix)
+            self.input_buffer_left[self.input_count] = sample;
+            self.input_count += 1;
+            if self.input_count >= self.block_size {
+                self.process_partition_block_mono();
+            }
+
+            if self.output_available > 0 {
+                let out = self.output_fifo_left[self.output_read_pos];
+                self.output_read_pos += 1;
+                self.output_available -= 1;
+                if self.output_available == 0 {
+                    self.output_read_pos = 0;
+                }
+                if (self.current_wet_mix - self.wet_mix).abs() > 1e-5 {
+                    self.current_wet_mix += 0.001 * (self.wet_mix - self.current_wet_mix);
+                } else {
+                    self.current_wet_mix = self.wet_mix;
+                }
+                let mix = self.current_wet_mix;
+                sample * (1.0 - mix) + out * mix
+            } else {
+                let mix = self.current_wet_mix;
+                sample * (1.0 - mix)
+            }
         }
     }
 
@@ -805,21 +984,47 @@ impl ConvolutionEngine {
             return (left, right);
         }
 
-        self.input_buffer_left_f64[self.input_count_f64] = left;
-        self.input_buffer_right_f64[self.input_count_f64] = right;
-        self.input_count_f64 += 1;
+        if self.zero_latency {
+            let (tail_l, tail_r) = if self.output_available_f64 > 0 {
+                let out_l = self.output_fifo_left_f64[self.output_read_pos_f64];
+                let out_r = self.output_fifo_right_f64[self.output_read_pos_f64];
+                self.output_read_pos_f64 += 1;
+                self.output_available_f64 -= 1;
+                if self.output_available_f64 == 0 {
+                    self.output_read_pos_f64 = 0;
+                }
+                (out_l, out_r)
+            } else {
+                (0.0, 0.0)
+            };
 
-        if self.input_count_f64 >= self.block_size {
-            self.process_partition_block_f64();
-        }
+            let bs = self.block_size;
+            let mask = bs - 1;
+            let wp = self.head_wp_f64;
+            self.head_history_left_f64[wp] = left;
+            self.head_history_left_f64[wp + bs] = left;
+            self.head_history_right_f64[wp] = right;
+            self.head_history_right_f64[wp + bs] = right;
 
-        if self.output_available_f64 > 0 {
-            let out_l = self.output_fifo_left_f64[self.output_read_pos_f64];
-            let out_r = self.output_fifo_right_f64[self.output_read_pos_f64];
-            self.output_read_pos_f64 += 1;
-            self.output_available_f64 -= 1;
-            if self.output_available_f64 == 0 {
-                self.output_read_pos_f64 = 0;
+            let slice_l = &self.head_history_left_f64[wp + 1..wp + 1 + bs];
+            let slice_r = &self.head_history_right_f64[wp + 1..wp + 1 + bs];
+            let ir_l = &self.head_ir_left_rev_f64[..bs];
+            let ir_r = &self.head_ir_right_rev_f64[..bs];
+
+            let head_l: f64 = slice_l.iter().zip(ir_l.iter()).map(|(&x, &h)| x * h).sum();
+            let head_r: f64 = slice_r.iter().zip(ir_r.iter()).map(|(&x, &h)| x * h).sum();
+
+            self.head_wp_f64 = (wp + 1) & mask;
+
+            let conv_l = head_l + tail_l;
+            let conv_r = head_r + tail_r;
+
+            self.input_buffer_left_f64[self.input_count_f64] = left;
+            self.input_buffer_right_f64[self.input_count_f64] = right;
+            self.input_count_f64 += 1;
+
+            if self.input_count_f64 >= bs {
+                self.process_partition_block_f64();
             }
 
             if (self.current_wet_mix - self.wet_mix).abs() > 1e-5 {
@@ -828,12 +1033,40 @@ impl ConvolutionEngine {
                 self.current_wet_mix = self.wet_mix;
             }
             let mix = self.current_wet_mix as f64;
-            let mixed_l = left * (1.0 - mix) + out_l * mix;
-            let mixed_r = right * (1.0 - mix) + out_r * mix;
+            let mixed_l = left * (1.0 - mix) + conv_l * mix;
+            let mixed_r = right * (1.0 - mix) + conv_r * mix;
             (mixed_l, mixed_r)
         } else {
-            let mix = self.current_wet_mix as f64;
-            (left * (1.0 - mix), right * (1.0 - mix))
+            self.input_buffer_left_f64[self.input_count_f64] = left;
+            self.input_buffer_right_f64[self.input_count_f64] = right;
+            self.input_count_f64 += 1;
+
+            if self.input_count_f64 >= self.block_size {
+                self.process_partition_block_f64();
+            }
+
+            if self.output_available_f64 > 0 {
+                let out_l = self.output_fifo_left_f64[self.output_read_pos_f64];
+                let out_r = self.output_fifo_right_f64[self.output_read_pos_f64];
+                self.output_read_pos_f64 += 1;
+                self.output_available_f64 -= 1;
+                if self.output_available_f64 == 0 {
+                    self.output_read_pos_f64 = 0;
+                }
+
+                if (self.current_wet_mix - self.wet_mix).abs() > 1e-5 {
+                    self.current_wet_mix += 0.001 * (self.wet_mix - self.current_wet_mix);
+                } else {
+                    self.current_wet_mix = self.wet_mix;
+                }
+                let mix = self.current_wet_mix as f64;
+                let mixed_l = left * (1.0 - mix) + out_l * mix;
+                let mixed_r = right * (1.0 - mix) + out_r * mix;
+                (mixed_l, mixed_r)
+            } else {
+                let mix = self.current_wet_mix as f64;
+                (left * (1.0 - mix), right * (1.0 - mix))
+            }
         }
     }
 
@@ -850,13 +1083,15 @@ impl ConvolutionEngine {
         self.fft_workspace_input_right[bs..fft_size].fill(0.0);
 
         let fft_forward = self.fft_forward.as_ref();
-        let forward_left = fft_forward.process(
+        let forward_left = fft_forward.process_with_scratch(
             &mut self.fft_workspace_input_left,
             &mut self.fft_workspace_output_left,
+            &mut self.fft_scratch_forward_left,
         );
-        let forward_right = fft_forward.process(
+        let forward_right = fft_forward.process_with_scratch(
             &mut self.fft_workspace_input_right,
             &mut self.fft_workspace_output_right,
+            &mut self.fft_scratch_forward_right,
         );
 
         let cur_idx = self.input_spectrum_idx;
@@ -887,9 +1122,14 @@ impl ConvolutionEngine {
         self.acc_spectrum_right.fill(Complex::new(0.0, 0.0));
 
         let is_stereo = self.ir_partitions_right.is_some();
+        let start_p = if self.zero_latency { 1 } else { 0 };
 
-        for p in 0..p_count {
-            let hist_idx = (cur_idx + p_count - p) % p_count;
+        for p in start_p..p_count {
+            let hist_idx = if self.zero_latency {
+                (cur_idx + p_count - (p - 1)) % p_count
+            } else {
+                (cur_idx + p_count - p) % p_count
+            };
             let x_l = &self.input_spectra_left[hist_idx];
             let x_r = &self.input_spectra_right[hist_idx];
             let h_l = &self.ir_partitions_left[p];
@@ -953,6 +1193,16 @@ impl ConvolutionEngine {
             }
         }
 
+        // Enforce Hermitian symmetry: DC and Nyquist components of real FFT must have 0 imaginary part
+        self.acc_spectrum_left[0].im = 0.0;
+        self.acc_spectrum_left[spec_len - 1].im = 0.0;
+        self.acc_spectrum_right[0].im = 0.0;
+        self.acc_spectrum_right[spec_len - 1].im = 0.0;
+
+        // Enforce Hermitian symmetry: DC and Nyquist components of real FFT must have 0 imaginary part
+        self.acc_spectrum_left[0].im = 0.0;
+        self.acc_spectrum_left[spec_len - 1].im = 0.0;
+
         let fft_inverse = self.fft_inverse.as_ref();
         let copy_len = spec_len.min(self.ifft_workspace_spectrum_left.len());
         self.ifft_workspace_spectrum_left[..copy_len]
@@ -960,13 +1210,15 @@ impl ConvolutionEngine {
         self.ifft_workspace_spectrum_right[..copy_len]
             .copy_from_slice(&self.acc_spectrum_right[..copy_len]);
 
-        let inverse_left = fft_inverse.process(
+        let inverse_left = fft_inverse.process_with_scratch(
             &mut self.ifft_workspace_spectrum_left,
             &mut self.ifft_workspace_output_left,
+            &mut self.fft_scratch_inverse_left,
         );
-        let inverse_right = fft_inverse.process(
+        let inverse_right = fft_inverse.process_with_scratch(
             &mut self.ifft_workspace_spectrum_right,
             &mut self.ifft_workspace_output_right,
+            &mut self.fft_scratch_inverse_right,
         );
 
         match (inverse_left, inverse_right) {
@@ -1026,9 +1278,10 @@ impl ConvolutionEngine {
         self.fft_workspace_input_left[bs..fft_size].fill(0.0);
 
         let fft_forward = self.fft_forward.as_ref();
-        let forward = fft_forward.process(
+        let forward = fft_forward.process_with_scratch(
             &mut self.fft_workspace_input_left,
             &mut self.fft_workspace_output_left,
+            &mut self.fft_scratch_forward_left,
         );
         let cur_idx = self.input_spectrum_idx;
         match forward {
@@ -1043,8 +1296,13 @@ impl ConvolutionEngine {
         }
 
         self.acc_spectrum_left.fill(Complex::new(0.0, 0.0));
-        for p in 0..p_count {
-            let hist_idx = (cur_idx + p_count - p) % p_count;
+        let start_p = if self.zero_latency { 1 } else { 0 };
+        for p in start_p..p_count {
+            let hist_idx = if self.zero_latency {
+                (cur_idx + p_count - (p - 1)) % p_count
+            } else {
+                (cur_idx + p_count - p) % p_count
+            };
             let x_l = &self.input_spectra_left[hist_idx];
             let h_l = &self.ir_partitions_left[p];
             // SAFETY: Complex<f32> is #[repr(C)] with fields (re: f32, im:
@@ -1067,13 +1325,18 @@ impl ConvolutionEngine {
             }
         }
 
+        // Enforce Hermitian symmetry: DC and Nyquist components of real FFT must have 0 imaginary part
+        self.acc_spectrum_left[0].im = 0.0;
+        self.acc_spectrum_left[spec_len - 1].im = 0.0;
+
         let fft_inverse = self.fft_inverse.as_ref();
         let copy_len = spec_len.min(self.ifft_workspace_spectrum_left.len());
         self.ifft_workspace_spectrum_left[..copy_len]
             .copy_from_slice(&self.acc_spectrum_left[..copy_len]);
-        let inverse = fft_inverse.process(
+        let inverse = fft_inverse.process_with_scratch(
             &mut self.ifft_workspace_spectrum_left,
             &mut self.ifft_workspace_output_left,
+            &mut self.fft_scratch_inverse_left,
         );
         match inverse {
             Ok(()) => {
@@ -1114,13 +1377,15 @@ impl ConvolutionEngine {
         self.fft_workspace_input_right_f64[bs..fft_size].fill(0.0);
 
         let fft_forward = self.fft_forward_f64.as_ref();
-        let forward_left = fft_forward.process(
+        let forward_left = fft_forward.process_with_scratch(
             &mut self.fft_workspace_input_left_f64,
             &mut self.fft_workspace_output_left_f64,
+            &mut self.fft_scratch_forward_left_f64,
         );
-        let forward_right = fft_forward.process(
+        let forward_right = fft_forward.process_with_scratch(
             &mut self.fft_workspace_input_right_f64,
             &mut self.fft_workspace_output_right_f64,
+            &mut self.fft_scratch_forward_right_f64,
         );
 
         let cur_idx = self.input_spectrum_idx_f64;
@@ -1148,9 +1413,14 @@ impl ConvolutionEngine {
         self.acc_spectrum_right_f64.fill(Complex::new(0.0, 0.0));
 
         let is_stereo = self.ir_partitions_right_f64.is_some();
+        let start_p = if self.zero_latency { 1 } else { 0 };
 
-        for p in 0..p_count {
-            let hist_idx = (cur_idx + p_count - p) % p_count;
+        for p in start_p..p_count {
+            let hist_idx = if self.zero_latency {
+                (cur_idx + p_count - (p - 1)) % p_count
+            } else {
+                (cur_idx + p_count - p) % p_count
+            };
             let x_l = &self.input_spectra_left_f64[hist_idx];
             let x_r = &self.input_spectra_right_f64[hist_idx];
             let h_l = &self.ir_partitions_left_f64[p];
@@ -1173,6 +1443,12 @@ impl ConvolutionEngine {
             }
         }
 
+        // Enforce Hermitian symmetry: DC and Nyquist components of real FFT must have 0 imaginary part
+        self.acc_spectrum_left_f64[0].im = 0.0;
+        self.acc_spectrum_left_f64[spec_len - 1].im = 0.0;
+        self.acc_spectrum_right_f64[0].im = 0.0;
+        self.acc_spectrum_right_f64[spec_len - 1].im = 0.0;
+
         let fft_inverse = self.fft_inverse_f64.as_ref();
         let copy_len = spec_len.min(self.ifft_workspace_spectrum_left_f64.len());
         self.ifft_workspace_spectrum_left_f64[..copy_len]
@@ -1180,13 +1456,15 @@ impl ConvolutionEngine {
         self.ifft_workspace_spectrum_right_f64[..copy_len]
             .copy_from_slice(&self.acc_spectrum_right_f64[..copy_len]);
 
-        let inverse_left = fft_inverse.process(
+        let inverse_left = fft_inverse.process_with_scratch(
             &mut self.ifft_workspace_spectrum_left_f64,
             &mut self.ifft_workspace_output_left_f64,
+            &mut self.fft_scratch_inverse_left_f64,
         );
-        let inverse_right = fft_inverse.process(
+        let inverse_right = fft_inverse.process_with_scratch(
             &mut self.ifft_workspace_spectrum_right_f64,
             &mut self.ifft_workspace_output_right_f64,
+            &mut self.fft_scratch_inverse_right_f64,
         );
 
         match (inverse_left, inverse_right) {
@@ -1367,13 +1645,34 @@ impl ConvolutionEngine {
             + one(&self.ifft_workspace_output_right_f64)
             + one(&self.overlap_left)
             + one(&self.overlap_right)
+            + one(&self.fft_scratch_forward_left)
+            + one(&self.fft_scratch_forward_right)
+            + one(&self.fft_scratch_inverse_left)
+            + one(&self.fft_scratch_inverse_right)
+            + one(&self.fft_scratch_forward_left_f64)
+            + one(&self.fft_scratch_forward_right_f64)
+            + one(&self.fft_scratch_inverse_left_f64)
+            + one(&self.fft_scratch_inverse_right_f64)
+            + one(&self.head_ir_left_rev)
+            + one(&self.head_ir_right_rev)
+            + one(&self.head_ir_left_rev_f64)
+            + one(&self.head_ir_right_rev_f64)
+            + one(&self.head_history_left)
+            + one(&self.head_history_right)
+            + one(&self.head_history_left_f64)
+            + one(&self.head_history_right_f64)
     }
 
     /// Intrinsic latency of the partitioned convolution engine in samples.
-    /// In UP-OLA this is exactly one partition block (`block_size`).
+    /// In standard UP-OLA this is exactly one partition block (`block_size`);
+    /// in zero-latency mode this is 0.
     pub fn intrinsic_latency_samples(&self) -> usize {
         if self.enabled && self.ir_loaded {
-            self.block_size
+            if self.zero_latency {
+                0
+            } else {
+                self.block_size
+            }
         } else {
             0
         }
@@ -1381,7 +1680,11 @@ impl ConvolutionEngine {
 
     /// Partition latency in samples (the block size of the uniform partitions).
     pub fn partition_latency_samples(&self) -> usize {
-        self.block_size
+        if self.zero_latency {
+            0
+        } else {
+            self.block_size
+        }
     }
 
     /// Algorithmic latency in samples introduced by the convolution architecture.
@@ -1405,18 +1708,39 @@ impl ConvolutionEngine {
     }
 
     /// Latency of the partitioned convolution engine in samples.
-    /// In UP-OLA this is exactly one partition block (`block_size`).
+    /// In standard UP-OLA this is exactly one partition block (`block_size`); in zero-latency mode it is 0.
     pub fn latency_samples(&self) -> usize {
-        self.block_size
+        if self.zero_latency {
+            0
+        } else {
+            self.block_size
+        }
     }
 
-    /// Latency of the partitioned convolution engine in milliseconds (0 if disabled/no IR).
+    /// Latency of the partitioned convolution engine in milliseconds (0 if disabled/no IR/zero-latency).
     pub fn latency_ms(&self) -> f32 {
-        if self.enabled && self.ir_loaded && self.sample_rate > 0.0 {
+        if self.enabled && self.ir_loaded && self.sample_rate > 0.0 && !self.zero_latency {
             self.block_size as f32 / self.sample_rate * 1000.0
         } else {
             0.0
         }
+    }
+
+    /// Enable or disable zero-latency hybrid partitioned convolution (NUPC).
+    ///
+    /// When zero-latency is enabled, the first partition is convolved in the time domain
+    /// using direct-form FIR convolution without delay, while remaining partitions are
+    /// processed via frequency-domain overlap-add. Algorithmic latency drops to 0 samples.
+    pub fn set_zero_latency(&mut self, enabled: bool) {
+        if self.zero_latency != enabled {
+            self.zero_latency = enabled;
+            self.reset();
+        }
+    }
+
+    /// Whether zero-latency hybrid partitioned convolution is enabled.
+    pub fn is_zero_latency(&self) -> bool {
+        self.zero_latency
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -1513,6 +1837,13 @@ impl ConvolutionEngine {
         self.dropped_frames = 0;
         self.fft_failure_logged = false;
         self.current_wet_mix = self.wet_mix;
+
+        self.head_history_left.fill(0.0);
+        self.head_history_right.fill(0.0);
+        self.head_wp = 0;
+        self.head_history_left_f64.fill(0.0);
+        self.head_history_right_f64.fill(0.0);
+        self.head_wp_f64 = 0;
     }
 }
 
@@ -1823,5 +2154,142 @@ mod tests {
         assert!(!engine.is_ir_loaded());
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_zero_latency_reporting() {
+        let mut engine = ConvolutionEngine::new(48_000.0, 1024);
+        let ir = vec![(1.0f32, 1.0f32); 256];
+        engine.load_ir_from_samples(&ir).unwrap();
+        engine.set_enabled(true);
+
+        assert!(!engine.is_zero_latency());
+        assert_eq!(engine.latency_samples(), engine.block_size());
+        assert!(engine.latency_ms() > 0.0);
+
+        engine.set_zero_latency(true);
+        assert!(engine.is_zero_latency());
+        assert_eq!(engine.latency_samples(), 0);
+        assert_eq!(engine.intrinsic_latency_samples(), 0);
+        assert_eq!(engine.partition_latency_samples(), 0);
+        assert_eq!(engine.algorithmic_latency_samples(), 0);
+        assert_eq!(engine.latency_ms(), 0.0);
+    }
+
+    #[test]
+    fn test_zero_latency_convolution_matches_direct_convolution_f32() {
+        let mut engine = ConvolutionEngine::new(48_000.0, 2048);
+        let bs = engine.block_size();
+        let ir_len = bs * 3; // 3 partitions (512 * 3 = 1536 samples <= 2048 max)
+
+        let ir: Vec<(f32, f32)> = (0..ir_len)
+            .map(|i| {
+                let v = (-(i as f32) / (bs as f32 * 0.5)).exp() * ((i as f32) * 0.1).cos();
+                (v, v)
+            })
+            .collect();
+
+        engine.load_ir_from_samples(&ir).unwrap();
+        assert_eq!(engine.num_partitions(), 3);
+        engine.set_enabled(true);
+        engine.set_zero_latency(true);
+        engine.set_wet_mix(1.0);
+
+        let input_len = bs * 4;
+        let input: Vec<f32> = (0..input_len)
+            .map(|i| ((i as f32) * 0.07).sin() + if i % 13 == 0 { 0.5 } else { 0.0 })
+            .collect();
+
+        // Direct time-domain linear convolution reference
+        let mut expected = vec![0.0f32; input_len];
+        for n in 0..input_len {
+            let mut sum = 0.0f32;
+            for k in 0..ir_len {
+                if n >= k {
+                    sum += ir[k].0 * input[n - k];
+                }
+            }
+            expected[n] = sum;
+        }
+
+        // Run through zero-latency engine
+        let mut actual = Vec::with_capacity(input_len);
+        for &s in &input {
+            let (out_l, _) = engine.process(s, s);
+            actual.push(out_l);
+        }
+
+        for n in 0..input_len {
+            let diff = (actual[n] - expected[n]).abs();
+            assert!(
+                diff < 1e-4,
+                "Sample {n}: actual {}, expected {}, diff {}",
+                actual[n],
+                expected[n],
+                diff
+            );
+        }
+
+        // Also test mono path
+        engine.reset();
+        for (n, &s) in input.iter().enumerate() {
+            let out = engine.process_mono(s);
+            let diff = (out - expected[n]).abs();
+            assert!(
+                diff < 1e-4,
+                "Mono sample {n}: actual {}, expected {}, diff {}",
+                out,
+                expected[n],
+                diff
+            );
+        }
+    }
+
+    #[test]
+    fn test_zero_latency_convolution_matches_direct_convolution_f64() {
+        let mut engine = ConvolutionEngine::new(48_000.0, 2048);
+        let bs = engine.block_size();
+        let ir_len = bs * 3;
+
+        let ir: Vec<(f64, f64)> = (0..ir_len)
+            .map(|i| {
+                let v = (-(i as f64) / (bs as f64 * 0.5)).exp() * ((i as f64) * 0.1).cos();
+                (v, v)
+            })
+            .collect();
+
+        engine.load_ir_from_samples_f64(&ir).unwrap();
+        assert_eq!(engine.num_partitions(), 3);
+        engine.set_enabled(true);
+        engine.set_zero_latency(true);
+        engine.set_wet_mix(1.0);
+
+        let input_len = bs * 4;
+        let input: Vec<f64> = (0..input_len)
+            .map(|i| ((i as f64) * 0.07).sin() + if i % 13 == 0 { 0.5 } else { 0.0 })
+            .collect();
+
+        let mut expected = vec![0.0f64; input_len];
+        for n in 0..input_len {
+            let mut sum = 0.0f64;
+            for k in 0..ir_len {
+                if n >= k {
+                    sum += ir[k].0 * input[n - k];
+                }
+            }
+            expected[n] = sum;
+        }
+
+        for (n, &s) in input.iter().enumerate() {
+            let (out_l, _) = engine.process_f64(s, s);
+            let diff = (out_l - expected[n]).abs();
+            assert!(
+                diff < 1e-8,
+                "f64 Sample {n}: actual {}, expected {}, diff {}",
+                out_l,
+                expected[n],
+                diff
+            );
+        }
     }
 }

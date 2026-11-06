@@ -589,16 +589,45 @@ pub fn deconvolve_direct_raw(recording: &[f64], inverse_filter: &[f64]) -> Vec<f
     }
 
     let out_len = recording.len() + inverse_filter.len() - 1;
-    let mut ir = vec![0.0_f64; out_len];
-    for (i, &rec) in recording.iter().enumerate() {
-        if rec.abs() < 1e-9 {
-            continue;
+
+    // Small-input fast path: for tiny signals, direct time-domain convolution avoids FFT overhead.
+    if recording.len() * inverse_filter.len() <= 1024 {
+        let mut ir = vec![0.0_f64; out_len];
+        for (i, &rec) in recording.iter().enumerate() {
+            if rec.abs() < 1e-9 {
+                continue;
+            }
+            for (j, &inv) in inverse_filter.iter().enumerate() {
+                ir[i + j] += rec * inv;
+            }
         }
-        for (j, &inv) in inverse_filter.iter().enumerate() {
-            ir[i + j] += rec * inv;
-        }
+        return ir;
     }
-    ir
+
+    // FFT linear convolution: O(K log K) instead of O(N * M).
+    // Zero-pad to the next power of two >= out_len to prevent circular wrap-around.
+    let n = out_len.next_power_of_two();
+    let mut rec_buf = vec![Complex::new(0.0, 0.0); n];
+    for (i, &x) in recording.iter().enumerate() {
+        rec_buf[i].re = x;
+    }
+    let mut inv_buf = vec![Complex::new(0.0, 0.0); n];
+    for (i, &x) in inverse_filter.iter().enumerate() {
+        inv_buf[i].re = x;
+    }
+
+    let cfft = Cfft::new(n);
+    cfft.forward(&mut rec_buf);
+    cfft.forward(&mut inv_buf);
+
+    for (r, h) in rec_buf.iter_mut().zip(inv_buf.iter()) {
+        *r *= *h;
+    }
+
+    cfft.inverse(&mut rec_buf);
+
+    rec_buf.truncate(out_len);
+    rec_buf.into_iter().map(|c| c.re).collect()
 }
 
 #[cfg(test)]
