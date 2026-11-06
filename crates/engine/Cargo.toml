@@ -394,7 +394,7 @@ libloading = { version = "0.8", optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 # Must stay on the same line as cpal's ALSA requirement (both bind the same
 # `alsa` native library): cpal 0.18 requires alsa >= 0.11.
-alsa = "0.11"
+alsa = "0.12"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # CoreAudio HAL bindings for hardware endpoint volume
