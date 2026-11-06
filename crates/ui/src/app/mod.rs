@@ -76,6 +76,8 @@ pub struct ShadowPlayerApp {
     /// The track whose DSP profile was last applied, so the profile is
     /// applied once per track rather than once per frame.
     dsp_profile_track: Option<domain::ids::TrackId>,
+    /// The track whose ZoneSwitch routing was last evaluated.
+    zone_switch_track: Option<domain::ids::TrackId>,
     /// The chain as it stood when the current track started with no profile.
     /// The user may adjust the chain while listening to author that track's
     /// override; this is the base the override is diffed against, so those
@@ -294,6 +296,7 @@ impl ShadowPlayerApp {
             track_repo,
             track_dsp_repo,
             dsp_profile_track: None,
+            zone_switch_track: None,
             dsp_track_base: None,
             playlist_repo,
             favorites_repo,

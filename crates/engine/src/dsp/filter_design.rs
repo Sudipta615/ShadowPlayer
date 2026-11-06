@@ -73,12 +73,12 @@ pub enum FilterDesign {
     /// behaviour and a peaking band's skirt shape close to the analog
     /// prototype instead of forcing them to the bilinear image.
     Vicanek,
-    /// Nyquist-matched (Orfanidis-style) design: peaking and high-shelf
+    /// Nyquist-matched (Orfanidis-style) design: peaking and shelf
     /// shapes that hold their analog gain at the centre and pass to DC /
-    /// Nyquist without bilinear cramping. Available for `Peaking` and
-    /// `Highshelf` only; every other type falls back to the
+    /// Nyquist without bilinear cramping. Available for `Peaking`,
+    /// `Lowshelf`, and `Highshelf`; every other type falls back to the
     /// bandwidth-compensated cookbook design, exactly like Vicanek's shelf
-    /// fallback. Delegates to `BiquadCoeffs::{peaking,highshelf}_decramped`.
+    /// fallback. Delegates to `BiquadCoeffs::{peaking,lowshelf,highshelf}_decramped`.
     Orfanidis,
 }
 
@@ -154,6 +154,9 @@ pub fn design(
         match kind {
             FilterType::Peaking => {
                 return BiquadCoeffs::<f64>::peaking_decramped(sr, f0, gain as f32, q);
+            }
+            FilterType::Lowshelf => {
+                return BiquadCoeffs::<f64>::lowshelf_decramped(sr, f0, gain as f32, q);
             }
             FilterType::Highshelf => {
                 return BiquadCoeffs::<f64>::highshelf_decramped(sr, f0, gain as f32, q);
@@ -836,8 +839,26 @@ mod tests {
     }
 
     #[test]
-    fn the_orfanidis_highshelf_reaches_its_dc_gain() {
-        let coeffs = design(
+    fn the_orfanidis_shelves_reach_their_asymptotes() {
+        let low_coeffs = design(
+            FilterType::Lowshelf,
+            FilterDesign::Orfanidis,
+            SR,
+            1_000.0,
+            6.0,
+            Bandwidth::Q(0.707),
+        );
+        assert!(
+            close(magnitude_db_at(&low_coeffs, 20.0, SR_F64), 6.0, 0.1),
+            "low shelf DC: {:.3} dB",
+            magnitude_db_at(&low_coeffs, 20.0, SR_F64)
+        );
+        assert!(
+            magnitude_db_at(&low_coeffs, SR_F64 * 0.499, SR_F64).abs() < 0.2,
+            "low shelf Nyquist must be ~0 dB"
+        );
+
+        let high_coeffs = design(
             FilterType::Highshelf,
             FilterDesign::Orfanidis,
             SR,
@@ -846,11 +867,18 @@ mod tests {
             Bandwidth::Q(0.707),
         );
         assert!(
-            close(magnitude_db_at(&coeffs, 20.0, SR_F64), 6.0, 0.1),
-            "high shelf DC: {:.3} dB",
-            magnitude_db_at(&coeffs, 20.0, SR_F64)
+            magnitude_db_at(&high_coeffs, 20.0, SR_F64).abs() < 0.2,
+            "high shelf DC must be ~0 dB"
         );
-        assert!(magnitude_db_at(&coeffs, SR_F64 * 0.499, SR_F64).abs() < 0.2);
+        assert!(
+            close(
+                magnitude_db_at(&high_coeffs, SR_F64 * 0.499, SR_F64),
+                6.0,
+                0.1
+            ),
+            "high shelf Nyquist: {:.3} dB",
+            magnitude_db_at(&high_coeffs, SR_F64 * 0.499, SR_F64)
+        );
     }
 
     /// Golden vectors from an independent Python RBJ implementation
@@ -867,11 +895,11 @@ mod tests {
                 6.0,
                 1.0,
                 [
-                    1.0439530869903351,
-                    -1.8953207239365961,
-                    0.86772228475985658,
-                    -1.8953207239365961,
-                    0.91167537175019153,
+                    1.043953086990335,
+                    -1.895320723936596,
+                    0.867722284759856,
+                    -1.895320723936596,
+                    0.911675371750191,
                 ],
             ),
             (
@@ -880,11 +908,11 @@ mod tests {
                 -9.0,
                 4.31,
                 [
-                    0.90688515902195899,
-                    0.85567766065785378,
-                    0.80447016229374912,
-                    0.85567766065785378,
-                    0.71135532131570833,
+                    0.906885159021958,
+                    0.855677660657853,
+                    0.804470162293749,
+                    0.855677660657853,
+                    0.711355321315708,
                 ],
             ),
             (
@@ -894,10 +922,10 @@ mod tests {
                 0.707,
                 [
                     1.006446518467452,
-                    -1.9686077924935919,
-                    0.96311455562203341,
-                    -1.9688455470085819,
-                    0.9693233195744958,
+                    -1.968607792493591,
+                    0.963114555622033,
+                    -1.968845547008581,
+                    0.969323319574495,
                 ],
             ),
             (
@@ -906,11 +934,11 @@ mod tests {
                 -3.0,
                 0.9,
                 [
-                    0.74850580296318525,
-                    -0.97118159852610697,
-                    0.40388122461293557,
+                    0.748505802963185,
+                    -0.971181598526106,
+                    0.403881224612935,
                     -1.409207491951171,
-                    0.59041292100118503,
+                    0.590_412_921_001_185,
                 ],
             ),
         ];

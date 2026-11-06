@@ -94,10 +94,9 @@ Extracted from JRiver Media Center 36 (`/home/sudipta/Downloads/software`):
   - Zero-cost cover track stand-in mapping (`cover_tracks`) and conversion to UI `Album` entities (`to_albums`).
   - Integrated into `LibraryState::rebuild_album_covers()` and exposed through `LibraryState::album_analyzer`.
 - **Pre-Folded Collation Sort Keys**:
-  - `domain::text::fold_collation_key(&str) -> Box<[u8]>` ([`crates/domain/src/text.rs`](../crates/domain/src/text.rs)).
-  - `Track` models now carry `sort_artist_folded`, `sort_title_folded`, and `sort_album_folded` (`Option<Box<[u8]>>`) with lazy population via `ensure_sort_keys()` ([`crates/domain/src/models.rs`](../crates/domain/src/models.rs)).
-  - Precomputed during SQLite row hydration in `crates/database/src/repos/common.rs` and tag extraction in `crates/metadata/src/extractor.rs`.
-  - Sort comparisons in `LibraryState::sort_tracks` operate directly on pre-folded byte slices (`&[u8]::cmp`), eliminating string allocations and case conversions during sorting.
+  - `domain::text::fold_collation_key(&str) -> Vec<u8>` ([`crates/domain/src/text.rs`](../crates/domain/src/text.rs)).
+  - `Track::sort_artist_bytes`, `sort_title_bytes` and `sort_album_bytes` derive the key on demand from the live string fields ([`crates/domain/src/models.rs`](../crates/domain/src/models.rs)). No folded key is stored on the model or persisted, so `Vec<Track>::clone` stays cheap for the 100k-row list.
+  - `LibraryState::sort_tracks` builds one temporary key array per sort (only the fields that sort actually compares) and orders indices against it, eliminating string allocations and case conversions inside comparisons.
 - **Virtualized Album Grid Rendering ([`crates/ui/src/components/albums_view.rs`](../crates/ui/src/components/albums_view.rs))**:
   - Replaced unvirtualized table layout with `egui::ScrollArea::vertical().show_rows(...)` computing visible row ranges dynamically.
   - Reduced allocations to $O(\text{visible rows})$ rather than $O(\text{albums})$, maintaining silky 60 fps even with 10,000+ albums.

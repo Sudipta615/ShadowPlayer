@@ -344,7 +344,12 @@ impl DynamicEqBand {
             if !self.current_gain_db.is_finite() {
                 self.current_gain_db = self.params.static_gain_db;
             }
-            let alpha = if target_gain_db < self.current_gain_db {
+            let is_attacking = if self.params.dynamic_gain_db < 0.0 {
+                target_gain_db < self.current_gain_db
+            } else {
+                target_gain_db > self.current_gain_db
+            };
+            let alpha = if is_attacking {
                 subblock_alpha(self.params.attack_ms, self.sample_rate, chunk_len)
             } else {
                 subblock_alpha(self.params.release_ms, self.sample_rate, chunk_len)
@@ -611,5 +616,40 @@ mod tests {
         for (&a, &b) in valid_l.iter().zip(valid_r.iter()) {
             assert!(a.is_finite() && b.is_finite());
         }
+    }
+
+    #[test]
+    fn dynamic_eq_boost_uses_attack_on_onset() {
+        let sample_rate = 48_000.0;
+        let mut band = DynamicEqBand::new(sample_rate);
+        band.set_params(DynamicEqBandParams {
+            frequency: 1000.0,
+            q: 1.0,
+            static_gain_db: 0.0,
+            dynamic_gain_db: 6.0, // dynamic boost
+            threshold_db: -20.0,
+            ratio: 4.0,
+            attack_ms: 1.0,    // fast attack (1 ms)
+            release_ms: 200.0, // slow release (200 ms)
+            range_db: 6.0,
+            filter_type: EqFilterType::Peaking,
+            detector_mode: DetectionMode::Peak,
+            enabled: true,
+        });
+
+        // Feed a loud burst (0 dBFS sine) for 20 ms (~960 samples)
+        let n = 960;
+        let mut l: Vec<f64> = (0..n)
+            .map(|i| (2.0 * std::f64::consts::PI * 1000.0 * (i as f64) / 48_000.0).sin())
+            .collect();
+        let mut r = l.clone();
+        band.process_block(&mut l, &mut r, None);
+
+        // With a 1 ms attack, dynamic gain should rapidly approach +4 to +6 dB within 20 ms
+        let gain = band.current_gain_db;
+        assert!(
+            gain > 3.0,
+            "Dynamic boost must ramp up quickly with 1ms attack time (got {gain} dB)"
+        );
     }
 }

@@ -380,7 +380,7 @@ impl ShadowPlayerApp {
                     .find(|t| t.id == id)
                     .cloned()
                 {
-                    self.coordinator.play_track(track, None);
+                    self.play_track(track, None);
                 }
             }
         }

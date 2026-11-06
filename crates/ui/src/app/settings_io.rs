@@ -180,6 +180,17 @@ impl ShadowPlayerApp {
             }
         }
 
+        // 8. Speaker setup & acoustic alignment state
+        if let Ok(Some(json)) = self.settings_repo.get_value("speaker_setup_state") {
+            match serde_json::from_str::<crate::modals::SpeakerSetupModalState>(&json) {
+                Ok(mut state) => {
+                    state.apply_to_session(&self.session);
+                    self.app_state.speaker_setup_modal = state;
+                }
+                Err(e) => log::warn!("Ignoring unreadable speaker setup state: {e}"),
+            }
+        }
+
         // Sync restored state to audio session
         self.dsp_state.sync_all_to_session(&self.session);
 
@@ -358,6 +369,13 @@ impl ShadowPlayerApp {
         if let Ok(json) = serde_json::to_string(&table_prefs) {
             if let Err(e) = self.settings_repo.set_value("song_table_prefs", &json) {
                 log::warn!("Could not save the song-table layout: {e}");
+            }
+        }
+
+        // 9. Speaker setup & acoustic alignment state
+        if let Ok(json) = serde_json::to_string(&self.app_state.speaker_setup_modal) {
+            if let Err(e) = self.settings_repo.set_value("speaker_setup_state", &json) {
+                log::warn!("Could not save the speaker setup state: {e}");
             }
         }
     }

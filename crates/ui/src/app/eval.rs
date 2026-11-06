@@ -272,9 +272,6 @@ impl ShadowPlayerApp {
                             skip_count: 0,
                             last_played_at: None,
                             added_at: 0,
-                            sort_artist_folded: None,
-                            sort_title_folded: None,
-                            sort_album_folded: None,
                         };
                         self.track_repo.upsert(&track).unwrap();
                         scope.push(track);
@@ -423,7 +420,7 @@ impl ShadowPlayerApp {
                 if let Ok(idx) = std::env::var("SHADOWPLAYER_EVAL_LYRICS") {
                     let n: usize = idx.parse().unwrap_or(0);
                     if let Some(track) = self.library_state.displayed_tracks.get(n).cloned() {
-                        self.coordinator.play_track(track, None);
+                        self.play_track(track, None);
                     }
                     self.app_state.right_tab = crate::components::right_panel::RightTab::Lyrics;
                 }
@@ -485,9 +482,6 @@ impl ShadowPlayerApp {
                             skip_count: 0,
                             last_played_at: Some(1_700_000_000),
                             added_at: 1_600_000_000 + (i as i64) * 86_400,
-                            sort_artist_folded: None,
-                            sort_title_folded: None,
-                            sort_album_folded: None,
                         };
                         let _ = self.track_repo.upsert(&track);
                     }
@@ -574,9 +568,6 @@ impl ShadowPlayerApp {
                             skip_count: 0,
                             last_played_at: None,
                             added_at: 1_600_000_000,
-                            sort_artist_folded: None,
-                            sort_title_folded: None,
-                            sort_album_folded: None,
                         };
                         let _ = self.track_repo.upsert(&track);
                         let day_ago = (i % 20) as i64;

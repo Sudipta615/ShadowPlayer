@@ -381,4 +381,46 @@ impl ShadowPlayerApp {
             ImportKind::ClapLibrary => self.import_service.request_clap_library(),
         }
     }
+
+    /// Evaluate ZoneSwitch routing rules for the current track and switch active zone if matched.
+    pub(super) fn apply_track_zone_switch(&mut self) {
+        let Some(track) = self.coordinator.current_track().cloned() else {
+            return;
+        };
+        if self.zone_switch_track == Some(track.id) {
+            return;
+        }
+        self.zone_switch_track = Some(track.id);
+
+        if let Some(target_zone_id) = self.zone_coordinator.evaluate_zone_switch(&track) {
+            if target_zone_id != self.zone_coordinator.active_zone_id() {
+                self.zone_coordinator.set_active_zone(target_zone_id);
+                if let Some(zone) = self.zone_coordinator.active_zone() {
+                    self.session
+                        .set_output_device(zone.config.output_device.clone());
+                    self.session.set_volume(zone.effective_volume());
+                }
+            }
+        }
+    }
+
+    /// Play a track, evaluating ZoneSwitch rules before dispatching to the playback coordinator.
+    pub(super) fn play_track(
+        &mut self,
+        track: domain::models::Track,
+        new_queue: Option<Vec<domain::models::Track>>,
+    ) {
+        if let Some(target_zone_id) = self.zone_coordinator.evaluate_zone_switch(&track) {
+            if target_zone_id != self.zone_coordinator.active_zone_id() {
+                self.zone_coordinator.set_active_zone(target_zone_id);
+                if let Some(zone) = self.zone_coordinator.active_zone() {
+                    self.session
+                        .set_output_device(zone.config.output_device.clone());
+                    self.session.set_volume(zone.effective_volume());
+                }
+            }
+        }
+        self.zone_switch_track = Some(track.id);
+        self.coordinator.play_track(track, new_queue);
+    }
 }

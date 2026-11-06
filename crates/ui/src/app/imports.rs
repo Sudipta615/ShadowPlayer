@@ -288,7 +288,7 @@ impl ShadowPlayerApp {
                             }
                             if let Some(first) = cue_tracks.first().map(|m| m.track.clone()) {
                                 let all_t = cue_tracks.into_iter().map(|m| m.track).collect();
-                                self.coordinator.play_track(first, Some(all_t));
+                                self.play_track(first, Some(all_t));
                             }
                             self.reload_library();
                         }
@@ -296,7 +296,7 @@ impl ShadowPlayerApp {
                         if let Err(e) = self.track_repo.upsert(&meta.track) {
                             log::warn!("Could not import {}: {e}", meta.track.path.display());
                         }
-                        self.coordinator.play_track(meta.track.clone(), None);
+                        self.play_track(meta.track.clone(), None);
                         self.reload_library();
                     }
                 }

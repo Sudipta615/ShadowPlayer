@@ -4,12 +4,21 @@ use super::*;
 
 impl LibraryState {
     pub fn toggle_favorite(&mut self, favorites_repo: &FavoritesRepo, track_id: TrackId) {
-        if self.favorite_ids.contains(&track_id) {
+        let is_fav = if self.favorite_ids.contains(&track_id) {
             let _ = favorites_repo.remove(&track_id);
             self.favorite_ids.remove(&track_id);
+            false
         } else {
             let _ = favorites_repo.add(&track_id);
             self.favorite_ids.insert(track_id);
+            true
+        };
+        // Reflect favorite status on in-memory track models
+        if let Some(track) = self.all_tracks.iter_mut().find(|t| t.id == track_id) {
+            track.is_favorite = is_fav;
+        }
+        if let Some(track) = self.displayed_tracks.iter_mut().find(|t| t.id == track_id) {
+            track.is_favorite = is_fav;
         }
         // Favorites membership changed; force the visible list to rebuild.
         self.displayed_key = None;
@@ -20,6 +29,12 @@ impl LibraryState {
         if !self.favorite_ids.contains(&track_id) {
             let _ = favorites_repo.add(&track_id);
             self.favorite_ids.insert(track_id);
+            if let Some(track) = self.all_tracks.iter_mut().find(|t| t.id == track_id) {
+                track.is_favorite = true;
+            }
+            if let Some(track) = self.displayed_tracks.iter_mut().find(|t| t.id == track_id) {
+                track.is_favorite = true;
+            }
             self.displayed_key = None;
         }
     }

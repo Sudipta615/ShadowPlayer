@@ -226,7 +226,7 @@ impl ShadowPlayerApp {
         self.refresh_view();
 
         if let Some(first) = tracks.first().cloned() {
-            self.coordinator.play_track(first, Some(tracks));
+            self.play_track(first, Some(tracks));
         }
     }
 
@@ -439,6 +439,10 @@ impl ShadowPlayerApp {
         // A track's own DSP profile is applied when the track starts, so it
         // plays with its own curve rather than the global one.
         self.apply_track_dsp_profile();
+
+        // Evaluate ZoneSwitch routing rules when a track starts or transitions,
+        // redirecting playback to the designated zone and audio output device.
+        self.apply_track_zone_switch();
 
         // The coordinator drains the bounded output-event channel and
         // republishes device arrivals/changes. A preset bound to that device

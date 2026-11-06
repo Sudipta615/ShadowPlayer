@@ -1,6 +1,7 @@
 //! Types and domain models for acoustic alignment and speaker setup.
 
 use config::{CrossoverFilterType, CrossoverSlope};
+use serde::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
 
 /// Speed of sound in standard dry room air at 20°C (meters per second).
@@ -9,7 +10,7 @@ pub const SPEED_OF_SOUND_MPS: f32 = 343.2;
 pub const SPEED_OF_SOUND_FPS: f32 = 1126.0;
 
 /// Distance measurement unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DistanceUnit {
     #[default]
     Meters,
@@ -62,7 +63,7 @@ impl DistanceUnit {
 }
 
 /// Semantic speaker roles mapped to standard channel indices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SpeakerRole {
     #[default]
     FrontLeft,
@@ -134,7 +135,7 @@ impl SpeakerRole {
 }
 
 /// Surround and multichannel layout topology.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SpeakerLayout {
     Stereo20,
     #[default]
@@ -182,7 +183,7 @@ impl SpeakerLayout {
 }
 
 /// Per-channel alignment settings.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpeakerChannelConfig {
     pub role: SpeakerRole,
     pub channel: usize,
@@ -211,7 +212,7 @@ impl SpeakerChannelConfig {
 }
 
 /// Quick crossover presets based on acoustic speaker driver sizes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SpeakerSizePreset {
     Floorstander,
     #[default]
@@ -221,11 +222,14 @@ pub enum SpeakerSizePreset {
 }
 
 /// Modal dialog state for speaker setup & alignment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeakerSetupModalState {
+    #[serde(skip)]
     pub is_open: bool,
     pub layout: SpeakerLayout,
     pub unit: DistanceUnit,
     pub speakers: Vec<SpeakerChannelConfig>,
+    #[serde(skip)]
     pub selected_idx: usize,
     pub live_preview: bool,
 
@@ -241,6 +245,7 @@ pub struct SpeakerSetupModalState {
     pub sub_polarity_invert: bool,
     pub sub_fine_delay_ms: f32,
 
+    #[serde(skip)]
     pub status_banner: Option<String>,
 }
 

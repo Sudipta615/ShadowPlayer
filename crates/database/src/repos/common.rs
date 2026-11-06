@@ -10,6 +10,13 @@ use rusqlite::{Result, Row};
 use std::path::Path;
 use std::str::FromStr;
 
+// NOTE: `Track` no longer stores pre-folded sort keys. They were never
+// persisted in the database (the row reader rebuilt them from the string
+// fields on every read), so removing them from `Track` changes no schema and
+// touches no migration. Sort keys are now built on demand by
+// `Track::sort_*_bytes()` and by the sort routines in
+// `crate::state::library_state::sort_tracks`.
+
 /// Decode a UUID column.
 ///
 /// A malformed value is a hard error rather than a fabricated id: the old
@@ -132,10 +139,6 @@ pub(super) fn map_track(row: &Row<'_>) -> Result<Track> {
     let title: String = row.get("title")?;
     let artist: String = row.get("artist")?;
     let album: String = row.get("album")?;
-    let sort_artist_folded = Some(domain::text::fold_collation_key(&artist));
-    let sort_title_folded = Some(domain::text::fold_collation_key(&title));
-    let sort_album_folded = Some(domain::text::fold_collation_key(&album));
-
     Ok(Track {
         id: parse_id(&id_str, "tracks.id")?,
         path: decode_path_key(&path_str),
@@ -174,8 +177,5 @@ pub(super) fn map_track(row: &Row<'_>) -> Result<Track> {
         play_count: row.get("play_count")?,
         last_played_at: row.get("last_played_at")?,
         added_at: row.get("added_at")?,
-        sort_artist_folded,
-        sort_title_folded,
-        sort_album_folded,
     })
 }

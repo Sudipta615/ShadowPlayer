@@ -73,11 +73,13 @@ fn decode_cp1252(bytes: &[u8]) -> String {
 
 /// Compute a pre-folded collation key for case-insensitive ordering.
 ///
-/// Pre-folding strings into lower-case byte slices once during ingestion
-/// allows sorting by title/artist/album to compare pre-folded byte slices
-/// (`&[u8]`) directly with zero heap allocations during sort comparisons.
-pub fn fold_collation_key(s: &str) -> Box<[u8]> {
-    s.to_lowercase().into_bytes().into_boxed_slice()
+/// The key is returned as an owned `Vec<u8>` so a sort routine can build one
+/// temporary key per track and borrow it for the duration of each comparison
+/// without per-comparison allocation. Sorting no longer stores these keys on
+/// `Track` (they were never persisted and were rebuilt from the string fields
+/// on every read), which keeps `Vec<Track>::clone` cheap.
+pub fn fold_collation_key(s: &str) -> Vec<u8> {
+    s.to_lowercase().into_bytes()
 }
 
 #[cfg(test)]

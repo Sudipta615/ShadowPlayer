@@ -64,9 +64,6 @@ fn synthetic_library(count: usize) -> Vec<Track> {
             let album = ALBUMS[(i / 7) % ALBUMS.len()];
             let track_no = (i % 12) as u32 + 1;
             let title = format!("{album} — Track {track_no:02}");
-            let sort_artist_folded = Some(domain::text::fold_collation_key(artist));
-            let sort_title_folded = Some(domain::text::fold_collation_key(&title));
-            let sort_album_folded = Some(domain::text::fold_collation_key(album));
             Track {
                 id: TrackId::new(),
                 path: std::path::PathBuf::from(format!("/music/{artist}/{album}/{i:06}.flac")),
@@ -102,9 +99,6 @@ fn synthetic_library(count: usize) -> Vec<Track> {
                 skip_count: 0,
                 last_played_at: None,
                 added_at: 1_700_000_000 + i as i64,
-                sort_artist_folded,
-                sort_title_folded,
-                sort_album_folded,
             }
         })
         .collect()

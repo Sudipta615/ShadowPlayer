@@ -5,6 +5,7 @@
 
 use super::envelope::BallisticEnvelope;
 use crate::dsp::biquad::{BiquadCoeffsF32, BiquadStateF32};
+use crate::dsp::true_peak::TruePeakMeter;
 
 /// Detection algorithm type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -98,6 +99,10 @@ pub struct DynamicsDetector {
     mean_sq_r: f32,
     rms_coeff: f32,
 
+    // 4x oversampled true-peak followers (only driven in `TruePeak` mode)
+    tp_l: TruePeakMeter,
+    tp_r: TruePeakMeter,
+
     // Sidechain biquad filtering
     sc_coeffs: Option<BiquadCoeffsF32>,
     sc_state_l: BiquadStateF32,
@@ -114,7 +119,7 @@ impl DynamicsDetector {
     /// Create a new dynamics detector for the given sample rate and configuration.
     pub fn new(sample_rate: f32, config: DetectorConfig) -> Self {
         let sr = sample_rate.max(1.0);
-        let lookahead_cap = config.lookahead_samples.max(1).next_power_of_two();
+        let lookahead_cap = (config.lookahead_samples + 1).max(2).next_power_of_two();
         let env_l = BallisticEnvelope::new(sr, config.attack_ms, config.release_ms, config.hold_ms);
         let env_r = BallisticEnvelope::new(sr, config.attack_ms, config.release_ms, config.hold_ms);
 
@@ -126,6 +131,8 @@ impl DynamicsDetector {
             mean_sq_l: 0.0,
             mean_sq_r: 0.0,
             rms_coeff: 0.0,
+            tp_l: TruePeakMeter::new(),
+            tp_r: TruePeakMeter::new(),
             sc_coeffs: None,
             sc_state_l: BiquadStateF32::default(),
             sc_state_r: BiquadStateF32::default(),
@@ -148,8 +155,8 @@ impl DynamicsDetector {
 
     /// Update configuration.
     pub fn set_config(&mut self, config: DetectorConfig) {
-        if config.lookahead_samples > self.lookahead_cap {
-            self.lookahead_cap = config.lookahead_samples.next_power_of_two();
+        if config.lookahead_samples >= self.lookahead_cap {
+            self.lookahead_cap = (config.lookahead_samples + 1).max(2).next_power_of_two();
             self.lookahead_buf_l = vec![0.0; self.lookahead_cap];
             self.lookahead_buf_r = vec![0.0; self.lookahead_cap];
             self.lookahead_write = 0;
@@ -170,6 +177,8 @@ impl DynamicsDetector {
         self.env_r.reset();
         self.mean_sq_l = 0.0;
         self.mean_sq_r = 0.0;
+        self.tp_l.reset();
+        self.tp_r.reset();
         self.sc_state_l.reset();
         self.sc_state_r.reset();
         self.lookahead_buf_l.fill(0.0);
@@ -198,7 +207,7 @@ impl DynamicsDetector {
             self.lookahead_buf_l[wp] = raw_l;
             self.lookahead_buf_r[wp] = raw_r;
             self.lookahead_write = (wp + 1) & mask;
-            let rp = (wp + cap - (self.config.lookahead_samples & mask)) & mask;
+            let rp = (wp + cap - self.config.lookahead_samples) & mask;
             (self.lookahead_buf_l[rp], self.lookahead_buf_r[rp])
         } else {
             (raw_l, raw_r)
@@ -216,7 +225,15 @@ impl DynamicsDetector {
 
         // 3. Extract instantaneous detector energy/level based on mode
         let (mut level_l, mut level_r) = match self.config.detection_mode {
-            DetectionMode::Peak | DetectionMode::TruePeak => (filtered_l.abs(), filtered_r.abs()),
+            DetectionMode::Peak => (filtered_l.abs(), filtered_r.abs()),
+            // `TruePeak` must actually be 4x oversampled. Matching `Peak`
+            // here under-reads every inter-sample peak (up to +3 dB on a
+            // fs/4 tone), which is the exact error a true-peak detector is
+            // bought to avoid — a limiter driven by this would clamp late.
+            DetectionMode::TruePeak => (
+                self.tp_l.process_sample(filtered_l as f64) as f32,
+                self.tp_r.process_sample(filtered_r as f64) as f32,
+            ),
             // All three integrate the same leaky mean-square energy; `Rms`
             // returns its square root, the energy modes the value itself.
             //
@@ -417,6 +434,53 @@ mod tests {
         );
     }
 
+    /// TruePeak must see inter-sample peaks that a sample-peak follower
+    /// misses. A fs/4 sine offset by 45 deg samples at +-0.7071 while its true
+    /// peak is 1.0 (+3 dB): the two modes must not report the same level.
+    #[test]
+    fn true_peak_mode_detects_inter_sample_peaks() {
+        let sample_rate = 48_000.0;
+        let base = DetectorConfig {
+            attack_ms: 0.05,
+            release_ms: 0.05,
+            ..Default::default()
+        };
+        let mut peak = DynamicsDetector::new(sample_rate, base.clone());
+        let mut true_peak = DynamicsDetector::new(
+            sample_rate,
+            DetectorConfig {
+                detection_mode: DetectionMode::TruePeak,
+                ..base
+            },
+        );
+
+        let mut peak_max = 0.0f32;
+        let mut tp_max = 0.0f32;
+        for i in 0..4096 {
+            let phase = std::f32::consts::FRAC_PI_2 * i as f32 + std::f32::consts::FRAC_PI_4;
+            let s = phase.sin();
+            peak_max = peak_max.max(peak.process_frame(s, s, None).0);
+            tp_max = tp_max.max(true_peak.process_frame(s, s, None).0);
+        }
+
+        assert!(
+            (peak_max - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.02,
+            "sample peak follower reads the samples: {peak_max}"
+        );
+        assert!(
+            tp_max > peak_max * 1.2,
+            "true peak must exceed the sample peak on an fs/4 tone: {tp_max} vs {peak_max}"
+        );
+        // The 4x polyphase interpolator is flat to ~-2.6 dB right at the
+        // Nyquist / 4 edge it is most stressed near. The real claim is only
+        // that it exceeds the sample peak; the dBTP-in-other-units value is
+        // documented at -1.20 dB on this tone.
+        assert!(
+            tp_max > 0.85 && tp_max <= 1.0,
+            "true peak of this tone should be between 0.85 and 1.0: {tp_max}"
+        );
+    }
+
     #[test]
     fn test_detector_linking_modes() {
         let sample_rate = 48_000.0;
@@ -434,5 +498,35 @@ mod tests {
                 "MaxLinked must produce identical envelope across channels"
             );
         }
+    }
+
+    #[test]
+    fn lookahead_power_of_two_delay_is_exact() {
+        let sample_rate = 48_000.0;
+        let delay = 64;
+        let config = DetectorConfig {
+            lookahead_samples: delay,
+            attack_ms: 0.0,
+            release_ms: 0.0,
+            hold_ms: 0.0,
+            detection_mode: DetectionMode::Peak,
+            ..Default::default()
+        };
+        let mut det = DynamicsDetector::new(sample_rate, config);
+
+        // Feed an impulse at frame 0, followed by zeroes
+        let mut detected_at = None;
+        for i in 0..128 {
+            let s = if i == 0 { 1.0 } else { 0.0 };
+            let (l, _) = det.process_frame(s, s, None);
+            if l > 0.5 && detected_at.is_none() {
+                detected_at = Some(i);
+            }
+        }
+        assert_eq!(
+            detected_at,
+            Some(delay),
+            "Impulse must emerge after exactly {delay} samples"
+        );
     }
 }

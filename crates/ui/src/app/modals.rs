@@ -292,6 +292,9 @@ impl ShadowPlayerApp {
             &self.session,
             &self.theme,
         );
+        if self.app_state.speaker_setup_modal.is_open {
+            self.settings_dirty = true;
+        }
 
         let available_devices = self.session.available_devices();
         let zone_actions = crate::modals::show_zone_manager_modal(

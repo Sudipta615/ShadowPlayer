@@ -6,17 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- **Settings & Help layout.** The category rail is a fixed-width, elided nav column; content no longer runs under the scrollbar; the queue toggle is hidden on Settings and Help; and hover feedback snaps out instead of crossfading between rows.
-- **Equalizer studio.** Header, tab strip, section cards, preamp, and reset control rebuilt around content-sized tabs so the window can actually shrink to its 320 px minimum. Tabs with an engaged processing stage show a dot, and the master switch reads `ACTIVE` / `BYPASSED`.
-- **Smart playlist & Song Info dialogs.** Rule rows are cards with aligned field/operator/value controls, match mode is a visible choice, and both dialogs gain a footer with Cancel plus the primary action.
-- **Text on accent fills** now goes through `theme::on_fill`, which chooses white or dark ink by contrast, so pale custom accents stay readable.
-- **Interaction surfaces** are normalised when a theme loads, guaranteeing a visible hover delta even when a custom theme declares `bg_card_hover == bg_card`. Quiet action pills no longer pin their background with `Button::fill`, which used to suppress the hover state entirely.
-- **Settings dialogs** close on Escape and on a backdrop click through one owner (`ModalResponse::should_close`), so the key press cannot also be consumed by a focused text field.
+---
 
-### Removed
-- **Frosted glass surfaces** and the artwork backdrop/blur pipeline, including its Settings toggle and the `theme/glass.rs` module. Cards, panels, and inputs are opaque theme surfaces.
-- The theme gallery's active-theme/preview strip: each card already carries its own Clear action.
+## [0.28.0] - 2026-11-06
+
+*Released with audio-engine 1.13.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added & Integrated
+- **ZoneSwitch Metadata Routing.** Wired `ZoneCoordinator::evaluate_zone_switch` into track playback and natural queue advancement, allowing rule-based automatic redirection of playback to dedicated audio zones and output devices (e.g. surround, DSD, lossless).
+- **Persistent Speaker Setup & Acoustic Alignment.** `SpeakerSetupModalState` is now serialized to durable settings storage across sessions, preserving calibrated speaker distances, arrival delay compensation, level trims, and subwoofer Linkwitz-Riley crossovers.
+
+### Fixed & Optimized (Engine & DSP)
+- **Decramped Orfanidis Shelf Filters.** Implemented true high-shelf bilinear prewarping ($\omega_g = \omega_0 / g^{0.25}$) and numerator mapping in `biquad.rs` and `filter_design.rs`, eliminating low-shelf inversion on treble shelf boosts/cuts.
+- **Dynamic EQ Boost Ballistics.** Corrected attack/release envelope selection for positive dynamic gains in `DynamicEqBand::process_stereo_block`, applying attack dynamics on transient peaks.
+- **Zero-Allocation 3-Way Crossover.** Preallocated scratch buffers in `Crossover3Way` eliminating audio-thread heap allocations, and added delay alignment compensation to the High band to match Mid/Low filter latency.
+- **Dynamics Detector Lookahead Delay.** Corrected power-of-two lookahead buffer capacity sizing and bitmask indexing in `DynamicsDetector`, preventing delay collapse to 0 samples on exact powers of two.
+
+### Fixed & Optimized (UI & State)
+- **Contiguous KeyTable 100k Sort.** Slashed heap fragmentation and allocations during large library sorts using a two-allocation `KeyTable` (offsets + byte storage), verified by the `library_budget` performance suite.
+- **Subordinate Natural Sort Order.** Maintained chronological album release and track number ordering when sorting by artist or album in descending order.
+- **Favorite Synchronization.** Synchronized in-memory `Track.is_favorite` across `all_tracks` and `displayed_tracks` on favorite toggle and addition.
+- **Settings & Help Layout Overhaul.** Category rail navigation, tabbed EQ studio with active stage indicators, modal backdrop dismissal, and contrast-guaranteed text styling on accent fills.
+- **Frosted glass surfaces** and the artwork backdrop/blur pipeline removed in favor of opaque theme surfaces.
 
 ---
 

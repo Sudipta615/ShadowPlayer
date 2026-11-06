@@ -271,11 +271,11 @@ impl<T: AudioFloat> BiquadCoeffs<T> {
         Self::from_f64_raw(b0, b1, b2, a1, a2)
     }
 
-    /// Nyquist-decramped high-shelf filter.
+    /// Nyquist-decramped low-shelf filter.
     ///
-    /// Extends the high-shelf transition smoothly up to the Nyquist frequency
-    /// without premature shelf termination.
-    pub fn highshelf_decramped(sample_rate: f32, freq: f32, gain_db: f32, q: f32) -> Self {
+    /// Holds the analog low-shelf gain at DC and rolls off smoothly toward
+    /// Nyquist without cramping.
+    pub fn lowshelf_decramped(sample_rate: f32, freq: f32, gain_db: f32, q: f32) -> Self {
         let (sr, f, qv) = Self::validate_params(sample_rate, freq, q);
         let gain = Self::validate_gain_db(gain_db);
         if gain.abs() < 1e-6 {
@@ -294,6 +294,35 @@ impl<T: AudioFloat> BiquadCoeffs<T> {
         let b0 = (g * om_g * om_g + (2.0 * g).sqrt() * om_g + 1.0) / d;
         let b1 = 2.0 * (g * om_g * om_g - 1.0) / d;
         let b2 = (g * om_g * om_g - (2.0 * g).sqrt() * om_g + 1.0) / d;
+        let a1 = 2.0 * (om_g * om_g - 1.0) / d;
+        let a2 = (om_g * om_g - sqrt2_over_q * om_g + 1.0) / d;
+
+        Self::from_f64_raw(b0, b1, b2, a1, a2)
+    }
+
+    /// Nyquist-decramped high-shelf filter.
+    ///
+    /// Extends the high-shelf transition smoothly up to the Nyquist frequency
+    /// without premature shelf termination, holding DC at unity and Nyquist at gain.
+    pub fn highshelf_decramped(sample_rate: f32, freq: f32, gain_db: f32, q: f32) -> Self {
+        let (sr, f, qv) = Self::validate_params(sample_rate, freq, q);
+        let gain = Self::validate_gain_db(gain_db);
+        if gain.abs() < 1e-6 {
+            return Self::identity();
+        }
+
+        let g = 10.0_f64.powf(gain / 20.0);
+        let w0 = 2.0 * std::f64::consts::PI * f / sr;
+        let om0 = (w0 * 0.5).tan();
+        let sqrt2_over_q = std::f64::consts::SQRT_2 / qv;
+
+        // Shelf prewarping (inverse factor for high shelf)
+        let om_g = om0 / g.powf(0.25);
+        let d = om_g * om_g + sqrt2_over_q * om_g + 1.0;
+
+        let b0 = (om_g * om_g + (2.0 * g).sqrt() * om_g + g) / d;
+        let b1 = 2.0 * (om_g * om_g - g) / d;
+        let b2 = (om_g * om_g - (2.0 * g).sqrt() * om_g + g) / d;
         let a1 = 2.0 * (om_g * om_g - 1.0) / d;
         let a2 = (om_g * om_g - sqrt2_over_q * om_g + 1.0) / d;
 

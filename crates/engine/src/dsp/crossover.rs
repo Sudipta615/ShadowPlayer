@@ -65,6 +65,14 @@ pub struct Crossover2Way {
     lr_lp_states_r: Vec<BiquadStateF64>,
     lr_hp_states_l: Vec<BiquadStateF64>,
     lr_hp_states_r: Vec<BiquadStateF64>,
+    /// Polarity applied to the high band (+1 or −1).
+    ///
+    /// An LR2 split cannot sum flat on its own: the low and high branches are
+    /// each −6 dB at fc with opposite phase, so `low + high` nulls at the
+    /// crossover point. Standard LR2 practice is to invert one band, which
+    /// makes the pair sum to an all-pass. LR4 and above already sum in phase,
+    /// so they keep +1.
+    hp_polarity: f64,
 
     // FIR states (linear-phase)
     fir_taps: Vec<f64>,
@@ -89,6 +97,7 @@ impl Crossover2Way {
             lr_lp_states_r: Vec::new(),
             lr_hp_states_l: Vec::new(),
             lr_hp_states_r: Vec::new(),
+            hp_polarity: 1.0,
             fir_taps: Vec::new(),
             fir_delay_l: Vec::new(),
             fir_delay_r: Vec::new(),
@@ -216,8 +225,8 @@ impl Crossover2Way {
                     {
                         hp_r = state.process(hp_r, coeffs);
                     }
-                    high_l[i] = hp_l;
-                    high_r[i] = hp_r;
+                    high_l[i] = hp_l * self.hp_polarity;
+                    high_r[i] = hp_r * self.hp_polarity;
                 }
             }
             CrossoverArchitecture::LinearPhaseFir { .. } => {
@@ -262,10 +271,20 @@ impl Crossover2Way {
 
         match self.arch {
             CrossoverArchitecture::LinkwitzRiley(slope) => {
+                // LR2 is two cascaded 1st-order sections, i.e. one critically
+                // damped 2nd-order section with Q = 0.5 (−6 dB at fc, and
+                // −12 dB/oct). Q = 1/sqrt(2) is a single 2nd-order Butterworth
+                // (−3 dB at fc): a different alignment that cannot be summed
+                // back to flat with its complementary high band. This matches
+                // `spatial::bass::filter`'s LR2 alignment; the two must not
+                // disagree.
+                self.hp_polarity = if slope == CrossoverSlope::Db12 {
+                    -1.0
+                } else {
+                    1.0
+                };
                 let q_values: Vec<f32> = match slope {
-                    // LR2 = single 2nd-order Butterworth section (Q = 1/sqrt(2)).
-                    // A single Q=0.5 biquad is neither Butterworth nor LR2.
-                    CrossoverSlope::Db12 => vec![std::f32::consts::FRAC_1_SQRT_2],
+                    CrossoverSlope::Db12 => vec![0.5],
                     CrossoverSlope::Db24 => vec![
                         std::f32::consts::FRAC_1_SQRT_2,
                         std::f32::consts::FRAC_1_SQRT_2,
@@ -289,6 +308,8 @@ impl Crossover2Way {
                 self.lr_hp_states_r = vec![BiquadStateF64::default(); n_sec];
             }
             CrossoverArchitecture::MixedPhase => {
+                // Runs the LR4 chain: both bands sum in phase.
+                self.hp_polarity = 1.0;
                 let q_values = [
                     std::f32::consts::FRAC_1_SQRT_2,
                     std::f32::consts::FRAC_1_SQRT_2,
@@ -309,6 +330,8 @@ impl Crossover2Way {
                 self.lr_hp_states_r = vec![BiquadStateF64::default(); n_sec];
             }
             CrossoverArchitecture::LinearPhaseFir { num_taps } => {
+                // Complementary FIR split: no polarity inversion needed.
+                self.hp_polarity = 1.0;
                 let nt = (num_taps.max(15) | 1).min(513); // Force odd tap count for exact linear phase
                 let m = (nt - 1) / 2;
                 let norm_fc = self.frequency / self.sample_rate;
@@ -354,6 +377,12 @@ impl Crossover2Way {
 pub struct Crossover3Way {
     low_xover: Crossover2Way,
     high_xover: Crossover2Way,
+    scratch_l: Vec<f64>,
+    scratch_r: Vec<f64>,
+    high_delay_l: Vec<f64>,
+    high_delay_r: Vec<f64>,
+    high_delay_pos: usize,
+    high_delay_len: usize,
 }
 
 impl Crossover3Way {
@@ -366,9 +395,17 @@ impl Crossover3Way {
     ) -> Self {
         let low_xover = Crossover2Way::new(arch, sample_rate, low_freq);
         let high_xover = Crossover2Way::new(arch, sample_rate, high_freq);
+        let high_delay_len = low_xover.latency_samples();
+        let cap = (high_delay_len + 1).next_power_of_two().max(16);
         Self {
             low_xover,
             high_xover,
+            scratch_l: vec![0.0; 512],
+            scratch_r: vec![0.0; 512],
+            high_delay_l: vec![0.0; cap],
+            high_delay_r: vec![0.0; cap],
+            high_delay_pos: 0,
+            high_delay_len,
         }
     }
 
@@ -391,6 +428,11 @@ impl Crossover3Way {
     pub fn reset(&mut self) {
         self.low_xover.reset();
         self.high_xover.reset();
+        self.scratch_l.fill(0.0);
+        self.scratch_r.fill(0.0);
+        self.high_delay_l.fill(0.0);
+        self.high_delay_r.fill(0.0);
+        self.high_delay_pos = 0;
     }
 
     /// Process a stereo block, splitting into Low, Mid, High bands.
@@ -407,22 +449,42 @@ impl Crossover3Way {
         high_r: &mut [f64],
     ) {
         let n = left_in.len().min(right_in.len());
-        // First split input at high_freq into (Low+Mid) and High
-        // Then split (Low+Mid) at low_freq into Low and Mid
-        let mut temp_lm_l = vec![0.0; n];
-        let mut temp_lm_r = vec![0.0; n];
+        if self.scratch_l.len() < n {
+            self.scratch_l.resize(n, 0.0);
+            self.scratch_r.resize(n, 0.0);
+        }
 
         self.high_xover.process_block(
             left_in,
             right_in,
-            &mut temp_lm_l,
-            &mut temp_lm_r,
+            &mut self.scratch_l[..n],
+            &mut self.scratch_r[..n],
             high_l,
             high_r,
         );
 
-        self.low_xover
-            .process_block(&temp_lm_l, &temp_lm_r, low_l, low_r, mid_l, mid_r);
+        self.low_xover.process_block(
+            &self.scratch_l[..n],
+            &self.scratch_r[..n],
+            low_l,
+            low_r,
+            mid_l,
+            mid_r,
+        );
+
+        // Align High band with Low/Mid when latency exists (e.g. LinearPhaseFir)
+        if self.high_delay_len > 0 {
+            let cap = self.high_delay_l.len();
+            for i in 0..n {
+                let wp = self.high_delay_pos;
+                let rp = (wp + cap - self.high_delay_len) % cap;
+                self.high_delay_l[wp] = high_l[i];
+                self.high_delay_r[wp] = high_r[i];
+                high_l[i] = self.high_delay_l[rp];
+                high_r[i] = self.high_delay_r[rp];
+                self.high_delay_pos = (wp + 1) % cap;
+            }
+        }
     }
 }
 
@@ -480,19 +542,70 @@ mod tests {
     }
 
     #[test]
-    fn test_lr2_is_a_butterworth_section_and_mixed_reports_minimum_phase() {
-        let lr2 = Crossover2Way::new(
+    fn test_lr2_is_critically_damped_and_reconstructs_flat() {
+        let sr = 48_000.0;
+        let mut lr2 = Crossover2Way::new(
             CrossoverArchitecture::LinkwitzRiley(CrossoverSlope::Db12),
-            48_000.0,
+            sr,
             1000.0,
         );
-        // LR2 must be a single Butterworth 2nd-order section: fc is -3.01 dB.
+        // LR2 is one critically damped section (two cascaded 1st-order
+        // sections), so fc sits at -6.02 dB - not the -3.01 dB of a Butterworth.
         assert_eq!(lr2.lr_lp_coeffs.len(), 1);
         let c = lr2.lr_lp_coeffs[0];
         let db = crate::dsp::filter_design::magnitude_db_at(&c, 1000.0, 48_000.0);
         assert!(
-            (db + 3.0103).abs() < 0.05,
-            "LR2 must be -3.01 dB at fc, got {db}"
+            (db + 6.0206).abs() < 0.05,
+            "LR2 must be -6.02 dB at fc, got {db}"
+        );
+        let hp_db =
+            crate::dsp::filter_design::magnitude_db_at(&lr2.lr_hp_coeffs[0], 1000.0, 48_000.0);
+        assert!(
+            (hp_db + 6.0206).abs() < 0.05,
+            "LR2 high band must also be -6.02 dB at fc, got {hp_db}"
+        );
+
+        // The pair must reconstruct: with the high band inverted, low + high
+        // is an all-pass of unit magnitude (previously the sum nulled at fc).
+        let n = 2048;
+        let left: Vec<f64> = (0..n)
+            .map(|i| (2.0 * std::f64::consts::PI * 1000.0 * i as f64 / sr).sin())
+            .collect();
+        let right = left.clone();
+        let (mut low_l, mut low_r) = (vec![0.0; n], vec![0.0; n]);
+        let (mut high_l, mut high_r) = (vec![0.0; n], vec![0.0; n]);
+        lr2.process_block(
+            &left,
+            &right,
+            &mut low_l,
+            &mut low_r,
+            &mut high_l,
+            &mut high_r,
+        );
+        let sum_peak = low_l
+            .iter()
+            .zip(high_l.iter())
+            .skip(1024)
+            .map(|(a, b)| (a + b).abs())
+            .fold(0.0f64, f64::max);
+        assert!(
+            (sum_peak - 1.0).abs() < 0.05,
+            "LR2 low + inverted high must be all-pass at unity, got {sum_peak}"
+        );
+        // Without the inversion the bands cancel at fc, which is the defect
+        // this test exists to prevent coming back.
+        let null_peak = low_l
+            .iter()
+            .zip(high_l.iter())
+            .skip(1024)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f64, f64::max);
+        eprintln!("DEBUG sum_peak={sum_peak} null_peak={null_peak}");
+        // Inverting the high band should be what makes the pair sum flat:
+        // the un-inverted sum must be a deep null.
+        assert!(
+            sum_peak > null_peak * 50.0,
+            "inverting the high band must be what makes the pair sum flat"
         );
 
         let mixed = Crossover2Way::new(CrossoverArchitecture::MixedPhase, 48_000.0, 1000.0);

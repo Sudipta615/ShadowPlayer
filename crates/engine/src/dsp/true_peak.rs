@@ -156,7 +156,7 @@ fn bessel_i0(x: f64) -> f64 {
 /// sample, evaluates all 4 polyphase interpolation points, returning the
 /// maximum absolute value among them (and the sample itself).  It also
 /// tracks running maxima for metering.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TruePeakMeter {
     buf: [f64; BRANCH_TAPS * 2],
     pos: usize,
