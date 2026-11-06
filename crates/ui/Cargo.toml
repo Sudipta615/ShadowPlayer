@@ -74,7 +74,7 @@ pollster = "1.0"
 # its native MPRIS2 backend above; souvlaki's Linux feature would pull a second
 # D-Bus stack, so it is only compiled on the other desktop platforms.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-souvlaki = { version = "0.8", default-features = false }
+souvlaki = { version = "0.9", default-features = false }
 raw-window-handle = "0.6"
 
 [dev-dependencies]
