@@ -34,7 +34,7 @@ jobs:
       releases: ${{ steps.read.outputs.releases }}
       tag: ${{ steps.plan.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve the tag
         id: plan
@@ -88,7 +88,7 @@ jobs:
           - { os: macos-latest,    target: x86_64-apple-darwin }
           - { os: macos-latest,    target: aarch64-apple-darwin }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies (Linux)
         if: runner.os == 'Linux'
@@ -134,7 +134,7 @@ jobs:
           scripts/package-windows.sh target/${{ matrix.target }}/release/shadowplayer.exe ${{ matrix.target }} target/distrib
 
       - name: Collect the artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: target/distrib/
@@ -148,7 +148,7 @@ jobs:
       contents: write
     steps:
       - name: Download the artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: target/distrib
           merge-multiple: true
