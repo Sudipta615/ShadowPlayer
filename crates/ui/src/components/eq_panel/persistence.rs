@@ -3,8 +3,8 @@
 use super::{
     CrossfeedViewMode, CustomEqPreset, EqPanelState, EqPreset, EqTab, EqViewMode, ParametricBand,
 };
+use audio_session::engine::dsp::limiter::LimiterMode;
 use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
-use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
 
 /// Serde-serializable snapshot of EQ panel settings for persistent storage across sessions

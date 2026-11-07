@@ -2,6 +2,8 @@
 //! context the view supplies.
 
 use super::index::SettingsCategory;
+use audio_session::engine::output::devices::OutputDeviceInfo;
+use audio_session::engine::AudioSource;
 use config::{
     AudioBackend, BassManagementConfig, ChannelMixConfig, ChannelRoutingConfig, CrossfadeCurve,
     DacCorrectionConfig, DsdNoiseFilter, DsdOutput, FallbackPolicy, LfeConfig, LoudnessMode,
@@ -10,8 +12,6 @@ use config::{
 };
 use domain::ids::ScanRootId;
 use domain::models::ScanRoot;
-use engine::output::devices::OutputDeviceInfo;
-use engine::AudioSource;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -589,9 +589,9 @@ pub struct SettingsExtraContext<'a> {
     pub actual_backend: Option<AudioBackend>,
     /// The full negotiated output snapshot. Shared with the Bit-Perfect modal
     /// so both surfaces render exactly the same facts.
-    pub output_info: Option<&'a engine::output::OutputInfo>,
+    pub output_info: Option<&'a audio_session::engine::output::OutputInfo>,
     /// Per-track apodizing guidance from the decode loop (read-only).
-    pub apodizing: Option<&'a engine::dsp::apodizing::ApodizingReport>,
+    pub apodizing: Option<&'a audio_session::engine::dsp::apodizing::ApodizingReport>,
     /// The output devices the *selected* backend can open.
     ///
     /// Each backend enumerates its own devices, so a device chosen from this

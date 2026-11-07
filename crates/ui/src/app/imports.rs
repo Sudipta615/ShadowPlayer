@@ -238,26 +238,21 @@ impl ShadowPlayerApp {
         // Prefer relative paths when the playlist lands on the same volume as
         // the music, so it survives being copied alongside the library.
         let text = library::write_playlist(format, &entries, path.parent());
-        match std::fs::write(path, text) {
-            Ok(()) => {
-                log::info!(
-                    "Exported {} track(s) as {} to {}",
-                    entries.len(),
-                    format.label(),
-                    path.display()
-                );
-                self.toasts.success(format!(
-                    "Exported {} track(s) as {} to {}",
-                    entries.len(),
-                    format.label(),
-                    path.display()
-                ));
-            }
-            Err(e) => {
-                log::warn!("Could not write playlist {}: {e}", path.display());
-                self.toasts
-                    .warning(format!("Could not write playlist: {e}"));
-            }
+        let success_message = tr_args!(
+            "Exported {count} track(s) as {format} to {path}",
+            "count" => entries.len(),
+            "format" => format.label(),
+            "path" => path.display().to_string()
+        );
+        // The save dialog chose the path on the UI thread; the write itself
+        // belongs on the worker with the other file work.
+        if !self.file_tasks.submit(FileTask::WriteText {
+            path: path.to_path_buf(),
+            contents: text,
+            success_message,
+        }) {
+            self.toasts
+                .warning(tr!("Could not start the background task"));
         }
     }
 }

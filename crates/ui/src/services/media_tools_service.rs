@@ -297,7 +297,7 @@ impl MediaToolsService {
                         .unwrap_or_else(|| "track".to_string());
 
                     let target_rel_path = if let Some(ref pattern) = naming_pattern {
-                        let meta = engine::decode::extract_track_metadata(&input);
+                        let meta = audio_session::engine::decode::extract_track_metadata(&input);
                         let mut p = pattern.clone();
                         p = p.replace(
                             "{title}",

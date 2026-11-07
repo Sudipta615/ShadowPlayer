@@ -1,3 +1,4 @@
+use super::repaint_policy::{wake_after, RepaintSignals};
 use super::*;
 
 impl ShadowPlayerApp {
@@ -503,6 +504,10 @@ impl ShadowPlayerApp {
             self.handle_preset_io_result(event);
         }
 
+        // 2b3. Disk work issued from modals: tag write-back, duplicate
+        // deletion, the organizer, playlist and history exports.
+        self.poll_file_tasks();
+
         // 2c. Sleep timer (countdown or end-of-track).
         self.update_sleep_timer(ctx);
 
@@ -624,41 +629,24 @@ impl ShadowPlayerApp {
             self.toasts.info(msg);
         }
 
-        // 3. Reactive Repaints (capped at 30fps during playback for low CPU; 0% idle when paused)
+        // 3. Reactive Repaints. The policy is a pure function so the idle case
+        // is a test: no active signal means no wake-up at all (0% idle CPU).
         let is_playing = self.session.is_playing();
-        let is_minimized = ctx.input(|i| i.viewport().minimized == Some(true));
-        if is_minimized {
-            // When minimized, the window is invisible. Throttle repaints to 500ms (2Hz)
-            // to drop APU and GPU rendering usage to near zero while background audio plays.
-            if is_playing
-                || self.scanner_service.is_scanning()
-                || self.loudness_service.is_running()
-                || self.import_service.is_active()
-            {
-                ctx.request_repaint_after(std::time::Duration::from_millis(500));
-            }
-        } else if is_playing || self.scanner_service.is_scanning() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
-        } else if self.loudness_service.is_running() {
-            // Progress bar only needs a couple of updates per second.
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        } else if self.import_service.is_active() {
-            // Keep polling briskly while the OS picker is open, cheaply when idle.
-            ctx.request_repaint_after(std::time::Duration::from_millis(120));
-        } else if self.app_state.sleep_timer.is_some() {
-            // Tick the timer display roughly once per second while idle.
-            ctx.request_repaint_after(std::time::Duration::from_millis(500));
-        } else if self.watch_pending.is_some() || !self.scan_queue.is_empty() {
-            // A watched folder changed: keep ticking until the debounce elapses
-            // and the queued rescan starts.
-            ctx.request_repaint_after(std::time::Duration::from_millis(500));
-        } else if !self.toasts.is_empty() {
-            // Keep the fade-out animating while a notification is on screen.
-            ctx.request_repaint_after(std::time::Duration::from_millis(120));
-        } else if self.lyrics_service.is_loading() || self.waveform_service.has_pending() {
-            // Waiting on an embedded-lyrics or waveform read: tick until it
-            // lands, even while paused.
-            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        let signals = RepaintSignals {
+            playing: is_playing,
+            minimized: ctx.input(|i| i.viewport().minimized == Some(true)),
+            scanning: self.scanner_service.is_scanning(),
+            loudness_running: self.loudness_service.is_running(),
+            import_active: self.import_service.is_active(),
+            sleep_timer_armed: self.app_state.sleep_timer.is_some(),
+            watch_pending: self.watch_pending.is_some(),
+            scan_queued: !self.scan_queue.is_empty(),
+            toasts_visible: !self.toasts.is_empty(),
+            background_read_pending: self.lyrics_service.is_loading()
+                || self.waveform_service.has_pending(),
+        };
+        if let Some(delay) = wake_after(signals) {
+            ctx.request_repaint_after(delay);
         }
 
         // 3b. Toast notifications ride above everything else.

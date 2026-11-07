@@ -1,13 +1,13 @@
 use crate::theme::Theme;
+use audio_session::engine::dsp::ProfessionalMeterSnapshot;
 use eframe::egui::{self, CornerRadius, Pos2, Rect, Stroke, Vec2};
-use engine::dsp::ProfessionalMeterSnapshot;
 
 /// Broadcast-style loudness & true-peak meter.
 ///
 /// The LUFS blocks are the engine's BS.1770-5-gated loudness. The dBTP block
 /// is the engine's 4× FIR *estimate* of the Annex 2 true-peak definition —
 /// a different prototype filter from the 48-tap table the recommendation
-/// publishes (`engine::dsp::true_peak`) — and the widget says so on hover.
+/// publishes (`audio_session::engine::dsp::true_peak`) — and the widget says so on hover.
 pub struct LufsMeterWidget<'a> {
     pub meters: Option<&'a ProfessionalMeterSnapshot>,
     pub theme: &'a Theme,

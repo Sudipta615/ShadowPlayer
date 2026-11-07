@@ -306,6 +306,15 @@ impl ShadowPlayerApp {
 
                     if mode == "apply" {
                         self.apply_organize_plan();
+                        // The move runs on the file worker now. This hook is
+                        // automation, so it waits for the result instead of
+                        // asserting on a plan that has not been applied yet.
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(60);
+                        while self.file_tasks.is_busy() && std::time::Instant::now() < deadline {
+                            self.poll_file_tasks();
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                        }
 
                         let mut moved = 0usize;
                         for track in &scope {

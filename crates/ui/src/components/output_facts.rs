@@ -6,9 +6,9 @@
 //! Both now render this exact list, so a fact cannot appear in one place and be
 //! missing or worded differently in the other.
 
+use audio_session::engine::output::OutputInfo;
 use config::OutputAccessMode;
 use eframe::egui;
-use engine::output::OutputInfo;
 
 use crate::theme::Theme;
 
@@ -249,7 +249,7 @@ pub fn render_fact_table(ui: &mut egui::Ui, facts: &[OutputFact], theme: &Theme)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::dsp::pipeline::OutputSampleFormat;
+    use audio_session::engine::dsp::pipeline::OutputSampleFormat;
 
     fn verified_info() -> OutputInfo {
         let mut info = OutputInfo::exclusive(

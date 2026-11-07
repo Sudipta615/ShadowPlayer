@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.shadowplayer</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>ShadowPlayer</name>
+  <summary>Audiophile playback for the music you already own</summary>
+  <description>
+    <p>
+      ShadowPlayer is a local-first desktop music player built in Rust: bit-perfect
+      output, a studio-grade DSP chain, a 100,000-track library that stays fast, and
+      zero accounts, cloud dependencies, or telemetry.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Verified bit-perfect output with live hardware transformation ledger</li>
+      <li>Studio-grade DSP chain: Parametric EQ, Cytomic SVF, Graphic EQ, and CLAP plugin rack</li>
+      <li>Non-Uniform Partitioned Convolution (NUPC) and real-time neural declipping</li>
+      <li>Acoustic alignment suite with 2D soundstage geometry and arrival delay physics</li>
+      <li>Calibrated binaural crossfeed (Bauer, Chu Moy, Jan Meier) with cranial shadow modeling</li>
+      <li>Autonomous multi-zone playback with quartz crystal clock drift compensation</li>
+      <li>High-scale library virtualization rendering 100,000 tracks in 0.23 ms per frame</li>
+      <li>Local-first privacy: on-device recommendation mix and local SQLite storage</li>
+      <li>Customizable themes with WCAG AA contrast enforcement and .stm theme editor</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">shadowplayer.desktop</launchable>
+  <provides>
+    <binary>shadowplayer</binary>
+    <mediatype>audio/flac</mediatype>
+    <mediatype>audio/x-wav</mediatype>
+    <mediatype>audio/x-dsd</mediatype>
+    <mediatype>application/x-cue</mediatype>
+    <mediatype>application/x-stm</mediatype>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.30.0" date="2026-11-07">
+      <description>
+        <p>Complete secondary localization (DE/FR/ES/JA/ZH/HI 100%), .stm theme format migration, and multi-platform packaging pipeline.</p>
+      </description>
+    </release>
+    <release version="0.29.0" date="2026-11-06">
+      <description>
+        <p>Settings dual-persona overhaul, full-spectrum HSV color wheel, quick-tune EQ studio, and audio engine 1.14.0.</p>
+      </description>
+    </release>
+  </releases>
+</component>
+

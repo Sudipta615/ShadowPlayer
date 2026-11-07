@@ -156,40 +156,24 @@ impl ShadowPlayerApp {
             self.scan_duplicates();
         }
         if dupe_actions.remove_selected {
-            let delete_from_disk = self.duplicates.delete_from_disk;
             let ids: Vec<domain::ids::TrackId> = self.duplicates.selected.iter().copied().collect();
-            let mut removed = 0usize;
-            for id in ids {
-                // Deleting the file first means a failed unlink leaves the
-                // library row intact (rather than orphaning a file on disk).
-                if delete_from_disk {
-                    match self.track_repo.get_by_id(&id) {
-                        Ok(Some(t)) if t.path.exists() => {
-                            if let Err(e) = std::fs::remove_file(&t.path) {
-                                log::warn!("Could not delete {}: {e}", t.path.display());
-                                continue;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if self.track_repo.delete(&id).is_ok() {
-                    removed += 1;
-                }
-            }
-            log::info!("Removed {removed} duplicate track(s)");
-            if removed > 0 {
-                let verb = if delete_from_disk {
-                    "deleted"
-                } else {
-                    "removed"
-                };
+            if ids.is_empty() {
                 self.toasts
-                    .success(format!("{removed} duplicate track(s) {verb}"));
+                    .info(tr!("Select the duplicates to remove first"));
+            } else if self.file_tasks.is_busy() {
+                self.toasts.info(tr!("Another file task is still running"));
+            } else {
+                // Unlinking files and deleting their rows is disk work; the
+                // worker reports what it managed, and the poll side refreshes.
+                let delete_from_disk = self.duplicates.delete_from_disk;
+                if !self.file_tasks.submit(FileTask::DeleteTracks {
+                    ids,
+                    delete_from_disk,
+                }) {
+                    self.toasts
+                        .warning(tr!("Could not start the background task"));
+                }
             }
-            self.reload_library();
-            // Refresh so the list reflects what is left.
-            self.scan_duplicates();
         }
 
         // Batch organizer.
@@ -217,7 +201,7 @@ impl ShadowPlayerApp {
             // database is lost the moment the file moves or the library is
             // rebuilt from disk, so the tags are written back too.
             if edit_actions.write_to_file {
-                let tags = engine::decode::EditorialTags {
+                let tags = audio_session::engine::decode::EditorialTags {
                     title: Some(track.title.clone()),
                     artist: Some(track.artist.clone()),
                     album: Some(track.album.clone()),
@@ -226,18 +210,22 @@ impl ShadowPlayerApp {
                     track_number: track.track_number,
                     disc_number: track.disc_number,
                 };
-                match engine::decode::write_editorial_tags(&track.path, &tags) {
-                    Ok(()) => self.toasts.success(format!(
-                        "Updated the tags in {}",
-                        track
+                // Writing tags is a file write. It runs on the worker and
+                // reports back, so a slow disk cannot stall this frame.
+                if !self.file_tasks.submit(FileTask::WriteTags {
+                    path: track.path.clone(),
+                    tags,
+                    success_message: Some(tr_args!(
+                        "Updated the tags in {file}",
+                        "file" => track
                             .path
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| track.path.display().to_string())
                     )),
-                    Err(e) => self.toasts.warning(format!(
-                        "Saved in the library, but the file's tags could not be written: {e}"
-                    )),
+                }) {
+                    self.toasts
+                        .warning(tr!("Could not start the background task"));
                 }
             }
             self.reload_library();

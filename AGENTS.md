@@ -267,6 +267,7 @@ cargo test -p domain -p database -p metadata -p lyrics -p library \
 # 4. Integration guards
 cargo test -p shadowplayer --test platform_parity -- --test-threads=1
 cargo test -p shadowplayer --test version_lockstep -- --test-threads=1
+cargo test -p shadowplayer --test source_budget
 
 # 5. Performance budgets (release; UI changes that touch list rendering)
 cargo test --release -p ui --test library_budget -- --nocapture --test-threads=1

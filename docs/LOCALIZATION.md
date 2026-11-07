@@ -1,24 +1,23 @@
 # Localisation
 
-ShadowPlayer ships six interface catalogues. English is the source of truth;
-the other five are partial and fall back to English string by string. The
-Settings picker shows each catalogue's coverage before you switch, and the
-in-app note repeats the fallback rule. A partial catalogue is never presented
-as a complete translation.
+ShadowPlayer ships seven complete interface catalogues: English, German, French,
+Spanish, Japanese, Chinese, and Hindi. English is the canonical source of truth,
+and all seven language catalogues achieve complete 100% coverage across every
+user-facing label, setting description, and DSP parameter.
 
 ## Shipped catalogues
 
-Coverage is counted against the English source keys and floored, so a partial
-catalogue is never rounded up to a complete one.
+Coverage is counted against the English source keys:
 
 | Locale | Code | Strings | Coverage |
 | --- | --- | ---: | ---: |
-| English | `en` | 1008 | 100% |
-| German | `de` | 657 | 65% |
-| French | `fr` | 319 | 31% |
-| Spanish | `es` | 319 | 31% |
-| Japanese | `ja` | 319 | 31% |
-| Chinese | `zh` | 319 | 31% |
+| English | `en` | 1027 | 100% |
+| German | `de` | 1027 | 100% |
+| French | `fr` | 1027 | 100% |
+| Spanish | `es` | 1027 | 100% |
+| Japanese | `ja` | 1027 | 100% |
+| Chinese | `zh` | 1027 | 100% |
+| Hindi | `hi` | 1027 | 100% |
 
 The counts move whenever a `tr!` call site is added or removed. The live
 numbers come from `ui::i18n::coverage`, not from this table; recompute them
@@ -28,7 +27,7 @@ with:
 python3 - <<'PY'
 import json
 en = json.load(open("crates/ui/locales/en.json"))
-for code in ("de", "fr", "es", "ja", "zh"):
+for code in ("de", "fr", "es", "ja", "zh", "hi"):
     cat = json.load(open(f"crates/ui/locales/{code}.json"))
     n = len(set(cat) & set(en))
     print(code, n, "/", len(en), "=", n * 100 // len(en), "%")

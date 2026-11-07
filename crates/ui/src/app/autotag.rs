@@ -9,6 +9,9 @@ impl ShadowPlayerApp {
             self.autotag_modal.close();
         }
         if !autotag_actions.apply.is_empty() {
+            // Tag files are written on the worker, not while the frame is
+            // being drawn. The summary toast is raised when the batch lands.
+            let mut writes = Vec::new();
             for (review, m) in autotag_actions.apply {
                 let track_id = review.result.track_id;
                 if let Ok(Some(mut track)) = self.track_repo.get_by_id(&track_id) {
@@ -35,7 +38,7 @@ impl ShadowPlayerApp {
                     }
                     let _ = self.track_repo.upsert(&track);
 
-                    let editorial = engine::decode::EditorialTags {
+                    let editorial = audio_session::engine::decode::EditorialTags {
                         title: if review.fields.title {
                             Some(m.title)
                         } else {
@@ -64,12 +67,28 @@ impl ShadowPlayerApp {
                             None
                         },
                     };
-                    let _ = engine::decode::write_editorial_tags(&track.path, &editorial);
+                    writes.push((track.path.clone(), editorial));
                 }
             }
             self.reload_library();
-            self.toasts.info("Tags applied successfully");
             self.autotag_modal.close();
+            let count = writes.len();
+            if count == 0
+                || self.file_tasks.submit(FileTask::WriteTagsBatch {
+                    items: writes,
+                    success_message: tr_args!(
+                        "Tags applied to {count} track(s)",
+                        "count" => count
+                    ),
+                })
+            {
+                if count > 0 {
+                    self.toasts.info(tr!("Applying tags…"));
+                }
+            } else {
+                self.toasts
+                    .warning(tr!("Could not start the background task"));
+            }
         }
 
         // The Bulk Cover Art Fetch modal.

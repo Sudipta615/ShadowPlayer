@@ -162,7 +162,7 @@ fn default_version() -> String {
     "2.0.0".to_string()
 }
 
-/// The raw JSON structure of a `.shadowtheme` (v2) or `.shadowskin` (legacy v1) file.
+/// The raw JSON structure of a `.stm` (v2) or `.shadowtheme` (legacy v2) / `.shadowskin` (legacy v1) file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeFile {
     /// Schema version for forward migration.  Current is 2; v1 had no schema_version.
@@ -604,7 +604,10 @@ mod tests {
             .unwrap_or_else(|e| panic!("could not read {}: {e}", dir.display()))
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "shadowtheme"))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext == "stm" || ext == "shadowtheme")
+            })
             .collect();
         paths.sort();
 

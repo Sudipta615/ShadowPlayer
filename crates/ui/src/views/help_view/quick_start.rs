@@ -35,7 +35,7 @@ pub(super) fn render_quick_start_tab(ui: &mut egui::Ui, _state: &mut HelpState, 
         // ALSA, WASAPI, CoreAudio and ASIO" on a build that has none of them
         // is a promise, and the promise is the thing this project refuses to
         // make.
-        let exclusive_labels: Vec<String> = engine::output::available_backends()
+        let exclusive_labels: Vec<String> = audio_session::engine::output::available_backends()
             .iter()
             .filter(|b| {
                 matches!(

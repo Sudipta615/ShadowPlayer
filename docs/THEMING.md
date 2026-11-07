@@ -4,7 +4,7 @@ ShadowPlayer provides a unified, high-performance theming architecture.
 The UI reads every colour, radius, and spacing step from [`ui::theme::Theme`],
 and its three typeface roles (`display`, `body`, `mono`) from the active theme's
 font declaration. Themes can be system presets (Obsidian Jade, Studio Mint, OLED
-Midnight) or custom user themes loaded from `.shadowtheme` files.
+Midnight) or custom user themes loaded from `.stm` (or legacy `.shadowtheme`) files.
 
 ---
 
@@ -20,7 +20,7 @@ The theming engine is organized into modular components under `crates/ui/src/the
   - `light()` — *Studio Mint*: Crisp studio-light surfaces with teal accents.
   - `oled()` — *OLED Midnight*: Pure black (#000000) background engineered for zero-power OLED displays.
 * **`contrast.rs`**: WCAG 2.1 relative luminance calculator, contrast ratio evaluator, and an iterative lightness-stepping algorithm (`auto_adjust_contrast`) to rescue low-contrast tokens.
-* **`schema.rs`**: Theme file serialization supporting the `.shadowtheme` format.
+* **`schema.rs`**: Theme file serialization supporting the `.stm` (and legacy `.shadowtheme`) format.
 * **`manager.rs`**: Filesystem discovery across the `themes/` directory, active theme selection, and staged live preview lifecycle.
 * **`preview.rs`**: Sandbox rendering a mini playback shell with simulated album artwork, 3-track playlist table, transport controls, volume slider, and VU meters.
 * **`editor/`**: In-app theme editor split into `mod.rs` (layout), `state.rs` (draft snapshot, dirtiness, save safety), and `widgets.rs` (preview and token controls). It offers grouped color pickers, a live player preview, transport silhouette selection, radii and font controls, real-time WCAG AA validation, auto-fix, and JSON file export.
@@ -85,7 +85,7 @@ tokens above.
 ### Interaction-surface floor
 
 `Theme::normalize_interaction_surfaces` runs once when a theme is loaded (from
-a preset or a user `.shadowtheme`) and again for the theme editor's live
+a preset or a user `.stm`) and again for the theme editor's live
 preview, and enforces a minimum contrast delta between
 `bg_card` and each of `bg_card_hover`, `bg_pill_hover`, `bg_card_active`, and
 `border_subtle`. A theme that declares an invisible hover (the common
@@ -140,7 +140,7 @@ The **Auto-Fix Contrast** button in the Theme Editor calls `auto_adjust_contrast
 
 ---
 
-## 4. Theme File Format (`.shadowtheme`)
+## 4. Theme File Format (`.stm`)
 
 Themes are stored in JSON files under the `themes/` directory:
 
@@ -260,8 +260,8 @@ ShadowPlayer includes an automated migration pipeline (`schema::migrate_theme_fi
 ShadowPlayer features a dedicated **Themes & Appearance** category in Settings:
 * **Opaque surfaces**: Cards, panels, and inputs are opaque theme surfaces. There is no backdrop blur pass and no artwork-driven transparency behind text, so a translucent custom theme cannot make rows unreadable while artwork changes.
 * **Reduce Motion**: **Library & App → Interface & Language → Reduce Motion** zeros the duration of hover and transition fades. Explicitly timed animations call `Theme::motion_time`, and egui's own `style.animation_time` is set to zero, so the preference reaches both the player chrome and the Settings surfaces.
-* **Custom Themes Folder (`themes/custom-theme/`)**: Custom user themes reside inside `<data_dir>/themes/custom-theme/`. The theme manager monitors this directory and loads all `.shadowtheme` and `.json` files.
-* **Bundled Custom Themes**: Thirty-three schema-v2 themes ship in `crates/ui/src/theme/custom-theme/` (alongside the starter example template `example_ocean_night.shadowtheme`). They are embedded in the binary and written into `<data_dir>/themes/custom-theme/` on first launch, so a packaged build shows the same gallery as a source checkout. Existing files are never overwritten.
+* **Custom Themes Folder (`themes/custom-theme/`)**: Custom user themes reside inside `<data_dir>/themes/custom-theme/`. The theme manager monitors this directory and loads all `.stm` (and legacy `.shadowtheme`/`.json`) files.
+* **Bundled Custom Themes**: Thirty-three schema-v2 themes ship in `crates/ui/src/theme/custom-theme/` (alongside the starter example template `example_ocean_night.stm`). They are embedded in the binary and written into `<data_dir>/themes/custom-theme/` on first launch, so a packaged build shows the same gallery as a source checkout. Existing files are never overwritten.
 
 | Theme | Mood | Mode | Typefaces |
 | :--- | :--- | :--- | :--- |
@@ -304,8 +304,8 @@ tokens, and override every radius step. The theme-level radius scale is what
 distinguishes an angular editorial theme such as *Paper & Ink* from a soft,
 pill-shaped theme such as *Lilac Air*.
 * **Active Theme Persistence**: When a theme is committed or applied, its identifier is persisted to `<data_dir>/themes/active_theme.txt` so the selected theme survives application restarts seamlessly.
-* **Optimized Import & Invalidation**: Importing a `.shadowtheme` file immediately registers and stages the theme in-memory without expensive full-disk rescans, with dirty-flag cache invalidation (`reload_if_dirty`) managing cache freshness.
-* **Import Theme Button**: In Settings → Appearance, clicking **Import Theme…** opens the system's native file picker (`rfd`, XDG portal / native OS dialog) allowing users to select `.shadowtheme` files from anywhere on their storage. Imported themes are validated, copied into `themes/custom-theme/`, and immediately staged or applied.
+* **Optimized Import & Invalidation**: Importing a `.stm` file immediately registers and stages the theme in-memory without expensive full-disk rescans, with dirty-flag cache invalidation (`reload_if_dirty`) managing cache freshness.
+* **Import Theme Button**: In Settings → Appearance, clicking **Import Theme…** opens the system's native file picker (`rfd`, XDG portal / native OS dialog) allowing users to select `.stm` files from anywhere on their storage. Imported themes are validated, copied into `themes/custom-theme/`, and immediately staged or applied.
 * **Open Folder Button**: Directly opens `<data_dir>/themes/custom-theme/` in the OS file manager (Nautilus, Dolphin, Finder, Explorer) with a single click.
 * **Gallery**: Filter and search through installed and system themes. Settings search also reaches card headings such as **Theme Gallery** and **Theme Editor**, and jumps to the card rather than pretending a section is a row. Each compact card shows a live palette sample, the theme's transport silhouette, author, version, and description, with per-card **Preview**, **Apply**, and **Edit** actions. The active card shows only **Edit** because it is already applied. A staged theme also gets a strip above the wall with **Apply** and **Clear Preview**, so reverting never requires finding the card again.
 * **Sandbox Preview**: Real-time rendering of mini transport controls, volume slider, VU meter, and track listing, including the candidate theme's typefaces once staged.

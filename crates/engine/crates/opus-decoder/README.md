@@ -138,36 +138,51 @@ pub enum OpusError {
 
 ## Conformance
 
-All 12 RFC 8251 test vectors pass the `opus_compare` quality metric:
+**11 of 12 RFC 8251 test vectors pass** the `opus_compare` quality metric.
+This is a measured result, not an aspiration: it was produced by the harness
+below against the official `opus_testvectors-rfc8251.tar.gz`, decoding every
+vector at 48 kHz stereo with both the `.dec` and the `m.dec` reference decode
+(RFC 8251 §11 permits either).
 
-| Vector | Description | Result |
-|--------|-------------|--------|
-| tv01 | CELT stereo FB | ✅ PASS |
-| tv02 | SILK NB 8 kHz mono | ✅ PASS |
-| tv03 | SILK MB 12 kHz mono | ✅ PASS |
-| tv04 | SILK WB 16 kHz mono | ✅ PASS |
-| tv05 | Hybrid SWB transitions | ✅ PASS |
-| tv06 | Hybrid FB transitions | ✅ PASS |
-| tv07 | CELT mono FB | ✅ PASS |
-| tv08 | SILK stereo + CELT NB stereo | ✅ PASS |
-| tv09 | SILK→CELT transitions | ✅ PASS |
-| tv10 | CeltOnly + Hybrid mix | ✅ PASS |
-| tv11 | CELT stereo FB | ✅ PASS |
-| tv12 | SILK bandwidth transitions | ✅ PASS |
+| Vector | Result |
+|--------|--------|
+| tv01 | ✅ PASS |
+| tv02 | ✅ PASS |
+| tv03 | ✅ PASS |
+| tv04 | ✅ PASS |
+| tv05 | ✅ PASS |
+| tv06 | ✅ PASS |
+| tv07 | ✅ PASS |
+| tv08 | ❌ FAIL — PCM mismatch against both references (quality −63.1 %) |
+| tv09 | ✅ PASS |
+| tv10 | ✅ PASS |
+| tv11 | ✅ PASS |
+| tv12 | ✅ PASS |
 
-Run conformance tests locally:
+`testvector08` (SILK stereo with a CELT narrowband stereo section) is a known
+gap, not a rounding error: the decode takes the wrong path for the CELT
+narrowband frames. The other eleven vectors are gated in CI, so a regression
+cannot hide behind the `#[ignore]` attributes. Do not describe this decoder as
+fully RFC 8251 conformant until tv08 passes.
+
+Run the harness locally:
 
 ```bash
-# Download test vectors
-cargo xtask fetch-vectors
+# Download the official bitstreams and reference decodes (~75 MB).
+# Installs crates/engine/testdata/opus_testvectors/ with a vectors.txt manifest.
+crates/engine/scripts/fetch-opus-vectors.sh
 
-# Run all 12 vectors
-for v in 01 02 03 04 05 06 07 08 09 10 11 12; do
-  OPUS_TESTVECTORS_DIR="testdata/opus_testvectors" \
-  OPUS_VECTOR=testvector${v} \
-  cargo test --release -p opus-decoder rfc_conformance -- --ignored --nocapture \
-    2>&1 | grep -E "PASS|FAIL"
-done
+# Run every vector (takes a few minutes; the harness decodes ~30 s of audio
+# per vector in release mode).
+cd crates/engine
+OPUS_TESTVECTORS_DIR="$PWD/testdata/opus_testvectors" \
+  cargo test --release -p opus-decoder --test conformance_rfc \
+  -- --ignored --nocapture
+
+# Run one vector while debugging.
+OPUS_TESTVECTORS_DIR="$PWD/testdata/opus_testvectors" OPUS_VECTOR=testvector08 \
+  cargo test --release -p opus-decoder --test conformance_rfc \
+  rfc_conformance_vectors -- --ignored --nocapture
 ```
 
 ## Minimum Supported Rust Version (MSRV)

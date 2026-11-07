@@ -635,8 +635,8 @@ pub(in crate::components::settings_tab) fn render_library_category(
                 ui.label(
                     egui::RichText::new(format!(
                         "Engine: {} v{} | Framework: egui v0.37.0 / eframe | SQLite FTS5",
-                        engine::NAME,
-                        engine::VERSION
+                        audio_session::engine::NAME,
+                        audio_session::engine::VERSION
                     ))
                     .font(crate::theme::font(11.0))
                     .color(theme.text_muted),

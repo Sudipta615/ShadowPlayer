@@ -20,7 +20,7 @@
 
 use std::time::{Duration, Instant};
 
-use engine::dsp::clap_rack::ClapRackView;
+use audio_session::engine::dsp::clap_rack::ClapRackView;
 use serde::{Deserialize, Serialize};
 
 /// How long a preset save waits for the engine to hand back the plugin's state
@@ -417,7 +417,7 @@ pub struct ClapRackActions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::dsp::clap_rack::{ClapParamInfo, ClapPluginInfo, ClapRackReport};
+    use audio_session::engine::dsp::clap_rack::{ClapParamInfo, ClapPluginInfo, ClapRackReport};
 
     fn view_with(plugin: Option<&str>, params: Vec<ClapParamInfo>) -> ClapRackView {
         ClapRackView {

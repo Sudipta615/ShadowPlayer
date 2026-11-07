@@ -1,6 +1,6 @@
 [package]
 name = "audio-session"
-version = "0.29.0"
+version = "0.30.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -12,7 +12,10 @@ domain = { path = "../domain" }
 # real if the UI can reach it. Enabling it anywhere in the graph enables it
 # everywhere, so this is the one place that decides it. Costs `clap-sys`
 # (generated C ABI bindings, no build script) and `libloading`.
-engine = { package = "audio-engine", path = "../engine", features = ["clap-host"] }
+# `tag-write` is needed because the player's tag write-back runs through this
+# crate: it is the only player crate that may speak to the engine (AGENTS.md
+# §1), and every other crate reaches the engine through the re-export below.
+engine = { package = "audio-engine", path = "../engine", features = ["clap-host", "tag-write"] }
 config = { package = "config", path = "../engine/crates/config" }
 crossbeam = "0.8"
 log = "0.4"

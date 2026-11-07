@@ -100,7 +100,7 @@ pub fn render_settings_view(
             theme,
             &format!(
                 "Configure Audio Engine v{}, bit-perfect streaming, 3D acoustics, and library",
-                engine::VERSION
+                audio_session::engine::VERSION
             ),
         );
 

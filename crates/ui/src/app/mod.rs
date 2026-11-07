@@ -28,10 +28,11 @@ use crate::modals::{
 };
 use crate::services::{
     ArtworkFetchService, ArtworkService, AutoEqCatalogService, AutotagService, BiographyService,
-    ControlService, CrossfadePreview, ImportKind, ImportResult, ImportService, LoudnessService,
-    LyricsService, MediaToolEvent, MediaToolsService, MprisCommand, MprisService, MprisSnapshot,
-    PodcastEvent, PodcastService, PresetIoEvent, PresetIoService, RecommendationAnalysisService,
-    RecommendationService, ScannerService, WaveformService,
+    ControlService, CrossfadePreview, FileTask, FileTaskEvent, FileTaskService, ImportKind,
+    ImportResult, ImportService, LoudnessService, LyricsService, MediaToolEvent, MediaToolsService,
+    MprisCommand, MprisService, MprisSnapshot, PodcastEvent, PodcastService, PresetIoEvent,
+    PresetIoService, RecommendationAnalysisService, RecommendationService, ScannerService,
+    WaveformService,
 };
 use crate::state::{
     AppState, DspState, LibraryState, PodcastState, RecommendationState, SleepTimerMode,
@@ -51,12 +52,14 @@ mod desktop;
 mod editors;
 mod eq_presets;
 mod eval;
+mod file_tasks;
 mod history;
 mod imports;
 mod library_actions;
 mod modals;
 mod recommendation_actions;
 mod render;
+mod repaint_policy;
 mod service_poll;
 mod settings_io;
 mod shortcuts;
@@ -109,6 +112,9 @@ pub struct ShadowPlayerApp {
     podcast_state: PodcastState,
     scanner_service: ScannerService,
     import_service: ImportService,
+    /// Disk work issued from modals: tag write-back, duplicate deletion, the
+    /// batch organizer, exports. One thread, one task at a time.
+    file_tasks: FileTaskService,
     /// Text EQ-curve import/export. Owns its own worker; the UI only polls.
     preset_io: PresetIoService,
     /// Decodes the embedded AutoEQ corpus on first open, off the UI thread.
@@ -271,6 +277,7 @@ impl ShadowPlayerApp {
         let recommendation_service = RecommendationService::new(db.clone());
         let recommendation_analysis_service = RecommendationAnalysisService::new(db.clone());
         let recommendation_state = RecommendationState::default();
+        let file_tasks = FileTaskService::new(&_cc.egui_ctx, db.clone());
         let scanner_service = ScannerService::new(db, artwork_service.manager());
         let import_service = ImportService::new();
         let preset_io = PresetIoService::new();
@@ -323,6 +330,7 @@ impl ShadowPlayerApp {
             podcast_state,
             scanner_service,
             import_service,
+            file_tasks,
             preset_io,
             autoeq_catalog,
             mpris_service,
@@ -433,7 +441,7 @@ impl eframe::App for ShadowPlayerApp {
             is_playing,
             bit_perfect: self.session.bit_perfect(),
             bit_perfect_cause: self.session.bit_perfect_cause().map(|c| format!("{:?}", c)),
-            spectrum: engine::dsp::AnalyzerSnapshot::default(),
+            spectrum: audio_session::engine::dsp::AnalyzerSnapshot::default(),
             meters: Some(self.session.meters_snapshot()),
         };
 

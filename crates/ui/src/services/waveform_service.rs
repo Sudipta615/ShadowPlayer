@@ -155,7 +155,7 @@ pub fn generate_peaks(
     duration_secs: f32,
     buckets: usize,
 ) -> Result<(Vec<u8>, f32), String> {
-    use engine::decode::Decoder;
+    use audio_session::engine::decode::Decoder;
 
     let buckets = buckets.max(1);
     let mut decoder = Decoder::open(path).map_err(|e| e.to_string())?;

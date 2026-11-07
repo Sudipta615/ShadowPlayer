@@ -1,0 +1,24 @@
+# The RFC 8251 Opus decoder-conformance vectors, in the `vectors.txt` shape the
+# harness in `crates/opus-decoder/tests/conformance_rfc.rs` reads:
+#
+#   name  .bit path  .dec path  sample rate  channels
+#
+# Every vector is decoded at 48 kHz stereo, which is what the reference
+# `run_vectors.sh 48000` does. The harness also accepts the `m.dec` decode
+# that RFC 8251 §11 permits as an alternative reference for the same input, so
+# only the plain `.dec` name needs to be listed here.
+#
+# Fetch the bitstreams and reference decodes with:
+#   crates/engine/scripts/fetch-opus-vectors.sh
+testvector01 testvector01.bit testvector01.dec 48000 2
+testvector02 testvector02.bit testvector02.dec 48000 2
+testvector03 testvector03.bit testvector03.dec 48000 2
+testvector04 testvector04.bit testvector04.dec 48000 2
+testvector05 testvector05.bit testvector05.dec 48000 2
+testvector06 testvector06.bit testvector06.dec 48000 2
+testvector07 testvector07.bit testvector07.dec 48000 2
+testvector08 testvector08.bit testvector08.dec 48000 2
+testvector09 testvector09.bit testvector09.dec 48000 2
+testvector10 testvector10.bit testvector10.dec 48000 2
+testvector11 testvector11.bit testvector11.dec 48000 2
+testvector12 testvector12.bit testvector12.dec 48000 2

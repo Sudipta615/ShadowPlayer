@@ -181,7 +181,10 @@ pub(super) fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, t
             ui,
             &[
                 ("Player".to_string(), env!("CARGO_PKG_VERSION").to_string()),
-                ("Audio engine".to_string(), engine::VERSION.to_string()),
+                (
+                    "Audio engine".to_string(),
+                    audio_session::engine::VERSION.to_string(),
+                ),
                 ("Platform".to_string(), std::env::consts::OS.to_string()),
                 (
                     "Architecture".to_string(),
@@ -211,7 +214,7 @@ pub(super) fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, t
             theme,
         );
 
-        let backends = engine::output::available_backends();
+        let backends = audio_session::engine::output::available_backends();
         if backends.is_empty() {
             ui.label(
                 egui::RichText::new(tr!("No output backend is compiled into this build."))
@@ -221,7 +224,7 @@ pub(super) fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, t
         } else {
             let mut rows: Vec<(String, String)> = Vec::new();
             for backend in &backends {
-                let devices = engine::output::devices::available_devices(*backend);
+                let devices = audio_session::engine::output::devices::available_devices(*backend);
                 let detail = if devices.is_empty() {
                     "no devices reported".to_string()
                 } else {
@@ -281,7 +284,7 @@ pub(super) fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, t
             "The formats this binary can actually decode.",
             theme,
         );
-        let codecs = engine::decode::codecs::decodable_codecs();
+        let codecs = audio_session::engine::decode::codecs::decodable_codecs();
         if codecs.is_empty() {
             ui.label(
                 egui::RichText::new(tr!("No decoder is compiled into this build."))

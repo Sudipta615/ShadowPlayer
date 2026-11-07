@@ -4,7 +4,43 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.30.0] - 2026-11-07
+
+*Released with audio-engine 1.14.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Multi-Platform Packaging & Distribution Pipeline.** Added production packaging scripts under `scripts/` supporting Linux portable tarballs (`scripts/package-tarball.sh` with `install.sh`/`uninstall.sh`), Debian packages (`scripts/package-deb.sh`), AppImage bundles (`scripts/package-appimage.sh`), macOS `.dmg` and `.zip` bundles (`scripts/package-macos.sh`), Windows portable `.zip` and Inno Setup installer (`scripts/package-windows.sh`, `scripts/shadowplayer.iss`), and a unified packaging CLI (`scripts/package.sh`). Bundled Freedesktop desktop entry (`crates/app/assets/shadowplayer.desktop`) and AppStream metadata (`crates/app/assets/io.github.shadowplayer.metainfo.xml`), and upgraded `.github/workflows/release.yml` with cross-platform packaging jobs and automated checksum generation.
+- **100% Secondary Localisation & Hindi (`hi`).** Complete 100% coverage across all 1027 catalogue keys in German (`de`), French (`fr`), Spanish (`es`), Japanese (`ja`), and Simplified Chinese (`zh`). Added full Hindi translation catalogue (`crates/ui/locales/hi.json`), registered `Locale::Hindi` (`"hi"` / `"हिन्दी (Hindi)"`) in `crates/ui/src/i18n/mod.rs`, and extended compile-time catalogue validation in `crates/ui/build.rs`.
+- **Streamlined `.stm` Theme Format.** Migrated theme file format from `.shadowtheme` to `.stm` (short form of ShadowTheme) across all 34 bundled themes, theme engine, schema, custom theme manager, color wheel editor, and file pickers, while preserving full backward-compatibility for importing legacy `.shadowtheme` and `.json` theme files.
+
+### Fixed
+- **Disk work no longer runs on the frame thread.** Tag write-back, duplicate
+  deletion, applying a batch organizer plan (and relinking the moved rows),
+  playlist and listening-history export, and saving a measurement WAV now run
+  on a typed worker (`ui::services::file_task_service`). `AGENTS.md` §2.4 puts
+  file I/O on a worker; a slow drive or a library-sized batch could previously
+  hold a frame for seconds.
+- **The idle-repaint decision is a tested function.** The frame-wake policy is
+  `ui::app::repaint_policy::wake_after`, with unit tests for the idle,
+  minimized, playback, scan, timer, toast and pending-read cases. "0% CPU when
+  idle" is now checked rather than maintained by review.
+- **`ui` no longer depends on `audio-engine` directly.** Engine types are read
+  through `audio_session::engine`, keeping `audio-session` the single bridge to
+  the engine workspace (`AGENTS.md` §1).
+- **Opus conformance claim corrected.** The decoder passes 11 of 12 RFC 8251
+  vectors, not 12: `testvector08` mismatches both reference decodes RFC 8251
+  permits. The crate README reports the measured result, the harness gained a
+  real vector-fetch script (`crates/engine/scripts/fetch-opus-vectors.sh`), and
+  CI decodes the eleven passing vectors so a regression cannot hide behind the
+  `#[ignore]` attributes.
+
+### Changed
+- `ui/src/components/settings_tab/mod.rs`, `ui/src/components/eq_panel/controls.rs`
+  and `ui/src/theme/manager.rs` were split into façades with focused
+  submodules. Public paths and behaviour are unchanged.
+- `docs/ENHANCEMENT_PROGRESS.md` is now a feature study with stated provenance,
+  not a reverse-engineering handoff document.
 
 ---
 
@@ -13,25 +49,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 *Released with audio-engine 1.14.0. The player and the engine are versioned separately and released
 together; the startup log prints both.*
 
-### Added & Overhauled (UI & Design)
-- **Settings Studio Dual-Persona Architecture.** Introduced `Standard` vs `Pro Studio` viewing modes with an interactive toggle pill. Standard Mode provides a streamlined, clutter-free curation for everyday audiophiles (playback, DAC hardware, library indexing, appearance & themes); Pro Studio Mode unlocks the complete mastering laboratory (studio mix bus, subwoofer crossovers, 3D binaural radar, audio format converter, and diagnostic tools).
-- **Four-Tier Semantic Settings Navigation Rail.** Replaced flat categories with 4 structured groups (`PLAYBACK & HARDWARE`, `STUDIO LAB & DSP`, `UTILITIES & MEDIA`, `SYSTEM & INTERFACE`), visual group headers, animated active indicator pills, and subtle `PRO` badges.
-- **Responsive Compact Settings Navigation.** Replaced the wrapping category chip bar with a responsive dropdown combobox and inline `Std`/`Pro` mode toggle pill for narrow layouts (< 640px).
-- **Enhanced Settings Search.** Search results feature category icons, contextual location breadcrumbs (`Category › Location`), and interactive jump cues that navigate directly across both standard and pro categories.
-- **Equalizer Studio & Quick-Tune Profiles.** Added quick-tune acoustic macro profiles (Vocal Clarity, Bass Punch, Warm Tube, Air / Sparkle, Acoustic Live) for rapid auditioning, alongside a clean tabbed workflow, active stage indicator pills, compact pre-amp slider, and high-precision biquad filter inspector.
-- **Full-Spectrum Color Wheel & Theme Editor.** Implemented a continuous interactive HSV color wheel + saturation/value gradient canvas for infinite color combinations, with multi-format color input supporting `#HEX`, `rgb(...)`, and `hsl(...)` parsing with live validation.
-- **Transport Bar Polish.** Resolved button spacing and alignment in MiniPlayer and NowPlaying transport bars; refined card headers with glowing status badge indicator dots and hairline separators.
+### Added (UI & Design)
+- **Settings modes.** Settings has a `Standard` and a `Pro Studio` view. Standard
+  shows playback, output device, library indexing and appearance; Pro Studio
+  adds the mix bus, crossovers, spatial radar, format converter and diagnostic
+  tools. A toggle switches between them.
+- **Settings navigation.** Categories are grouped into `PLAYBACK & HARDWARE`,
+  `STUDIO LAB & DSP`, `UTILITIES & MEDIA` and `SYSTEM & INTERFACE`, with group
+  headings, an active-row indicator and `PRO` badges.
+- **Compact settings navigation.** Below 640 px the category rail becomes a
+  dropdown plus an inline `Std`/`Pro` toggle.
+- **Settings search results.** Results carry a category icon and a
+  `Category › Location` breadcrumb, and jump to the row.
+- **Equalizer quick-tune profiles.** Five macro presets (Vocal Clarity, Bass
+  Punch, Warm Tube, Air / Sparkle, Acoustic Live), a tabbed layout, an active
+  stage indicator, a compact pre-amp slider and a biquad filter inspector.
+- **Colour wheel theme editor.** An HSV wheel and saturation/value canvas,
+  with `#HEX`, `rgb(...)` and `hsl(...)` input and validation.
+- **Transport bar layout.** Fixed button spacing in the MiniPlayer and Now
+  Playing transports, and aligned the card headers.
 
 ### Engine & DSP (audio-engine 1.14.0)
-- **Zero-Latency Hybrid Partitioned Convolution (NUPC).** Implemented non-uniform partitioned convolution combining direct time-domain FIR filtering for the head partition with frequency-domain overlap-add tail partitions, eliminating input latency while maintaining strict zero heap allocations on the audio thread.
-- **Real-Time Neural Audio Inference Subsystem.** Built lock-free real-time neural inference engine (`dsp::neural`) supporting linear projections, non-linear activations (ReLU, LeakyReLU, Tanh, GELU, Sigmoid), residual skips, and deep neural declipping models.
-- **Fast FFT Sweep Deconvolution.** Upgraded `EssSweep::deconvolve_into` from $O(N 	imes M)$ time-domain correlation to $O(N \log N)$ complex FFT deconvolution via `rustfft`.
-- **Delaunay HRTF Triangulation.** Replaced $O(N^4)$ brute-force triangulation in `spatial::hrtf::interpolate` with incremental 3D convex hull Delaunay triangulation.
-- **Cytomic / Andy Simper SVF State Variable Filter.** Corrected $k_A$ damping, $(m_0, m_1, m_2)$ mixer tap mappings, and shelving bilinear frequency prewarping in `equalizer/svf.rs`.
-- **Bitmasked Circular FIR Crossover Buffers.** Eliminated inner loop `% cap` modulo operations in `FirCrossover` using power-of-two circular double-buffering and bitwise masking.
-- **Multiband Compressor Phase Compensation.** Added 2nd-order allpass phase compensation to the Low band in `MultibandCompressor`, eliminating 3-way crossover recombination phase cancellation.
-- **ADAA Antialiased Limiter Saturation.** Implemented 1st-order Anti-Derivative Anti-Aliasing (ADAA) tanh soft-knee saturation in `limiter.rs` with L'Hôpital numerical conditioning.
-- **DSP Parameter Smoothing & Math.** Transitioned EQ setters to `exp2` for dB-to-linear conversions, verified RBJ golden vectors, Vicanek notch null, and headroom lobes.
+- **Non-uniform partitioned convolution (NUPC).** The head partition runs as a
+  direct FIR filter and the tail partitions as frequency-domain overlap-add, so
+  the stream has no input latency and the audio thread still allocates nothing.
+- **Neural inference (`dsp::neural`).** A lock-free real-time inference path
+  with linear projections, ReLU/LeakyReLU/Tanh/GELU/Sigmoid activations,
+  residual skips and declipping models.
+- **FFT sweep deconvolution.** `EssSweep::deconvolve_into` is `O(N log N)` via
+  `rustfft`, replacing the time-domain correlation.
+- **Delaunay HRTF interpolation.** Replaced the brute-force triangulation in
+  `spatial::hrtf::interpolate` with incremental 3D convex-hull Delaunay
+  triangulation.
+- **SVF corrections.** Fixed the damping term, the mixer tap mapping and
+  shelving frequency prewarping in `equalizer/svf.rs`.
+- **FIR crossover buffers.** Power-of-two circular buffers with a bitmask
+  replace the inner-loop modulo in `FirCrossover`.
+- **Multiband compressor phase.** Second-order allpass compensation on the Low
+  band removes the 3-way crossover recombination notch.
+- **Limiter saturation.** First-order ADAA tanh soft-knee saturation in
+  `limiter.rs`.
+- **EQ math.** Setters convert dB to linear with `exp2`; the RBJ golden
+  vectors, Vicanek notch null and headroom lobes are covered by tests.
 
 ### Release & Infrastructure
 - **Security & Distribution Hardening.** Updated `SECURITY.md` supported versions, deduplicated Linux ARM64 build matrix in `release.yml`, corrected repository links in `README.md`, and updated `THEMING.md` with Smoked Glass and theme starter specifications.

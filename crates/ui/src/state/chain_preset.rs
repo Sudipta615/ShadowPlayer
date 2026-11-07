@@ -21,10 +21,10 @@
 //! Applying a preset only writes into the two state structs; the caller pushes
 //! the result to the audio session with `DspState::sync_chain_to_session`.
 
+use audio_session::engine::dsp::limiter::LimiterMode;
 use config::{
     BassManagementConfig, ChannelMixConfig, CrossfeedProfile, EqMode, GraphicEqLayout, LfeConfig,
 };
-use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
 
 use crate::components::eq_panel::{EqPanelState, ParametricBand};
@@ -371,7 +371,7 @@ pub fn upsert(presets: &mut Vec<ChainPreset>, preset: ChainPreset) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::dsp::equalizer::EqFilterType;
+    use audio_session::engine::dsp::equalizer::EqFilterType;
 
     fn engaged_panel() -> EqPanelState {
         let mut panel = EqPanelState {

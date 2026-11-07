@@ -65,6 +65,11 @@ jobs:
           services::mpris_service::mpris_integration_tests::mpris_service_appears_on_the_session_bus_and_accepts_play_pause
           -- --exact
 
+      # AGENTS.md §4.1 puts a hard stop at ~1000 lines per hand-written source
+      # file; the guard scans the whole player workspace.
+      - name: Source budget (no god files)
+        run: cargo test -p shadowplayer --test source_budget
+
       # The installer inputs are files, so they can be checked even when the
       # runner cannot link a Windows or macOS release binary.
       - name: Cross-platform packaging inputs
@@ -161,6 +166,40 @@ jobs:
       # default features. Build and run the tag write-back tests explicitly.
       - name: Tag write-back tests
         run: cargo test --features tag-write decode::tags
+
+  # The Opus conformance corpus is external (~75 MB), so the decoder's vectors
+  # carry `#[ignore]`. This job fetches them and decodes each one, which is
+  # what makes "11 of 12 pass" in the crate README a checked claim instead of
+  # a remembered one. `testvector08` is excluded until it passes; that gap is
+  # written down in `crates/opus-decoder/README.md`, not hidden here.
+  opus-conformance:
+    name: Opus conformance vectors
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/engine
+
+      - name: Fetch the RFC 8251 vectors
+        run: ./scripts/fetch-opus-vectors.sh "$PWD/testdata/opus_testvectors"
+
+      - name: Decode the eleven passing vectors
+        run: |
+          for vector in 01 02 03 04 05 06 07 09 10 11 12; do
+            echo "::group::testvector${vector}"
+            OPUS_TESTVECTORS_DIR="$PWD/testdata/opus_testvectors" \
+            OPUS_VECTOR="testvector${vector}" \
+              cargo test --release -p opus-decoder --test conformance_rfc \
+                rfc_conformance_vectors -- --ignored --exact
+            echo "::endgroup::"
+          done
 
   desktop-targets:
     name: ${{ matrix.name }} compile

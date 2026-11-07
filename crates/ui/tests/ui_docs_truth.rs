@@ -298,7 +298,7 @@ fn the_engine_readme_badge_matches_the_engine_manifest() {
     );
     assert_eq!(
         manifest_version,
-        engine::VERSION,
+        audio_session::engine::VERSION,
         "the engine manifest and the linked engine disagree"
     );
 }
@@ -347,11 +347,11 @@ fn the_manual_reads_capabilities_from_the_live_engine() {
     }
 
     assert!(
-        !engine::output::available_backends().is_empty(),
+        !audio_session::engine::output::available_backends().is_empty(),
         "this build compiled in no output backend, so the manual has nothing truthful to show"
     );
     assert!(
-        !engine::decode::codecs::decodable_codecs().is_empty(),
+        !audio_session::engine::decode::codecs::decodable_codecs().is_empty(),
         "this build compiled in no decoder, so the manual has nothing truthful to show"
     );
 }
@@ -394,9 +394,9 @@ fn the_changelog_names_the_current_release_and_its_engine() {
         .unwrap_or(release_body.len());
     let release_body = &release_body[..release_end];
     assert!(
-        release_body.contains(&format!("audio-engine {}", engine::VERSION)),
+        release_body.contains(&format!("audio-engine {}", audio_session::engine::VERSION)),
         "the {latest} CHANGELOG entry must name the engine it shipped with \
          (audio-engine {}), not a remembered version",
-        engine::VERSION
+        audio_session::engine::VERSION
     );
 }

@@ -107,13 +107,31 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install cargo-dist
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
+      - name: Build the distributable binary
+        run: cargo build --release -p shadowplayer --target ${{ matrix.target }}
 
-      - name: Build the distributable artefacts
-        run: cargo dist build --target ${{ matrix.target }} --output-format=archive --with-aliases
+      - name: Package native artefacts (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p target/distrib
+          scripts/package-tarball.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+          if command -v dpkg-deb >/dev/null 2>&1; then
+            scripts/package-deb.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+          fi
+          scripts/package-appimage.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+
+      - name: Package native artefacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p target/distrib
+          scripts/package-macos.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+
+      - name: Package native artefacts (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p target/distrib
+          scripts/package-windows.sh target/${{ matrix.target }}/release/shadowplayer.exe ${{ matrix.target }} target/distrib
 
       - name: Collect the artefacts
         uses: actions/upload-artifact@v4
@@ -135,6 +153,11 @@ jobs:
           path: target/distrib
           merge-multiple: true
 
+      - name: Generate SHA256 checksums
+        working-directory: target/distrib
+        run: |
+          sha256sum * > SHA256SUMS.txt 2>/dev/null || true
+
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -149,7 +172,9 @@ jobs:
 
       - name: Report the checksums
         run: |
-          echo "### Artefacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Release Artefacts & Checksums" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Checksum | File |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| :--- | :--- |" >> "$GITHUB_STEP_SUMMARY"
           (cd target/distrib && sha256sum * 2>/dev/null || shasum -a 256 * 2>/dev/null) \
-            | sed 's/^/| `/; s/$/` |/' >> "$GITHUB_STEP_SUMMARY"
+            | awk '{print "| `" $1 "` | `" $2 "` |"}' >> "$GITHUB_STEP_SUMMARY"

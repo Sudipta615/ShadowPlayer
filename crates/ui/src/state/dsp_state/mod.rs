@@ -2,9 +2,9 @@ use crate::components::eq_panel::{EqPanelActions, EqPanelState};
 use crate::components::settings_tab::{SettingsTabActions, SettingsTabState};
 use crate::state::chain_preset::{self, ChainPreset};
 use crate::state::clap_rack::{ClapRackActions, ClapRackState};
+use audio_session::engine::output::devices::OutputDeviceInfo;
 use audio_session::AudioSession;
 use config::{AudioBackend, CrossfadeConfig, TransitionMode};
-use engine::output::devices::OutputDeviceInfo;
 
 /// The stages Pure Direct neutralises, kept so leaving it restores the sound
 /// the user had before the bypass instead of leaving every stage off.

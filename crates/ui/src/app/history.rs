@@ -30,16 +30,11 @@ impl ShadowPlayerApp {
                 self.app_state.listening_modal.is_open = false;
             }
             if let Some(format) = listening_actions.export {
-                match crate::modals::listening_modal::export_with_dialog(
-                    &self.scrobble_repo,
-                    format,
-                ) {
-                    Ok(Some(path)) => self.toasts.success(format!(
-                        "Exported the listening history to {}",
-                        path.display()
-                    )),
-                    Ok(None) => {}
-                    Err(e) => self.toasts.warning(e),
+                // Reading the whole history and writing it out are both work
+                // the frame must not wait on; the worker opens the picker.
+                if !self.file_tasks.submit(FileTask::ExportHistory(format)) {
+                    self.toasts
+                        .warning(tr!("Could not start the background task"));
                 }
             }
         }

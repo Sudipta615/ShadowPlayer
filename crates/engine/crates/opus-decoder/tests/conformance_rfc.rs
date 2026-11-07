@@ -697,3 +697,34 @@ fn read_opus_demo_stream(path: &Path) -> io::Result<Vec<OpusDemoPacket>> {
 
     Ok(out)
 }
+
+/// The README's conformance table is a measured result, so it is pinned here.
+///
+/// The vectors themselves are external and ignored, which is exactly how a
+/// stale "all 12 pass" survived in the README while the decoder did not pass
+/// them. This test reads the claim instead of the disks: re-inflating the
+/// table without the harness passing fails the normal suite.
+#[test]
+fn readme_states_the_measured_conformance_status() {
+    let readme = include_str!("../README.md");
+    assert!(
+        readme.contains("11 of 12"),
+        "the conformance section must state the measured pass count"
+    );
+    assert!(
+        readme.contains("tv08"),
+        "the conformance section must name the vector that does not pass"
+    );
+    assert!(
+        readme.contains("fetch-opus-vectors.sh"),
+        "the conformance section must point at the script that installs the vectors"
+    );
+    assert!(
+        !readme.contains("All 12 RFC 8251 test vectors pass"),
+        "the decoder does not pass all 12 vectors; do not claim that it does"
+    );
+    assert!(
+        !readme.contains("cargo xtask fetch-vectors"),
+        "there is no `xtask` in this workspace; the fetch script is the real path"
+    );
+}

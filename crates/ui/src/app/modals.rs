@@ -115,13 +115,18 @@ impl ShadowPlayerApp {
                     .add_filter("WAV audio", &["wav"])
                     .save_file()
                 {
-                    match std::fs::copy(&source, &dest) {
-                        Ok(_) => self
-                            .toasts
-                            .info(format!("Measurement saved to {}", dest.display())),
-                        Err(e) => self
-                            .toasts
-                            .warning(format!("Could not save the measurement: {e}")),
+                    // The copy is a file write; the worker reports the result.
+                    let success_message = tr_args!(
+                        "Measurement saved to {path}",
+                        "path" => dest.display().to_string()
+                    );
+                    if !self.file_tasks.submit(FileTask::CopyFile {
+                        source,
+                        destination: dest,
+                        success_message,
+                    }) {
+                        self.toasts
+                            .warning(tr!("Could not start the background task"));
                     }
                 }
             }

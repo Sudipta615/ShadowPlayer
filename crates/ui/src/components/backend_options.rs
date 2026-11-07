@@ -35,7 +35,7 @@ pub fn backend_picker(
     theme: &Theme,
     changed: &mut Option<AudioBackend>,
 ) {
-    let available = engine::output::available_backends();
+    let available = audio_session::engine::output::available_backends();
 
     // A selection this build cannot open (settings copied between machines, or
     // a build without the native backend) would otherwise show no selected

@@ -256,14 +256,14 @@ mod tests {
                     freq: 105.0,
                     gain_db: 5.0,
                     q: 0.7,
-                    filter_type: engine::dsp::equalizer::EqFilterType::LowShelf,
+                    filter_type: audio_session::engine::dsp::equalizer::EqFilterType::LowShelf,
                     enabled: true,
                 },
                 ParametricBand {
                     freq: 1_000.0,
                     gain_db: -3.0,
                     q: 1.4,
-                    filter_type: engine::dsp::equalizer::EqFilterType::Peaking,
+                    filter_type: audio_session::engine::dsp::equalizer::EqFilterType::Peaking,
                     enabled: true,
                 },
             ],
@@ -287,11 +287,11 @@ mod tests {
         assert_eq!(target.bands.len(), 2);
         assert_eq!(
             target.bands[0].filter_type,
-            engine::dsp::equalizer::EqFilterType::LowShelf
+            audio_session::engine::dsp::equalizer::EqFilterType::LowShelf
         );
         assert_eq!(
             target.bands[1].filter_type,
-            engine::dsp::equalizer::EqFilterType::Peaking
+            audio_session::engine::dsp::equalizer::EqFilterType::Peaking
         );
         assert!((target.preamp_db + 4.0).abs() < 1e-6);
         assert!(target.eq_enabled);

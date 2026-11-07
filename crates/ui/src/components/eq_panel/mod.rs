@@ -17,9 +17,9 @@
 //! `mod.rs` owns the panel state and the window shell.
 
 use crate::theme::Theme;
+use audio_session::engine::dsp::limiter::LimiterMode;
 use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use eframe::egui::{self, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
-use engine::dsp::limiter::LimiterMode;
 use serde::{Deserialize, Serialize};
 
 mod actions;

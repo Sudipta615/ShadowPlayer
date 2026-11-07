@@ -141,7 +141,7 @@ impl LoudnessService {
                 // once every track of that album has been measured.
                 let mut by_album: HashMap<
                     (String, String),
-                    Vec<(PathBuf, engine::decode::LoudnessScanResult)>,
+                    Vec<(PathBuf, audio_session::engine::decode::LoudnessScanResult)>,
                 > = HashMap::new();
 
                 for (id, path, album, artist) in items {
@@ -161,7 +161,7 @@ impl LoudnessService {
                         current,
                     });
 
-                    match engine::decode::scan_track_loudness(&path) {
+                    match audio_session::engine::decode::scan_track_loudness(&path) {
                         Some(result) => {
                             by_album
                                 .entry((album.clone(), artist.clone()))
@@ -170,7 +170,7 @@ impl LoudnessService {
 
                             // Feed the engine's own cache so normalization works
                             // on playback without touching the source file.
-                            engine::decode::loudness_cache::store(&path, &result);
+                            audio_session::engine::decode::loudness_cache::store(&path, &result);
                             if let Err(e) = repo.set_loudness(
                                 &id,
                                 result.replaygain_track_db,
@@ -183,7 +183,7 @@ impl LoudnessService {
                             // Optional: persist the values into the file's own
                             // tags so other players/gear can normalise too.
                             if write_tags {
-                                let meta = engine::dsp::LoudnessMetadata {
+                                let meta = audio_session::engine::dsp::LoudnessMetadata {
                                     replaygain_track_db: result.replaygain_track_db,
                                     replaygain_album_db: None,
                                     replaygain_track_peak: result.replaygain_track_peak,
@@ -191,7 +191,9 @@ impl LoudnessService {
                                     ebu_r128_loudness: result.ebu_r128_loudness,
                                     ebu_r128_peak: result.ebu_r128_peak_dbtp,
                                 };
-                                match engine::decode::write_loudness_tags(&path, &meta) {
+                                match audio_session::engine::decode::write_loudness_tags(
+                                    &path, &meta,
+                                ) {
                                     Ok(()) => tagged += 1,
                                     // Unsupported containers (PCM/DSD) are
                                     // expected; anything else is worth a log.
@@ -216,7 +218,9 @@ impl LoudnessService {
                 // specification says it should.
                 for ((album, artist), tracks) in by_album {
                     let Some(album_gain) =
-                        engine::decode::accumulate_album_replaygain(tracks.iter().map(|(_, r)| r))
+                        audio_session::engine::decode::accumulate_album_replaygain(
+                            tracks.iter().map(|(_, r)| r),
+                        )
                     else {
                         continue;
                     };
@@ -235,7 +239,7 @@ impl LoudnessService {
                     // known, which is why this is a second pass.
                     if write_tags {
                         for (path, result) in &tracks {
-                            let meta = engine::dsp::LoudnessMetadata {
+                            let meta = audio_session::engine::dsp::LoudnessMetadata {
                                 replaygain_track_db: result.replaygain_track_db,
                                 replaygain_album_db: Some(album_gain.album_gain_db),
                                 replaygain_track_peak: result.replaygain_track_peak,
@@ -243,7 +247,7 @@ impl LoudnessService {
                                 ebu_r128_loudness: result.ebu_r128_loudness,
                                 ebu_r128_peak: result.ebu_r128_peak_dbtp,
                             };
-                            match engine::decode::write_loudness_tags(path, &meta) {
+                            match audio_session::engine::decode::write_loudness_tags(path, &meta) {
                                 Ok(()) => {}
                                 Err(e) => {
                                     log::debug!("Not tagging {}: {e:?}", path.display())
@@ -381,7 +385,8 @@ mod tests {
         let wav = dir.join("tone.wav");
         write_tone_wav(&wav, 2.0);
 
-        let result = engine::decode::scan_track_loudness(&wav).expect("scan should succeed");
+        let result =
+            audio_session::engine::decode::scan_track_loudness(&wav).expect("scan should succeed");
         assert!(
             result.ebu_r128_loudness.is_some(),
             "expected an integrated LUFS measurement"
@@ -406,8 +411,9 @@ mod tests {
 
         let before = std::fs::read(&wav).expect("read wav");
 
-        let result = engine::decode::scan_track_loudness(&wav).expect("scan should succeed");
-        let meta = engine::dsp::LoudnessMetadata {
+        let result =
+            audio_session::engine::decode::scan_track_loudness(&wav).expect("scan should succeed");
+        let meta = audio_session::engine::dsp::LoudnessMetadata {
             replaygain_track_db: result.replaygain_track_db,
             replaygain_album_db: None,
             replaygain_track_peak: result.replaygain_track_peak,
@@ -415,7 +421,8 @@ mod tests {
             ebu_r128_loudness: result.ebu_r128_loudness,
             ebu_r128_peak: result.ebu_r128_peak_dbtp,
         };
-        engine::decode::write_loudness_tags(&wav, &meta).expect("tag write should succeed");
+        audio_session::engine::decode::write_loudness_tags(&wav, &meta)
+            .expect("tag write should succeed");
 
         let after = std::fs::read(&wav).expect("read wav");
         assert_ne!(before, after, "the file must have been modified");

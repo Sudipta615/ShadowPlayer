@@ -12,8 +12,8 @@ use super::controls::{
 };
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
+use audio_session::engine::dsp::limiter::LimiterMode;
 use eframe::egui::{self, Vec2};
-use engine::dsp::limiter::LimiterMode;
 use std::ops::RangeInclusive;
 
 pub(super) fn render_dynamics_tab(

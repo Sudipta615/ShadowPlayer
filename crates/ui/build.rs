@@ -30,12 +30,14 @@ fn main() {
     let es_path = locales.join("es.json");
     let ja_path = locales.join("ja.json");
     let zh_path = locales.join("zh.json");
+    let hi_path = locales.join("hi.json");
     println!("cargo:rerun-if-changed={}", en_path.display());
     println!("cargo:rerun-if-changed={}", de_path.display());
     println!("cargo:rerun-if-changed={}", fr_path.display());
     println!("cargo:rerun-if-changed={}", es_path.display());
     println!("cargo:rerun-if-changed={}", ja_path.display());
     println!("cargo:rerun-if-changed={}", zh_path.display());
+    println!("cargo:rerun-if-changed={}", hi_path.display());
 
     let en: BTreeMap<String, String> = read_catalogue(&en_path);
     for (name, path) in [
@@ -44,6 +46,7 @@ fn main() {
         ("es", &es_path),
         ("ja", &ja_path),
         ("zh", &zh_path),
+        ("hi", &hi_path),
     ] {
         let cat: BTreeMap<String, String> = read_catalogue(path);
         for key in cat.keys() {

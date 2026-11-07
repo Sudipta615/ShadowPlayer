@@ -10,8 +10,8 @@ use super::controls::{card, render_footer_controls};
 use super::preset_library::render_preset_library;
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::{font, Theme};
+use audio_session::engine::dsp::equalizer::{EqFilterType, MAX_EQ_BANDS};
 use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
-use engine::dsp::equalizer::{EqFilterType, MAX_EQ_BANDS};
 use serde::{Deserialize, Serialize};
 
 const BAND_FREQ_MIN: f32 = 10.0;

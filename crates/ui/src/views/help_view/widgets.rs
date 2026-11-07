@@ -15,7 +15,7 @@ use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 /// negotiated — would contradict it.
 pub(super) fn exclusive_backend_sentence() -> String {
     let mut parts: Vec<String> = Vec::new();
-    for backend in engine::output::available_backends() {
+    for backend in audio_session::engine::output::available_backends() {
         let label = crate::components::backend_options::backend_label(backend);
         let detail = match backend {
             config::AudioBackend::ExclusiveAlsa => {

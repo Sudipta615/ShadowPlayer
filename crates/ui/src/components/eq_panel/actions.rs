@@ -1,7 +1,7 @@
 //! Typed action sink returned by the EQ studio.
 
+use audio_session::engine::dsp::limiter::LimiterMode;
 use config::CrossfeedProfile;
-use engine::dsp::limiter::LimiterMode;
 
 /// Save the active curve under `name`, optionally binding it to a device.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -132,8 +132,14 @@ impl ShadowPlayerApp {
     /// The plan is rebuilt from the board immediately before applying, so what
     /// moves is exactly what is on screen — not what was on screen a keystroke
     /// ago — and any destination that appeared meanwhile is caught as a
-    /// conflict rather than silently clobbered.
+    /// conflict rather than silently clobbered. The moves themselves, and the
+    /// row relinks that follow them, run on the file worker; [`Self::finish_organize`]
+    /// applies the result.
     pub(super) fn apply_organize_plan(&mut self) {
+        if self.file_tasks.is_busy() {
+            self.toasts.info(tr!("Another file task is still running"));
+            return;
+        }
         self.organize.plan = library::organize::build_plan(
             &self.organize.tracks,
             &self.organize.pattern,
@@ -141,26 +147,26 @@ impl ShadowPlayerApp {
         );
         self.organize.plan_dirty = false;
 
-        let plan = self.organize.plan.clone();
-        let outcome = library::organize::apply_plan(&plan);
-
-        // Relink each moved row in place: the id, play counts, playlists and
-        // artwork all survive a rename.
-        let mut relinked = 0usize;
-        for (id, new_path, content_hash) in &outcome.moved {
-            match self
-                .track_repo
-                .relink_path(id, new_path, content_hash.as_deref())
-            {
-                Ok(true) => relinked += 1,
-                Ok(false) => log::warn!(
-                    "Organizer moved {} but found no library row",
-                    new_path.display()
-                ),
-                Err(e) => log::warn!("Could not relink {}: {e}", new_path.display()),
-            }
+        if !self
+            .file_tasks
+            .submit(FileTask::ApplyOrganize(self.organize.plan.clone()))
+        {
+            self.toasts
+                .warning(tr!("Could not start the background task"));
         }
+    }
 
+    /// Apply a finished organizer move.
+    ///
+    /// The rows were already relinked on the worker, where one write per moved
+    /// file belongs. What is left is in-memory work: the queue's resolved
+    /// paths, the modal's review scope, and the refresh that rebuilds views.
+    pub(super) fn finish_organize(
+        &mut self,
+        outcome: library::organize::OrganizeOutcome,
+        relinked: usize,
+        relink_failures: Vec<String>,
+    ) {
         // The queue holds resolved paths, so repoint it too.
         let moved: Vec<(domain::ids::TrackId, PathBuf)> = outcome
             .moved
@@ -186,6 +192,9 @@ impl ShadowPlayerApp {
         self.watch_suppress_until =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
 
+        for failure in &relink_failures {
+            log::warn!("Organizer: {failure}");
+        }
         let failed = outcome.failures.len();
         if failed > 0 {
             let detail = outcome
@@ -201,20 +210,24 @@ impl ShadowPlayerApp {
         }
 
         self.organize.result = Some(if failed == 0 {
-            format!("Moved {relinked} file(s).")
+            tr_args!("Moved {count} file(s).", "count" => relinked)
         } else {
-            format!("Moved {relinked}, {failed} left in place — see the log.")
+            tr_args!(
+                "Moved {moved}, {failed} left in place — see the log.",
+                "moved" => relinked,
+                "failed" => failed
+            )
         });
         self.organize.applied = true;
 
         if relinked > 0 {
-            self.toasts.success(format!(
-                "Organized {relinked} file(s){}",
-                if failed > 0 {
-                    format!(" ({failed} skipped)")
-                } else {
-                    String::new()
-                }
+            self.toasts
+                .success(tr_args!("Organized {count} file(s)", "count" => relinked));
+        }
+        if failed > 0 {
+            self.toasts.warning(tr_args!(
+                "{failed} file(s) could not be moved",
+                "failed" => failed
             ));
         }
         self.reload_library();

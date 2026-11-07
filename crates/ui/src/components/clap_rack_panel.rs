@@ -16,7 +16,7 @@ use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, Stroke, Vec2
 use crate::state::clap_rack::{ClapRackActions, ClapRackPreset, ClapRackState};
 use crate::theme::Theme;
 
-use engine::dsp::clap_rack::ClapRackView;
+use audio_session::engine::dsp::clap_rack::ClapRackView;
 
 /// Draw the rack. Returns the actions the user took this frame.
 pub fn show_clap_rack_panel(
@@ -514,7 +514,11 @@ fn render_parameters(
 
 /// One parameter's name, with its grouping path, coloured so a plugin's own
 /// bypass switch stands out from the controls that change the sound.
-fn param_label(ui: &mut egui::Ui, param: &engine::dsp::clap_rack::ClapParamInfo, theme: &Theme) {
+fn param_label(
+    ui: &mut egui::Ui,
+    param: &audio_session::engine::dsp::clap_rack::ClapParamInfo,
+    theme: &Theme,
+) {
     let label = if param.module.trim().is_empty() {
         param.name.clone()
     } else {

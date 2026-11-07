@@ -8,9 +8,9 @@ use super::super::widgets::{
 };
 use super::super::{SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
+use audio_session::engine::AudioSource;
 use config::{ChannelMixTemplate, CrossoverFilterType, CrossoverSlope};
 use eframe::egui::{self, Vec2};
-use engine::AudioSource;
 
 pub(in crate::components::settings_tab) fn render_mixbus_category(
     ui: &mut egui::Ui,
@@ -725,7 +725,7 @@ fn render_clap_plugin_card(
                             row_changed |= ui
                                 .add(
                                     egui::DragValue::new(&mut route.source)
-                                        .range(0..=engine::buffer::MAX_CHANNELS - 1),
+                                        .range(0..=audio_session::engine::buffer::MAX_CHANNELS - 1),
                                 )
                                 .changed();
                             ui.label(
@@ -736,7 +736,7 @@ fn render_clap_plugin_card(
                             row_changed |= ui
                                 .add(
                                     egui::DragValue::new(&mut route.destination)
-                                        .range(0..=engine::buffer::MAX_CHANNELS - 1),
+                                        .range(0..=audio_session::engine::buffer::MAX_CHANNELS - 1),
                                 )
                                 .changed();
                             row_changed |= ui
@@ -793,7 +793,7 @@ fn render_clap_plugin_card(
             theme,
             |ui| {
                 let full =
-                    state.channel_routing.fir_routes.len() >= engine::dsp::channel_trim::MAX_MATRIX_FIR_ROUTES;
+                    state.channel_routing.fir_routes.len() >= audio_session::engine::dsp::channel_trim::MAX_MATRIX_FIR_ROUTES;
                 if ui
                     .add_enabled(!full, pill_btn(tr!("Add Route"), false, theme))
                     .clicked()

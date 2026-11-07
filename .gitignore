@@ -45,3 +45,6 @@ crates/**/Cargo.lock
 .github/context-mode/
 GEMINI.md
 skills-lock.json
+
+# The external Opus conformance corpus (fetched by scripts/fetch-opus-vectors.sh).
+crates/engine/testdata/opus_testvectors/

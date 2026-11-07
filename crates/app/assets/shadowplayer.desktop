@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=ShadowPlayer
+GenericName=Audiophile Music Player
+Comment=Bit-perfect playback, studio-grade DSP chain, and local library management
+Exec=shadowplayer %U
+Icon=shadowplayer
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;
+MimeType=audio/flac;audio/x-flac;audio/x-wav;audio/wav;audio/x-alac;audio/aac;audio/mp4;audio/mpeg;audio/ogg;audio/x-opus+ogg;audio/x-vorbis+ogg;audio/x-wavpack;audio/x-dsd;audio/dsf;audio/dff;application/x-cue;application/x-stm;application/x-shadowtheme;
+Keywords=Audio;Player;Audiophile;Music;FLAC;DSD;DSP;Equalizer;Bit-Perfect;Hi-Res;
+StartupWMClass=shadowplayer
+

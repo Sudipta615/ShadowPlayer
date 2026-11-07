@@ -165,7 +165,7 @@ pub fn render_theme_gallery(
                     .corner_radius(CornerRadius::same(theme.radius_sm))
                     .min_size(Vec2::new(0.0, 24.0)),
                 )
-                .on_hover_text("Import a .shadowtheme file")
+                .on_hover_text("Import a .stm theme file")
                 .clicked()
             {
                 actions.import_theme = true;

@@ -8,7 +8,7 @@ A local-first desktop music player built in Rust: bit-perfect output, a
 studio-grade DSP chain, a 100,000-track library that stays fast, and no
 accounts, cloud, or telemetry.
 
-[![Version](https://img.shields.io/badge/version-0.29.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.30.0-blue?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)](#platform-support)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org/)
@@ -132,12 +132,11 @@ its own README, test matrix, and C ABI.
 - MPRIS2 on Linux, System Media Transport Controls on Windows, and Now Playing
   on macOS, including artwork and media-key transport.
 - Native file and folder pickers, including the XDG portal under Wayland.
-- Six interface catalogues: English is complete; German is substantially
-  translated, and French, Spanish, Japanese, and Chinese are partial. Settings
-  shows each catalogue's exact coverage, and missing strings fall back to
-  English rather than showing a key.
+- Seven complete interface catalogues: English, German, French, Spanish,
+  Japanese, Chinese, and Hindi, with 100% string coverage across all user-facing
+  labels, settings, and DSP controls.
 - Headless mode for servers and scripted listening sessions.
-- Light, dark, and OLED themes, plus custom `.shadowtheme` files with a live
+- Light, dark, and OLED themes, plus custom `.stm` (`.shadowtheme`) files with a live
   editor and WCAG AA contrast validation.
 
 ---

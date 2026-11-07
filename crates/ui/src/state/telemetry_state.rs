@@ -1,4 +1,4 @@
-use engine::dsp::AnalyzerSnapshot;
+use audio_session::engine::dsp::AnalyzerSnapshot;
 
 /// Telemetry state snapshot polled from AudioSession in a lock-free manner
 #[derive(Debug, Clone)]
@@ -9,7 +9,7 @@ pub struct TelemetryState {
     pub bit_perfect: bool,
     pub bit_perfect_cause: Option<String>,
     pub spectrum: AnalyzerSnapshot,
-    pub meters: Option<engine::dsp::ProfessionalMeterSnapshot>,
+    pub meters: Option<audio_session::engine::dsp::ProfessionalMeterSnapshot>,
 }
 
 impl Default for TelemetryState {

@@ -314,7 +314,7 @@ pub(super) enum SaveOutcome {
 
 /// Validate a theme file ID before it is used as a file name.
 ///
-/// The ID becomes `<id>.shadowtheme` inside the user's custom-theme directory.
+/// The ID becomes `<id>.stm` inside the user's custom-theme directory.
 /// A value like `../../foo` or `..\..\foo` must be rejected rather than
 /// joined onto that directory.
 fn validate_theme_id(id: &str) -> Result<(), String> {
@@ -394,8 +394,12 @@ fn unique_theme_id(manager: &ThemeManager, base: &str) -> String {
         };
         let file_exists = manager
             .custom_themes_dir
-            .join(format!("{candidate}.shadowtheme"))
-            .exists();
+            .join(format!("{candidate}.stm"))
+            .exists()
+            || manager
+                .custom_themes_dir
+                .join(format!("{candidate}.shadowtheme"))
+                .exists();
         let id_exists = manager
             .all_theme_cards()
             .iter()
@@ -433,7 +437,7 @@ pub(super) fn save_current_theme(
         }
     }
 
-    let filename = format!("{}.shadowtheme", state.id.trim());
+    let filename = format!("{}.stm", state.id.trim());
     let target_path = manager.custom_themes_dir.join(&filename);
     if !target_path.starts_with(&manager.custom_themes_dir) {
         return SaveOutcome::Error("Invalid theme file name".to_string());
@@ -521,7 +525,7 @@ mod tests {
             SaveOutcome::Saved(id) => id,
             _ => panic!("first save-as-new should succeed"),
         };
-        assert!(custom_dir.join(format!("{first}.shadowtheme")).exists());
+        assert!(custom_dir.join(format!("{first}.stm")).exists());
         assert!(!state.is_dirty());
 
         let second = match save_current_theme(&mut state, &manager, true, true) {
@@ -529,7 +533,7 @@ mod tests {
             _ => panic!("second save-as-new should succeed"),
         };
         assert_ne!(first, second);
-        assert!(custom_dir.join(format!("{second}.shadowtheme")).exists());
+        assert!(custom_dir.join(format!("{second}.stm")).exists());
         assert_eq!(
             std::fs::read_dir(&custom_dir)
                 .unwrap()
@@ -537,7 +541,7 @@ mod tests {
                 .filter(|entry| entry
                     .path()
                     .extension()
-                    .is_some_and(|ext| ext == "shadowtheme"))
+                    .is_some_and(|ext| ext == "stm" || ext == "shadowtheme"))
                 .count(),
             2,
             "save-as-new must create a new file instead of replacing the first"

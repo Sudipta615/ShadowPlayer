@@ -1,5 +1,5 @@
 use super::*;
-use engine::dsp::equalizer::EqFilterType;
+use audio_session::engine::dsp::equalizer::EqFilterType;
 
 #[test]
 fn layout_change_interpolates_the_visible_curve_and_clears_stale_bands() {

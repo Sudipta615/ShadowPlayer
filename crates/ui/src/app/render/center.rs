@@ -165,7 +165,7 @@ impl ShadowPlayerApp {
                                 crate::components::page::status_pill(
                                     ui,
                                     &self.theme,
-                                    &format!("Engine {}", engine::VERSION),
+                                    &format!("Engine {}", audio_session::engine::VERSION),
                                     self.theme.accent_warm,
                                     self.theme.text_secondary,
                                 );
@@ -403,8 +403,8 @@ impl ShadowPlayerApp {
                             if let Some(paths) = rfd::FileDialog::new()
                                 .set_title("Import ShadowPlayer Theme")
                                 .add_filter(
-                                    "ShadowPlayer Theme (*.shadowtheme, *.json)",
-                                    &["shadowtheme", "json"],
+                                    "ShadowPlayer Theme (*.stm, *.shadowtheme, *.json)",
+                                    &["stm", "shadowtheme", "json"],
                                 )
                                 .pick_files()
                             {

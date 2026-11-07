@@ -672,13 +672,13 @@ pub(in crate::components::settings_tab) fn render_output_category(
                     return;
                 };
                 let recommendation = match report.recommendation {
-                    engine::dsp::apodizing::ApodizingRecommendation::InsufficientData => {
+                    audio_session::engine::dsp::apodizing::ApodizingRecommendation::InsufficientData => {
                         tr!("Insufficient data")
                     }
-                    engine::dsp::apodizing::ApodizingRecommendation::NotNeeded => {
+                    audio_session::engine::dsp::apodizing::ApodizingRecommendation::NotNeeded => {
                         tr!("Not needed")
                     }
-                    engine::dsp::apodizing::ApodizingRecommendation::Recommended => {
+                    audio_session::engine::dsp::apodizing::ApodizingRecommendation::Recommended => {
                         tr!("Apodizing recommended")
                     }
                 };

@@ -581,7 +581,7 @@ pub fn render_theme_editor(
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
                         egui::RichText::new(format!(
-                            "A theme file named \"{}.shadowtheme\" already exists. Overwrite it?",
+                            "A theme file named \"{}.stm\" already exists. Overwrite it?",
                             state.id.trim()
                         ))
                         .font(crate::theme::font(11.5))
