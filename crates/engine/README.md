@@ -177,6 +177,9 @@ The command exits non-zero if any check fails, so it can gate a release.
 
 The block below is a **captured run of `selftest`, taken on 1.4.0**. It is reproduced verbatim rather
 than re-labelled: the engine version in the output is the one that actually produced these numbers.
+It is therefore historical evidence, not a current result — the engine is now 1.14.0, and the
+`qualification-100% PASS` badge above is only as current as the last run somebody captured. Re-run
+`selftest` on the release you are shipping before treating the badge as a claim about that release.
 
 ```text
 Quality evaluation report — engine 1.4.0 (reference registry v1)
