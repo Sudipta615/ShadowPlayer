@@ -31,7 +31,6 @@ jobs:
     name: Plan the build
     runs-on: ubuntu-latest
     outputs:
-      releases: ${{ steps.read.outputs.releases }}
       tag: ${{ steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
@@ -58,20 +57,11 @@ jobs:
           fi
           echo "Building $tag from workspace version $version."
 
-      - name: Install cargo-dist
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
-
-      - name: Plan the release
-        run: cargo dist plan --output-format=json > dist-plan.json
-
-      - name: Read the plan
-        id: read
-        run: |
-          set -euo pipefail
-          releases="$(jq -r '.releases | join(",")' dist-plan.json)"
-          echo "releases=$releases" >> "$GITHUB_OUTPUT"
+      # There is no cargo-dist step here on purpose. The artefacts are built by
+      # the `build` job below and packaged by the `scripts/package-*.sh` suite;
+      # a `cargo dist plan` step used to run here and its output was never read
+      # by anything, which made two packaging descriptions look authoritative
+      # at once. See the distribution note in the root `Cargo.toml`.
 
   build:
     name: Build ${{ matrix.target }}
