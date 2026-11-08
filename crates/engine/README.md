@@ -10,7 +10,7 @@
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg?style=flat-square)](#-hardware-output-backends--os-integration)
 [![Realtime Safety](https://img.shields.io/badge/realtime-0%20allocations%20hot%20path-brightgreen.svg?style=flat-square)](#-real-time-safety--concurrency)
 [![Qualification Gate](https://img.shields.io/badge/qualification-100%25%20PASS-brightgreen.svg?style=flat-square)](#-formal-release-qualification)
-[![Test Matrix](https://img.shields.io/badge/tests-24%20suites-blueviolet.svg?style=flat-square)](#-testing--quality-gates)
+[![Test Matrix](https://img.shields.io/badge/tests-25%20suites-blueviolet.svg?style=flat-square)](#-testing--quality-gates)
 
 <p align="center">
   <b>A zero-allocation, lock-free, node-based audio playback and DSP engine engineered for bit-perfect audiophile listening, pro-audio mastering, and low-latency studio monitoring — with zero C/C++ codec SDKs.</b>
@@ -895,7 +895,7 @@ engine remain authoritative.
 
 ## 🧪 Testing & Quality Gates
 
-The engine enforces correctness across **24 test files (0 registered `[[test]]` suites + 24 integration suites)**, on top of the unit tests that live beside the code they test. The integration suites are the ones that exercise the engine the way an embedder does — through its public API, with a real decoder and a real output path.
+The engine enforces correctness across **25 test files (1 registered `[[test]]` suite + 24 integration suites)**, on top of the unit tests that live beside the code they test. The integration suites are the ones that exercise the engine the way an embedder does — through its public API, with a real decoder and a real output path. The one registered suite is `graph_pipeline_equivalence`, which lives under `tests/fidelity/` and is therefore not auto-discovered by Cargo; see the `[[test]]` block in `Cargo.toml`.
 
 ```bash
 # 1. Run the whole matrix: the in-crate unit tests and the integration suites

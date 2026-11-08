@@ -452,6 +452,17 @@ windows = { version = "0.59", features = [
     "Win32_UI_Shell_PropertiesSystem",
 ] }
 
+# ── Integration suites that live in a subdirectory ────────────────────────────
+#
+# Cargo only auto-discovers `tests/*.rs`; a file under `tests/fidelity/` is not
+# a test target unless it is registered here. The fidelity suites were cited
+# from `AGENTS.md`, `CONTRIBUTING.md` and a dozen module docs long before any
+# of them existed as a target, which is how a citation can point at a file that
+# is never compiled. Registering the target is what makes the citation real.
+[[test]]
+name = "graph_pipeline_equivalence"
+path = "tests/fidelity/graph_pipeline_equivalence.rs"
+
 [dev-dependencies]
 criterion = "0.8.2"
 approx = "0.5.1"
