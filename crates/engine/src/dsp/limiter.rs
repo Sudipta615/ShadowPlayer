@@ -1749,7 +1749,7 @@ mod tests {
     /// window, which made this test fail intermittently with small spurious
     /// counts (e.g. "allocated 47 times") that vanished under
     /// `--test-threads=1` — a false negative, not a real regression.
-    /// `tests/fidelity/realtime_allocation.rs` hit the same hazard and
+    /// `tests/realtime_alloc_budget.rs` hit the same hazard and
     /// documents it further: libtest's own `get_timed_out_tests` busy-loop
     /// floods the allocator once any sibling test exceeds the 60 s default
     /// timeout.

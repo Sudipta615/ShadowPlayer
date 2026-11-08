@@ -57,10 +57,10 @@ pub enum ResamplerQuality {
 
 /// Nominal characteristics of each resampler quality tier.
 ///
-/// These are **design targets**: `tests/fidelity/resampler_measurement.rs`
-/// measures the realized passband ripple, stopband rejection, and latency of
-/// the actual rubato filters each tier maps to, so the numbers below are
-/// validated rather than aspirational. rubato 5.0's `Fft` resampler derives
+/// These are **design targets**: `tests/resampler.rs` measures the realized
+/// passband flatness, distortion and stopband rejection of the actual rubato
+/// filters each tier maps to, so the numbers below are checked rather than
+/// aspirational. A per-tier tap-count assertion is not written yet. rubato 5.0's `Fft` resampler derives
 /// the anti-aliasing filter length from `chunk_size / sub_chunks`, so each
 /// tier is a genuinely longer filter — 320 / 640 / 1120 / 2240 taps for
 /// 44.1↔48 kHz — with a correspondingly deeper stopband and higher CPU cost.

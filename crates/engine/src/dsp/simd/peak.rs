@@ -250,8 +250,9 @@ mod nan_tests {
     /// second operand when that operand is NaN, so an accumulator passed first
     /// ignores NaN, while NEON's `FMAX` propagates it. The same audio therefore
     /// reported a number on x86_64 and `NaN` on aarch64.
-    /// `tests/fidelity/simd_qualification.rs` covers gain and levels but had no
-    /// NaN case, so nothing pinned this.
+    /// No SIMD qualification suite exists in `tests/`; the only automated
+    /// coverage of the vector kernels is the in-crate unit tests beside them
+    /// (this one included), so the NaN case below is the sole guard.
     ///
     /// It runs on whatever host builds it, which is the point: the NEON path is
     /// only observable on aarch64 and the SSE2 path only on x86_64, so the test

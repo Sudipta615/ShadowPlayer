@@ -16,9 +16,9 @@
 //!   buffers with explicit lengths.
 //! - **Realtime-safe process.** `process()` runs on the audio thread
 //!   inside a plan step: it must not allocate, lock, or block. The host
-//!   enforces this with the zero-allocation fidelity suite
-//!   (`tests/fidelity/plugin_host.rs`) and the worst-case reference
-//!   plugin.
+//!   passes borrowed buffers with no allocation in the block path, and
+//!   `tests/clap_fixture.rs` exercises the fixture plugin end to end; a
+//!   counting-allocator suite around a plugin callback is not written yet.
 //! - **Versioned.** [`PLUGIN_ABI_VERSION`] gates the handshake; the host
 //!   refuses mismatched plugins with a structured error rather than UB.
 //!

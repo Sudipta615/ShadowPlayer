@@ -260,8 +260,9 @@ sofa-import = []
 # had no streaming backend — so remote URIs were refused. It is now wired end to
 # end: `decode::resolve_uri` classifies an `AudioSource::Uri` as local or remote,
 # the four `Uri` call sites branch on that, and a remote target decodes through
-# the same Symphonia backend a local file uses. `tests/fidelity/network_streaming`
-# drives it against a loopback HTTP server and is the guard on that wiring.
+# the same Symphonia backend a local file uses. A `network_streaming` fidelity
+# suite is cited elsewhere but does not exist yet, so the wiring is currently
+# guarded only by the feature compiling under `--all-features`.
 #
 # Not in `default`: a network dependency most local playback never uses, and
 # blocking HTTP I/O on the decode thread is a real cost to opt into knowingly.

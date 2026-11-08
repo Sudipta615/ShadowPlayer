@@ -2,8 +2,10 @@
 //! verbatim; imports adapted to the `exec/` split).
 //!
 //! The oracles here are the **bit-exact expectations** the realtime
-//! executor must reproduce: `tests/fidelity/graph2_rt_offline_equivalence.rs`
-//! asserts RT == offline across these same topologies.
+//! executor must reproduce. There is no automated RT-vs-offline equivalence
+//! suite yet: the assertions below pin the offline executor's own output, and
+//! holding the realtime path to them is outstanding work rather than a
+//! passing test.
 
 use super::*;
 use crate::spatial::hrtf::HrtfDataset;

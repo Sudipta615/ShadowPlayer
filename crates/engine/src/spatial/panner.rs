@@ -30,7 +30,9 @@
 //! ## Realtime contract
 //!
 //! `process_block` performs no allocation and takes no locks after `prepare`
-//! (verified by `tests/fidelity/realtime_allocation.rs`). Bounded work per
+//! (the counting-allocator suite `tests/realtime_alloc_budget.rs` covers the
+//! pipeline's DSP stages, but the spatial panner is not among them yet).
+//! Bounded work per
 //! callback: at most `MAX_SPATIAL_OBJECTS` objects × 4 speaker paths × block.
 
 use crate::buffer::MAX_AUDIO_BLOCK_FRAMES;

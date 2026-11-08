@@ -258,8 +258,8 @@ pub struct PlaybackInfo {
     /// whole `PlaybackInfo` inside `ArcSwap::rcu`, and an idle tick publishes
     /// on every tick. With the settings inline, that clone deep-copied eight
     /// `Vec`s — turning the engine's "exactly one allocation per idle tick"
-    /// invariant into eight, measured by
-    /// `tests/fidelity/producer_tick_allocations.rs`. Behind an `Arc` the
+    /// invariant into eight. No automated test pins the idle-tick allocation
+    /// count today; the bound is maintained by review, not by a suite.
     /// publish is one refcount bump, the idle-tick bound holds, and
     /// `PlaybackInfo` stays small enough to copy cheaply.
     ///

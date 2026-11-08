@@ -22,10 +22,11 @@
 //! IRs from these functions, so the hot-path contract (no allocation, no
 //! locks) is untouched by design.
 //!
-//! Acceptance suites (spec-first, thresholds pinned in the roadmap):
-//! `tests/fidelity/ess_measurement.rs`, `tests/fidelity/minimal_phase.rs`,
-//! `tests/fidelity/correction_inverse.rs`, and the graph-level
-//! `tests/fidelity/room_correction_pipeline.rs`.
+//! Acceptance coverage for this module is the in-crate suite in
+//! `src/dsp/correction/tests.rs`. The spec-first acceptance suites that used to
+//! be cited here (`ess_measurement`, `minimal_phase`, `correction_inverse`,
+//! `room_correction_pipeline`) do not exist in `tests/`, so they are not
+//! claimed; the thresholds those suites were meant to pin are outstanding work.
 
 pub mod derive;
 pub mod ir;

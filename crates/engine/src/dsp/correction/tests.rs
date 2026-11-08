@@ -383,8 +383,8 @@ fn deconvolve_recovers_impulse_and_noise_floor() {
     let snr = super::sweep::estimate_snr_db(&ir).unwrap();
     assert!(snr > 80.0, "SNR {snr} dB on a clean recording");
 
-    // And the floor tracks injected noise (coarse check; the ±2 dB
-    // acceptance bound lives in tests/fidelity/ess_measurement.rs).
+    // And the floor tracks injected noise (coarse check; a tighter ±2 dB
+    // acceptance bound is not pinned by any suite yet).
     let mut noisy = recorded.clone();
     let mut state = 0x9E3779B97F4A7C15_u64;
     let sigma = 3.0e-3;

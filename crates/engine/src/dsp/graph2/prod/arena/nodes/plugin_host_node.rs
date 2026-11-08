@@ -11,9 +11,10 @@
 //! ## Realtime contract
 //!
 //! - `process_block_*` calls [`PluginInstance::process`] — the plugin's
-//!   own `process` must not allocate/lock/block (enforced by the
-//!   `tests/fidelity/plugin_host.rs` suite and the worst-case reference
-//!   plugin).
+//!   own `process` must not allocate/lock/block. The host enforces the
+//!   contract structurally (the plugin is called with borrowed buffers and no
+//!   host allocation in the block path) but no counting-allocator suite arms
+//!   the counter around a plugin callback yet.
 //! - Parameters travel as plain-data [`NodeCmd::SetPluginParams`] over
 //!   the per-node SPSC queue (see `controls.rs`); a failed
 //!   `set_param` is sticky-mirrored as dropped, never fatal.

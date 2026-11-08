@@ -30,8 +30,13 @@
 //!
 //! [`RtExecutor::render_block`] and the whole `rt` hot path perform **no
 //! heap allocation, no locks, no syscalls** — only preallocated memory and
-//! plain arithmetic. `tests/fidelity/realtime_allocation.rs` enforces this
-//! with the counting allocator; `tests/fidelity/graph2_rt_offline_equivalence.rs`
+//! plain arithmetic. `tests/realtime_alloc_budget.rs` enforces this
+//! with the counting allocator for the pipeline's stages, but it does **not**
+//! arm the counter around this executor: a counting-allocator suite for the
+//! realtime graph path is not written yet, so the guarantee here rests on the
+//! shared kernels and review rather than on a test. An RT-vs-offline
+//! equivalence suite is likewise absent; the offline executor's own oracles
+//! live in `src/dsp/graph2/exec/tests.rs`.
 //! pins RT == offline bit-exactly.
 //!
 //! ## Scope boundaries

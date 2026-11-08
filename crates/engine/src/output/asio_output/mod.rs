@@ -87,9 +87,12 @@ struct CallbackState {
     /// heap allocation on the driver's audio thread, and a dropped or
     /// reallocated `Vec` there is a dropout.
     ///
-    /// Enforced by `tests/fidelity/realtime_allocation.rs`, which arms the
-    /// engine's quality-registration path (`src/eval/qualification.rs`) and
-    /// asserts zero allocations across the real production chain.
+    /// The counting-allocator suite (`tests/realtime_alloc_budget.rs`) arms the
+    /// counter around the pipeline's DSP stages, not around this callback, so
+    /// the ASIO block path is not covered by it yet. It is also not covered by
+    /// the engine's quality-registration path (`src/eval/qualification.rs`),
+    /// which asserts zero allocations across the production chain but does not
+    /// drive an ASIO callback.
     ///
     /// (This previously cited a `tests/realtime_contract_test.rs` and an
     /// `RT_ENTRY_POINTS` list. Neither exists — there is no such test file and

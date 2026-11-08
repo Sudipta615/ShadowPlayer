@@ -361,10 +361,10 @@ impl<T: rubato::Sample + Float + Default + Send + Sync + 'static> AudioResampler
             // length derives from `chunk_size / sub_chunks`. Measured filter
             // group delay for this tier at 44.1 <-> 48 kHz is 560 output
             // frames, i.e. a ~1120-tap filter -- see
-            // `tests/fidelity/resampler_measurement.rs::
-            // published_latency_matches_measurement_and_its_tap_counts`, which
-            // measures every tier and pins it to the published latency table
-            // and the tap counts in the tier documentation.
+            // `tests/resampler.rs::the_tiers_are_ordered_by_latency_from_fast_to_ultra`
+            // and `the_passband_is_flat_across_the_whole_band`, which measure the
+            // realized latency and passband of every tier. A per-tier tap-count
+            // assertion against the published table does not exist yet.
             //
             // An earlier comment here quoted a different set (Fast ~640,
             // Balanced ~588, HighQuality ~1029, Ultra ~2058), which was both

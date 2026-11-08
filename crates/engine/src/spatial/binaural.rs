@@ -53,7 +53,9 @@
 //!
 //! All per-path state (ITD rings, shelf filters, reflection gains, the
 //! virtual ring) is preallocated flat at `prepare`; the per-block hot path
-//! is bounded arithmetic — verified by `tests/fidelity/realtime_allocation.rs`.
+//! is bounded arithmetic. The counting-allocator suite
+//! (`tests/realtime_alloc_budget.rs`) does not arm the counter around this
+//! path yet, so that guarantee is by construction rather than by test.
 
 use crate::buffer::MAX_AUDIO_BLOCK_FRAMES;
 use crate::decode::ChannelId;
