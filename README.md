@@ -489,11 +489,10 @@ Deliberate product choices live in
   controls carry accessible names, and the main editing surfaces work from the
   keyboard. The app has not had a professional screen-reader audit, so the
   keyboard remains the most thoroughly exercised path.
-- **The long-form manual is English.** Six interface catalogues ship, but only
-  English is complete: German is 65%, and French, Spanish, Japanese, and
-  Chinese are 31% of the English source keys at the time of writing. Settings
-  lists the live coverage and notes that missing strings fall back to English;
-  the Help manual's prose is English in every locale. See
+- **The long-form manual is English.** Seven interface catalogues ship —
+  English, German, French, Spanish, Japanese, Chinese, and Hindi — and all
+  seven carry a complete set of the English source keys. The Help manual's
+  prose is English in every locale regardless of the interface language. See
   [docs/LOCALIZATION.md](docs/LOCALIZATION.md).
 - **Engine-level boundaries are inherited in full.** The engine owns the
   precise contracts; these are the player-facing summaries. See the

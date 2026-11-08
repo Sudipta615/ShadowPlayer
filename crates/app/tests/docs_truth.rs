@@ -209,24 +209,133 @@ fn the_readme_describes_the_tools_and_the_opt_in_network() {
     );
 }
 
+/// The bolded topic of every bullet under a `## … Known Limitations` heading.
+///
+/// The engine's README states its limitations as `> - **Topic.** prose` lines
+/// inside a blockquote. Reading them from the source means this check cannot
+/// fall behind the list the way a hard-coded array does.
+fn engine_limitation_topics(engine_readme: &str) -> Vec<String> {
+    let mut topics = Vec::new();
+    let mut in_section = false;
+    for line in engine_readme.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") {
+            in_section = trimmed.to_lowercase().contains("known limitations");
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        // `> - **Topic.** prose` → `Topic.`
+        let Some(rest) = trimmed.strip_prefix("> -") else {
+            continue;
+        };
+        let rest = rest.trim();
+        let Some(rest) = rest.strip_prefix("**") else {
+            continue;
+        };
+        let Some(end) = rest.find("**") else {
+            continue;
+        };
+        let topic = rest[..end].trim().trim_end_matches('.').trim().to_string();
+        if !topic.is_empty() {
+            topics.push(topic);
+        }
+    }
+    topics
+}
+
+/// Collapse every run of whitespace to a single space.
+///
+/// Markdown hard-wraps its lines, so a phrase like "front L/R pair only in a
+/// `>2`-channel stream" is split across a newline and an indent in the source.
+/// Matching raw file text would fail on a limitation that is plainly present.
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The phrases a player-README mention may use to cover one limitation topic.
+///
+/// A limitation is a full sentence in the engine's README ("Matrix-FIR
+/// multicore is CPU-only and has no affinity or GPU controls.") and a summary
+/// in the player's ("Matrix-FIR multicore is CPU-only."). So the candidates are
+/// tried widest-first: the whole sentence, then the leading clause before the
+/// first natural break. A topic counts as covered when any candidate appears.
+fn limitation_candidates(topic: &str) -> Vec<String> {
+    let lower = topic.to_lowercase();
+    let mut out = vec![lower.clone()];
+
+    // The leading clause: up to the first comma, or the first copula/verb that
+    // turns the subject into a predicate.
+    let mut cut = lower.len();
+    for marker in [", ", " is ", " are ", " do ", " does ", " and "] {
+        if let Some(i) = lower.find(marker) {
+            cut = cut.min(i);
+        }
+    }
+    let clause = lower[..cut].trim().trim_end_matches(',').trim();
+    // Drop a leading article so "the output ultrasonic …" also matches
+    // "output ultrasonic …".
+    let clause = clause
+        .trim_start_matches("the ")
+        .trim_start_matches("no ")
+        .trim_start_matches("several ")
+        .trim();
+    if !clause.is_empty() && clause != lower {
+        out.push(clause.to_string());
+    }
+    out
+}
+
 #[test]
 fn the_readme_known_limitations_cover_the_engines() {
     let root = repo_root();
-    let readme = read(&root.join("README.md")).to_lowercase();
-    let engine_readme = read(&root.join("crates/engine/README.md")).to_lowercase();
+    // Whitespace-collapsed, because markdown wraps lines and a wrapped phrase
+    // is still the same phrase.
+    let readme = collapse_whitespace(&read(&root.join("README.md"))).to_lowercase();
+    let engine_readme = read(&root.join("crates/engine/README.md"));
 
-    // The engine's limitations are the ones a user is most likely to hit.
-    // Each of them must be mentioned in the player's README too, because the
-    // player is what people read.
-    for topic in ["musepack", "tak", "talkback", "ambisonic"] {
-        if engine_readme.contains(topic) {
-            assert!(
-                readme.contains(topic),
-                "the engine documents a '{topic}' limitation that the player's \
-                 README does not mention"
-            );
+    // The engine's limitations are the ones a user is most likely to hit, and
+    // the player's README is what people actually read. Every one of them must
+    // be mentioned there.
+    //
+    // The list is read from the engine's README rather than hard-coded: an
+    // earlier version of this test named four topics, so ten of the fifteen
+    // limitations the engine documents could have vanished from the player's
+    // README without the build noticing.
+    let topics = engine_limitation_topics(&engine_readme);
+    assert!(
+        topics.len() >= 10,
+        "the engine's Known Limitations section should list its boundaries; \
+         parsed only {} topic(s) — the section's format may have changed",
+        topics.len()
+    );
+
+    let mut missing = Vec::new();
+    for topic in &topics {
+        let candidates: Vec<String> = limitation_candidates(topic)
+            .iter()
+            .map(|c| collapse_whitespace(c))
+            .collect();
+        if !candidates.iter().any(|c| readme.contains(c.as_str())) {
+            missing.push(format!(
+                "{topic}\n      tried: {}",
+                candidates
+                    .iter()
+                    .map(|c| format!("\"{c}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
     }
+
+    assert!(
+        missing.is_empty(),
+        "the engine documents {} limitation(s) the player's README does not \
+         mention:\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    );
 }
 
 #[test]
