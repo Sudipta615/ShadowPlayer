@@ -471,7 +471,7 @@ plugin-abi = { path = "crates/plugin-abi", version = "1.14.0", default-features 
 # `decode::codecs`'s manifest test parses this Cargo.toml, and the WavPack
 # dispatch test encodes a `.wv` in memory (`wavicle`'s `encode` feature). Both
 # were used by tests but never declared, so the test build did not compile.
-toml = "0.8"
+toml = "1.1"
 wavicle = { version = "0.1", features = ["encode"] }
 # The Opus round-trip test encodes a stream to feed the decoder.
 rusty-opus = "0.9"
