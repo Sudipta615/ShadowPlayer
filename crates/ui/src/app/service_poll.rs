@@ -554,8 +554,10 @@ impl ShadowPlayerApp {
             .mark_progress(self.autotag_service.progress().clone());
         if !self.autotag_service.pending.is_empty() {
             let pending = std::mem::take(&mut self.autotag_service.pending);
-            let mut track_map: std::collections::HashMap<domain::ids::TrackId, domain::models::Track> =
-                std::collections::HashMap::with_capacity(pending.len());
+            let mut track_map: std::collections::HashMap<
+                domain::ids::TrackId,
+                domain::models::Track,
+            > = std::collections::HashMap::with_capacity(pending.len());
             let target_ids: std::collections::HashSet<domain::ids::TrackId> =
                 pending.iter().map(|r| r.track_id).collect();
             for t in &self.library_state.all_tracks {

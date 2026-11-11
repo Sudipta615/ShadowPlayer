@@ -150,8 +150,7 @@ impl LibraryState {
                 // Recently Added owns its running order: it is defined by
                 // recency. For You is ranked by the engine, so a column header
                 // must not reorder it either.
-                if active_nav != NavItem::RecentlyAdded
-                    && self.quick_filter != QuickFilter::ForYou
+                if active_nav != NavItem::RecentlyAdded && self.quick_filter != QuickFilter::ForYou
                 {
                     sort_tracks(&mut self.displayed_tracks, current_sort, sort_order);
                 }
@@ -255,9 +254,7 @@ impl LibraryState {
 
         // "Recently Added" defines itself by recency, so the user's global sort
         // would fight the view. For You keeps the engine's ranking.
-        if active_nav != NavItem::RecentlyAdded
-            && self.quick_filter != QuickFilter::ForYou
-        {
+        if active_nav != NavItem::RecentlyAdded && self.quick_filter != QuickFilter::ForYou {
             sort_tracks(&mut tracks, current_sort, sort_order);
         }
 
