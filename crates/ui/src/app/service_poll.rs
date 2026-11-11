@@ -420,8 +420,9 @@ impl ShadowPlayerApp {
 }
 
 impl ShadowPlayerApp {
-    pub(super) fn poll_services(&mut self, ctx: &egui::Context) -> bool {
-        // 1. Poll Coordinator & Session events
+    /// 1. Poll Coordinator, audio session, DSP events, and room measurement.
+    fn poll_audio_dsp_subsystems(&mut self, ctx: &egui::Context) {
+        // Coordinator & Session events
         self.coordinator.poll_events();
         for event in self.coordinator.take_room_measurement_events() {
             self.room_measurement.apply_event(event);
@@ -472,7 +473,39 @@ impl ShadowPlayerApp {
             }
         }
 
-        // 2. Poll Library Scanner progress
+        // Chain-preset feedback. Saving or applying a profile also marks
+        // the settings dirty so it persists now rather than at the next
+        // periodic save.
+        if let Some(msg) = self.dsp_state.settings_tab.chain_preset_notice.take() {
+            self.toasts.success(msg);
+            self.settings_dirty = true;
+        }
+
+        // CLAP plugin rack. Three things happen every frame:
+        // - a preset save waiting on the plugin's state is completed or timed
+        //   out (the engine answers off the frame loop),
+        // - the settings card gets the plugin's current description,
+        // - a library probe that has answered is acted on: one plugin in the
+        //   file loads itself, several wait for the user to choose.
+        self.dsp_state.poll_clap_state_capture(&self.session);
+        self.dsp_state.refresh_clap_summary(&self.session);
+        self.autoload_probed_clap_plugin();
+        if self.clap_refresh_frames > 0 {
+            self.clap_refresh_frames -= 1;
+            self.session.refresh_clap_plugin();
+            ctx.request_repaint();
+        }
+        if let Some(msg) = self.dsp_state.clap_rack.pending_toast.take() {
+            self.toasts.info(msg);
+        }
+        if std::mem::take(&mut self.dsp_state.settings_tab.request_clap_library) {
+            self.request_import(ImportKind::ClapLibrary);
+        }
+    }
+
+    /// 2. Poll library scanner, watchers, imports, file tasks, and tagger.
+    fn poll_library_file_subsystems(&mut self, ctx: &egui::Context) {
+        // Poll Library Scanner progress
         if self.scanner_service.poll() {
             // The library changed, so the smart playlists may have new
             // answers. Under the library-change policy that is the trigger;
@@ -491,33 +524,19 @@ impl ShadowPlayerApp {
             }
         }
 
-        // 2a. Folders that changed on disk (debounced) feed the scan queue.
+        // Folders that changed on disk (debounced) feed the scan queue.
         self.poll_watchers();
 
-        // 2b. Poll the native import picker (runs on a worker thread)
+        // Poll the native import picker (runs on a worker thread)
         if let Some(result) = self.import_service.poll() {
             self.handle_import_result(result);
         }
 
-        // 2b2. Poll the EQ curve worker (file dialogs and parsing off-thread).
-        if let Some(event) = self.preset_io.poll() {
-            self.handle_preset_io_result(event);
-        }
-
-        // 2b3. Disk work issued from modals: tag write-back, duplicate
+        // Disk work issued from modals: tag write-back, duplicate
         // deletion, the organizer, playlist and history exports.
         self.poll_file_tasks();
 
-        // 2c. Sleep timer (countdown or end-of-track).
-        self.update_sleep_timer(ctx);
-
-        // 2c2. Smart playlists: the timer policy re-evaluates them on its own.
-        self.tick_smart_refresh();
-
-        // 2d. Desktop integration: apply media-key transport, publish state.
-        self.handle_mpris(ctx);
-
-        // 2e. Library-wide loudness scan progress.
+        // Library-wide loudness scan progress.
         if self.loudness_service.poll() {
             self.reload_library();
             let summary = self.loudness_service.progress().current.clone();
@@ -526,35 +545,8 @@ impl ShadowPlayerApp {
             }
         }
 
-        // 2e2. Recommendation ranking, analysis progress, and playback edges.
-        // Both workers are polled without blocking; the tracker observes the
-        // transport once per frame so a skip is reported on the real change.
-        self.poll_recommendation_services(ctx);
-        self.track_recommendation_playback();
-
-        // 2f. Embedded lyric tags are read on a worker thread; pick up the
-        // result as soon as it lands so the lyrics panel fills in.
-        if self.lyrics_service.poll() {
-            ctx.request_repaint();
-        }
-
-        // 2f0. Waveform decodes and podcast network work also happen off the
-        // UI thread. A finished waveform is only a repaint; a finished podcast
-        // job changes rows the view is showing.
-        if self.waveform_service.poll() {
-            ctx.request_repaint();
-        }
-        self.poll_podcast_service();
-        self.poll_podcast_playback(ctx);
-        if self.crossfade_preview.is_playing() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
-        }
-        self.poll_media_tools();
-        if self.media_tools_service.is_busy() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(120));
-        }
-
-        // 2f1. Auto-tag service polling.
+        // Auto-tag service polling: single-pass hash lookup eliminates O(N*M)
+        // scans over the in-memory library on dual-core CPUs.
         if self.autotag_service.poll() {
             ctx.request_repaint();
         }
@@ -562,21 +554,27 @@ impl ShadowPlayerApp {
             .mark_progress(self.autotag_service.progress().clone());
         if !self.autotag_service.pending.is_empty() {
             let pending = std::mem::take(&mut self.autotag_service.pending);
+            let mut track_map: std::collections::HashMap<domain::ids::TrackId, domain::models::Track> =
+                std::collections::HashMap::with_capacity(pending.len());
+            let target_ids: std::collections::HashSet<domain::ids::TrackId> =
+                pending.iter().map(|r| r.track_id).collect();
+            for t in &self.library_state.all_tracks {
+                if target_ids.contains(&t.id) {
+                    track_map.insert(t.id, t.clone());
+                    if track_map.len() == target_ids.len() {
+                        break;
+                    }
+                }
+            }
             for res in pending {
-                if let Some(track) = self
-                    .library_state
-                    .all_tracks
-                    .iter()
-                    .find(|t| t.id == res.track_id)
-                    .cloned()
-                {
+                if let Some(track) = track_map.remove(&res.track_id) {
                     self.autotag_modal.push_result(res, track);
                 }
             }
             ctx.request_repaint();
         }
 
-        // 2f2. Cover art fetch service polling.
+        // Cover art fetch service polling.
         let saved_art_tracks = self.artwork_fetch_service.poll();
         self.artwork_fetch_modal.progress = self.artwork_fetch_service.progress().clone();
         if !self.artwork_fetch_service.is_running()
@@ -593,41 +591,67 @@ impl ShadowPlayerApp {
             ctx.request_repaint();
         }
 
-        // 2g. Chain-preset feedback. Saving or applying a profile also marks
-        // the settings dirty so it persists now rather than at the next
-        // periodic save.
-        if let Some(msg) = self.dsp_state.settings_tab.chain_preset_notice.take() {
-            self.toasts.success(msg);
-            self.settings_dirty = true;
-        }
-
-        // 2h. The Settings > Library card asks for the batch organizer. Raised
+        // The Settings > Library card asks for the batch organizer. Raised
         // here because neither settings surface owns app-level modals.
         if std::mem::take(&mut self.dsp_state.settings_tab.request_organize) {
             let tracks = self.library_state.all_tracks.clone();
             self.open_organize(tracks, "Whole library".to_string());
         }
-        if std::mem::take(&mut self.dsp_state.settings_tab.request_clap_library) {
-            self.request_import(ImportKind::ClapLibrary);
+    }
+
+    /// 3. Poll media content services: lyrics, waveforms, podcasts, presets, tools.
+    fn poll_media_content_subsystems(&mut self, ctx: &egui::Context) {
+        // Poll the EQ curve worker (file dialogs and parsing off-thread).
+        if let Some(event) = self.preset_io.poll() {
+            self.handle_preset_io_result(event);
         }
 
-        // 2i. CLAP plugin rack. Three things happen every frame:
-        // - a preset save waiting on the plugin's state is completed or timed
-        //   out (the engine answers off the frame loop),
-        // - the settings card gets the plugin's current description,
-        // - a library probe that has answered is acted on: one plugin in the
-        //   file loads itself, several wait for the user to choose.
-        self.dsp_state.poll_clap_state_capture(&self.session);
-        self.dsp_state.refresh_clap_summary(&self.session);
-        self.autoload_probed_clap_plugin();
-        if self.clap_refresh_frames > 0 {
-            self.clap_refresh_frames -= 1;
-            self.session.refresh_clap_plugin();
+        // Embedded lyric tags are read on a worker thread; pick up the
+        // result as soon as it lands so the lyrics panel fills in.
+        if self.lyrics_service.poll() {
             ctx.request_repaint();
         }
-        if let Some(msg) = self.dsp_state.clap_rack.pending_toast.take() {
-            self.toasts.info(msg);
+
+        // Waveform decodes and podcast network work also happen off the
+        // UI thread. A finished waveform is only a repaint; a finished podcast
+        // job changes rows the view is showing.
+        if self.waveform_service.poll() {
+            ctx.request_repaint();
         }
+        self.poll_podcast_service();
+        self.poll_podcast_playback(ctx);
+        if self.crossfade_preview.is_playing() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
+        self.poll_media_tools();
+        if self.media_tools_service.is_busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        }
+    }
+
+    /// 4. Poll desktop and system services: sleep timer, smart refresh, MPRIS, recommendations.
+    fn poll_desktop_system_subsystems(&mut self, ctx: &egui::Context) {
+        // Sleep timer (countdown or end-of-track).
+        self.update_sleep_timer(ctx);
+
+        // Smart playlists: the timer policy re-evaluates them on its own.
+        self.tick_smart_refresh();
+
+        // Desktop integration: apply media-key transport, publish state.
+        self.handle_mpris(ctx);
+
+        // Recommendation ranking, analysis progress, and playback edges.
+        // Both workers are polled without blocking; the tracker observes the
+        // transport once per frame so a skip is reported on the real change.
+        self.poll_recommendation_services(ctx);
+        self.track_recommendation_playback();
+    }
+
+    pub(super) fn poll_services(&mut self, ctx: &egui::Context) -> bool {
+        self.poll_audio_dsp_subsystems(ctx);
+        self.poll_library_file_subsystems(ctx);
+        self.poll_media_content_subsystems(ctx);
+        self.poll_desktop_system_subsystems(ctx);
 
         // 3. Reactive Repaints. The policy is a pure function so the idle case
         // is a test: no active signal means no wake-up at all (0% idle CPU).
