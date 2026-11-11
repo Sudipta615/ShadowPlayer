@@ -129,7 +129,7 @@ impl TrackRepo {
     }
 
     pub fn get_by_id(&self, id: &TrackId) -> Result<Option<Track>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE id = ?1;")?;
             stmt.query_row(params![id.to_string()], map_track)
                 .optional()
@@ -137,7 +137,7 @@ impl TrackRepo {
     }
 
     pub fn get_by_path(&self, path: &Path) -> Result<Option<Track>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE path = ?1;")?;
             stmt.query_row(params![encode_path_key(path)], map_track)
                 .optional()
@@ -149,7 +149,7 @@ impl TrackRepo {
     /// Returns `None` when the hash is unknown, or when it matches more than one
     /// row: an ambiguous match is ignored rather than risking the wrong relink.
     pub fn find_by_content_hash(&self, hash: &str) -> Result<Option<(TrackId, PathBuf)>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt =
                 conn.prepare("SELECT id, path FROM tracks WHERE content_hash = ?1 LIMIT 2;")?;
             let mut rows = stmt.query(params![hash])?;
@@ -202,7 +202,7 @@ impl TrackRepo {
     /// already holding duplicates before the file-identity migration merged
     /// them; the caller gets them all so it can decide.
     pub fn find_by_file_id(&self, file_id: &str) -> Result<Vec<Track>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt = conn.prepare("SELECT * FROM tracks WHERE file_id = ?1;")?;
             let mapped = stmt.query_map(params![file_id], map_track)?;
             let mut out = Vec::new();
@@ -248,7 +248,7 @@ impl TrackRepo {
     /// Only fingerprinted tracks participate, so nothing is guessed from tags or
     /// file names. Groups are ordered by size (largest first).
     pub fn find_duplicates(&self) -> Result<Vec<Vec<Track>>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             // One query for the whole census. The old shape listed the hashes
             // first and then ran a full-track `SELECT` per hash — N+1 queries
             // over a table that can hold a whole library.
@@ -287,14 +287,14 @@ impl TrackRepo {
     }
 
     pub fn count(&self) -> Result<usize> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks;", [], |r| r.get(0))?;
             Ok(count.max(0) as usize)
         })
     }
 
     pub fn list(&self, sort: SortField, order: SortOrder) -> Result<Vec<Track>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let sort_col = match sort {
                 SortField::Title => "title COLLATE NOCASE",
                 SortField::Artist => "artist COLLATE NOCASE, album COLLATE NOCASE, track_number",
@@ -419,7 +419,7 @@ impl TrackRepo {
 
     /// The tracks that are skipped most often.
     pub fn list_most_skipped(&self, limit: usize) -> Result<Vec<Track>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT * FROM tracks
                   WHERE skip_count > 0
@@ -503,7 +503,7 @@ impl TrackRepo {
     pub fn list_missing_replaygain_with_album(
         &self,
     ) -> Result<Vec<(TrackId, PathBuf, String, String)>> {
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, path, album, artist FROM tracks
                   WHERE replaygain_track_db IS NULL
@@ -591,7 +591,7 @@ impl TrackRepo {
     /// what is actually on disk.
     pub fn list_paths_under_prefix(&self, prefix: &Path) -> Result<Vec<(TrackId, PathBuf)>> {
         let like = like_prefix(prefix);
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt =
                 conn.prepare("SELECT id, path FROM tracks WHERE path LIKE ?1 ESCAPE '\\';")?;
             let iter = stmt.query_map(params![like], |row| {
@@ -615,7 +615,7 @@ impl TrackRepo {
         prefix: &Path,
     ) -> Result<std::collections::HashMap<PathBuf, TrackScanEntry>> {
         let like = like_prefix(prefix);
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, path, mtime_unix_secs, mtime_nanos, file_size_bytes, content_hash, file_id
                  FROM tracks WHERE path LIKE ?1 ESCAPE '\\';",
@@ -657,7 +657,7 @@ impl TrackRepo {
         if trimmed.is_empty() {
             return Ok(Vec::new());
         }
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let Some(fts_query) = fts_query(trimmed) else {
                 return Ok(Vec::new());
             };
@@ -679,7 +679,7 @@ impl TrackRepo {
 
     pub fn get_tracks_by_folder(&self, folder_path: &Path) -> Result<Vec<Track>> {
         let search = like_prefix(folder_path);
-        self.db.with_conn(|conn| {
+        self.db.with_read_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT * FROM tracks WHERE path LIKE ?1 ESCAPE '\\' ORDER BY path ASC;",
             )?;

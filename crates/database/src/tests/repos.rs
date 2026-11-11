@@ -311,4 +311,59 @@ mod unit {
         dsp.clear(&track.id).unwrap();
         assert!(dsp.get(&track.id).unwrap().is_none());
     }
+
+    #[test]
+    fn test_wal_concurrent_read_while_writing() {
+        let temp_path =
+            std::env::temp_dir().join(format!("shadow_wal_test_{}.db", uuid::Uuid::new_v4()));
+        let db = Database::open(&temp_path).expect("failed to open disk DB");
+        let repo = TrackRepo::new(db.clone());
+
+        let track = sample_track(TrackId::new(), "/m/wal_test.flac", "WAL", "Artist", "Album");
+        repo.upsert(&track).expect("upsert failed");
+
+        let (tx_started, rx_started) = std::sync::mpsc::channel();
+        let (tx_finish, rx_finish) = std::sync::mpsc::channel();
+
+        let db_writer = db.clone();
+        let track_id_str = track.id.to_string();
+        let writer_handle = std::thread::spawn(move || {
+            db_writer
+                .with_write_conn(|conn| {
+                    let tx = conn.transaction().expect("begin tx");
+                    tx.execute(
+                        "UPDATE tracks SET play_count = 99 WHERE id = ?1;",
+                        rusqlite::params![track_id_str],
+                    )
+                    .expect("update");
+                    tx_started.send(()).unwrap();
+                    rx_finish.recv().unwrap();
+                    tx.commit().expect("commit");
+                    Ok(())
+                })
+                .unwrap();
+        });
+
+        // Wait until writer is inside the transaction holding the writer lock
+        rx_started.recv().unwrap();
+
+        // While writer is still in-flight, reader queries via with_read_conn immediately without blocking
+        let start = std::time::Instant::now();
+        let count = repo.count().expect("read during active write transaction");
+        let duration = start.elapsed();
+
+        assert_eq!(count, 1);
+        assert!(
+            duration < std::time::Duration::from_millis(500),
+            "read must not be blocked by writer lock"
+        );
+
+        // Release writer
+        tx_finish.send(()).unwrap();
+        writer_handle.join().unwrap();
+
+        let _ = std::fs::remove_file(&temp_path);
+        let _ = std::fs::remove_file(format!("{}-wal", temp_path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", temp_path.display()));
+    }
 }
