@@ -39,7 +39,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", zh_path.display());
     println!("cargo:rerun-if-changed={}", hi_path.display());
 
-    let en: BTreeMap<String, String> = read_catalogue(&en_path);
+    let mut en: BTreeMap<String, String> = read_catalogue(&en_path);
     for (name, path) in [
         ("de", &de_path),
         ("fr", &fr_path),
@@ -66,6 +66,18 @@ fn main() {
             panic!("could not read {}: {e}", path.display());
         });
         scan_source(&path, &source, &en, &mut used);
+    }
+
+    if std::env::var("PRUNE_LOCALES").is_ok() {
+        en.retain(|k, _| used.contains(k));
+        let en_json = serde_json::to_string_pretty(&en).unwrap();
+        fs::write(&en_path, format!("{en_json}\n")).unwrap();
+        for path in [&de_path, &fr_path, &es_path, &ja_path, &zh_path, &hi_path] {
+            let mut cat: BTreeMap<String, String> = read_catalogue(path);
+            cat.retain(|k, _| used.contains(k));
+            let json = serde_json::to_string_pretty(&cat).unwrap();
+            fs::write(path, format!("{json}\n")).unwrap();
+        }
     }
 
     for key in en.keys() {

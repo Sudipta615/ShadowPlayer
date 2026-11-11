@@ -13,13 +13,11 @@ impl ShadowPlayerApp {
         let mut entries: Vec<PaletteEntry> = Vec::new();
 
         // ── Navigation ─────────────────────────────────────────────────────
-        let nav: [(&str, NavItem, &str); 11] = [
+        let nav: [(&str, NavItem, &str); 9] = [
             ("Go to", NavItem::Home, "Home"),
             ("Go to", NavItem::Albums, "Albums"),
             ("Go to", NavItem::Artists, "Artists"),
             ("Go to", NavItem::Genres, "Genres"),
-            ("Go to", NavItem::Radio, "Radio"),
-            ("Go to", NavItem::Podcasts, "Podcasts"),
             ("Go to", NavItem::Folders, "Folders & library manager"),
             ("Go to", NavItem::Favorites, "Favorites"),
             ("Go to", NavItem::RecentlyPlayed, "Recently played"),

@@ -61,5 +61,4 @@ pub struct TrackRepo {
 pub type TrackDspRepo = dsp::TrackDspRepo;
 
 mod dsp;
-mod radio;
 mod tracks;

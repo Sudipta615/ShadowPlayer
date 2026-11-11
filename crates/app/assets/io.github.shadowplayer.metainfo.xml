@@ -40,6 +40,11 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.31.0" date="2026-11-11">
+      <description>
+        <p>Unified player card across library views, independent volume slider widget, pruned legacy collections, podcasts, radio and meter codes.</p>
+      </description>
+    </release>
     <release version="0.30.0" date="2026-11-07">
       <description>
         <p>Complete secondary localization (DE/FR/ES/JA/ZH/HI 100%), .stm theme format migration, and multi-platform packaging pipeline.</p>

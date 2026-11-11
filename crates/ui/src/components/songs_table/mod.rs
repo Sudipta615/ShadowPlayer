@@ -213,8 +213,6 @@ pub struct SongsTableAction {
     pub open_dsp: Option<TrackId>,
     /// User chose "Auto-Tag with MusicBrainz" from the context menu.
     pub autotag_track: Option<TrackId>,
-    /// Seed a local radio station from this track.
-    pub start_radio: Option<TrackId>,
 
     // ── Bulk (multi-select) actions ─────────────────────────────────────────
     // The selected ids themselves live in `LibraryState`; these flags only say
@@ -318,7 +316,6 @@ impl<'a> SongsTable<'a> {
             edit_track: None,
             open_dsp: None,
             autotag_track: None,
-            start_radio: None,
             play_selected: false,
             queue_next_selected: false,
             add_selected_to_queue: false,

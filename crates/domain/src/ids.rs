@@ -74,8 +74,6 @@ define_id!(ArtistId);
 define_id!(PlaylistId);
 define_id!(FolderId);
 define_id!(ScanRootId);
-define_id!(PodcastFeedId);
-define_id!(PodcastEpisodeId);
 define_id!(ZoneId);
 
 static PATH_NAMESPACE: Uuid = Uuid::from_u128(0x716a5b6f_2c60_4387_9bc2_c77a672d6e3f);

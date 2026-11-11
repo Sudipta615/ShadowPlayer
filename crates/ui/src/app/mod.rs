@@ -4,8 +4,7 @@ use std::sync::Arc;
 use audio_session::AudioSession;
 use database::{
     AlbumNotesRepo, AlbumRepo, ArtistRepo, Database, EqPresetsRepo, FavoritesRepo, GenreRepo,
-    HistoryRepo, PlaylistRepo, PodcastRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo,
-    TrackRepo,
+    HistoryRepo, PlaylistRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
 };
 use domain::models::Track;
 use eframe::egui::{self, Margin, Pos2, Rect, Sense, Vec2};
@@ -30,13 +29,11 @@ use crate::services::{
     ArtworkFetchService, ArtworkService, AutoEqCatalogService, AutotagService, BiographyService,
     ControlService, CrossfadePreview, FileTask, FileTaskEvent, FileTaskService, ImportKind,
     ImportResult, ImportService, LoudnessService, LyricsService, MediaToolEvent, MediaToolsService,
-    MprisCommand, MprisService, MprisSnapshot, PodcastEvent, PodcastService, PresetIoEvent,
-    PresetIoService, RecommendationAnalysisService, RecommendationService, ScannerService,
-    WaveformService,
+    MprisCommand, MprisService, MprisSnapshot, PresetIoEvent, PresetIoService,
+    RecommendationAnalysisService, RecommendationService, ScannerService, WaveformService,
 };
 use crate::state::{
-    AppState, DspState, LibraryState, PodcastState, RecommendationState, SleepTimerMode,
-    TelemetryState,
+    AppState, DspState, LibraryState, RecommendationState, SleepTimerMode, TelemetryState,
 };
 use crate::theme::{Theme, ThemeFonts, ThemeManager};
 use crate::views::{
@@ -107,9 +104,6 @@ pub struct ShadowPlayerApp {
     waveform_service: WaveformService,
     crossfade_preview: CrossfadePreview,
     biography_service: BiographyService,
-    podcast_service: PodcastService,
-    podcast_repo: PodcastRepo,
-    podcast_state: PodcastState,
     scanner_service: ScannerService,
     import_service: ImportService,
     /// Disk work issued from modals: tag write-back, duplicate deletion, the
@@ -270,9 +264,6 @@ impl ShadowPlayerApp {
         let lyrics_service = LyricsService::new();
         let waveform_service = WaveformService::new(db.clone());
         let biography_service = BiographyService::new(db.clone());
-        let podcast_repo = PodcastRepo::new(db.clone());
-        let podcast_service = PodcastService::new(PodcastRepo::new(db.clone()), &data_dir);
-        let podcast_state = PodcastState::default();
         let loudness_service = LoudnessService::new(db.clone());
         let recommendation_service = RecommendationService::new(db.clone());
         let recommendation_analysis_service = RecommendationAnalysisService::new(db.clone());
@@ -325,9 +316,6 @@ impl ShadowPlayerApp {
             waveform_service,
             crossfade_preview: CrossfadePreview::new(),
             biography_service,
-            podcast_service,
-            podcast_repo,
-            podcast_state,
             scanner_service,
             import_service,
             file_tasks,
@@ -401,7 +389,6 @@ impl ShadowPlayerApp {
             app.dsp_state.settings_tab.crossfade_curve,
             app.dsp_state.settings_tab.crossfade_duration_secs,
         );
-        app.podcast_state.reload_feeds(&app.podcast_repo);
 
         app.reload_library();
 

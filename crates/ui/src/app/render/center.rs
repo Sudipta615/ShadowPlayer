@@ -42,10 +42,26 @@ impl ShadowPlayerApp {
                 let spacing = if show_right_panel { 16.0 } else { 0.0 };
                 let center_w = (avail_w - right_w - spacing).max(0.0);
 
+                let vol_h = 36.0;
+                let vol_w = if show_right_panel {
+                    right_w
+                } else {
+                    260.0_f32.min(avail_w)
+                };
+                let vol_rect = Rect::from_min_size(
+                    Pos2::new(full_rect.max.x - vol_w, full_rect.max.y - vol_h),
+                    Vec2::new(vol_w, vol_h),
+                );
+
+                let right_h = if show_right_panel {
+                    (avail_h - vol_h - 10.0).max(100.0)
+                } else {
+                    avail_h
+                };
                 let center_rect = Rect::from_min_size(full_rect.min, Vec2::new(center_w, avail_h));
                 let right_rect = Rect::from_min_size(
                     Pos2::new(full_rect.max.x - right_w, full_rect.min.y),
-                    Vec2::new(right_w, avail_h),
+                    Vec2::new(right_w, right_h),
                 );
 
                 // A. Center View Column
@@ -197,6 +213,12 @@ impl ShadowPlayerApp {
                             }
                         });
                     });
+                }
+
+                // Player Card: visible across Albums, Artists, Genres, Folders, and standard views (not in Settings or Help)
+                if !is_help_view && self.app_state.active_nav != NavItem::Settings {
+                    self.render_player_card(ui, playback);
+                    ui.add_space(8.0);
                 }
 
                 // View Switcher
@@ -578,92 +600,6 @@ impl ShadowPlayerApp {
                             self.toasts.info("Conversion cancelled");
                         }
                     }
-                    NavItem::Podcasts => {
-                        let action = crate::components::podcasts_view::PodcastsView {
-                            state: &mut self.podcast_state,
-                            busy: self.podcast_service.is_busy(),
-                            status: self.podcast_service.status(),
-                            theme: &self.theme,
-                        }
-                        .show(ui);
-
-                        if let Some(url) = action.add_feed {
-                            match self.podcast_service.add_feed(&url) {
-                                Ok(()) => {
-                                    self.podcast_state.new_feed_url.clear();
-                                    self.podcast_state.error = None;
-                                }
-                                Err(e) => self.podcast_state.error = Some(e),
-                            }
-                        }
-                        if let Some(id) = action.select_feed {
-                            self.podcast_state.select_feed(&self.podcast_repo, id);
-                        }
-                        if let Some(id) = action.refresh_feed {
-                            if let Some(feed) = self
-                                .podcast_state
-                                .feeds
-                                .iter()
-                                .find(|feed| feed.id == id)
-                                .cloned()
-                            {
-                                if let Err(e) = self.podcast_service.refresh_feed(&feed) {
-                                    self.podcast_state.error = Some(e);
-                                }
-                            }
-                        }
-                        if let Some(id) = action.delete_feed {
-                            // If this feed owns the loaded episode, stop the
-                            // transport before the rows disappear.
-                            let playing_here = self
-                                .podcast_state
-                                .playing_episode
-                                .and_then(|episode| {
-                                    self.podcast_repo.get_episode(&episode).ok().flatten()
-                                })
-                                .is_some_and(|episode| episode.feed_id == id);
-                            if playing_here {
-                                self.session.stop();
-                                self.podcast_state.is_playing = false;
-                                self.podcast_state.playing_episode = None;
-                            }
-                            if let Err(e) = self.podcast_repo.delete_feed(&id) {
-                                self.podcast_state.error = Some(tr_args!(
-                                    "Could not remove the podcast feed: {error}",
-                                    "error" => e
-                                ));
-                            } else {
-                                self.podcast_state.selected_feed = None;
-                                self.podcast_state.reload_feeds(&self.podcast_repo);
-                            }
-                        }
-                        if let Some(id) = action.download_episode {
-                            if let Some(episode) = self
-                                .podcast_state
-                                .episodes
-                                .iter()
-                                .find(|episode| episode.id == id)
-                                .cloned()
-                            {
-                                if let Err(e) = self.podcast_service.download_episode(&episode) {
-                                    self.podcast_state.error = Some(e);
-                                }
-                            }
-                        }
-                        if let Some(id) = action.play_episode {
-                            self.play_podcast_episode(id);
-                        }
-                        if action.toggle_playback {
-                            self.toggle_podcast_playback();
-                        }
-                        if let Some(position) = action.seek_to {
-                            if let Some(id) = self.podcast_state.playing_episode {
-                                self.session.seek(position);
-                                self.podcast_state.position_secs = position;
-                                let _ = self.podcast_repo.save_progress(&id, position, false);
-                            }
-                        }
-                    }
                     NavItem::Help => {
                         render_help_view(
                             ui,
@@ -679,18 +615,13 @@ impl ShadowPlayerApp {
                             &mut self.app_state,
                             &mut self.library_state,
                             &mut self.coordinator,
-                            &self.session,
                             &mut self.artwork_service,
-                            playback.telemetry,
-                            playback
-                                .current_track
-                                .and_then(|t| self.waveform_service.peaks(&t.id)),
                             playback.current_track,
+                            playback.is_playing,
                             &self.theme,
                             &self.track_repo,
                             &self.playlist_repo,
                             &self.favorites_repo,
-                            self.dsp_state.eq_panel.is_open,
                             self.dsp_state.settings_tab.recommendation_enabled,
                             self.recommendation_state.loading,
                         );
@@ -748,12 +679,6 @@ impl ShadowPlayerApp {
                         if view_action.refresh_smart_playlist {
                             self.refresh_smart_playlists();
                         }
-                        if let Some(seed) = view_action.start_radio {
-                            self.start_radio(seed);
-                        }
-                        if view_action.refresh_radio {
-                            self.refresh_radio();
-                        }
                         if let Some(tracks) = view_action.organize_tracks {
                             self.open_organize(tracks, "Selection".to_string());
                         }
@@ -790,6 +715,10 @@ impl ShadowPlayerApp {
                     },
                     playback,
                 );
+
+                // C. Dedicated Volume Slider (sits below right sidebar and remains visible whether sidebar is toggled on or off)
+                self.render_volume_slider(root_ui, vol_rect, !show_right_panel);
+
                 root_ui.allocate_rect(full_rect, Sense::hover());
             });
     }

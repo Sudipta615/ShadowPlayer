@@ -1,15 +1,13 @@
-use audio_session::AudioSession;
 use database::{FavoritesRepo, PlaylistRepo, TrackRepo};
 use domain::ids::TrackId;
-use domain::models::{RepeatModeChoice, Track};
+use domain::models::Track;
 use eframe::egui::{self, CornerRadius, Stroke, Vec2};
 use playback::PlaybackCoordinator;
 
-use crate::components::now_playing::{NowPlayingCard, SleepTimerRequest};
 use crate::components::sidebar::NavItem;
 use crate::components::songs_table::{SongsTable, SongsTableAction};
 use crate::services::ArtworkService;
-use crate::state::{AppState, LibraryState, SleepTimer, TelemetryState};
+use crate::state::{AppState, LibraryState};
 use crate::theme::Theme;
 
 #[derive(Default, Debug, Clone)]
@@ -32,10 +30,6 @@ pub struct MainViewAction {
     pub autotag_tracks: Option<Vec<Track>>,
     /// The user asked to fetch missing artwork for track(s).
     pub fetch_artwork_tracks: Option<Vec<Track>>,
-    /// Start a local radio station seeded from this track.
-    pub start_radio: Option<TrackId>,
-    /// Rebuild the current radio station with a new shuffle.
-    pub refresh_radio: bool,
     /// A grouped-search chip asked to run a narrower query.
     pub search_query: Option<String>,
     /// The loudness inspector was requested.
@@ -50,153 +44,28 @@ pub struct MainViewAction {
     pub recommendation_feedback: Vec<crate::state::RecommendationFeedback>,
 }
 
-/// Render standard playback view: Now Playing Card + Foobar2000 Tab Strip + Songs Table
+/// Render standard playback view: Foobar2000 Tab Strip + Songs Table
 #[allow(clippy::too_many_arguments)]
 pub fn render_main_playback_view(
     ui: &mut egui::Ui,
     app_state: &mut AppState,
     library_state: &mut LibraryState,
     coordinator: &mut PlaybackCoordinator,
-    session: &AudioSession,
     artwork_service: &mut ArtworkService,
-    telemetry: &TelemetryState,
-    waveform: Option<&[f32]>,
     current_track: Option<&Track>,
+    is_playing: bool,
     theme: &Theme,
     track_repo: &TrackRepo,
     playlist_repo: &PlaylistRepo,
     favorites_repo: &FavoritesRepo,
-    is_eq_open: bool,
     recommendations_enabled: bool,
     recommendation_loading: bool,
 ) -> MainViewAction {
     let mut view_action = MainViewAction::default();
-    let title = current_track
-        .map(|t| t.title.as_str())
-        .unwrap_or("No Track Selected");
-    let artist = current_track
-        .map(|t| t.artist.as_str())
-        .unwrap_or("ShadowPlayer");
-    let album = current_track.map(|t| t.album.as_str()).unwrap_or("Ready");
+
     if let Some(t) = current_track {
         artwork_service.ensure_loaded(ui.ctx(), t);
     }
-    let art_tex = current_track
-        .and_then(|t| artwork_service.get_texture(&t.id))
-        .cloned();
-
-    let format_str = current_track.map(|t| {
-        let sr_khz = t.sample_rate as f32 / 1000.0;
-        if t.is_lossless {
-            format!("{} {:.1}kHz", t.format, sr_khz)
-        } else if let Some(br) = t.bitrate_kbps {
-            format!("{} {}kbps", t.format, br)
-        } else {
-            t.format.clone()
-        }
-    });
-
-    let is_cur_fav = current_track
-        .map(|t| library_state.favorite_ids.contains(&t.id))
-        .unwrap_or(false);
-
-    let sleep_label = app_state.sleep_timer.as_ref().map(|t| t.label());
-
-    let np_events = NowPlayingCard {
-        title,
-        artist,
-        album,
-        is_playing: telemetry.is_playing,
-        is_favorite: is_cur_fav,
-        rating: current_track.map(|t| t.rating).unwrap_or(0),
-        is_shuffle: coordinator.is_shuffle(),
-        is_repeat: coordinator.repeat_mode() != RepeatModeChoice::Off,
-        position_secs: telemetry.position_secs,
-        duration_secs: telemetry.duration_secs,
-        spectrum_db: &telemetry.spectrum.spectrum_db,
-        waveform,
-        artwork: art_tex.as_ref(),
-        format_str: format_str.as_deref(),
-        bit_perfect: telemetry.bit_perfect,
-        is_eq_open,
-        sleep_timer_label: sleep_label.as_deref(),
-        theme,
-    }
-    .show(ui);
-
-    // Handle Now Playing card interactions
-    if np_events.toggle_play {
-        coordinator.toggle_play_pause();
-    }
-    if np_events.next_track {
-        coordinator.next();
-    }
-    if np_events.prev_track {
-        coordinator.previous();
-    }
-    if np_events.toggle_shuffle {
-        let new_shuffle = !coordinator.is_shuffle();
-        coordinator.set_shuffle(new_shuffle);
-    }
-    if np_events.toggle_repeat {
-        let next_mode = match coordinator.repeat_mode() {
-            RepeatModeChoice::Off => RepeatModeChoice::All,
-            RepeatModeChoice::All => RepeatModeChoice::One,
-            RepeatModeChoice::One => RepeatModeChoice::Off,
-        };
-        coordinator.set_repeat_mode(next_mode);
-    }
-    if let Some(seek) = np_events.seek_secs {
-        session.seek(seek as f32);
-    }
-    if np_events.toggle_favorite {
-        if let Some(t) = current_track {
-            if !library_state.favorite_ids.contains(&t.id) {
-                view_action
-                    .recommendation_feedback
-                    .push(crate::state::RecommendationFeedback::Liked(t.id));
-            }
-            library_state.toggle_favorite(favorites_repo, t.id);
-            view_action.needs_reload = true;
-        }
-    }
-    if let Some(req) = np_events.sleep_timer_request {
-        // Turning a timer off while it is already fading must put the user's
-        // volume back, not leave the output stuck at the faded level.
-        if matches!(req, SleepTimerRequest::Off) {
-            session.set_volume(if app_state.is_muted {
-                0.0
-            } else {
-                app_state.volume
-            });
-        }
-        app_state.sleep_timer = match req {
-            SleepTimerRequest::Off => None,
-            SleepTimerRequest::AfterSeconds(secs) => Some(SleepTimer::after_seconds(secs)),
-            SleepTimerRequest::AfterSecondsFade(secs) => {
-                Some(SleepTimer::after_seconds_fade(secs, 10.0))
-            }
-            SleepTimerRequest::EndOfTrack => Some(SleepTimer::end_of_track()),
-        };
-    }
-    if np_events.open_properties {
-        app_state.track_properties_track = current_track.cloned();
-        app_state.track_properties_open = true;
-    }
-    if np_events.open_bit_perfect {
-        app_state.bit_perfect_modal_open = true;
-    }
-    if np_events.open_zones {
-        app_state.zone_manager_modal.is_open = true;
-    }
-    if np_events.open_loudness {
-        view_action.open_loudness = true;
-    }
-    if np_events.open_eq_panel {
-        view_action.open_eq_panel = true;
-    }
-
-    ui.add_space(8.0);
 
     // Grouped search: artists, albums and playlists are first-class results
     // rather than silently discarded while only tracks reach the table.
@@ -330,34 +199,6 @@ pub fn render_main_playback_view(
             });
             ui.add_space(4.0);
         }
-        NavItem::Radio => {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(if library_state.radio_label.is_empty() {
-                        tr!("Radio")
-                    } else {
-                        library_state.radio_label.clone()
-                    })
-                    .font(crate::theme::font(16.0))
-                    .strong()
-                    .color(theme.accent_warm),
-                );
-                ui.label(
-                    egui::RichText::new(tr_args!(
-                        "({count} tracks · local smart shuffle)",
-                        "count" => library_state.displayed_tracks.len()
-                    ))
-                    .font(crate::theme::font(12.0))
-                    .color(theme.text_muted),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(tr!("New Mix")).clicked() {
-                        view_action.refresh_radio = true;
-                    }
-                });
-            });
-            ui.add_space(4.0);
-        }
         NavItem::SmartPlaylist(sp_id) => {
             let sp = library_state
                 .smart_playlists
@@ -415,7 +256,7 @@ pub fn render_main_playback_view(
     let table_action = SongsTable {
         tracks: &library_state.displayed_tracks,
         active_track_id: cur_id,
-        is_playing: telemetry.is_playing,
+        is_playing,
         favorite_track_ids: &library_state.favorite_ids,
         playlists: &library_state.playlists,
         current_sort: app_state.current_sort,
@@ -629,9 +470,6 @@ pub fn render_main_playback_view(
     }
     if table_action.fetch_artwork_selected {
         view_action.fetch_artwork_tracks = Some(library_state.selected_tracks_in_order());
-    }
-    if let Some(seed) = table_action.start_radio {
-        view_action.start_radio = Some(seed);
     }
 
     handle_songs_table_action(

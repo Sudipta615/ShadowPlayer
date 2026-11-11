@@ -364,57 +364,6 @@ pub enum RepeatModeChoice {
     One,
 }
 
-/// A subscribed podcast feed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PodcastFeed {
-    pub id: PodcastFeedId,
-    pub url: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub artwork_url: Option<String>,
-    pub last_fetched_at: Option<i64>,
-    pub added_at: i64,
-}
-
-/// One episode of a podcast feed.
-///
-/// Episodes deliberately live in their own tables rather than in `tracks`: a
-/// podcast is not part of the music library, its progress is per-episode, and
-/// removing a feed must not touch a single play count or playlist.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PodcastEpisode {
-    pub id: PodcastEpisodeId,
-    pub feed_id: PodcastFeedId,
-    pub guid: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub enclosure_url: String,
-    pub published_at: Option<i64>,
-    pub duration_secs: Option<f32>,
-    /// Downloaded audio, when the user has fetched the episode.
-    pub local_path: Option<PathBuf>,
-    /// Resume position, in seconds.
-    pub position_secs: f32,
-    pub completed: bool,
-    pub added_at: i64,
-}
-
-impl PodcastEpisode {
-    /// Whether the episode is ready to play without a download.
-    pub fn is_downloaded(&self) -> bool {
-        self.local_path.as_ref().is_some_and(|p| p.exists())
-    }
-
-    /// How much of the episode has been heard, 0.0–1.0.
-    pub fn progress_fraction(&self) -> f32 {
-        match self.duration_secs {
-            Some(d) if d > 0.0 => (self.position_secs / d).clamp(0.0, 1.0),
-            _ if self.completed => 1.0,
-            _ => 0.0,
-        }
-    }
-}
-
 /// A cached artist or album biography.
 ///
 /// `entity_kind` is `"artist"` or `"album"`; `entity_name` is the artist name,

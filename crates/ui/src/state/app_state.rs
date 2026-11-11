@@ -9,8 +9,6 @@ use domain::models::{SortField, SortOrder, Track};
 pub enum VisualizerMode {
     #[default]
     Spectrum,
-    VuMeters,
-    LufsRadar,
     Off,
 }
 

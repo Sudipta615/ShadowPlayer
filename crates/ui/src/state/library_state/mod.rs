@@ -89,15 +89,6 @@ pub struct LibraryState {
     pub folder_tracks: Vec<Track>,
     pub new_folder_input: String,
 
-    /// The track the current local radio station was seeded from.
-    pub radio_seed: Option<TrackId>,
-    /// A human-readable station name, e.g. "Boards of Canada Radio".
-    pub radio_label: String,
-    /// The station's current running order. Kept separately from
-    /// `displayed_tracks` so leaving and returning to Radio does not re-query
-    /// or reshuffle the station.
-    pub radio_tracks: Vec<Track>,
-
     /// The recommendation engine's pending list, in ranking order.
     ///
     /// The worker owns the rolling session; this is only the id projection the
@@ -127,7 +118,7 @@ pub struct LibraryState {
     pub artist_cover_tracks: HashMap<String, (TrackId, PathBuf)>,
 }
 
-mod radio;
+mod recommendation;
 mod reload;
 mod selection;
 mod smart;

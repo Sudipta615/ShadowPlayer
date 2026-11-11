@@ -17,7 +17,7 @@ pub fn render_right_drawer(
     avail_h: f32,
     app_state: &mut AppState,
     coordinator: &mut PlaybackCoordinator,
-    session: &AudioSession,
+    _session: &AudioSession,
     artwork_service: &mut ArtworkService,
     lyrics_service: &mut LyricsService,
     current_track: Option<&Track>,
@@ -48,8 +48,6 @@ pub fn render_right_drawer(
                 lyrics_source,
                 active_lyric_idx,
                 lyrics_editor: &mut app_state.lyrics_editor,
-                volume: app_state.volume,
-                is_muted: app_state.is_muted,
                 artwork: artwork_service,
                 theme,
             }
@@ -79,23 +77,6 @@ pub fn render_right_drawer(
             }
             if right_action.clear_queue {
                 coordinator.clear_queue();
-            }
-
-            if let Some(new_vol) = right_action.volume_changed {
-                app_state.volume = new_vol;
-                app_state.is_muted = false;
-                session.set_volume(new_vol);
-            }
-            if right_action.toggle_mute {
-                if app_state.is_muted {
-                    app_state.is_muted = false;
-                    app_state.volume = app_state.prev_volume;
-                    session.set_volume(app_state.volume);
-                } else {
-                    app_state.prev_volume = app_state.volume;
-                    app_state.is_muted = true;
-                    session.set_volume(0.0);
-                }
             }
         },
     );

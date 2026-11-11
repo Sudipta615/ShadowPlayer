@@ -96,222 +96,6 @@ impl ShadowPlayerApp {
         }
     }
 
-    /// Apply a finished podcast fetch/download on the UI thread.
-    pub(super) fn poll_podcast_service(&mut self) {
-        let Some(event) = self.podcast_service.poll() else {
-            return;
-        };
-        match event {
-            PodcastEvent::FeedUpdated { feed_id } => {
-                self.podcast_state.reload_feeds(&self.podcast_repo);
-                self.podcast_state.selected_feed = Some(feed_id);
-                self.podcast_state.reload_episodes(&self.podcast_repo);
-                self.podcast_state.error = None;
-                self.toasts.success(tr!("Podcast feed updated"));
-            }
-            PodcastEvent::Downloaded { episode_id } => {
-                self.podcast_state.reload_episodes(&self.podcast_repo);
-                self.podcast_state.error = None;
-                if let Some(episode) = self.podcast_state.episode(episode_id) {
-                    self.toasts.success(tr_args!(
-                        "Downloaded “{title}”",
-                        "title" => episode.title
-                    ));
-                }
-            }
-            PodcastEvent::Error(message) => {
-                self.podcast_state.error = Some(message.clone());
-                self.toasts.warning(message);
-            }
-        }
-    }
-
-    /// Persist podcast resume state and notice the end of an episode.
-    pub(super) fn poll_podcast_playback(&mut self, ctx: &egui::Context) {
-        // Starting a music track from the library takes the output back. Do
-        // not keep crediting the podcast transport in that case.
-        if self.coordinator.current_track().is_some() && self.session.is_playing() {
-            self.podcast_state.is_playing = false;
-            self.podcast_state.playing_episode = None;
-        }
-
-        let Some(id) = self.podcast_state.playing_episode else {
-            return;
-        };
-        let position = self.session.position_secs();
-        // Prefer the decoder's duration once the episode is open: feed
-        // metadata is often approximate, and a duration that is a minute too
-        // long would keep the episode from ever reaching its completion
-        // threshold. Fall back to the stored duration while the file is still
-        // being probed.
-        let live_duration = self.session.duration_secs();
-        let duration = if live_duration > 0.0 {
-            live_duration
-        } else {
-            self.podcast_state.duration_secs
-        };
-        self.podcast_state.position_secs = position;
-        self.podcast_state.duration_secs = duration;
-
-        let finished = self.podcast_state.is_playing
-            && !self.session.is_playing()
-            && duration > 0.0
-            && position >= duration - 0.75;
-        if finished {
-            let completed_at = duration;
-            let _ = self.podcast_repo.save_progress(&id, completed_at, true);
-            self.podcast_state.is_playing = false;
-            self.podcast_state.position_secs = completed_at;
-            self.podcast_state.last_saved_secs = completed_at;
-            self.podcast_state.reload_episodes(&self.podcast_repo);
-            self.toasts.info(tr!("Podcast episode finished"));
-            return;
-        }
-
-        if self.podcast_state.is_playing
-            && (position - self.podcast_state.last_saved_secs).abs() >= 5.0
-        {
-            let _ = self.podcast_repo.save_progress(&id, position, false);
-            self.podcast_state.last_saved_secs = position;
-            if let Some(episode) = self
-                .podcast_state
-                .episodes
-                .iter_mut()
-                .find(|episode| episode.id == id)
-            {
-                episode.position_secs = position;
-            }
-            ctx.request_repaint();
-        }
-    }
-
-    /// Build a local radio station around `seed_id` and start it.
-    ///
-    /// The station is a pure query over the user's own library: same genre,
-    /// nearby BPM, similar rating. A fresh salt gives a new shuffle without
-    /// making the query non-deterministic.
-    pub(super) fn start_radio(&mut self, seed_id: domain::ids::TrackId) {
-        let Some(seed) = self.track_repo.get_by_id(&seed_id).ok().flatten() else {
-            self.toasts
-                .warning(tr!("That track is no longer in the library"));
-            return;
-        };
-        let salt = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(1);
-        let mut tracks = vec![seed.clone()];
-        match self.track_repo.radio_station(&seed_id, 100, salt) {
-            Ok(next) => tracks.extend(next),
-            Err(e) => {
-                log::warn!("Could not build a radio station: {e}");
-                self.toasts.warning(tr!("Could not build a radio station"));
-            }
-        }
-
-        self.library_state.set_radio_station(
-            seed_id,
-            tr_args!("{artist} Radio", "artist" => seed.artist),
-            tracks.clone(),
-        );
-        // The station is its own view. A search left over from the songs
-        // table would filter the station down to whatever matched, which is
-        // not what "Start Radio" promises.
-        self.app_state.search_query.clear();
-        self.library_state.selected_album = None;
-        self.library_state.selected_artist = None;
-        self.library_state.selected_genre = None;
-        self.library_state.selected_folder = None;
-        self.library_state.clear_selection();
-        self.app_state.active_nav = NavItem::Radio;
-        self.refresh_view();
-
-        if let Some(first) = tracks.first().cloned() {
-            self.play_track(first, Some(tracks));
-        }
-    }
-
-    /// Regenerate the current station with a new shuffle.
-    pub(super) fn refresh_radio(&mut self) {
-        if let Some(seed) = self.library_state.radio_seed {
-            self.start_radio(seed);
-        } else {
-            self.toasts
-                .info(tr!("Start a station from any song's context menu first"));
-        }
-    }
-
-    /// Start (or resume) an episode through the main output.
-    pub(super) fn play_podcast_episode(&mut self, id: domain::ids::PodcastEpisodeId) {
-        let Some(episode) = self
-            .podcast_repo
-            .get_episode(&id)
-            .ok()
-            .flatten()
-            .or_else(|| self.podcast_state.episode(id).cloned())
-        else {
-            return;
-        };
-        let Some(path) = episode.local_path.clone() else {
-            self.toasts
-                .warning(tr!("Download this episode before playing it"));
-            return;
-        };
-        if !path.exists() {
-            self.toasts
-                .warning(tr!("The downloaded episode is missing; download it again"));
-            return;
-        }
-
-        // The two transports share the output. Stop the music queue first so
-        // its end-of-track handler cannot advance over the podcast.
-        self.session.stop();
-        self.coordinator.clear_queue();
-
-        self.session.open_file(&path);
-        let resume_at = if episode.completed {
-            0.0
-        } else {
-            episode.position_secs.max(0.0)
-        };
-        if resume_at > 0.0 {
-            self.session.seek(resume_at);
-        }
-        self.session.play();
-
-        self.podcast_state.playing_episode = Some(id);
-        self.podcast_state.is_playing = true;
-        self.podcast_state.position_secs = resume_at;
-        self.podcast_state.duration_secs = episode.duration_secs.unwrap_or(0.0);
-        self.podcast_state.last_saved_secs = resume_at;
-        self.podcast_state.error = None;
-    }
-
-    pub(super) fn toggle_podcast_playback(&mut self) {
-        if self.podcast_state.is_playing {
-            self.session.pause();
-            self.podcast_state.is_playing = false;
-            if let Some(id) = self.podcast_state.playing_episode {
-                let _ =
-                    self.podcast_repo
-                        .save_progress(&id, self.podcast_state.position_secs, false);
-            }
-            return;
-        }
-        if self.podcast_state.playing_episode.is_some() {
-            // Reaching the end leaves the source stopped at its duration; a
-            // resume from there would replay a single silent frame.
-            let at_end = self.podcast_state.duration_secs > 0.0
-                && self.podcast_state.position_secs >= self.podcast_state.duration_secs - 0.75;
-            if at_end {
-                self.session.seek(0.0);
-                self.podcast_state.position_secs = 0.0;
-            }
-            self.session.play();
-            self.podcast_state.is_playing = true;
-        }
-    }
-
     /// Drain background media-tool jobs into the Tools modal.
     pub(super) fn poll_media_tools(&mut self) {
         for event in self.media_tools_service.poll() {
@@ -601,7 +385,7 @@ impl ShadowPlayerApp {
         }
     }
 
-    /// 3. Poll media content services: lyrics, waveforms, podcasts, presets, tools.
+    /// 3. Poll media content services: lyrics, waveforms, presets, tools.
     fn poll_media_content_subsystems(&mut self, ctx: &egui::Context) {
         // Poll the EQ curve worker (file dialogs and parsing off-thread).
         if let Some(event) = self.preset_io.poll() {
@@ -614,14 +398,11 @@ impl ShadowPlayerApp {
             ctx.request_repaint();
         }
 
-        // Waveform decodes and podcast network work also happen off the
-        // UI thread. A finished waveform is only a repaint; a finished podcast
-        // job changes rows the view is showing.
+        // Waveform decodes also happen off the UI thread.
+        // A finished waveform requests a repaint.
         if self.waveform_service.poll() {
             ctx.request_repaint();
         }
-        self.poll_podcast_service();
-        self.poll_podcast_playback(ctx);
         if self.crossfade_preview.is_playing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }

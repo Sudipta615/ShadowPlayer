@@ -46,8 +46,6 @@ impl ShadowPlayerApp {
             );
             right_ui.add_space(self.theme.space_sm);
             let prev_light = self.theme.is_light;
-            let prev_vol = self.app_state.volume;
-            let prev_muted = self.app_state.is_muted;
             render_right_drawer(
                 &mut right_ui,
                 ctx,
@@ -66,10 +64,7 @@ impl ShadowPlayerApp {
                 &mut self.theme,
                 true,
             );
-            if self.theme.is_light != prev_light
-                || (self.app_state.volume - prev_vol).abs() > 0.001
-                || self.app_state.is_muted != prev_muted
-            {
+            if self.theme.is_light != prev_light {
                 self.settings_dirty = true;
             }
         }
@@ -111,8 +106,6 @@ impl ShadowPlayerApp {
             );
             overlay_ui.set_clip_rect(overlay_rect);
             let prev_light = self.theme.is_light;
-            let prev_vol = self.app_state.volume;
-            let prev_muted = self.app_state.is_muted;
             render_right_drawer(
                 &mut overlay_ui,
                 ctx,
@@ -131,12 +124,51 @@ impl ShadowPlayerApp {
                 &mut self.theme,
                 false,
             );
-            if self.theme.is_light != prev_light
-                || (self.app_state.volume - prev_vol).abs() > 0.001
-                || self.app_state.is_muted != prev_muted
-            {
+            if self.theme.is_light != prev_light {
                 self.settings_dirty = true;
             }
+        }
+    }
+
+    /// Render dedicated, independent volume slider widget.
+    /// Sits below the right sidebar and remains visible whether the sidebar is toggled on or off.
+    pub(super) fn render_volume_slider(
+        &mut self,
+        root_ui: &mut egui::Ui,
+        rect: Rect,
+        standalone: bool,
+    ) {
+        let mut vol_ui = root_ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        vol_ui.set_clip_rect(rect);
+        let action = crate::components::volume_slider::VolumeSlider::new(
+            self.app_state.volume,
+            self.app_state.is_muted,
+            &self.theme,
+        )
+        .standalone(standalone)
+        .show(&mut vol_ui);
+
+        if let Some(new_vol) = action.volume_changed {
+            self.app_state.volume = new_vol;
+            self.app_state.is_muted = false;
+            self.session.set_volume(new_vol);
+            self.settings_dirty = true;
+        }
+        if action.toggle_mute {
+            if self.app_state.is_muted {
+                self.app_state.is_muted = false;
+                self.app_state.volume = self.app_state.prev_volume;
+                self.session.set_volume(self.app_state.volume);
+            } else {
+                self.app_state.prev_volume = self.app_state.volume;
+                self.app_state.is_muted = true;
+                self.session.set_volume(0.0);
+            }
+            self.settings_dirty = true;
         }
     }
 }

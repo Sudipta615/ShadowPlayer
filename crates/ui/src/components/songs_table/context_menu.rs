@@ -25,10 +25,6 @@ pub(super) fn render_track_context_menu(
         action.add_to_queue = Some(track.id);
         ui.close();
     }
-    if ui.button(tr!("Start Radio")).clicked() {
-        action.start_radio = Some(track.id);
-        ui.close();
-    }
 
     ui.separator();
 

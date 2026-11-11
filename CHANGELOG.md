@@ -4,6 +4,18 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-11-11
+
+*Released with audio-engine 1.14.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Unified Player Card Across Library Views.** Extracted `render_player_card` into a dedicated UI subsystem, ensuring the now playing card and playback controls are seamlessly visible across Albums, Artists, Genres, Folders, and playlist views without duplication (while omitted from Settings and Help).
+- **Independent Volume Slider.** Decoupled the volume control into a dedicated `VolumeSlider` component positioned at the bottom-right corner below the right sidebar, remaining continuously accessible whether the queue/lyrics sidebar is toggled on or off.
+
+### Removed
+- **Pruned Legacy Collections, Podcasts, and Radio Subsystems.** Removed dead podcast feed/episode models, repositories, and UI services; pruned local radio generation in favor of the active local recommendation engine; and removed legacy VU and LUFS meter widgets.
+
 ## [0.30.0] - 2026-11-07
 
 *Released with audio-engine 1.14.0. The player and the engine are versioned separately and released

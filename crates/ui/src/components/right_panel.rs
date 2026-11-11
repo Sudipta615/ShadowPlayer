@@ -19,8 +19,6 @@ pub struct RightPanelAction {
     /// Move an upcoming queue row up/down by one slot.
     pub move_queue: Option<(usize, isize)>,
     pub clear_queue: bool,
-    pub volume_changed: Option<f32>,
-    pub toggle_mute: bool,
     /// Write the lyrics editor's draft to the current track's `.lrc` sidecar.
     pub save_lyrics: bool,
 }
@@ -36,8 +34,6 @@ pub struct RightPanel<'a> {
     pub lyrics_source: Option<LyricsSource>,
     pub active_lyric_idx: Option<usize>,
     pub lyrics_editor: &'a mut crate::state::LyricsEditorState,
-    pub volume: f32,
-    pub is_muted: bool,
     pub artwork: &'a mut ArtworkService,
     pub theme: &'a Theme,
 }
@@ -50,8 +46,6 @@ impl<'a> RightPanel<'a> {
             remove_queue_index: None,
             move_queue: None,
             clear_queue: false,
-            volume_changed: None,
-            toggle_mute: false,
             save_lyrics: false,
         };
 
@@ -208,110 +202,6 @@ impl<'a> RightPanel<'a> {
                 match self.active_tab {
                     RightTab::Queue => self.render_queue_tab(ui, &mut action),
                     RightTab::Lyrics => self.render_lyrics_tab(ui, &mut action),
-                }
-            });
-
-            // 2. Dedicated Bottom Volume Control below Card (speaker + full-width slider)
-            //
-            // Pinned to the bottom of the drawer. It used to be pushed down
-            // by whatever height the queue happened to have, so it drifted
-            // around as the queue grew and shrank.
-            let space_to_bottom = (ui.available_height() - 28.0).clamp(0.0, 16.0);
-            if space_to_bottom > 0.0 {
-                ui.add_space(space_to_bottom);
-            }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(self.theme.space_lg, 0.0);
-
-                // Speaker Icon Button
-                let is_muted = self.is_muted || self.volume <= 0.0;
-                let (spk_rect, spk_resp) =
-                    ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
-                crate::components::icons::draw_speaker(
-                    ui,
-                    spk_rect,
-                    self.theme.text_secondary,
-                    is_muted,
-                );
-
-                spk_resp.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::Role::Button,
-                        true,
-                        if is_muted { "Unmute" } else { "Mute" },
-                    )
-                });
-                let _ = spk_resp
-                    .clone()
-                    .on_hover_text(if is_muted { "Unmute" } else { "Mute" });
-                if spk_resp.clicked() {
-                    action.toggle_mute = true;
-                }
-
-                // Full-width volume slider with a single jade fill.
-                let slider_w = (ui.available_width() - 4.0).max(60.0);
-                let (slider_rect, slider_resp) =
-                    ui.allocate_exact_size(Vec2::new(slider_w, 20.0), Sense::click_and_drag());
-
-                slider_resp.widget_info(|| {
-                    egui::WidgetInfo::slider(
-                        true,
-                        if self.is_muted {
-                            0.0
-                        } else {
-                            self.volume as f64
-                        },
-                        "Volume",
-                    )
-                });
-                let painter = ui.painter_at(slider_rect);
-                let cy = slider_rect.center().y;
-
-                // Background track (clearly visible in both dark & light modes)
-                let track_rect = Rect::from_min_max(
-                    Pos2::new(slider_rect.min.x, cy - 2.0),
-                    Pos2::new(slider_rect.max.x, cy + 2.0),
-                );
-                painter.rect_filled(
-                    track_rect,
-                    CornerRadius::same(self.theme.radius_xs),
-                    self.theme.slider_track,
-                );
-
-                let effective_vol = if self.is_muted {
-                    0.0
-                } else {
-                    self.volume.clamp(0.0, 1.0)
-                };
-                let filled_w = slider_w * effective_vol;
-
-                if filled_w > 0.0 {
-                    let filled_rect = Rect::from_min_max(
-                        Pos2::new(slider_rect.min.x, cy - 2.0),
-                        Pos2::new(slider_rect.min.x + filled_w, cy + 2.0),
-                    );
-                    painter.rect_filled(
-                        filled_rect,
-                        CornerRadius::same(self.theme.radius_xs),
-                        self.theme.accent_highlight,
-                    );
-                }
-
-                if slider_resp.hovered() || slider_resp.dragged() {
-                    let thumb_pos = Pos2::new(slider_rect.min.x + filled_w, cy);
-                    painter.circle_filled(thumb_pos, 5.0, self.theme.text_primary);
-                    painter.circle_stroke(
-                        thumb_pos,
-                        5.0,
-                        Stroke::new(1.5_f32, self.theme.bg_sidebar),
-                    );
-                }
-
-                if slider_resp.dragged() || slider_resp.clicked() {
-                    if let Some(pos) = slider_resp.interact_pointer_pos() {
-                        let norm = ((pos.x - slider_rect.min.x) / slider_w).clamp(0.0, 1.0);
-                        action.volume_changed = Some(norm);
-                    }
                 }
             });
         });

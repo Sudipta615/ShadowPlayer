@@ -1,6 +1,7 @@
 mod center;
 mod drawer;
 mod frame;
+mod player_card;
 mod sidebar;
 
 use super::*;
