@@ -139,7 +139,9 @@ struct KeyTable {
 impl KeyTable {
     fn new(tracks: &[Track], extract: impl Fn(&Track) -> &str) -> Self {
         let mut offsets = Vec::with_capacity(tracks.len() + 1);
-        let mut bytes = Vec::new();
+        // Pre-allocate estimated byte capacity to avoid log(N) reallocations and
+        // cache thrashing on dual-core CPUs during large library sorts.
+        let mut bytes = Vec::with_capacity(tracks.len() * 16);
         offsets.push(0);
         for t in tracks {
             let folded = domain::text::fold_collation_key(extract(t));

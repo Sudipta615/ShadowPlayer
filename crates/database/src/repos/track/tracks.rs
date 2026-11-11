@@ -546,6 +546,25 @@ impl TrackRepo {
         })
     }
 
+    /// Delete multiple tracks in a single transaction to reduce disk sync overhead.
+    pub fn delete_batch(&self, ids: &[TrackId]) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        self.db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            let mut count = 0;
+            {
+                let mut stmt = tx.prepare_cached("DELETE FROM tracks WHERE id = ?1;")?;
+                for id in ids {
+                    count += stmt.execute(params![id.to_string()])?;
+                }
+            }
+            tx.commit()?;
+            Ok(count)
+        })
+    }
+
     /// Update the user-editable metadata tags of a track. Content that is
     /// derived from the file itself (path, duration, format, ...) is untouched.
     pub fn update_metadata(&self, track: &Track) -> Result<()> {

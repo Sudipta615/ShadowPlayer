@@ -147,12 +147,10 @@ impl LibraryState {
             let only_the_sort_changed =
                 same_list && (previous.2 != current_sort || previous.3 != sort_order);
             if only_the_sort_changed {
-                // Recently Added and Radio own their running order: one is
-                // defined by recency, the other is a deliberate shuffle. For
-                // You is ranked by the engine, so a column header must not
-                // reorder it either.
+                // Recently Added owns its running order: it is defined by
+                // recency. For You is ranked by the engine, so a column header
+                // must not reorder it either.
                 if active_nav != NavItem::RecentlyAdded
-                    && active_nav != NavItem::Radio
                     && self.quick_filter != QuickFilter::ForYou
                 {
                     sort_tracks(&mut self.displayed_tracks, current_sort, sort_order);
@@ -176,12 +174,16 @@ impl LibraryState {
             } else {
                 self.search_result = search::SearchResult::default();
                 match active_nav {
-                    NavItem::Favorites => self
-                        .all_tracks
-                        .iter()
-                        .filter(|t| self.favorite_ids.contains(&t.id))
-                        .cloned()
-                        .collect(),
+                    NavItem::Favorites => {
+                        let mut favs =
+                            Vec::with_capacity(self.favorite_ids.len().min(self.all_tracks.len()));
+                        for t in &self.all_tracks {
+                            if self.favorite_ids.contains(&t.id) {
+                                favs.push(t.clone());
+                            }
+                        }
+                        favs
+                    }
                     NavItem::RecentlyPlayed => match history_repo.list_recently_played(100) {
                         Ok(tracks) => tracks,
                         Err(e) => {
@@ -196,13 +198,28 @@ impl LibraryState {
                             Vec::new()
                         }
                     },
-                    // Newest imports first. `all_tracks` is already in memory, so
-                    // this is a sort rather than another query.
+                    // Newest imports first. Index sort avoids deep-cloning all 100k
+                    // tracks just to keep 200, saving ~500k allocations on low-end CPUs.
                     NavItem::RecentlyAdded => {
-                        let mut recent = self.all_tracks.clone();
-                        recent.sort_by_key(|t| std::cmp::Reverse(t.added_at));
-                        recent.truncate(200);
-                        recent
+                        let k = 200.min(self.all_tracks.len());
+                        if k == 0 {
+                            Vec::new()
+                        } else {
+                            let mut indices: Vec<usize> = (0..self.all_tracks.len()).collect();
+                            if indices.len() > k {
+                                indices.select_nth_unstable_by_key(k - 1, |&i| {
+                                    std::cmp::Reverse(self.all_tracks[i].added_at)
+                                });
+                                indices.truncate(k);
+                            }
+                            indices.sort_unstable_by_key(|&i| {
+                                std::cmp::Reverse(self.all_tracks[i].added_at)
+                            });
+                            indices
+                                .into_iter()
+                                .map(|i| self.all_tracks[i].clone())
+                                .collect()
+                        }
                     }
                     NavItem::Playlist(pl_id) => match playlist_repo.get_tracks_resolved(&pl_id) {
                         Ok(tracks) => tracks,
@@ -211,7 +228,6 @@ impl LibraryState {
                             Vec::new()
                         }
                     },
-                    NavItem::Radio => self.radio_tracks.clone(),
                     NavItem::SmartPlaylist(sp_id) => {
                         let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
                         match playlist {
@@ -238,11 +254,8 @@ impl LibraryState {
         );
 
         // "Recently Added" defines itself by recency, so the user's global sort
-        // would fight the view. Radio owns its scored, salted running order for
-        // the same reason: re-sorting it alphabetically would throw away the
-        // shuffle the user asked for. For You keeps the engine's ranking.
+        // would fight the view. For You keeps the engine's ranking.
         if active_nav != NavItem::RecentlyAdded
-            && active_nav != NavItem::Radio
             && self.quick_filter != QuickFilter::ForYou
         {
             sort_tracks(&mut tracks, current_sort, sort_order);
@@ -250,7 +263,7 @@ impl LibraryState {
 
         self.displayed_tracks = tracks;
 
-        // Update drilldown collections
+        // Update drilldown views
         if let Some((ref title, ref artist)) = self.selected_album {
             self.album_tracks = album_repo
                 .get_tracks_by_album(title, artist)
