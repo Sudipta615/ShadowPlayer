@@ -80,6 +80,11 @@ impl LibraryScanner {
         let walker = WalkDir::new(root).follow_links(false).into_iter();
         let mut entries = Vec::new();
 
+        // Batch buffer for track upserts. Drastically reduces SQLite transaction
+        // commits and mechanical disk fsyncs on spinning HDDs and dual-core CPUs.
+        const BATCH_SIZE: usize = 200;
+        let mut track_batch: Vec<domain::models::Track> = Vec::with_capacity(BATCH_SIZE);
+
         for entry in walker {
             if cancel_flag.load(Ordering::Relaxed) {
                 info!("Library scan cancelled");
@@ -230,12 +235,12 @@ impl LibraryScanner {
                                     }
                                 }
 
-                                if let Err(e) = repo.upsert(&extracted.track) {
-                                    warn!(
-                                        "Failed to save CUE track {}: {}",
-                                        extracted.track.path.display(),
-                                        e
-                                    );
+                                track_batch.push(extracted.track);
+                                if track_batch.len() >= BATCH_SIZE {
+                                    if let Err(e) = repo.upsert_batch(&track_batch) {
+                                        warn!("Failed to save CUE track batch: {e}");
+                                    }
+                                    track_batch.clear();
                                 }
                             }
                         }
@@ -302,8 +307,12 @@ impl LibraryScanner {
                             }
                         }
 
-                        if let Err(e) = repo.upsert(&extracted.track) {
-                            warn!("Failed to save track {}: {}", path.display(), e);
+                        track_batch.push(extracted.track);
+                        if track_batch.len() >= BATCH_SIZE {
+                            if let Err(e) = repo.upsert_batch(&track_batch) {
+                                warn!("Failed to save track batch: {e}");
+                            }
+                            track_batch.clear();
                         }
                     }
                     Err(e) => {
@@ -325,6 +334,14 @@ impl LibraryScanner {
             }
         }
 
+        // Flush any remaining tracks in the batch
+        if !track_batch.is_empty() {
+            if let Err(e) = repo.upsert_batch(&track_batch) {
+                warn!("Failed to flush final track batch: {e}");
+            }
+            track_batch.clear();
+        }
+
         if cancel_flag.load(Ordering::Relaxed) {
             info!("Library scan cancelled");
             return;
@@ -337,16 +354,16 @@ impl LibraryScanner {
         if walk_errors == 0 {
             match repo.list_paths_under_prefix(root) {
                 Ok(rows) => {
+                    let mut to_delete = Vec::new();
                     for (id, path) in rows {
                         if !seen.contains(&cue_base_path(&path)) {
-                            match repo.delete(&id) {
-                                Ok(()) => removed_count += 1,
-                                Err(e) => warn!(
-                                    "Could not remove missing track {}: {}",
-                                    path.display(),
-                                    e
-                                ),
-                            }
+                            to_delete.push(id);
+                        }
+                    }
+                    if !to_delete.is_empty() {
+                        match repo.delete_batch(&to_delete) {
+                            Ok(n) => removed_count += n,
+                            Err(e) => warn!("Could not remove missing tracks: {e}"),
                         }
                     }
                 }
