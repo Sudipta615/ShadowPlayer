@@ -7,7 +7,20 @@
 #endif
 #define MyAppPublisher "ShadowPlayer Developers"
 #define MyAppURL "https://github.com/shadowplayer/shadowplayer"
+#ifndef MyAppExeName
 #define MyAppExeName "shadowplayer.exe"
+#endif
+; `package-windows.sh` overrides these for cross-target builds. The defaults
+; preserve the original in-tree layout.
+#ifndef MyAppBinary
+#define MyAppBinary "..\target\release\shadowplayer.exe"
+#endif
+#ifndef MyAppArch
+#define MyAppArch "x86_64"
+#endif
+#ifndef MyAppArm64
+#define MyAppArm64 0
+#endif
 
 [Setup]
 AppId={{5E285F5D-C35B-4C6A-91E2-F4A5E6B7C8D9}
@@ -21,12 +34,18 @@ DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=..\target\distrib
-OutputBaseFilename=shadowplayer-{#MyAppVersion}-setup-x86_64
+OutputBaseFilename=shadowplayer-{#MyAppVersion}-setup-{#MyAppArch}
 SetupIconFile=..\crates\app\assets\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+#if MyAppArm64 == 1
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
+ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 ChangesAssociations=yes
 
 [Languages]
@@ -38,7 +57,7 @@ Name: "associate_stm"; Description: "Associate .stm theme files with ShadowPlaye
 Name: "associate_audio"; Description: "Associate lossless audio files (.flac, .wav, .dsf, .cue) with ShadowPlayer"; GroupDescription: "File Associations:"; Flags: unchecked
 
 [Files]
-Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppBinary}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\crates\app\assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion

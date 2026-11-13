@@ -1,0 +1,112 @@
+name: Build distributables
+
+# The one canonical packaging matrix. It has two callers:
+#
+#   * `ci.yml` — a push to `main` whose gates all pass, so the shipped branch
+#     has a downloadable build for each supported platform;
+#   * `release.yml` — a version tag, feeding the reviewed draft release.
+#
+# Sharing the file is the point: the binaries a contributor tests from CI are
+# compiled and packaged by exactly the same commands as the ones attached to a
+# release, so the two paths cannot drift. GitHub scopes artifacts to a run, so
+# a CI run and a release run never collide.
+
+on:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: "Git ref to build. Empty means the caller's ref."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc }
+          - { os: windows-latest,   target: aarch64-pc-windows-msvc }
+          - { os: macos-latest,     target: x86_64-apple-darwin }
+          - { os: macos-latest,     target: aarch64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref }}
+
+      # The engine links ALSA on Linux, and eframe/winit need the X11 and
+      # Wayland client libraries even for a headless build.
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev dbus
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build the distributable binary
+        run: cargo build --release -p shadowplayer --target ${{ matrix.target }}
+
+      - name: Package native artefacts (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p target/distrib
+          scripts/package-tarball.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+          if command -v dpkg-deb >/dev/null 2>&1; then
+            scripts/package-deb.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+          fi
+          scripts/package-appimage.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+
+      - name: Package native artefacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p target/distrib
+          scripts/package-macos.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
+
+      - name: Package native artefacts (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p target/distrib
+          scripts/package-windows.sh target/${{ matrix.target }}/release/shadowplayer.exe ${{ matrix.target }} target/distrib
+
+      # The run page is where a contributor looks first; list the files there
+      # rather than making them open the artifact to see what was produced.
+      - name: List the artefacts
+        shell: bash
+        run: |
+          echo "### shadowplayer — ${{ matrix.target }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -lh target/distrib >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: target/distrib/
+          if-no-files-found: error
+          # These are pre-release builds; the reviewed copies live on the
+          # draft release, which has its own retention.
+          retention-days: 14

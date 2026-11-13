@@ -34,6 +34,10 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Check out the commit being released, not whatever the default
+          # branch holds when a manual dispatch runs.
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Resolve the tag
         id: plan
@@ -64,71 +68,14 @@ jobs:
       # at once. See the distribution note in the root `Cargo.toml`.
 
   build:
-    name: Build ${{ matrix.target }}
+    name: Build distributables
     needs: plan
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest,   target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
-          - { os: windows-latest,  target: x86_64-pc-windows-msvc }
-          - { os: windows-latest,  target: aarch64-pc-windows-msvc }
-          - { os: macos-latest,    target: x86_64-apple-darwin }
-          - { os: macos-latest,    target: aarch64-apple-darwin }
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: System dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libasound2-dev \
-            libxkbcommon-dev libwayland-dev libx11-dev
-
-      - name: Install the Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Build the distributable binary
-        run: cargo build --release -p shadowplayer --target ${{ matrix.target }}
-
-      - name: Package native artefacts (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p target/distrib
-          scripts/package-tarball.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
-          if command -v dpkg-deb >/dev/null 2>&1; then
-            scripts/package-deb.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
-          fi
-          scripts/package-appimage.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
-
-      - name: Package native artefacts (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p target/distrib
-          scripts/package-macos.sh target/${{ matrix.target }}/release/shadowplayer ${{ matrix.target }} target/distrib
-
-      - name: Package native artefacts (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p target/distrib
-          scripts/package-windows.sh target/${{ matrix.target }}/release/shadowplayer.exe ${{ matrix.target }} target/distrib
-
-      - name: Collect the artefacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-${{ matrix.target }}
-          path: target/distrib/
-          if-no-files-found: error
+    uses: ./.github/workflows/dist.yml
+    with:
+      # A tag push checks out the tag; a manual dispatch names it explicitly.
+      # Either way the release binaries come from the tagged commit, not from
+      # whatever the default branch happened to be at dispatch time.
+      checkout_ref: ${{ needs.plan.outputs.tag }}
 
   publish:
     name: Publish the draft release

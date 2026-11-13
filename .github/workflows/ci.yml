@@ -495,3 +495,28 @@ jobs:
       - name: Engine coverage floor
         working-directory: crates/engine
         run: cargo llvm-cov --lib --fail-under-lines 70 --summary-only
+
+  # Artifacts, not a release. A push to `main` whose full gate set is green
+  # gets a downloadable build for all six supported targets; other branches and
+  # pull requests skip it, and a tag still goes through `release.yml`, which
+  # reuses the same `.github/workflows/dist.yml` matrix. CI binaries and release
+  # binaries are therefore built by the same commands.
+  #
+  # Narrowing to `main` is deliberate: `desktop-targets` already proves the
+  # player compiles on the three host platforms for every push and PR, while
+  # packaging six full builds is the expensive part.
+  dist:
+    name: Build distributables
+    needs:
+      - player
+      - engine
+      - opus-conformance
+      - desktop-targets
+      - engine-tests-cross
+      - sanitizers
+      - wayland-smoke
+      - supply-chain
+      - docs
+      - coverage
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/dist.yml

@@ -38,10 +38,32 @@ elif command -v 7z >/dev/null 2>&1; then
 fi
 rm -rf "$stage"
 
-# 3. Compile Inno Setup installer if iscc is available
+# 3. Compile Inno Setup installer if iscc is available.
+#
+# The script lives in `scripts/`, so the `.iss` resolves relative `Source:`
+# paths against that directory. A cross-target build puts the binary under
+# `target/<triple>/release/`, which the script's default `target\release`
+# does not match — pass the real path and the architecture instead of
+# assuming the host layout.
 if command -v iscc >/dev/null 2>&1; then
-    echo "Compiling Inno Setup installer..."
-    iscc "/DMyAppVersion=$version" "$here/scripts/shadowplayer.iss"
+    case "$target" in
+        aarch64*) arch="arm64" ;;
+        *) arch="x86_64" ;;
+    esac
+    arm64=0
+    if [[ "$arch" == "arm64" ]]; then
+        arm64=1
+    fi
+
+    iscc_binary="$binary"
+    if command -v cygpath >/dev/null 2>&1; then
+        iscc_binary="$(cygpath -w "$binary")"
+    fi
+
+    echo "Compiling Inno Setup installer for $arch..."
+    iscc "/DMyAppVersion=$version" "/DMyAppArch=$arch" \
+        "/DMyAppArm64=$arm64" "/DMyAppBinary=$iscc_binary" \
+        "$here/scripts/shadowplayer.iss"
     echo "Installer generated successfully."
 else
     echo "Notice: iscc (Inno Setup Compiler) not found in PATH; skipping installer generation."

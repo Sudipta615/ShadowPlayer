@@ -4,6 +4,18 @@ All notable changes to **ShadowPlayer** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Installable builds on every green `main` push.** CI now calls the same packaging
+  matrix as the release workflow (`.github/workflows/dist.yml`), so a
+  successful push to `main` uploads one artifact per supported target:
+  Linux x86-64/arm64 (`.deb`, portable tarball, AppDir for the AppImage),
+  Windows x86-64/arm64 (portable `.zip`), and macOS x86-64/arm64 (`.dmg`,
+  `.zip`). The artifacts are test builds kept for 14 days, not releases; a
+  version tag still produces the reviewed draft release through
+  `release.yml`.
+
 ## [0.31.0] - 2026-11-11
 
 *Released with audio-engine 1.14.0. The player and the engine are versioned separately and released
