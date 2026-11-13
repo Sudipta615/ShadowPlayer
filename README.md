@@ -61,9 +61,8 @@ its own README, test matrix, and C ABI.
 - **Metadata you approve.** AcoustID + MusicBrainz auto-tagging with a
   field-by-field review before anything is written, and bulk cover-art lookup
   from the Cover Art Archive with a local cache.
-- **Notes and biographies.** Markdown album liner notes stored in the library,
-  plus artist and album biographies from text you write or `.txt`/`.md` files
-  you point at.
+- **Detail pages that get out of the way.** Opening an album, artist, genre or
+  folder shows every song in it, with its own remembered list/grid switch.
 - **Playlists that fit the job.** Standard playlists; smart rule-based
   playlists with a stated refresh policy; duplicate finding; a batch organizer
   with a reviewable rename plan; M3U import and export.
@@ -241,7 +240,6 @@ gates in the code.
 | CLAP plugin editor windows | Yes | Yes | Yes | A plugin that implements clap.gui opens its own floating native editor from the plugin rack. |
 | Headless mode | Yes | Yes | Yes | --headless runs the engine and the loopback control socket without opening a window. |
 | Opt-in update check | Yes | Yes | Yes | Contacts GitHub only when enabled; a download is SHA-256 verified and is never installed automatically. |
-| Markdown album liner notes | Yes | Yes | Yes | Notes are stored in the library database and rendered in a safe Markdown subset. |
 | Null output backend | Yes | Yes | Yes | A platform-independent output used by the bit-identical Pure Direct test. |
 <!-- platform-features:end -->
 
@@ -379,7 +377,7 @@ unavailable, the app falls back to shared mode **and says so**. See
 
 The database is an ordinary SQLite file. There is no automatic backup: copy it
 if it matters to you. Scans never delete audio files, only rows whose file is
-gone. Album liner notes live in the same database, not beside the music.
+gone.
 
 ---
 

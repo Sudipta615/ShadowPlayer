@@ -73,8 +73,6 @@ pub struct LibraryState {
     pub albums: Vec<Album>,
     pub selected_album: Option<(String, String)>,
     pub album_tracks: Vec<Track>,
-    /// Markdown liner notes for the album open in the detail view.
-    pub album_notes: crate::state::AlbumNotesState,
 
     pub artists: Vec<Artist>,
     pub selected_artist: Option<String>,
@@ -88,6 +86,12 @@ pub struct LibraryState {
     pub selected_folder: Option<PathBuf>,
     pub folder_tracks: Vec<Track>,
     pub new_folder_input: String,
+
+    /// List or grid form for the album/artist/genre/folder detail pages.
+    ///
+    /// Independent of the main Songs table's `is_grid_view`, and persisted by
+    /// `settings_io` when the app marks the settings dirty.
+    pub collection_view: domain::models::ViewMode,
 
     /// The recommendation engine's pending list, in ranking order.
     ///

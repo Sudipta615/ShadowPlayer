@@ -96,8 +96,6 @@ pub struct AppState {
     pub sleep_timer: Option<SleepTimer>,
     /// Inline lyrics editor draft for the right-hand Lyrics tab.
     pub lyrics_editor: crate::state::LyricsEditorState,
-    /// Inline biography draft for the Artist/Album detail pane.
-    pub biography_editor: crate::state::BiographyEditorState,
 }
 
 impl Default for AppState {
@@ -150,7 +148,6 @@ impl Default for AppState {
             edit_track: EditTrackState::default(),
             sleep_timer: None,
             lyrics_editor: Default::default(),
-            biography_editor: Default::default(),
         }
     }
 }

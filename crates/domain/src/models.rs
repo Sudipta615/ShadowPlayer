@@ -395,6 +395,11 @@ pub struct AppSettings {
     pub sort_field: SortField,
     pub sort_order: SortOrder,
     pub view_mode: ViewMode,
+    /// List/grid choice for the album, artist, genre and folder detail pages.
+    ///
+    /// Kept separate from [`Self::view_mode`] so browsing an album as covers
+    /// does not turn the main Songs table into a grid.
+    pub collection_view: ViewMode,
     pub audio_profile: AudioProfileChoice,
     pub repeat_mode: RepeatModeChoice,
     pub shuffle: bool,
@@ -431,6 +436,7 @@ impl Default for AppSettings {
             sort_field: SortField::Title,
             sort_order: SortOrder::Ascending,
             view_mode: ViewMode::List,
+            collection_view: ViewMode::List,
             audio_profile: AudioProfileChoice::Normal,
             repeat_mode: RepeatModeChoice::Off,
             shuffle: false,

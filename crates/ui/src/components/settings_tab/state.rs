@@ -219,9 +219,6 @@ pub struct SettingsTabState {
     // Library input
     #[serde(skip)]
     pub new_scan_path: String,
-    /// Folder of `<Artist>.txt` / `<Album>.md` biography files. Empty means
-    /// only user-written biographies are shown.
-    pub biography_source_dir: String,
 
     // Audio Converter
     pub converter_format: media_tools::transcode::OutputFormat,
@@ -357,7 +354,6 @@ impl Default for SettingsTabState {
             loudness_write_tags: false,
 
             new_scan_path: String::new(),
-            biography_source_dir: String::new(),
 
             converter_format: media_tools::transcode::OutputFormat::Flac { bit_depth: 24 },
             converter_sample_rate: 0,

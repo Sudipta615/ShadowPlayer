@@ -36,8 +36,6 @@ pub struct SettingsViewActions {
     /// The crossfade curve or duration changed while a preview might be
     /// playing.
     pub crossfade_config_changed: bool,
-    /// The folder biographies are read from changed.
-    pub biography_source_dir_changed: Option<String>,
     /// Open the room-measurement wizard.
     pub open_room_measurement: bool,
     /// Open the speaker setup & acoustic alignment modal.
@@ -88,7 +86,6 @@ pub fn render_settings_view(
     mut on_import: impl FnMut(ImportKind),
 ) -> SettingsViewActions {
     let mut view_actions = SettingsViewActions::default();
-    let biography_source_before = dsp_state.settings_tab.biography_source_dir.clone();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_2xl);
 
@@ -264,9 +261,5 @@ pub fn render_settings_view(
         dsp_state.handle_settings_actions(session, &s_actions);
     });
 
-    if dsp_state.settings_tab.biography_source_dir != biography_source_before {
-        view_actions.biography_source_dir_changed =
-            Some(dsp_state.settings_tab.biography_source_dir.clone());
-    }
     view_actions
 }

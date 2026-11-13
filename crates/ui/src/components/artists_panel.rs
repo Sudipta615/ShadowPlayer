@@ -1,8 +1,9 @@
 use crate::components::text::truncated_galley;
+use crate::components::track_collection::{view_toggle, TrackCollection, TrackSubtitle};
 use crate::services::ArtworkService;
 use crate::theme::Theme;
 use domain::ids::TrackId;
-use domain::models::{Artist, Track};
+use domain::models::{Artist, Track, ViewMode};
 use eframe::egui::{
     self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, Vec2,
 };
@@ -14,8 +15,8 @@ pub struct ArtistsViewAction {
     pub queue_artist: Option<String>,
     pub play_track: Option<TrackId>,
     pub toggle_favorite: Option<TrackId>,
-    /// A biography was saved or cleared in the pane.
-    pub biography_request: Option<crate::components::biography_pane::BiographyPaneRequest>,
+    /// The user switched the detail page between list and grid.
+    pub view_changed: Option<ViewMode>,
 }
 
 pub struct ArtistsView<'a> {
@@ -30,9 +31,8 @@ pub struct ArtistsView<'a> {
     /// The artwork service, so the grid can load the covers it is about to
     /// show.
     pub artwork: &'a mut ArtworkService,
-    /// Cached biography for the selected artist, if any.
-    pub biography: Option<&'a domain::models::Biography>,
-    pub biography_editor: &'a mut crate::state::BiographyEditorState,
+    /// List or grid form for the songs on this page.
+    pub collection_view: ViewMode,
     pub theme: &'a Theme,
 }
 
@@ -43,7 +43,7 @@ impl<'a> ArtistsView<'a> {
             queue_artist: None,
             play_track: None,
             toggle_favorite: None,
-            biography_request: None,
+            view_changed: None,
         };
 
         if let Some(sel_name) = self.selected_artist.clone() {
@@ -62,6 +62,14 @@ impl<'a> ArtistsView<'a> {
                 if ui.add(back_btn).clicked() {
                     *self.selected_artist = None;
                 }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(view) =
+                        view_toggle(ui, self.collection_view, self.theme, "artist_detail")
+                    {
+                        action.view_changed = Some(view);
+                    }
+                });
             });
 
             ui.add_space(8.0);
@@ -81,16 +89,35 @@ impl<'a> ArtistsView<'a> {
                     let avatar_size = Vec2::new(88.0, 88.0);
                     let (avatar_rect, _) = ui.allocate_exact_size(avatar_size, Sense::hover());
                     let p = ui.painter_at(avatar_rect);
-                    p.circle_filled(avatar_rect.center(), 44.0, self.theme.artwork_placeholder);
+
+                    let mut detail_tex: Option<TextureHandle> = None;
+                    if let Some((cover_id, cover_path)) = self.artist_covers.get(&sel_name) {
+                        if self.artwork.get_texture(cover_id).is_none()
+                            && !self.artwork.is_missing(cover_id)
+                        {
+                            self.artwork
+                                .ensure_loaded_at(ui.ctx(), *cover_id, cover_path);
+                        }
+                        detail_tex = self.artwork.get_texture(cover_id).cloned();
+                    }
+
+                    if let Some(tex) = detail_tex {
+                        egui::Image::new(&tex)
+                            .corner_radius(CornerRadius::same(44))
+                            .fit_to_exact_size(avatar_size)
+                            .paint_at(ui, avatar_rect);
+                    } else {
+                        p.circle_filled(avatar_rect.center(), 44.0, self.theme.artwork_placeholder);
+                        crate::components::icons::draw_artist(
+                            ui,
+                            avatar_rect.shrink2(Vec2::new(26.0, 26.0)),
+                            self.theme.accent_warm,
+                        );
+                    }
                     p.circle_stroke(
                         avatar_rect.center(),
                         44.0,
                         Stroke::new(1.5_f32, self.theme.accent),
-                    );
-                    crate::components::icons::draw_artist(
-                        ui,
-                        avatar_rect.shrink2(Vec2::new(26.0, 26.0)),
-                        self.theme.accent_warm,
                     );
 
                     ui.vertical(|ui| {
@@ -149,149 +176,24 @@ impl<'a> ArtistsView<'a> {
 
             ui.add_space(8.0);
 
-            action.biography_request = crate::components::biography_pane::BiographyPane {
-                kind: "artist",
-                name: &sel_name,
-                biography: self.biography,
-                editor: self.biography_editor,
+            let collection = TrackCollection {
+                tracks: self.artist_tracks,
+                active_track_id: self.active_track_id,
+                favorite_track_ids: self.favorite_track_ids,
+                artwork: self.artwork,
+                view: self.collection_view,
+                subtitle: TrackSubtitle::Album,
+                id_salt: "artist_tracks",
                 theme: self.theme,
             }
             .show(ui);
 
-            ui.add_space(8.0);
-
-            // Artist Tracks Table
-            egui::ScrollArea::vertical()
-                .id_salt("artist_tracks_scroll")
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xxs);
-                    let full_w = ui.available_width();
-
-                    for (idx, track) in self.artist_tracks.iter().enumerate() {
-                        let is_cur = self.active_track_id == Some(track.id);
-                        let is_fav = self.favorite_track_ids.contains(&track.id);
-                        let row_h = 38.0;
-
-                        let (row_rect, row_resp) =
-                            ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
-                        row_resp.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::Role::Button,
-                                true,
-                                is_cur,
-                                format!("{} by {}", track.title, track.artist),
-                            )
-                        });
-                        if row_resp.double_clicked() {
-                            action.play_track = Some(track.id);
-                        }
-
-                        let painter = ui.painter_at(row_rect);
-                        if is_cur {
-                            painter.rect_filled(
-                                row_rect,
-                                CornerRadius::same(self.theme.radius_sm),
-                                self.theme.bg_active_row,
-                            );
-                            painter.rect_stroke(
-                                row_rect,
-                                CornerRadius::same(self.theme.radius_sm),
-                                Stroke::new(1.0_f32, self.theme.border_active_row),
-                                egui::StrokeKind::Inside,
-                            );
-                        } else if row_resp.hovered() {
-                            painter.rect_filled(
-                                row_rect,
-                                CornerRadius::same(self.theme.radius_sm),
-                                self.theme.bg_card_hover,
-                            );
-                        }
-
-                        let cy = row_rect.center().y;
-                        painter.text(
-                            Pos2::new(row_rect.min.x + 10.0, cy),
-                            egui::Align2::LEFT_CENTER,
-                            format!("{:02}", idx + 1),
-                            crate::theme::font(12.0),
-                            self.theme.text_muted,
-                        );
-
-                        painter.text(
-                            Pos2::new(row_rect.min.x + 44.0, cy),
-                            egui::Align2::LEFT_CENTER,
-                            &track.title,
-                            crate::theme::font(13.2),
-                            if is_cur {
-                                Color32::WHITE
-                            } else {
-                                self.theme.text_primary
-                            },
-                        );
-
-                        let album_name = if track.album.is_empty() {
-                            "—"
-                        } else {
-                            &track.album
-                        };
-                        painter.text(
-                            Pos2::new(row_rect.min.x + 280.0, cy),
-                            egui::Align2::LEFT_CENTER,
-                            album_name,
-                            crate::theme::font(12.5),
-                            self.theme.text_muted,
-                        );
-
-                        let dur_s = format_time(track.duration_secs as f64);
-                        painter.text(
-                            Pos2::new(row_rect.max.x - 48.0, cy),
-                            egui::Align2::RIGHT_CENTER,
-                            &dur_s,
-                            crate::theme::font(12.0),
-                            self.theme.text_muted,
-                        );
-
-                        let fav_rect = Rect::from_center_size(
-                            Pos2::new(row_rect.max.x - 16.0, cy),
-                            Vec2::new(18.0, 18.0),
-                        );
-                        // A real widget, so the heart can be reached by
-                        // keyboard and announced by a screen reader.
-                        let fav_resp = ui.interact(
-                            fav_rect,
-                            ui.scope_id().with(("row_fav", track.id)),
-                            Sense::click(),
-                        );
-                        let fav_hover = fav_resp.hovered();
-                        let heart_col = if is_fav {
-                            self.theme.accent_warm
-                        } else if fav_hover {
-                            self.theme.text_primary
-                        } else {
-                            self.theme.text_muted
-                        };
-                        crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_fav);
-
-                        if fav_resp.clicked() {
-                            action.toggle_favorite = Some(track.id);
-                        }
-                        fav_resp.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::Role::Button,
-                                true,
-                                if is_fav {
-                                    "Remove from favorites"
-                                } else {
-                                    "Add to favorites"
-                                },
-                            )
-                        });
-                        let _ = fav_resp.on_hover_text(if is_fav {
-                            "Remove from favorites"
-                        } else {
-                            "Add to favorites"
-                        });
-                    }
-                });
+            if let Some(id) = collection.play_track {
+                action.play_track = Some(id);
+            }
+            if let Some(id) = collection.toggle_favorite {
+                action.toggle_favorite = Some(id);
+            }
         } else {
             // ── Artists Grid View ──────────────────────────────────────────
             ui.horizontal(|ui| {
@@ -399,10 +301,9 @@ impl<'a> ArtistsView<'a> {
                                     }
 
                                     if let Some(tex) = cover_tex {
-                                        // A rounded square, matching the album
-                                        // grid's cover shape.
+                                        // A circular image matching the artist avatar shape.
                                         egui::Image::new(&tex)
-                                            .corner_radius(CornerRadius::same(self.theme.radius_lg))
+                                            .corner_radius(CornerRadius::same(avatar_r as u8))
                                             .fit_to_exact_size(Vec2::splat(avatar_r * 2.0))
                                             .paint_at(ui, avatar_rect);
                                     } else {
@@ -470,11 +371,4 @@ impl<'a> ArtistsView<'a> {
 
         action
     }
-}
-
-fn format_time(seconds: f64) -> String {
-    let s = seconds.max(0.0) as u64;
-    let mins = s / 60;
-    let secs = s % 60;
-    format!("{}:{:02}", mins, secs)
 }

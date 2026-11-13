@@ -172,7 +172,6 @@ fn the_readme_describes_the_tools_and_the_opt_in_network() {
         "cd ripper",
         "transcode export",
         "room-correction",
-        "liner notes",
         "headless",
         "sha-256",
         "clap.gui",

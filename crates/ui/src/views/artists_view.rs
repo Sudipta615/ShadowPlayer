@@ -4,8 +4,8 @@ use eframe::egui;
 use playback::PlaybackCoordinator;
 
 use crate::components::artists_panel::ArtistsView;
-use crate::services::{ArtworkService, BiographyService};
-use crate::state::{BiographyEditorState, LibraryState};
+use crate::services::ArtworkService;
+use crate::state::LibraryState;
 use crate::theme::Theme;
 
 #[allow(clippy::too_many_arguments)]
@@ -14,18 +14,26 @@ pub fn render_artists_view(
     library_state: &mut LibraryState,
     coordinator: &mut PlaybackCoordinator,
     artwork_service: &mut ArtworkService,
-    biography_service: &mut BiographyService,
-    biography_editor: &mut BiographyEditorState,
     current_track: Option<&Track>,
     is_playing: bool,
     theme: &Theme,
     artist_repo: &ArtistRepo,
     favorites_repo: &FavoritesRepo,
 ) {
-    let biography = library_state
-        .selected_artist
-        .clone()
-        .and_then(|name| biography_service.get("artist", &name));
+    if let Some(ref artist) = library_state.selected_artist {
+        let is_mismatched = library_state.artist_tracks.is_empty()
+            || library_state
+                .artist_tracks
+                .first()
+                .map(|t| &t.artist != artist)
+                .unwrap_or(true);
+        if is_mismatched {
+            library_state.artist_tracks =
+                artist_repo.get_tracks_by_artist(artist).unwrap_or_default();
+        }
+    } else if !library_state.artist_tracks.is_empty() {
+        library_state.artist_tracks.clear();
+    }
 
     let art_action = ArtistsView {
         artists: &library_state.artists,
@@ -36,27 +44,28 @@ pub fn render_artists_view(
         favorite_track_ids: &library_state.favorite_ids,
         artist_covers: &library_state.artist_cover_tracks,
         artwork: artwork_service,
-        biography: biography.as_ref(),
-        biography_editor,
+        collection_view: library_state.collection_view,
         theme,
     }
     .show(ui);
 
-    if let Some(request) = art_action.biography_request {
-        match request {
-            crate::components::biography_pane::BiographyPaneRequest::Save { kind, name, text } => {
-                match biography_service.save(&kind, &name, &text) {
-                    Ok(()) => biography_editor.close(),
-                    Err(e) => biography_editor.fail(e),
-                }
-            }
-            crate::components::biography_pane::BiographyPaneRequest::Delete { kind, name } => {
-                match biography_service.save(&kind, &name, "") {
-                    Ok(()) => biography_editor.close(),
-                    Err(e) => biography_editor.fail(e),
-                }
-            }
+    // If an artist was just selected during this frame, immediately load its tracks.
+    if let Some(ref artist) = library_state.selected_artist {
+        let is_mismatched = library_state.artist_tracks.is_empty()
+            || library_state
+                .artist_tracks
+                .first()
+                .map(|t| &t.artist != artist)
+                .unwrap_or(true);
+        if is_mismatched {
+            library_state.artist_tracks =
+                artist_repo.get_tracks_by_artist(artist).unwrap_or_default();
+            ui.ctx().request_repaint();
         }
+    }
+
+    if let Some(view) = art_action.view_changed {
+        library_state.collection_view = view;
     }
 
     if let Some(artist) = art_action.play_artist {

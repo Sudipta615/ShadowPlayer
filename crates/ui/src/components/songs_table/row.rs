@@ -353,7 +353,7 @@ fn render_grid_card(
 }
 
 /// Fetch (or lazily decode, within budget) a cover texture for `track`.
-pub(super) fn art_for(
+pub(crate) fn art_for(
     artwork: &mut ArtworkService,
     ctx: &egui::Context,
     budget: &mut usize,
@@ -370,7 +370,7 @@ pub(super) fn art_for(
     tex
 }
 
-pub(super) fn format_duration(seconds: f64) -> String {
+pub(crate) fn format_duration(seconds: f64) -> String {
     let s = seconds.max(0.0) as u64;
     let mins = s / 60;
     let secs = s % 60;

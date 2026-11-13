@@ -33,7 +33,6 @@ mod tests {
 pub mod albums_panel;
 pub mod artists_panel;
 pub mod backend_options;
-pub mod biography_pane;
 pub mod clap_rack_panel;
 pub mod command_palette;
 pub mod eq_panel;
@@ -56,6 +55,7 @@ pub mod songs_table;
 pub mod text;
 pub mod toasts;
 pub mod topbar;
+pub mod track_collection;
 pub mod track_properties_modal;
 pub mod visualizer;
 pub mod volume_slider;

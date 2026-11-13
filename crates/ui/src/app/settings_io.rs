@@ -32,6 +32,7 @@ impl ShadowPlayerApp {
             self.app_state.current_sort = app_settings.sort_field;
             self.app_state.current_sort_order = app_settings.sort_order;
             self.app_state.is_grid_view = app_settings.view_mode == domain::models::ViewMode::Grid;
+            self.library_state.collection_view = app_settings.collection_view;
             self.window_size = (
                 app_settings
                     .window_width
@@ -274,6 +275,7 @@ impl ShadowPlayerApp {
             } else {
                 domain::models::ViewMode::List
             },
+            collection_view: self.library_state.collection_view,
             audio_profile: self.dsp_state.settings_tab.audio_profile,
             repeat_mode: self.coordinator.repeat_mode(),
             shuffle: self.coordinator.is_shuffle(),

@@ -3,7 +3,7 @@ mod unit {
     use crate::db::Database;
     use crate::repos::*;
     use domain::ids::TrackId;
-    use domain::models::{AppSettings, SortField, SortOrder, Track, TrackDspProfile};
+    use domain::models::{AppSettings, SortField, SortOrder, Track, TrackDspProfile, ViewMode};
 
     use std::path::PathBuf;
 
@@ -120,6 +120,7 @@ mod unit {
             volume: 0.92,
             sort_field: SortField::Duration,
             sort_order: SortOrder::Descending,
+            collection_view: ViewMode::Grid,
             ..AppSettings::default()
         };
 
@@ -129,6 +130,7 @@ mod unit {
         assert!((loaded.volume - 0.92).abs() < 1e-4);
         assert_eq!(loaded.sort_field, SortField::Duration);
         assert_eq!(loaded.sort_order, SortOrder::Descending);
+        assert_eq!(loaded.collection_view, ViewMode::Grid);
 
         // Test arbitrary key-value persistence for EQ and Studio Settings
         settings_repo

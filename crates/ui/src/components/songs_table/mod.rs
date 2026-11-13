@@ -29,7 +29,7 @@ mod toolbar;
 
 pub use columns::{ColumnPreset, SongColumn};
 pub use prefs::{ColumnWidths, QuickFilter, RowDensity, SongTablePrefs};
-pub(crate) use row::paint_rating_stars;
+pub(crate) use row::{art_for, format_duration, paint_rating_stars};
 
 /// Maximum number of new cover textures decoded per frame. Caps the work done in
 /// a single frame so fast scrolling on a slow CPU can't cause a stutter.

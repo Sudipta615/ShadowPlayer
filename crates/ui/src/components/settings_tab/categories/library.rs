@@ -442,20 +442,6 @@ pub(in crate::components::settings_tab) fn render_library_category(
 
         setting_item(
             ui,
-            &tr!("Biography Source Folder"),
-            &tr!("Folder of artist and album notes. Reads <Artist>.txt/.md and <Artist> - <Album>.txt/.md. The first read is cached; edits in the pane are stored separately."),
-            theme,
-            |ui| {
-                let edit = egui::TextEdit::singleline(&mut state.biography_source_dir)
-                    .hint_text(tr!("/home/user/Music/biographies"))
-                    .desired_width(240.0)
-                    .font(crate::theme::font(12.0));
-                ui.add(edit);
-            },
-        );
-
-        setting_item(
-            ui,
             &tr!("Or Type a Directory"),
             &tr!("Advanced: index a folder by typing its absolute path"),
             theme,

@@ -1,6 +1,8 @@
+use crate::components::track_collection::{view_toggle, TrackCollection, TrackSubtitle};
+use crate::services::ArtworkService;
 use crate::theme::Theme;
 use domain::ids::TrackId;
-use domain::models::{Genre, Track};
+use domain::models::{Genre, Track, ViewMode};
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 pub struct GenresViewAction {
@@ -8,6 +10,8 @@ pub struct GenresViewAction {
     pub queue_genre: Option<String>,
     pub play_track: Option<TrackId>,
     pub toggle_favorite: Option<TrackId>,
+    /// The user switched the detail page between list and grid.
+    pub view_changed: Option<ViewMode>,
 }
 
 pub struct GenresView<'a> {
@@ -17,6 +21,10 @@ pub struct GenresView<'a> {
     pub active_track_id: Option<TrackId>,
     pub is_playing: bool,
     pub favorite_track_ids: &'a std::collections::HashSet<TrackId>,
+    /// The artwork service, so the list/grid can load cover thumbnails.
+    pub artwork: &'a mut ArtworkService,
+    /// List or grid form for the songs on this page.
+    pub collection_view: ViewMode,
     pub theme: &'a Theme,
 }
 
@@ -27,6 +35,7 @@ impl<'a> GenresView<'a> {
             queue_genre: None,
             play_track: None,
             toggle_favorite: None,
+            view_changed: None,
         };
 
         if let Some(sel_name) = self.selected_genre.clone() {
@@ -45,6 +54,14 @@ impl<'a> GenresView<'a> {
                 if ui.add(back_btn).clicked() {
                     *self.selected_genre = None;
                 }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(view) =
+                        view_toggle(ui, self.collection_view, self.theme, "genre_detail")
+                    {
+                        action.view_changed = Some(view);
+                    }
+                });
             });
 
             ui.add_space(8.0);
@@ -137,133 +154,24 @@ impl<'a> GenresView<'a> {
 
             ui.add_space(10.0);
 
-            // Genre Tracks Table
-            egui::ScrollArea::vertical()
-                .id_salt("genre_tracks_scroll")
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, self.theme.space_xxs);
-                    let full_w = ui.available_width();
+            let collection = TrackCollection {
+                tracks: self.genre_tracks,
+                active_track_id: self.active_track_id,
+                favorite_track_ids: self.favorite_track_ids,
+                artwork: self.artwork,
+                view: self.collection_view,
+                subtitle: TrackSubtitle::ArtistAndAlbum,
+                id_salt: "genre_tracks",
+                theme: self.theme,
+            }
+            .show(ui);
 
-                    for (idx, track) in self.genre_tracks.iter().enumerate() {
-                        let is_cur = self.active_track_id == Some(track.id);
-                        let is_fav = self.favorite_track_ids.contains(&track.id);
-                        let row_h = 38.0;
-
-                        let (row_rect, row_resp) =
-                            ui.allocate_exact_size(Vec2::new(full_w, row_h), Sense::click());
-                        row_resp.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::Role::Button,
-                                true,
-                                is_cur,
-                                format!("{} by {}", track.title, track.artist),
-                            )
-                        });
-                        if row_resp.double_clicked() {
-                            action.play_track = Some(track.id);
-                        }
-
-                        let painter = ui.painter_at(row_rect);
-                        if is_cur {
-                            painter.rect_filled(
-                                row_rect,
-                                CornerRadius::same(self.theme.radius_sm),
-                                self.theme.bg_active_row,
-                            );
-                            painter.rect_stroke(
-                                row_rect,
-                                CornerRadius::same(self.theme.radius_sm),
-                                Stroke::new(1.0_f32, self.theme.border_active_row),
-                                egui::StrokeKind::Inside,
-                            );
-                        } else if row_resp.hovered() {
-                            painter.rect_filled(
-                                row_rect,
-                                CornerRadius::same(self.theme.radius_sm),
-                                self.theme.bg_card_hover,
-                            );
-                        }
-
-                        let cy = row_rect.center().y;
-                        painter.text(
-                            Pos2::new(row_rect.min.x + 10.0, cy),
-                            egui::Align2::LEFT_CENTER,
-                            format!("{:02}", idx + 1),
-                            crate::theme::font(12.0),
-                            self.theme.text_muted,
-                        );
-
-                        painter.text(
-                            Pos2::new(row_rect.min.x + 44.0, cy),
-                            egui::Align2::LEFT_CENTER,
-                            &track.title,
-                            crate::theme::font(13.2),
-                            if is_cur {
-                                Color32::WHITE
-                            } else {
-                                self.theme.text_primary
-                            },
-                        );
-
-                        painter.text(
-                            Pos2::new(row_rect.min.x + 280.0, cy),
-                            egui::Align2::LEFT_CENTER,
-                            &track.artist,
-                            crate::theme::font(12.5),
-                            self.theme.text_muted,
-                        );
-
-                        let dur_s = format_time(track.duration_secs as f64);
-                        painter.text(
-                            Pos2::new(row_rect.max.x - 48.0, cy),
-                            egui::Align2::RIGHT_CENTER,
-                            &dur_s,
-                            crate::theme::font(12.0),
-                            self.theme.text_muted,
-                        );
-
-                        let fav_rect = Rect::from_center_size(
-                            Pos2::new(row_rect.max.x - 16.0, cy),
-                            Vec2::new(18.0, 18.0),
-                        );
-                        // A real widget, so the heart can be reached by
-                        // keyboard and announced by a screen reader.
-                        let fav_resp = ui.interact(
-                            fav_rect,
-                            ui.scope_id().with(("row_fav", track.id)),
-                            Sense::click(),
-                        );
-                        let fav_hover = fav_resp.hovered();
-                        let heart_col = if is_fav {
-                            self.theme.accent_warm
-                        } else if fav_hover {
-                            self.theme.text_primary
-                        } else {
-                            self.theme.text_muted
-                        };
-                        crate::components::icons::draw_heart(ui, fav_rect, heart_col, is_fav);
-
-                        if fav_resp.clicked() {
-                            action.toggle_favorite = Some(track.id);
-                        }
-                        fav_resp.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::Role::Button,
-                                true,
-                                if is_fav {
-                                    "Remove from favorites"
-                                } else {
-                                    "Add to favorites"
-                                },
-                            )
-                        });
-                        let _ = fav_resp.on_hover_text(if is_fav {
-                            "Remove from favorites"
-                        } else {
-                            "Add to favorites"
-                        });
-                    }
-                });
+            if let Some(id) = collection.play_track {
+                action.play_track = Some(id);
+            }
+            if let Some(id) = collection.toggle_favorite {
+                action.toggle_favorite = Some(id);
+            }
         } else {
             // ── Genres Grid View ───────────────────────────────────────────
             ui.horizontal(|ui| {
@@ -389,11 +297,4 @@ impl<'a> GenresView<'a> {
 
         action
     }
-}
-
-fn format_time(seconds: f64) -> String {
-    let s = seconds.max(0.0) as u64;
-    let mins = s / 60;
-    let secs = s % 60;
-    format!("{}:{:02}", mins, secs)
 }

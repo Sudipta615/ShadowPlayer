@@ -301,18 +301,30 @@ impl<'a> NowPlayingCard<'a> {
 
                     ui.add_space(if compact { 2.0 } else { 3.0 });
 
-                    // 3. Live spectrum visualizer. It is decorative and the
-                    // compact layout needs the vertical space for the table, so
-                    // it is omitted below the responsive breakpoint.
+                    // 3. Waveform visualiser: the track's cached envelope,
+                    // coloured up to the playhead. Decorative, and the compact
+                    // layout needs the vertical space for the table, so it is
+                    // omitted below the responsive breakpoint.
                     let time_label_w = 32.0;
                     let time_gap = 8.0;
                     let bar_width =
                         (ui.available_width() - (time_label_w * 2.0 + time_gap * 2.0)).max(60.0);
                     if !compact {
+                        let progress = if self.duration_secs > 0.0 {
+                            (self.position_secs / self.duration_secs) as f32
+                        } else {
+                            0.0
+                        };
                         ui.horizontal(|ui| {
                             ui.add_space(time_label_w + time_gap);
-                            VisualizerWidget::new(self.is_playing, self.theme)
-                                .show(ui, Vec2::new(bar_width, 42.0));
+                            let (_vis_resp, vis_seek) =
+                                VisualizerWidget::new(self.is_playing, self.theme)
+                                    .peaks(self.waveform)
+                                    .progress(progress)
+                                    .show(ui, Vec2::new(bar_width, 42.0));
+                            if let Some(norm) = vis_seek {
+                                events.seek_secs = Some(norm as f64 * self.duration_secs);
+                            }
                         });
 
                         ui.add_space(3.0);
@@ -380,11 +392,11 @@ impl<'a> NowPlayingCard<'a> {
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             let avail_w = ui.available_width();
-                            // Right-hand utility cluster: 5 buttons (EQ, Signal Path,
-                            // Zones, Loudness, Sleep Timer), each 28 px wide with 6 px gap.
+                            // Right-hand utility cluster: 4 buttons (EQ, Signal Path,
+                            // Zones, Sleep Timer), each 28 px wide with 6 px gap.
                             let right_btn_w = 28.0;
                             let right_btn_gap = 6.0;
-                            let right_group_w = (5.0 * right_btn_w) + (4.0 * right_btn_gap);
+                            let right_group_w = (4.0 * right_btn_w) + (3.0 * right_btn_gap);
                             let play_size = (art_size.x * 0.30).clamp(32.0, 44.0);
                             let gap = if avail_w < 440.0 {
                                 6.0
@@ -522,7 +534,7 @@ impl<'a> NowPlayingCard<'a> {
                                 events.toggle_repeat = true;
                             }
 
-                            // Utility Buttons (EQ, Audio Path, Zones, Loudness, Timer) - RIGHT ALIGNED
+                            // Utility Buttons (EQ, Audio Path, Zones, Timer) - RIGHT ALIGNED
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -651,43 +663,7 @@ impl<'a> NowPlayingCard<'a> {
                                         events.open_zones = true;
                                     }
 
-                                    // 4. Loudness Inspector Button
-                                    let (ld_slot, ld_resp) = ui.allocate_exact_size(
-                                        Vec2::new(right_btn_w, row_h),
-                                        Sense::click(),
-                                    );
-                                    let ld_rect = Rect::from_center_size(
-                                        ld_slot.center(),
-                                        Vec2::new(26.0, 26.0),
-                                    );
-                                    let ld_p = ui.painter_at(ld_rect);
-                                    let ld_bg = if ld_resp.hovered() {
-                                        self.theme.bg_card_hover
-                                    } else {
-                                        self.theme.bg_pill
-                                    };
-                                    ld_p.rect_filled(ld_rect, CornerRadius::same(self.theme.radius_sm), ld_bg);
-                                    ld_p.rect_stroke(ld_rect, CornerRadius::same(self.theme.radius_sm), Stroke::new(1.0_f32, self.theme.border_subtle), egui::StrokeKind::Inside);
-                                    crate::components::icons::draw_bar_chart(
-                                        ui,
-                                        ld_rect.shrink2(Vec2::new(3.0, 3.0)),
-                                        self.theme.text_secondary,
-                                    );
-                                    ld_resp.widget_info(|| {
-                                        egui::WidgetInfo::labeled(
-                                            egui::Role::Button,
-                                            true,
-                                            "Loudness inspector",
-                                        )
-                                    });
-                                    let _ = ld_resp.clone().on_hover_text(
-                                        tr!(Msg::SAE6D928B2036843C),
-                                    );
-                                    if ld_resp.clicked() {
-                                        events.open_loudness = true;
-                                    }
-
-                                    // 5. Sleep Timer Button (with preset popup)
+                                    // 4. Sleep Timer Button (with preset popup)
                                     let (tm_slot, tm_resp) = ui.allocate_exact_size(
                                         Vec2::new(right_btn_w, row_h),
                                         Sense::click(),

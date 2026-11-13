@@ -149,12 +149,6 @@ pub const FEATURES: &[Feature] = &[
         note: "Contacts GitHub only when enabled; a download is SHA-256 verified and is never installed automatically.",
     },
     Feature {
-        id: "album_liner_notes",
-        label: "Markdown album liner notes",
-        platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
-        note: "Notes are stored in the library database and rendered in a safe Markdown subset.",
-    },
-    Feature {
         id: "null_backend",
         label: "Null output backend",
         platforms: &[Platform::Linux, Platform::Windows, Platform::MacOs],
@@ -258,8 +252,7 @@ mod tests {
                     assert!(pickers.contains("rfd::FileDialog"));
                 }
                 "exclusive_output" | "system_media" | "cd_ripping" | "transcode_export"
-                | "clap_gui" | "headless_mode" | "update_check" | "album_liner_notes"
-                | "null_backend" => {
+                | "clap_gui" | "headless_mode" | "update_check" | "null_backend" => {
                     assert_eq!(feature.platforms, Platform::ALL);
                 }
                 _ => {}

@@ -1,11 +1,11 @@
-use database::{AlbumNotesRepo, AlbumRepo, FavoritesRepo};
+use database::{AlbumRepo, FavoritesRepo};
 use domain::models::Track;
 use eframe::egui;
 use playback::PlaybackCoordinator;
 
 use crate::components::albums_panel::AlbumsView;
-use crate::services::{ArtworkService, BiographyService};
-use crate::state::{BiographyEditorState, LibraryState};
+use crate::services::ArtworkService;
+use crate::state::LibraryState;
 use crate::theme::Theme;
 
 #[allow(clippy::too_many_arguments)]
@@ -14,22 +14,27 @@ pub fn render_albums_view(
     library_state: &mut LibraryState,
     coordinator: &mut PlaybackCoordinator,
     artwork_service: &mut ArtworkService,
-    biography_service: &mut BiographyService,
-    biography_editor: &mut BiographyEditorState,
     current_track: Option<&Track>,
     is_playing: bool,
     theme: &Theme,
     album_repo: &AlbumRepo,
-    album_notes_repo: &AlbumNotesRepo,
     favorites_repo: &FavoritesRepo,
 ) {
-    let biography = library_state
-        .selected_album
-        .clone()
-        .and_then(|(title, artist)| {
-            let key = BiographyService::album_key(&artist, &title);
-            biography_service.get("album", &key)
-        });
+    if let Some((ref title, ref artist)) = library_state.selected_album {
+        let is_mismatched = library_state.album_tracks.is_empty()
+            || library_state
+                .album_tracks
+                .first()
+                .map(|t| (&t.album, &t.artist) != (title, artist))
+                .unwrap_or(true);
+        if is_mismatched {
+            library_state.album_tracks = album_repo
+                .get_tracks_by_album(title, artist)
+                .unwrap_or_default();
+        }
+    } else if !library_state.album_tracks.is_empty() {
+        library_state.album_tracks.clear();
+    }
 
     let alb_action = AlbumsView {
         albums: &library_state.albums,
@@ -40,30 +45,30 @@ pub fn render_albums_view(
         favorite_track_ids: &library_state.favorite_ids,
         album_covers: &library_state.album_cover_tracks,
         artwork: artwork_service,
-        biography: biography.as_ref(),
-        biography_editor,
-        notes: &mut library_state.album_notes,
-        notes_repo: album_notes_repo,
+        collection_view: library_state.collection_view,
         album_analyzer: Some(&library_state.album_analyzer),
         theme,
     }
     .show(ui);
 
-    if let Some(request) = alb_action.biography_request {
-        match request {
-            crate::components::biography_pane::BiographyPaneRequest::Save { kind, name, text } => {
-                match biography_service.save(&kind, &name, &text) {
-                    Ok(()) => biography_editor.close(),
-                    Err(e) => biography_editor.fail(e),
-                }
-            }
-            crate::components::biography_pane::BiographyPaneRequest::Delete { kind, name } => {
-                match biography_service.save(&kind, &name, "") {
-                    Ok(()) => biography_editor.close(),
-                    Err(e) => biography_editor.fail(e),
-                }
-            }
+    // If an album was just selected during this frame, immediately load its tracks.
+    if let Some((ref title, ref artist)) = library_state.selected_album {
+        let is_mismatched = library_state.album_tracks.is_empty()
+            || library_state
+                .album_tracks
+                .first()
+                .map(|t| (&t.album, &t.artist) != (title, artist))
+                .unwrap_or(true);
+        if is_mismatched {
+            library_state.album_tracks = album_repo
+                .get_tracks_by_album(title, artist)
+                .unwrap_or_default();
+            ui.ctx().request_repaint();
         }
+    }
+
+    if let Some(view) = alb_action.view_changed {
+        library_state.collection_view = view;
     }
 
     if let Some((title, artist)) = alb_action.play_album {

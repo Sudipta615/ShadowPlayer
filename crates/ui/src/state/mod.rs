@@ -1,7 +1,5 @@
-pub mod album_notes;
 pub mod app_state;
 pub mod autoeq_catalog;
-pub mod biography_editor;
 pub mod chain_override;
 pub mod chain_preset;
 pub mod clap_rack;
@@ -13,10 +11,8 @@ pub mod recommendation_state;
 pub mod sleep_timer;
 pub mod telemetry_state;
 
-pub use album_notes::AlbumNotesState;
 pub use app_state::{AppState, VisualizerMode};
 pub use autoeq_catalog::{AutoEqCatalog, AutoEqEntry};
-pub use biography_editor::BiographyEditorState;
 pub use chain_preset::{ChainEq, ChainPreset};
 pub use clap_rack::{ClapCardSummary, ClapRackPreset, ClapRackState};
 pub use dsp_state::DspState;

@@ -174,8 +174,20 @@ impl<'a> NowPlayingFull<'a> {
                             ui.add_space(theme.space_lg);
                             let used = ui.min_rect().height();
                             let vis_h = (body_h - used - theme.space_lg).clamp(72.0, 260.0);
-                            VisualizerWidget::new(self.is_playing, theme)
-                                .show(ui, Vec2::new(details_w, vis_h));
+                            let progress = if self.duration_secs > 0.0 {
+                                (self.position_secs / self.duration_secs) as f32
+                            } else {
+                                0.0
+                            };
+                            let (_vis_resp, vis_seek) =
+                                VisualizerWidget::new(self.is_playing, theme)
+                                    .peaks(self.waveform)
+                                    .progress(progress)
+                                    .show(ui, Vec2::new(details_w, vis_h));
+                            if let Some(fraction) = vis_seek {
+                                events.seek_secs =
+                                    Some(fraction as f64 * self.duration_secs.max(0.1));
+                            }
                         },
                     );
 

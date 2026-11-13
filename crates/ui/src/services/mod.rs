@@ -2,7 +2,6 @@ pub mod artwork_fetch_service;
 pub mod artwork_service;
 pub mod autoeq_catalog_service;
 pub mod autotag_service;
-pub mod biography_service;
 pub mod control_service;
 pub mod crossfade_preview;
 pub mod file_task_service;
@@ -24,7 +23,6 @@ pub use autoeq_catalog_service::AutoEqCatalogService;
 pub use autotag_service::{
     AutotagMatch, AutotagOutcome, AutotagProgress, AutotagResult, AutotagService,
 };
-pub use biography_service::BiographyService;
 pub use control_service::{
     activate_existing_instance, multi_instance_enabled, read_endpoint, send_control_command,
     set_multi_instance_enabled, ControlEndpoint, ControlRequest, ControlResponse, ControlService,

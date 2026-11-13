@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use audio_session::AudioSession;
 use database::{
-    AlbumNotesRepo, AlbumRepo, ArtistRepo, Database, EqPresetsRepo, FavoritesRepo, GenreRepo,
-    HistoryRepo, PlaylistRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
+    AlbumRepo, ArtistRepo, Database, EqPresetsRepo, FavoritesRepo, GenreRepo, HistoryRepo,
+    PlaylistRepo, ScanRootsRepo, SettingsRepo, SmartPlaylistRepo, TrackRepo,
 };
 use domain::models::Track;
 use eframe::egui::{self, Margin, Pos2, Rect, Sense, Vec2};
@@ -26,11 +26,11 @@ use crate::modals::{
     OrganizeState, RoomMeasurementState, SmartPlaylistEditorState,
 };
 use crate::services::{
-    ArtworkFetchService, ArtworkService, AutoEqCatalogService, AutotagService, BiographyService,
-    ControlService, CrossfadePreview, FileTask, FileTaskEvent, FileTaskService, ImportKind,
-    ImportResult, ImportService, LoudnessService, LyricsService, MediaToolEvent, MediaToolsService,
-    MprisCommand, MprisService, MprisSnapshot, PresetIoEvent, PresetIoService,
-    RecommendationAnalysisService, RecommendationService, ScannerService, WaveformService,
+    ArtworkFetchService, ArtworkService, AutoEqCatalogService, AutotagService, ControlService,
+    CrossfadePreview, FileTask, FileTaskEvent, FileTaskService, ImportKind, ImportResult,
+    ImportService, LoudnessService, LyricsService, MediaToolEvent, MediaToolsService, MprisCommand,
+    MprisService, MprisSnapshot, PresetIoEvent, PresetIoService, RecommendationAnalysisService,
+    RecommendationService, ScannerService, WaveformService,
 };
 use crate::state::{
     AppState, DspState, LibraryState, RecommendationState, SleepTimerMode, TelemetryState,
@@ -88,7 +88,6 @@ pub struct ShadowPlayerApp {
     history_repo: HistoryRepo,
     scrobble_repo: database::ScrobbleRepo,
     album_repo: AlbumRepo,
-    album_notes_repo: AlbumNotesRepo,
     artist_repo: ArtistRepo,
     genre_repo: GenreRepo,
     scan_roots_repo: ScanRootsRepo,
@@ -103,7 +102,6 @@ pub struct ShadowPlayerApp {
     lyrics_service: LyricsService,
     waveform_service: WaveformService,
     crossfade_preview: CrossfadePreview,
-    biography_service: BiographyService,
     scanner_service: ScannerService,
     import_service: ImportService,
     /// Disk work issued from modals: tag write-back, duplicate deletion, the
@@ -242,7 +240,6 @@ impl ShadowPlayerApp {
         let history_repo = HistoryRepo::new(db.clone());
         let scrobble_repo = database::ScrobbleRepo::new(db.clone());
         let album_repo = AlbumRepo::new(db.clone());
-        let album_notes_repo = AlbumNotesRepo::new(db.clone());
         let artist_repo = ArtistRepo::new(db.clone());
         let genre_repo = GenreRepo::new(db.clone());
         let scan_roots_repo = ScanRootsRepo::new(db.clone());
@@ -263,7 +260,6 @@ impl ShadowPlayerApp {
         let artwork_service = ArtworkService::new();
         let lyrics_service = LyricsService::new();
         let waveform_service = WaveformService::new(db.clone());
-        let biography_service = BiographyService::new(db.clone());
         let loudness_service = LoudnessService::new(db.clone());
         let recommendation_service = RecommendationService::new(db.clone());
         let recommendation_analysis_service = RecommendationAnalysisService::new(db.clone());
@@ -301,7 +297,6 @@ impl ShadowPlayerApp {
             history_repo,
             scrobble_repo,
             album_repo,
-            album_notes_repo,
             artist_repo,
             genre_repo,
             scan_roots_repo,
@@ -315,7 +310,6 @@ impl ShadowPlayerApp {
             lyrics_service,
             waveform_service,
             crossfade_preview: CrossfadePreview::new(),
-            biography_service,
             scanner_service,
             import_service,
             file_tasks,
@@ -383,8 +377,6 @@ impl ShadowPlayerApp {
         app.recommendation_service.refresh_stats();
         // Durable presets live in their own table, not in the settings JSON.
         app.reload_eq_presets();
-        app.biography_service
-            .set_source_dir(&app.dsp_state.settings_tab.biography_source_dir);
         app.crossfade_preview.set_preview(
             app.dsp_state.settings_tab.crossfade_curve,
             app.dsp_state.settings_tab.crossfade_duration_secs,

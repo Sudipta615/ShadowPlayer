@@ -222,6 +222,7 @@ impl ShadowPlayerApp {
                 }
 
                 // View Switcher
+                let collection_view_before = self.library_state.collection_view;
                 match self.app_state.active_nav {
                     NavItem::Albums => {
                         render_albums_view(
@@ -229,13 +230,10 @@ impl ShadowPlayerApp {
                             &mut self.library_state,
                             &mut self.coordinator,
                             &mut self.artwork_service,
-                            &mut self.biography_service,
-                            &mut self.app_state.biography_editor,
                             playback.current_track,
                             playback.is_playing,
                             &self.theme,
                             &self.album_repo,
-                            &self.album_notes_repo,
                             &self.favorites_repo,
                         );
                     }
@@ -245,8 +243,6 @@ impl ShadowPlayerApp {
                             &mut self.library_state,
                             &mut self.coordinator,
                             &mut self.artwork_service,
-                            &mut self.biography_service,
-                            &mut self.app_state.biography_editor,
                             playback.current_track,
                             playback.is_playing,
                             &self.theme,
@@ -259,6 +255,7 @@ impl ShadowPlayerApp {
                             ui,
                             &mut self.library_state,
                             &mut self.coordinator,
+                            &mut self.artwork_service,
                             playback.current_track,
                             playback.is_playing,
                             &self.theme,
@@ -275,6 +272,7 @@ impl ShadowPlayerApp {
                             &mut self.library_state,
                             &mut self.scanner_service,
                             &mut self.coordinator,
+                            &mut self.artwork_service,
                             playback.current_track,
                             &self.theme,
                             &self.scan_roots_repo,
@@ -373,10 +371,6 @@ impl ShadowPlayerApp {
                             } else {
                                 self.crossfade_preview.set_preview(curve, duration);
                             }
-                        }
-                        if let Some(dir) = sv_actions.biography_source_dir_changed.clone() {
-                            self.biography_service.set_source_dir(&dir);
-                            self.settings_dirty = true;
                         }
                         if sv_actions.start_loudness_scan {
                             let write_tags = self.dsp_state.settings_tab.loudness_write_tags;
@@ -699,6 +693,11 @@ impl ShadowPlayerApp {
                                 .start(tracks, self.artwork_service.manager());
                         }
                     }
+                }
+                // The detail-page list/grid choice is its own persisted
+                // preference, independent of the main Songs table.
+                if self.library_state.collection_view != collection_view_before {
+                    self.settings_dirty = true;
                 }
                 // B. Right Column Drawer
                 self.render_drawer(

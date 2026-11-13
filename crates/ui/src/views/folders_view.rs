@@ -6,7 +6,7 @@ use eframe::egui;
 use playback::PlaybackCoordinator;
 
 use crate::components::folders_panel::FoldersView;
-use crate::services::{ImportKind, ScannerService};
+use crate::services::{ArtworkService, ImportKind, ScannerService};
 use crate::state::LibraryState;
 use crate::theme::Theme;
 
@@ -16,6 +16,7 @@ pub fn render_folders_view(
     library_state: &mut LibraryState,
     scanner_service: &mut ScannerService,
     coordinator: &mut PlaybackCoordinator,
+    artwork_service: &mut ArtworkService,
     current_track: Option<&Track>,
     theme: &Theme,
     scan_roots_repo: &ScanRootsRepo,
@@ -25,6 +26,21 @@ pub fn render_folders_view(
     on_start_scan: impl FnOnce(PathBuf),
     mut on_import: impl FnMut(ImportKind),
 ) -> bool {
+    if let Some(ref folder) = library_state.selected_folder {
+        let is_mismatched = library_state.folder_tracks.is_empty()
+            || library_state
+                .folder_tracks
+                .first()
+                .map(|t| !t.path.starts_with(folder))
+                .unwrap_or(true);
+        if is_mismatched {
+            library_state.folder_tracks =
+                track_repo.get_tracks_by_folder(folder).unwrap_or_default();
+        }
+    } else if !library_state.folder_tracks.is_empty() {
+        library_state.folder_tracks.clear();
+    }
+
     let fld_action = FoldersView {
         scan_roots: &library_state.scan_roots,
         selected_folder: &mut library_state.selected_folder,
@@ -34,10 +50,31 @@ pub fn render_folders_view(
         scan_progress_text: scanner_service.progress_text(),
         active_track_id: current_track.map(|t| t.id),
         favorite_track_ids: &library_state.favorite_ids,
+        artwork: artwork_service,
+        collection_view: library_state.collection_view,
         import_active,
         theme,
     }
     .show(ui);
+
+    if let Some(view) = fld_action.view_changed {
+        library_state.collection_view = view;
+    }
+
+    // If a folder was just selected during this frame, immediately load its tracks.
+    if let Some(ref folder) = library_state.selected_folder {
+        let is_mismatched = library_state.folder_tracks.is_empty()
+            || library_state
+                .folder_tracks
+                .first()
+                .map(|t| !t.path.starts_with(folder))
+                .unwrap_or(true);
+        if is_mismatched {
+            library_state.folder_tracks =
+                track_repo.get_tracks_by_folder(folder).unwrap_or_default();
+            ui.ctx().request_repaint();
+        }
+    }
 
     let show_stats = fld_action.show_stats;
     if fld_action.browse_folder {

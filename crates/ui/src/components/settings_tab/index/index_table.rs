@@ -2,7 +2,7 @@
 //! settings categories. Data only; the scoring lives in `mod.rs`.
 use super::{SettingsCategory, SettingsEntry};
 
-pub static SETTINGS_INDEX: [SettingsEntry; 119] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 118] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -578,12 +578,6 @@ pub static SETTINGS_INDEX: [SettingsEntry; 119] = [
         card: "Music Library Storage & Directories",
         label: "Find Duplicate Tracks",
         description: "Group tracks with identical audio content (matched by fingerprint, not tags) and remove the extra copies",
-    },
-    SettingsEntry {
-        category: SettingsCategory::Library,
-        card: "Music Library Storage & Directories",
-        label: "Biography Source Folder",
-        description: "Folder of artist and album notes read into the biography panes",
     },
     SettingsEntry {
         category: SettingsCategory::Library,
