@@ -51,6 +51,9 @@ pub(super) fn render_view_mode_toggle_pill(
             && is_pro
         {
             state.view_mode = SettingsViewMode::Standard;
+            if state.active_category.is_pro() {
+                state.active_category = SettingsCategory::Playback;
+            }
         }
 
         let pro_btn = ui.add(
@@ -127,13 +130,29 @@ pub(super) fn render_settings_nav_compact(
                             .color(theme.text_dim),
                     );
                     for &cat in group.categories() {
+                        let is_disabled =
+                            state.view_mode == SettingsViewMode::Standard && cat.is_pro();
                         let is_sel = state.active_category == cat;
                         let text = format!(
                             "{} {}",
                             cat.title(),
-                            if cat.is_pro() { "· PRO" } else { "" }
+                            if cat.is_pro() {
+                                if is_disabled {
+                                    "· PRO (Pro only)"
+                                } else {
+                                    "· PRO"
+                                }
+                            } else {
+                                ""
+                            }
                         );
-                        if ui.selectable_label(is_sel, text).clicked() {
+                        if is_disabled {
+                            ui.add_enabled_ui(false, |ui| {
+                                ui.selectable_label(false, text).on_hover_text(
+                                    "Pro Studio feature — switch to Pro Studio mode to enable",
+                                );
+                            });
+                        } else if ui.selectable_label(is_sel, text).clicked() {
                             state.active_category = cat;
                         }
                     }
@@ -175,6 +194,9 @@ pub(super) fn render_settings_nav_compact(
             } else {
                 SettingsViewMode::ProStudio
             };
+            if state.view_mode == SettingsViewMode::Standard && state.active_category.is_pro() {
+                state.active_category = SettingsCategory::Playback;
+            }
         }
     });
 }
@@ -225,8 +247,10 @@ pub(super) fn render_settings_nav(ui: &mut egui::Ui, state: &mut SettingsTabStat
                 ui.add_space(2.0);
 
                 for &category in group.categories() {
-                    let is_active = category == state.active_category;
-                    let (rect, resp) =
+                    let is_disabled =
+                        state.view_mode == SettingsViewMode::Standard && category.is_pro();
+                    let is_active = category == state.active_category && !is_disabled;
+                    let (rect, mut resp) =
                         ui.allocate_exact_size(Vec2::new(row_w, 36.0), Sense::click());
                     resp.widget_info(|| {
                         egui::WidgetInfo::selected(
@@ -236,14 +260,18 @@ pub(super) fn render_settings_nav(ui: &mut egui::Ui, state: &mut SettingsTabStat
                             category.title(),
                         )
                     });
-                    if resp.clicked() {
+                    if is_disabled {
+                        resp = resp.on_hover_text(
+                            "Pro Studio feature — switch to Pro Studio mode to enable",
+                        );
+                    } else if resp.clicked() {
                         state.active_category = category;
                     }
 
                     // Hover snaps out instead of fading out. A 120 ms crossfade
                     // left the previous category lit while the next one lit up,
                     // which read as "two tabs highlighted at once".
-                    let hover_t = if resp.hovered() && !is_active {
+                    let hover_t = if resp.hovered() && !is_active && !is_disabled {
                         ui.ctx().animate_bool_with_time(
                             resp.id.with("cat_hover"),
                             true,
@@ -291,14 +319,18 @@ pub(super) fn render_settings_nav(ui: &mut egui::Ui, state: &mut SettingsTabStat
                         Pos2::new(rect.min.x + 20.0, rect.center().y),
                         Vec2::splat(15.0),
                     );
-                    let icon_color = if is_active {
+                    let icon_color = if is_disabled {
+                        theme.text_dim.gamma_multiply(0.35)
+                    } else if is_active {
                         theme.accent
                     } else {
                         crate::theme::lerp_color(theme.text_muted, theme.text_secondary, hover_t)
                     };
                     category.draw_icon(ui, icon_rect, icon_color);
 
-                    let text_color = if is_active {
+                    let text_color = if is_disabled {
+                        theme.text_dim.gamma_multiply(0.45)
+                    } else if is_active {
                         theme.text_primary
                     } else {
                         crate::theme::lerp_color(theme.text_secondary, theme.text_primary, hover_t)
@@ -328,7 +360,9 @@ pub(super) fn render_settings_nav(ui: &mut egui::Ui, state: &mut SettingsTabStat
                         ui.painter().rect_filled(
                             pro_r,
                             CornerRadius::same(theme.radius_xs),
-                            if is_active {
+                            if is_disabled {
+                                theme.bg_pill.gamma_multiply(0.35)
+                            } else if is_active {
                                 theme.accent_warm.linear_multiply(0.2)
                             } else {
                                 theme.bg_pill
@@ -339,7 +373,9 @@ pub(super) fn render_settings_nav(ui: &mut egui::Ui, state: &mut SettingsTabStat
                             egui::Align2::CENTER_CENTER,
                             "PRO",
                             crate::theme::mono_font(7.5),
-                            if is_active {
+                            if is_disabled {
+                                theme.text_dim.gamma_multiply(0.4)
+                            } else if is_active {
                                 theme.accent_warm
                             } else {
                                 theme.text_dim

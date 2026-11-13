@@ -17,11 +17,12 @@ pub(super) fn render_settings_search(
     state: &mut SettingsTabState,
     theme: &Theme,
 ) {
-    crate::components::search_field::search_field(
+    crate::components::search_field::search_field_with_width(
         ui,
         &mut state.search_query,
         tr!("Search settings — try “subwoofer” or “latency”"),
         theme,
+        f32::INFINITY,
     );
 }
 
@@ -154,7 +155,11 @@ pub(super) fn render_settings_search_results(
                                 });
 
                                 // Context Breadcrumb: Category > Card Section
-                                let breadcrumb = format!("{}  ›  {}", category.title(), location);
+                                let breadcrumb = if category.is_pro() {
+                                    format!("{}  ›  {}  [PRO]", category.title(), location)
+                                } else {
+                                    format!("{}  ›  {}", category.title(), location)
+                                };
                                 ui.label(
                                     egui::RichText::new(breadcrumb)
                                         .font(crate::theme::font(10.8))
@@ -189,6 +194,9 @@ pub(super) fn render_settings_search_results(
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 if response.clicked() {
+                    if category.is_pro() && state.view_mode == super::SettingsViewMode::Standard {
+                        state.view_mode = super::SettingsViewMode::ProStudio;
+                    }
                     state.active_category = category;
                     request_settings_jump(label);
                     state.search_query.clear();

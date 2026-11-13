@@ -54,69 +54,61 @@ pub fn show_settings_tab_extended(
     // A pending jump should land on its row without a smooth-scroll detour.
     let jump_pending = settings_jump_pending();
 
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
+    // Safety guard: if currently in Standard mode, cannot be on a Pro category
+    if state.view_mode == SettingsViewMode::Standard && state.active_category.is_pro() {
+        state.active_category = SettingsCategory::Playback;
+    }
 
-        // 0. Search & View Mode Switcher
-        let is_wide = ui.available_width() >= SETTINGS_COMPACT_BREAKPOINT;
-        if is_wide {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(theme.space_lg, 0.0);
-                let mode_w = 195.0;
-                let search_w = (ui.available_width() - mode_w - theme.space_lg).max(220.0);
-                ui.allocate_ui_with_layout(
-                    Vec2::new(search_w, 32.0),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        render_settings_search(ui, state, theme);
-                    },
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    render_view_mode_toggle_pill(ui, state, theme);
-                });
-            });
-        } else {
-            render_settings_search(ui, state, theme);
-        }
+    let is_wide = ui.available_width() >= SETTINGS_COMPACT_BREAKPOINT;
+    if is_wide {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
-        if !state.search_query.trim().is_empty() {
-            render_settings_search_results(ui, state, theme);
-            ui.add_space(32.0);
-            return;
-        }
+            ui.allocate_ui_with_layout(
+                Vec2::new(SETTINGS_NAV_WIDTH, ui.available_height()),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| render_settings_nav(ui, state, theme),
+            );
 
-        ui.add_space(theme.space_sm);
+            // A hairline divider instead of a full-weight egui separator:
+            // the two columns are peers, not sections.
+            let divider_x = ui.cursor().left() + theme.space_xl * 0.5;
+            let divider_rect = Rect::from_min_max(
+                Pos2::new(divider_x, ui.cursor().top()),
+                Pos2::new(divider_x + 1.0, ui.cursor().top() + ui.available_height()),
+            );
+            ui.painter()
+                .rect_filled(divider_rect, CornerRadius::ZERO, theme.border_subtle);
+            ui.add_space(theme.space_xl);
 
-        // 1. Master-detail layout. Wide panes get the vertical category
-        // rail with in-page sub-headings; a narrow pane gets a wrapping chip
-        // row instead, because a fixed 224 px rail on a 640 px window would
-        // leave the cards less room than a phone.
-        if ui.available_width() >= SETTINGS_COMPACT_BREAKPOINT {
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
+            let right_w = ui.available_width();
+            ui.allocate_ui_with_layout(
+                Vec2::new(right_w, ui.available_height()),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
 
-                ui.allocate_ui_with_layout(
-                    Vec2::new(SETTINGS_NAV_WIDTH, ui.available_height()),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| render_settings_nav(ui, state, theme),
-                );
+                    // Header toolbar in the right column: Search bar + View Mode Switcher
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(theme.space_md, 0.0);
+                        let mode_w = 175.0;
+                        let search_w = (ui.available_width() - mode_w - theme.space_md).max(120.0);
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(search_w, 32.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                render_settings_search(ui, state, theme);
+                            },
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            render_view_mode_toggle_pill(ui, state, theme);
+                        });
+                    });
 
-                // A hairline divider instead of a full-weight egui separator:
-                // the two columns are peers, not sections.
-                let divider_x = ui.cursor().left() + theme.space_xl * 0.5;
-                let divider_rect = Rect::from_min_max(
-                    Pos2::new(divider_x, ui.cursor().top()),
-                    Pos2::new(divider_x + 1.0, ui.cursor().top() + ui.available_height()),
-                );
-                ui.painter()
-                    .rect_filled(divider_rect, CornerRadius::ZERO, theme.border_subtle);
-                ui.add_space(theme.space_xl);
-
-                let right_w = ui.available_width();
-                ui.allocate_ui_with_layout(
-                    Vec2::new(right_w, ui.available_height()),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
+                    if !state.search_query.trim().is_empty() {
+                        render_settings_search_results(ui, state, theme);
+                        ui.add_space(32.0);
+                    } else {
                         egui::ScrollArea::vertical()
                             .id_salt("settings_main_scroll")
                             .animated(!jump_pending)
@@ -126,23 +118,32 @@ pub fn show_settings_tab_extended(
                                 render_active_category(ui, state, theme, extra, &mut actions);
                                 ui.add_space(32.0);
                             });
-                    },
-                );
-            });
-        } else {
-            render_settings_nav_compact(ui, state, theme);
-            ui.add_space(theme.space_md);
-            egui::ScrollArea::vertical()
-                .id_salt("settings_main_scroll")
-                .animated(!jump_pending)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
-                    render_active_category(ui, state, theme, extra, &mut actions);
-                    ui.add_space(32.0);
-                });
-        }
-    });
+                    }
+                },
+            );
+        });
+    } else {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_md);
+            render_settings_search(ui, state, theme);
+            if !state.search_query.trim().is_empty() {
+                render_settings_search_results(ui, state, theme);
+                ui.add_space(32.0);
+            } else {
+                render_settings_nav_compact(ui, state, theme);
+                ui.add_space(theme.space_xs);
+                egui::ScrollArea::vertical()
+                    .id_salt("settings_main_scroll")
+                    .animated(!jump_pending)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_3xl);
+                        render_active_category(ui, state, theme, extra, &mut actions);
+                        ui.add_space(32.0);
+                    });
+            }
+        });
+    }
 
     actions
 }
@@ -169,6 +170,10 @@ fn render_active_category(
     extra: &SettingsExtraContext<'_>,
     actions: &mut SettingsTabActions,
 ) {
+    if state.view_mode == SettingsViewMode::Standard && state.active_category.is_pro() {
+        state.active_category = SettingsCategory::Playback;
+    }
+
     match state.active_category {
         SettingsCategory::Playback => render_playback_category(ui, state, theme, extra, actions),
         SettingsCategory::Output => render_output_category(ui, state, theme, extra, actions),
