@@ -108,32 +108,81 @@ impl KissFft {
     }
 }
 
-/// Compute forward DFT on flat interleaved complex buffers.
+/// Precomputed twiddles for an unscaled forward DFT of length `n`.
 ///
-/// Params: `input`/`output` are `[re0, im0, re1, im1, ...]` and `n` is the
-/// number of complex samples.
-/// Returns: nothing; writes the forward transform to `output`.
-pub(crate) fn flat_fft_forward(input: &[f32], output: &mut [f32], n: usize) {
-    assert!(input.len() >= 2 * n && output.len() >= 2 * n);
-    for k in 0..n {
-        let mut sum_re = 0.0f64;
-        let mut sum_im = 0.0f64;
-        for j in 0..n {
-            let angle = -2.0 * PI as f64 * (k as f64) * (j as f64) / (n as f64);
-            let (sin_a, cos_a) = angle.sin_cos();
-            let re = input[2 * j] as f64;
-            let im = input[2 * j + 1] as f64;
-            sum_re += re * cos_a - im * sin_a;
-            sum_im += re * sin_a + im * cos_a;
+/// The CELT MDCT runs one forward transform per frame per channel, so the
+/// twiddle factors must be computed once when the plan is built. Computing
+/// `sin_cos()` inside the summation instead costs O(n²) transcendental calls
+/// per frame — at 48 kHz that is hundreds of thousands of libm calls per
+/// audio block and pins a core just to decode one Opus stream.
+#[derive(Debug, Clone)]
+pub(crate) struct ForwardDft {
+    n: usize,
+    cos: Vec<f64>,
+    sin: Vec<f64>,
+}
+
+impl ForwardDft {
+    /// Build the twiddle table for a transform of length `n`.
+    ///
+    /// Params: `n` is the (complex) transform size.
+    /// Returns: a plan whose table holds `e^{-2πim/n}` for every `m`.
+    pub fn new(n: usize) -> Self {
+        let mut cos = Vec::with_capacity(n);
+        let mut sin = Vec::with_capacity(n);
+        for m in 0..n {
+            let angle = -2.0 * core::f64::consts::PI * (m as f64) / (n as f64);
+            let (s, c) = angle.sin_cos();
+            cos.push(c);
+            sin.push(s);
         }
-        output[2 * k] = sum_re as f32;
-        output[2 * k + 1] = sum_im as f32;
+        Self { n, cos, sin }
+    }
+
+    /// Return the configured transform size.
+    pub fn len(&self) -> usize {
+        self.n
+    }
+
+    /// Forward DFT of a flat interleaved complex buffer, unscaled.
+    ///
+    /// Params: `input`/`output` are `[re0, im0, re1, im1, …]` with at least
+    /// `n` complex samples each.
+    /// Returns: nothing; the transform is written to `output`.
+    pub(crate) fn transform(&self, input: &[f32], output: &mut [f32]) {
+        let n = self.n;
+        assert!(input.len() >= 2 * n && output.len() >= 2 * n);
+        if n == 0 {
+            return;
+        }
+        for k in 0..n {
+            let mut sum_re = 0.0f64;
+            let mut sum_im = 0.0f64;
+            // The twiddle index is `(k * j) % n`. Stepping it by `k` and
+            // folding once keeps that out of the inner loop, where an integer
+            // remainder would cost a division per sample.
+            let mut idx = 0usize;
+            for j in 0..n {
+                let re = input[2 * j] as f64;
+                let im = input[2 * j + 1] as f64;
+                let c = self.cos[idx];
+                let s = self.sin[idx];
+                sum_re += re * c - im * s;
+                sum_im += re * s + im * c;
+                idx += k;
+                if idx >= n {
+                    idx -= n;
+                }
+            }
+            output[2 * k] = sum_re as f32;
+            output[2 * k + 1] = sum_im as f32;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Complex32, KissFft};
+    use super::{Complex32, ForwardDft, KissFft};
     use core::f32::consts::PI;
 
     /// Compute libopus-style forward DFT with `1/N` scaling for tests.
@@ -186,6 +235,60 @@ mod tests {
                 a.im,
                 b.im
             );
+        }
+    }
+
+    /// The plan's table-driven transform must agree with the definitional
+    /// `sin_cos()`-per-bin DFT it replaced. Every CELT MDCT size uses a
+    /// transform of 30·2^k, so those are the sizes the decoder can ask for.
+    #[test]
+    fn table_driven_forward_dft_matches_the_naive_definition() {
+        fn naive(input: &[f32], n: usize) -> Vec<f32> {
+            let mut out = vec![0.0f32; 2 * n];
+            for k in 0..n {
+                let mut sum_re = 0.0f64;
+                let mut sum_im = 0.0f64;
+                for j in 0..n {
+                    let angle = -2.0 * core::f64::consts::PI * (k as f64) * (j as f64) / (n as f64);
+                    let (sin_a, cos_a) = angle.sin_cos();
+                    let re = input[2 * j] as f64;
+                    let im = input[2 * j + 1] as f64;
+                    sum_re += re * cos_a - im * sin_a;
+                    sum_im += re * sin_a + im * cos_a;
+                }
+                out[2 * k] = sum_re as f32;
+                out[2 * k + 1] = sum_im as f32;
+            }
+            out
+        }
+
+        // Deterministic pseudo-random input: a decoder feeds real audio, but
+        // the transform must be checked against the full dynamic range.
+        let mut state = 0x1234_5678u32;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            (state as f32 / u32::MAX as f32) * 2.0 - 1.0
+        };
+
+        for n in [60usize, 120, 240, 480] {
+            let input: Vec<f32> = (0..2 * n).map(|_| next()).collect();
+            let mut fast = vec![0.0f32; 2 * n];
+            let plan = ForwardDft::new(n);
+            assert_eq!(plan.len(), n);
+            plan.transform(&input, &mut fast);
+
+            let reference = naive(&input, n);
+            for i in 0..2 * n {
+                let diff = (fast[i] - reference[i]).abs();
+                assert!(
+                    diff <= 1e-5,
+                    "n={n} bin {i}: fast {} vs reference {} (diff {diff})",
+                    fast[i],
+                    reference[i]
+                );
+            }
         }
     }
 }

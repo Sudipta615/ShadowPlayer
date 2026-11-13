@@ -51,6 +51,42 @@ The fix threads an explicit `mask: u32` through the call chain instead of
 relying on the inferred width. This is the patch that makes the fork
 non-substitutable, and the reason `publish = false` is not optional.
 
+### `celt/mdct.rs` + `celt/kiss_fft.rs` — twiddle table for the forward DFT
+
+`MdctBackward::backward` needs a forward DFT of size `n/4` per frame per
+channel, and upstream's `flat_fft_forward` computed it as a definitional DFT:
+`sin_cos()` for every `(k, j)` pair inside the inner loop. At 48 kHz that is
+230 400 transcendental calls per transform (n = 480), and a stereo stream runs
+about 100 transforms per second (50 frames × 2 channels).
+
+On the player's 2-core target the old transform measured **9.1 ms per
+transform** at n = 480 (a 20 ms, 48 kHz CELT frame), so a stereo stream could
+not decode faster than realtime. The engine missed its 50 ms tick deadline on
+essentially every tick — the app log recorded sustained 65–132 ms tick periods
+and ~70 device underruns per 2 s reporting window, which is the stutter a user
+heard.
+
+The patch replaces the free function with a `ForwardDft` plan that builds the
+`e^{-2πim/n}` table once in `new()` (called from `MdctBackward::new`, i.e. at
+stream open) and looks it up per sample, folding the `(k·j) mod n` index
+incrementally so the inner loop has no integer division. The same transform now
+measures **1.47 ms** (6.2×), and a 48 kHz stereo Opus stream decodes at
+**2.8 ms per 1000 frames ≈ 13.5 % of one core** — comfortably inside realtime,
+with the output ring holding its full 1.36 s cushion and no underrun after
+startup.
+
+The remaining cost is the transform's O(n²) arithmetic (the table removed the
+transcendentals, not the summation): ~230 400 complex MACs per transform.
+A split-radix FFT would remove that too, but it changes the summation order
+and therefore the samples the decoder emits, so it needs its own conformance
+work against the RFC vectors. That is a separate change, not this bug fix.
+
+This is a performance patch, not a numerical one: the arithmetic is the same
+f64 accumulation in the same order, and
+`table_driven_forward_dft_matches_the_naive_definition` in `kiss_fft.rs` pins
+the new transform to the old definition (≤ 1e-5) at every CELT size
+(30·2^k, i.e. n = 60/120/240/480).
+
 ### Debug scaffolding from upstream's development tree — **removed in 0.9.1**
 
 The vendored tree originally arrived carrying 93 `// #region agent log` blocks from an
@@ -84,15 +120,18 @@ re-vendor into a merge conflict.
 ## Not changed
 
 Everything else is upstream, unmodified: the RFC 8251 packet parsing, SILK and
-CELT decoders, the MDCT, the resampler, the psychoacoustic modules, and the
-public API. Where a comment above implies otherwise, it does not.
+CELT decoders, the MDCT windowing/overlap formulation, the resampler, the
+psychoacoustic modules, and the public API. Where a comment above implies
+otherwise, it does not.
 
 ## Re-vendoring
 
 1. Take the new upstream version.
 2. Re-apply the `celt/vq.rs` `mask: u32` fix first — it is the one with
    security/robustness impact, and it is the reason for the fork existing.
-3. Re-check the remaining two fixes above; they are hygiene and can be dropped
-   if upstream has fixed them.
+3. Re-check the remaining fixes above; they are hygiene and performance, and
+   can be dropped if upstream has fixed them. The forward-DFT patch is only
+   needed while upstream still computes the transform from a `sin_cos()` per
+   `(k, j)` pair.
 4. Update the version and this file.
 5. Leave `publish = false` in place until the crate is renamed.

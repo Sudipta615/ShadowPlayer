@@ -5,7 +5,7 @@
 //! Current scope is a decoder-oriented path for 48 kHz / 20 ms (`LM=3`), with
 //! explicit overlap/window processing kept close to libopus flow.
 
-use crate::celt::kiss_fft::{KissFft, flat_fft_forward};
+use crate::celt::kiss_fft::{ForwardDft, KissFft};
 
 /// Backward MDCT helper for CELT decode path.
 #[derive(Debug, Clone)]
@@ -14,6 +14,9 @@ pub(crate) struct MdctBackward {
     overlap: usize,
     fft: KissFft,
     trig: Vec<f32>,
+    /// Twiddles for the forward transform `backward()` needs. Built once,
+    /// here, so the decode path never computes `sin_cos()` per sample.
+    forward: ForwardDft,
 }
 
 impl MdctBackward {
@@ -34,6 +37,7 @@ impl MdctBackward {
             overlap,
             fft: KissFft::new(n / 4),
             trig,
+            forward: ForwardDft::new(n / 4),
         }
     }
 
@@ -178,7 +182,7 @@ impl MdctBackward {
         }
 
         let mut f2_out = vec![0.0f32; n2];
-        flat_fft_forward(&f2, &mut f2_out, n4);
+        self.forward.transform(&f2, &mut f2_out);
         if impulse_mode && f2_out.len() >= 8 {
             debug_trace!(
                 "IMPULSE f2_out[0..8]: {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} {:.6}",
