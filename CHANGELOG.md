@@ -16,6 +16,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version tag still produces the reviewed draft release through
   `release.yml`.
 
+### Fixed
+- **EQ bands now do what their labels say, and a boost is audible.** Three
+  defects combined into "enabling the EQ slightly suppresses the sound and the
+  sliders do nothing":
+  - **Shelves used the peaking bandwidth as their slope.** The first and last
+    graphic bands and the parametric tone shelves compiled to `LowShelf` /
+    `HighShelf` with the layout's peaking Q (`1.414` for a 1-octave ladder,
+    `4.31` for 1/3-octave, `8.65` for 1/6-octave). A shelf's Q is a slope, not
+    a bandwidth: at `Q 1.414` a `+12 dB` low shelf measured `+14.2 dB` at
+    20 Hz and cut `−2.2 dB` above its corner, so the slider and the audible
+    curve disagreed. Every shelf is now designed at `SHELF_Q = 1/√2` (the
+    maximally flat `S = 1`, the convention AutoEQ writes as `Q 0.70`), while
+    interior peaking bands keep their bandwidth Q.
+  - **The default parametric bank used a two-octave Q at octave spacing.** Its
+    ten bands sat an octave apart but carried `Q 0.707`, so neighbours
+    overlapped by more than half their height: three `+6 dB` moves summed to
+    `+13.7 dB` instead of the `+6 dB` curve the panel draws. The ladder now
+    uses `Q 1.4` on octave centres and ends in shelves, matching the standard
+    graphic ladder. Stored per-band Q values are untouched — a user may have
+    chosen them — but changing a band's shape now starts it from that shape's
+    own Q.
+  - **Stale auto-headroom default.** `PersistentEqState` now carries a
+    `schema_version` (v1). A v0 snapshot was written while `auto_headroom`
+    defaulted to on, and that default reserves the curve's peak boost as
+    attenuation of the *whole* mix: a `+6 dB` bass slider played back at 0 dB
+    against a `−6 dB` mix, which reads as "the EQ does nothing and the sound
+    got smaller". The migration clears `auto_headroom` once for v0 blobs and
+    leaves a deliberate v1 choice alone. A missing version field is a serde
+    trap — the container default would report the *current* version — so the
+    field carries its own default and a JSON-level test pins it.
+- **The applied EQ headroom is shown, not hidden.** When auto-headroom is on,
+  the preamp card reads `Auto headroom −X dB → net −X dB` and the Advanced
+  badge reads `−X dB applied` (`On · nothing to reserve` on a flat curve);
+  both read the new `EngineHandle::eq_headroom_db` scalar out of the lock-free
+  settings snapshot, so they report what the engine is actually doing rather
+  than repeating the request.
+
 ## [0.31.0] - 2026-11-11
 
 *Released with audio-engine 1.14.0. The player and the engine are versioned separately and released

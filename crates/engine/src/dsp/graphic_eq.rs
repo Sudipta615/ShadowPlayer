@@ -21,10 +21,13 @@
 //! The first and last bands compile to low/high shelves; interior bands are
 //! peaking filters at the layout's fixed frequencies with the standard
 //! bandwidth-derived Q (`Q = 1/(2·sinh(ln 2·B/2))`, B in octaves — 4.31 for
-//! 1/3-octave, 8.65 for 1/6-octave). A slider at 0 dB compiles to a disabled
-//! band so it costs nothing in the hot path.
+//! 1/3-octave, 8.65 for 1/6-octave). The interior Q is a *bandwidth*; a shelf's
+//! Q is a *slope*, so the shelves use [`SHELF_Q`] instead — sharing the peaking
+//! Q makes a +12 dB low shelf overshoot to +14 dB and cut −2 dB above its
+//! corner, where a shelf should reach +12 dB monotonically. A slider at 0 dB
+//! compiles to a disabled band so it costs nothing in the hot path.
 
-use crate::dsp::equalizer::{EqBandParams, EqFilterType, ParametricEq};
+use crate::dsp::equalizer::{EqBandParams, EqFilterType, ParametricEq, SHELF_Q};
 use config::GraphicEqLayout;
 
 /// Maximum slider excursion in dB. Keeps a careless drag from asking the
@@ -222,17 +225,22 @@ impl GraphicEq {
             .enumerate()
             .map(|(i, freq)| {
                 let gain = self.gains_db.get(i).copied().unwrap_or(0.0);
-                let filter_type = if i == 0 {
-                    EqFilterType::LowShelf
+                // `q` is a bandwidth for the interior peaking bands and a
+                // shelf slope at the ends. Sharing the peaking Q with the
+                // shelves would ring: a 1-octave layout's Q of 1.414 makes a
+                // +12 dB low shelf overshoot to +14 dB and cut −2 dB above the
+                // corner. A shelf that is not asked to resonate uses S = 1.
+                let (filter_type, band_q) = if i == 0 {
+                    (EqFilterType::LowShelf, SHELF_Q)
                 } else if i == last {
-                    EqFilterType::HighShelf
+                    (EqFilterType::HighShelf, SHELF_Q)
                 } else {
-                    EqFilterType::Peaking
+                    (EqFilterType::Peaking, q)
                 };
                 EqBandParams {
                     frequency: *freq,
                     gain_db: gain,
-                    q,
+                    q: band_q,
                     filter_type,
                     enabled: gain.abs() > GRAPHIC_EQ_SLIDER_EPSILON_DB,
                 }
@@ -358,6 +366,33 @@ mod tests {
         assert!(eq_a.band_params(10).unwrap().enabled);
         // Preamp is propagated.
         assert!((eq_a.preamp_db() - (-2.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn endpoint_shelves_carry_a_shelf_slope_not_the_peaking_bandwidth() {
+        let mut g = GraphicEq::new(GraphicEqLayout::TenBand);
+        g.set_slider(0, 12.0);
+        g.set_slider(9, -12.0);
+        g.set_enabled(true);
+        let eq = g.compile(48000.0);
+
+        let low = eq.band_params(0).unwrap();
+        let high = eq.band_params(9).unwrap();
+        assert_eq!(low.filter_type, EqFilterType::LowShelf);
+        assert_eq!(high.filter_type, EqFilterType::HighShelf);
+        assert!(
+            (low.q - SHELF_Q).abs() < 1e-6,
+            "low shelf Q {}, expected the maximally flat {SHELF_Q}",
+            low.q
+        );
+        assert!(
+            (high.q - SHELF_Q).abs() < 1e-6,
+            "high shelf Q {}, expected the maximally flat {SHELF_Q}",
+            high.q
+        );
+        // The interior bands are peaking filters, where the layout's Q *is* a
+        // bandwidth and must not change.
+        assert!((eq.band_params(5).unwrap().q - GraphicEqLayout::TenBand.q()).abs() < 1e-6);
     }
 
     #[test]

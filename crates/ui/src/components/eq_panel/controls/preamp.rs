@@ -131,6 +131,33 @@ pub(in crate::components::eq_panel) fn render_preamp_card(
                             .color(theme.text_muted),
                     );
                 });
+
+                if state.auto_headroom {
+                    // The engine's headroom is a real level change on the whole
+                    // mix, and hiding it is what made a working boost look
+                    // inert: the preamp read 0.0 dB while the EQ attenuated by
+                    // the curve's peak. Show the attenuation and the net the
+                    // listener actually hears.
+                    let headroom = state.engine_headroom_db.min(0.0);
+                    let (text, color) = if headroom < -0.05 {
+                        (
+                            tr_args!(
+                                "Auto headroom {headroom} dB → net {net} dB",
+                                "headroom" => format!("{headroom:.1}"),
+                                "net" => format!("{:+.1}", state.preamp_db + headroom)
+                            ),
+                            theme.warning_yellow,
+                        )
+                    } else {
+                        (
+                            tr!("Auto headroom on · nothing to reserve"),
+                            theme.text_muted,
+                        )
+                    };
+                    ui.add_space(theme.space_xxs);
+                    ui.label(egui::RichText::new(text).font(crate::theme::font(9.5)).color(color))
+                        .on_hover_text(tr!("Auto headroom reserves the curve's peak boost as attenuation of the whole mix. Every band keeps its shape, but nothing gets louder — that is what stops a boosted curve from clipping."));
+                }
             });
         });
 }

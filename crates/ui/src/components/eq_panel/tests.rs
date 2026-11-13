@@ -1,5 +1,5 @@
 use super::*;
-use audio_session::engine::dsp::equalizer::EqFilterType;
+use audio_session::engine::dsp::equalizer::{EqFilterType, SHELF_Q};
 
 #[test]
 fn layout_change_interpolates_the_visible_curve_and_clears_stale_bands() {
@@ -38,6 +38,123 @@ fn layout_change_interpolates_the_visible_curve_and_clears_stale_bands() {
         &[4.0, 3.0, 2.5, 0.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0]
     );
     assert!(state.graphic_gains[10..].iter().all(|g| *g == 0.0));
+}
+
+#[test]
+fn a_pre_migration_snapshot_drops_the_stale_auto_headroom_default() {
+    // Version 0 blobs were written while `auto_headroom` defaulted to ON. That
+    // default silently attenuated the whole mix by the curve's peak boost, so
+    // every boost stayed at its old level and the EQ looked inert. The value
+    // cannot be told apart from a deliberate choice, so the migration resets
+    // it once instead of leaving it on forever.
+    let legacy = PersistentEqState {
+        schema_version: 0,
+        auto_headroom: true,
+        ..Default::default()
+    };
+    let mut state = EqPanelState::default();
+    legacy.apply_to(&mut state);
+    assert!(
+        !state.auto_headroom,
+        "a snapshot from the old default must not keep auto headroom on"
+    );
+
+    // A v1 snapshot is the user's own choice and survives the round trip.
+    let chosen = PersistentEqState {
+        schema_version: 1,
+        auto_headroom: true,
+        ..Default::default()
+    };
+    let mut state = EqPanelState::default();
+    chosen.apply_to(&mut state);
+    assert!(state.auto_headroom);
+
+    let written = PersistentEqState::from(&state);
+    assert_eq!(written.schema_version, 1);
+    assert!(written.auto_headroom);
+}
+
+#[test]
+fn a_legacy_blob_without_a_version_field_is_treated_as_version_zero() {
+    // The real upgrade path is JSON, not a struct literal. A blob written by
+    // the old build has no `schema_version` key at all, and the container's
+    // `#[serde(default)]` would otherwise fill it from a fresh snapshot — the
+    // *current* version — so the migration would never see a legacy blob.
+    let legacy: PersistentEqState =
+        serde_json::from_str(r#"{"auto_headroom": true}"#).expect("legacy blob must parse");
+    assert_eq!(
+        legacy.schema_version, 0,
+        "a missing schema_version must read as 0, not as a fresh snapshot's version"
+    );
+
+    let mut state = EqPanelState::default();
+    legacy.apply_to(&mut state);
+    assert!(
+        !state.auto_headroom,
+        "the JSON a user actually has on disk must lose the stale default"
+    );
+
+    // The same JSON written back carries the version and the reset choice, so
+    // the migration does not run a second time.
+    let rewritten = PersistentEqState::from(&state);
+    let json = serde_json::to_string(&rewritten).unwrap();
+    let reloaded: PersistentEqState = serde_json::from_str(&json).unwrap();
+    assert_eq!(reloaded.schema_version, 1);
+    assert!(!reloaded.auto_headroom);
+}
+
+#[test]
+fn an_explicit_auto_headroom_choice_survives_the_json_round_trip() {
+    // Once the user turns auto-headroom on in a migrated build, that decision
+    // is theirs: the version gate must not reset it on the next launch.
+    let chosen = EqPanelState {
+        auto_headroom: true,
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&PersistentEqState::from(&chosen)).unwrap();
+    let reloaded: PersistentEqState = serde_json::from_str(&json).unwrap();
+    let mut state = EqPanelState::default();
+    reloaded.apply_to(&mut state);
+    assert!(
+        state.auto_headroom,
+        "a deliberate v1 choice must survive the version gate"
+    );
+}
+
+#[test]
+fn the_default_parametric_ladder_is_octave_wide_with_shelving_ends() {
+    let state = EqPanelState::default();
+    assert_eq!(state.bands.len(), 10);
+    let first = &state.bands[0];
+    let last = state.bands.last().unwrap();
+    assert_eq!(first.filter_type, EqFilterType::LowShelf);
+    assert_eq!(last.filter_type, EqFilterType::HighShelf);
+    assert!(state.bands[1..state.bands.len() - 1]
+        .iter()
+        .all(|band| band.filter_type == EqFilterType::Peaking));
+    // Q = 0.707 is a *two-octave* band: at octave spacing the bands overlap
+    // into one broad hump, so three +6 dB moves became +13 dB. The ladder's
+    // peaking bands carry the octave's own Q, and the shelves carry the
+    // maximally flat shelf slope — a shelving filter's Q is not a bandwidth,
+    // and handing it 1.4 makes it ring above the corner.
+    for band in &state.bands[1..state.bands.len() - 1] {
+        assert!(
+            (band.q - 1.4).abs() < 1e-6,
+            "{} Hz band has Q {}, expected the octave Q",
+            band.freq,
+            band.q
+        );
+    }
+    for shelf in [first, last] {
+        assert!(
+            (shelf.q - SHELF_Q).abs() < 1e-6,
+            "{} Hz shelf has Q {}, expected the maximally flat shelf slope",
+            shelf.freq,
+            shelf.q
+        );
+    }
+    assert!((first.freq - 31.5).abs() < 1e-3);
+    assert!((last.freq - 16000.0).abs() < 1e-3);
 }
 
 #[test]

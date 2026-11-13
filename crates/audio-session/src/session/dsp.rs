@@ -343,6 +343,16 @@ impl AudioSession {
         self.send(EngineCommand::SetEqAutoHeadroom(enabled));
     }
 
+    /// The headroom the EQ is applying right now, in dB (≤ 0).
+    ///
+    /// With auto-headroom on this is the negated peak of the live curve, so it
+    /// is the number a UI must show beside the preamp: the two together are
+    /// the actual level change. Read from the lock-free settings snapshot; no
+    /// allocation, safe to call per frame.
+    pub fn eq_headroom_db(&self) -> f32 {
+        self.handle.eq_headroom_db()
+    }
+
     /// Set the graphic EQ preamp gain in dB.
     pub fn set_graphic_eq_preamp(&self, gain_db: f32) {
         self.send(EngineCommand::SetGraphicEqPreamp(gain_db));

@@ -8,6 +8,22 @@ pub const MAX_EQ_BANDS: usize = 64;
 /// Number of default EQ bands
 pub const NUM_EQ_BANDS: usize = 10;
 
+/// The `q` a **shelving** filter needs to be maximally flat.
+///
+/// A shelf's `q` is not a bandwidth: it is the resonance of the transition
+/// into the shelf. The RBJ cookbook defines the shelf slope `S` and
+/// `q = 1/√2` is `S = 1`, the only slope that reaches the shelf gain
+/// monotonically — it approaches the plateau from below and never crosses it.
+///
+/// Any larger value buys a resonant overshoot and a matching undershoot on
+/// the far side of the corner. That is not a shelf the user asked for: a
+/// `+12 dB` low-shelf at `q = 1.414` measures `+14.2 dB` near the corner and
+/// `−2.3 dB` an octave up, so the slider and the audible curve disagree.
+/// `q = 0.707` is the convention every reference implementation uses for a
+/// shelf (AutoEq writes `Q 0.70` for its `LSC`/`HSC` bands), and it is what
+/// this engine uses wherever a shelf is designed.
+pub const SHELF_Q: f32 = std::f32::consts::FRAC_1_SQRT_2;
+
 /// EQ filter type for each band
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum EqFilterType {

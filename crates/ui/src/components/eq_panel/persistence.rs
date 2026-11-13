@@ -7,6 +7,13 @@ use audio_session::engine::dsp::limiter::LimiterMode;
 use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use serde::{Deserialize, Serialize};
 
+/// The version of the persisted EQ snapshot's *meaning*.
+///
+/// Bumped when a stored field's semantics change, so [`PersistentEqState::apply_to`]
+/// can migrate the blobs written by an older build. Version 1 reverses the
+/// default of `auto_headroom`; see the migration there.
+const SCHEMA_VERSION: u32 = 1;
+
 /// Serde-serializable snapshot of EQ panel settings for persistent storage across sessions
 ///
 /// `#[serde(default)]` at the struct level means a field added in a later build
@@ -15,6 +22,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PersistentEqState {
+    /// `0` for blobs written before this field existed.
+    ///
+    /// The field-level `default` is load-bearing. The container's
+    /// `#[serde(default)]` fills a missing field from `Default::default()`,
+    /// which is a *fresh* snapshot and therefore reports the current version —
+    /// every legacy blob would then look already migrated and keep the old
+    /// `auto_headroom` default forever. A missing version must read as 0.
+    #[serde(default)]
+    pub schema_version: u32,
     pub is_open: bool,
     pub window_pos: Option<[f32; 2]>,
     /// The last size the user dragged the studio to. `None` means the default.
@@ -82,6 +98,7 @@ pub struct PersistentEqState {
 impl From<&EqPanelState> for PersistentEqState {
     fn from(s: &EqPanelState) -> Self {
         Self {
+            schema_version: SCHEMA_VERSION,
             is_open: s.is_open,
             window_pos: s.window_pos,
             window_size: s.window_size,
@@ -192,7 +209,14 @@ impl PersistentEqState {
             EqMode::Parametric => self.preamp_db,
         };
         state.set_preamp(preamp);
-        state.auto_headroom = self.auto_headroom;
+        // Version 0 was written while `auto_headroom` defaulted to **on**. That
+        // default is gone: it attenuates the whole mix by the curve's peak
+        // boost, so every slider move keeps its *shape* but the level never
+        // rises — a +6 dB bass slider ends up at 0 dB against a −6 dB mix. A
+        // value persisted from that default is indistinguishable from a
+        // deliberate choice, so it would stay on forever and the EQ would keep
+        // sounding like it does nothing. Reset it once, on the migration.
+        state.auto_headroom = self.schema_version >= 1 && self.auto_headroom;
         state.bands = self.bands.clone();
         state.bass_shelf_db = self.bass_shelf_db;
         state.treble_shelf_db = self.treble_shelf_db;

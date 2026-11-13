@@ -1,7 +1,7 @@
 //! Equalizer filter-bank implementation.
 
 use super::headroom;
-use super::types::{EqBand, EqBandParams, EqFilterType, MAX_EQ_BANDS};
+use super::types::{EqBand, EqBandParams, EqFilterType, MAX_EQ_BANDS, SHELF_Q};
 use crate::dsp::biquad::{FilterType, SmoothedBiquad};
 use crate::dsp::filter_design::{design, BandwidthMode, FilterDesign};
 use crate::{
@@ -81,6 +81,18 @@ pub struct ParametricEq {
     bandwidth_mode: BandwidthMode,
 }
 
+/// The Q a band actually needs: a shelf's `q` is a slope, not a bandwidth.
+///
+/// Every band-layout generator here spaces bands by bandwidth, which yields a
+/// peaking Q. Feeding that number to the endpoint shelves makes them resonate
+/// instead of shelve (see [`SHELF_Q`]), so the shape decides the value.
+fn shape_q(filter_type: EqFilterType, bandwidth_q: f32) -> f32 {
+    match filter_type {
+        EqFilterType::LowShelf | EqFilterType::HighShelf => SHELF_Q,
+        _ => bandwidth_q,
+    }
+}
+
 impl ParametricEq {
     /// Create a new 10-band parametric EQ with standard ISO frequencies
     pub fn default_10_band(sample_rate: f32) -> Self {
@@ -108,7 +120,7 @@ impl ParametricEq {
                     filter_type: ft,
                     frequency: freq,
                     gain_db: 0.0,
-                    q: 1.4,
+                    q: shape_q(ft, 1.4),
                     enabled: false,
                 },
                 filter_left: SmoothedBiquad::new(),
@@ -117,12 +129,12 @@ impl ParametricEq {
             .collect();
 
         let bass_band = EqBand {
-            params: EqBandParams::lowshelf(100.0, 0.0, 1.0),
+            params: EqBandParams::lowshelf(100.0, 0.0, SHELF_Q),
             filter_left: SmoothedBiquad::new(),
             filter_right: SmoothedBiquad::new(),
         };
         let treble_band = EqBand {
-            params: EqBandParams::highshelf(7500.0, 0.0, 0.70),
+            params: EqBandParams::highshelf(7500.0, 0.0, SHELF_Q),
             filter_left: SmoothedBiquad::new(),
             filter_right: SmoothedBiquad::new(),
         };
@@ -170,7 +182,7 @@ impl ParametricEq {
                         filter_type: ft,
                         frequency: freq,
                         gain_db: 0.0,
-                        q: 4.31, // Standard 1/3 octave Q
+                        q: shape_q(ft, 4.31), // Standard 1/3 octave Q
                         enabled: false,
                     },
                     filter_left: SmoothedBiquad::new(),
@@ -180,12 +192,12 @@ impl ParametricEq {
             .collect();
 
         let bass_band = EqBand {
-            params: EqBandParams::lowshelf(100.0, 0.0, 1.0),
+            params: EqBandParams::lowshelf(100.0, 0.0, SHELF_Q),
             filter_left: SmoothedBiquad::new(),
             filter_right: SmoothedBiquad::new(),
         };
         let treble_band = EqBand {
-            params: EqBandParams::highshelf(7500.0, 0.0, 0.70),
+            params: EqBandParams::highshelf(7500.0, 0.0, SHELF_Q),
             filter_left: SmoothedBiquad::new(),
             filter_right: SmoothedBiquad::new(),
         };
@@ -245,7 +257,7 @@ impl ParametricEq {
                     filter_type: ft,
                     frequency: freq as f32,
                     gain_db: 0.0,
-                    q: q as f32,
+                    q: shape_q(ft, q as f32),
                     enabled: false,
                 },
                 filter_left: SmoothedBiquad::new(),
@@ -254,12 +266,12 @@ impl ParametricEq {
         }
 
         let bass_band = EqBand {
-            params: EqBandParams::lowshelf(100.0, 0.0, 1.0),
+            params: EqBandParams::lowshelf(100.0, 0.0, SHELF_Q),
             filter_left: SmoothedBiquad::new(),
             filter_right: SmoothedBiquad::new(),
         };
         let treble_band = EqBand {
-            params: EqBandParams::highshelf(7500.0, 0.0, 0.70),
+            params: EqBandParams::highshelf(7500.0, 0.0, SHELF_Q),
             filter_left: SmoothedBiquad::new(),
             filter_right: SmoothedBiquad::new(),
         };
@@ -326,9 +338,9 @@ impl ParametricEq {
         let clamped_bands = num_bands.min(MAX_EQ_BANDS);
         let bands = (0..clamped_bands).map(|_| EqBand::new()).collect();
         let mut bass_band = EqBand::new();
-        bass_band.params = EqBandParams::lowshelf(100.0, 0.0, 1.0);
+        bass_band.params = EqBandParams::lowshelf(100.0, 0.0, SHELF_Q);
         let mut treble_band = EqBand::new();
-        treble_band.params = EqBandParams::highshelf(7500.0, 0.0, 0.70);
+        treble_band.params = EqBandParams::highshelf(7500.0, 0.0, SHELF_Q);
 
         Self {
             bands,

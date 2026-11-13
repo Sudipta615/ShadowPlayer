@@ -1247,6 +1247,19 @@ impl EngineHandle {
         s
     }
 
+    /// The static pre-EQ headroom the EQ is currently reserving, in dB.
+    ///
+    /// This is the value the engine is applying when auto-headroom is on —
+    /// the curve's peak combined boost, negated — and the manually configured
+    /// value otherwise. Auto-headroom is a real level change on the whole
+    /// signal, so a host that shows a preamp must be able to show this next to
+    /// it: a `0.0 dB` preamp with a `−13.7 dB` headroom is a `−13.7 dB` mix.
+    ///
+    /// Reads one scalar out of the published settings snapshot; no clone.
+    pub fn eq_headroom_db(&self) -> f32 {
+        self.playback_info.load().settings.eq_headroom_db
+    }
+
     /// Read back the live `EngineConfig`.
     ///
     /// Added in 0.9.0. [`Self::settings`] is a curated read-back covering the

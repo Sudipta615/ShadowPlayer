@@ -27,6 +27,18 @@ pub(super) fn render_advanced_tab(
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(0.0, theme.space_lg);
 
+        // Report what the engine is actually reserving, not just that the
+        // switch is on. The badge is the number the preamp card also shows.
+        let ah_badge = if state.auto_headroom {
+            if state.engine_headroom_db < -0.05 {
+                format!("{:.1} dB applied", state.engine_headroom_db)
+            } else {
+                "On · nothing to reserve".to_string()
+            }
+        } else {
+            "Off · no attenuation".to_string()
+        };
+
         // Row 1: Extended Gain Range & Auto Headroom
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
@@ -53,8 +65,8 @@ pub(super) fn render_advanced_tab(
                     card_w,
                     "Static Auto Headroom",
                     &crate::components::info_box::INFO_AUTO_HEADROOM,
-                    "Reserves the curve's peak boost as fixed pre-EQ attenuation. It lowers the whole signal; it is not a limiter.",
-                    if ah { "Static Attenuation ON" } else { "Headroom Bypass" },
+                    "Reserves the curve's peak boost as fixed pre-EQ attenuation. Every band keeps its shape, but the whole mix drops by that amount, so a boost does not get louder. It is not a limiter.",
+                    &ah_badge,
                     ah,
                     &mut ah,
                     |v| {
@@ -73,8 +85,8 @@ pub(super) fn render_advanced_tab(
                 card_w,
                 "Static Auto Headroom",
                 &crate::components::info_box::INFO_AUTO_HEADROOM,
-                "Reserves the curve's peak boost as fixed pre-EQ attenuation. It lowers the whole signal; it is not a limiter.",
-                if ah { "Static Attenuation ON" } else { "Headroom Bypass" },
+                "Reserves the curve's peak boost as fixed pre-EQ attenuation. Every band keeps its shape, but the whole mix drops by that amount, so a boost does not get louder. It is not a limiter.",
+                &ah_badge,
                 ah,
                 &mut ah,
                 |v| {

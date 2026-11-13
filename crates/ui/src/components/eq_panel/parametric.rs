@@ -10,7 +10,7 @@ use super::controls::{card, render_footer_controls};
 use super::preset_library::render_preset_library;
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::{font, Theme};
-use audio_session::engine::dsp::equalizer::{EqFilterType, MAX_EQ_BANDS};
+use audio_session::engine::dsp::equalizer::{EqFilterType, MAX_EQ_BANDS, SHELF_Q};
 use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,32 @@ const BAND_FREQ_MAX: f32 = 24_000.0;
 const BAND_GAIN_LIMIT: f32 = 24.0;
 const BAND_Q_MIN: f32 = 0.1;
 const BAND_Q_MAX: f32 = 18.0;
+
+/// The Q of a band that is one octave wide — the default spacing of the
+/// parametric bank and the standard graphic-EQ bandwidth.
+///
+/// `Q = 0.707` is a *two-octave* band: at octave spacing every band overlaps
+/// its neighbours by more than half its own height, so raising three sliders
+/// by 6 dB produces a 13 dB hump instead of the 6 dB curve the panel draws.
+/// The bank is laid out on octave centres, so it uses the octave's Q.
+const OCTAVE_Q: f32 = 1.4;
+
+/// The Q a band of this shape starts with, used both for the factory bank and
+/// when the user changes a band's shape.
+///
+/// A shelf's Q is a slope, not a bandwidth: [`SHELF_Q`] — the engine's
+/// maximally flat `S = 1` — is the only slope that reaches the plateau
+/// monotonically. Handing a shelf the octave's bandwidth Q makes it resonate
+/// (a `+12 dB` low shelf measures `+14 dB` near the corner and cuts above it),
+/// so a shape change resets Q to that shape's own default instead of carrying
+/// a number that meant something else. A user may still dial Q on a shelf on
+/// purpose. The constant lives in the engine, which designs the filter.
+fn default_q_for(filter_type: EqFilterType) -> f32 {
+    match filter_type {
+        EqFilterType::LowShelf | EqFilterType::HighShelf => SHELF_Q,
+        _ => OCTAVE_Q,
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ParametricBand {
@@ -34,7 +60,7 @@ impl Default for ParametricBand {
         Self {
             freq: 1000.0,
             gain_db: 0.0,
-            q: 0.707,
+            q: OCTAVE_Q,
             filter_type: EqFilterType::Peaking,
             enabled: true,
         }
@@ -42,6 +68,37 @@ impl Default for ParametricBand {
 }
 
 impl ParametricBand {
+    /// The factory bank: ten ISO octave centres with shelving ends.
+    ///
+    /// The first and last bands are shelves because a peaking filter centred
+    /// on 31.5 Hz or 16 kHz cannot shape the band beyond it — the standard
+    /// graphic-EQ ladder ends in a low/high shelf for exactly this reason.
+    /// Every gain is 0 dB, so the curve is flat until the user moves it.
+    pub fn default_ladder() -> Vec<Self> {
+        const FREQS: [f32; 10] = [
+            31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+        ];
+        FREQS
+            .iter()
+            .enumerate()
+            .map(|(i, &freq)| {
+                let filter_type = if i == 0 {
+                    EqFilterType::LowShelf
+                } else if i == FREQS.len() - 1 {
+                    EqFilterType::HighShelf
+                } else {
+                    EqFilterType::Peaking
+                };
+                Self {
+                    freq,
+                    q: default_q_for(filter_type),
+                    filter_type,
+                    ..Self::default()
+                }
+            })
+            .collect()
+    }
+
     /// The next band's starting frequency: one octave above the last band,
     /// clamped to the audible range. Empty banks start at 1 kHz.
     fn next_frequency(bands: &[Self]) -> f32 {
@@ -315,6 +372,12 @@ fn render_band_row(
                                 && !selected
                             {
                                 band.filter_type = filter_type;
+                                // Q means something different for a shelf
+                                // (slope) than for a peaking band
+                                // (bandwidth), so carrying the old number
+                                // across makes the new shape ring instead of
+                                // shelve. Start the new shape from its own Q.
+                                band.q = default_q_for(filter_type);
                                 result.changed = true;
                             }
                         }

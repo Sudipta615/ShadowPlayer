@@ -390,3 +390,41 @@ fn test_headroom_estimator_includes_resonant_lowpass() {
         "auto headroom must attenuate to protect against the resonant peak"
     );
 }
+
+/// The ladder constructors must give their shelf endpoints a shelf slope.
+///
+/// The graphic path has its own test, but a parametric bank is built here and
+/// reaches the user through `set_bands`, so this pins the constructor: the
+/// endpoint band carries [`SHELF_Q`] while the interior bands keep the
+/// octave's peaking Q, and the shelf measured through the DSP reaches its gain
+/// monotonically instead of overshooting and cutting above the corner.
+#[test]
+fn a_ladder_shelf_endpoint_uses_a_shelf_slope_not_the_peaking_q() {
+    use super::SHELF_Q;
+
+    let sr = 48_000.0;
+    let mut eq = ParametricEq::default_10_band(sr);
+    let low_q = eq.band_params(0).unwrap().q;
+    let interior_q = eq.band_params(1).unwrap().q;
+    assert!(
+        (low_q - SHELF_Q).abs() < 1e-6,
+        "the 31.25 Hz endpoint carries Q {low_q}, expected the shelf slope {SHELF_Q}"
+    );
+    assert!(
+        (interior_q - 1.4).abs() < 1e-6,
+        "the 62.5 Hz band carries Q {interior_q}, expected the octave Q"
+    );
+
+    eq.set_band(0, EqBandParams::lowshelf(31.25, 12.0, low_q));
+    eq.set_enabled(true);
+    let near_corner = probe_gain_db(&mut eq, 20.0, sr);
+    let above_corner = probe_gain_db(&mut eq, 63.0, sr);
+    assert!(
+        near_corner <= 12.4,
+        "+12 dB low shelf overshot to {near_corner:.2} dB at 20 Hz"
+    );
+    assert!(
+        above_corner > -0.5,
+        "a shelf must not cut above its corner, got {above_corner:.2} dB at 63 Hz"
+    );
+}

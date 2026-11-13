@@ -16,6 +16,10 @@ impl ShadowPlayerApp {
         ctx: &egui::Context,
         current_track: Option<&Track>,
     ) {
+        // The applied headroom is a real level change on the whole mix, so the
+        // studio shows it next to the preamp. One scalar from the lock-free
+        // settings snapshot: no clone, no allocation, safe per frame.
+        self.dsp_state.eq_panel.engine_headroom_db = self.session.eq_headroom_db();
         let mut eq_actions = show_eq_panel(ctx, &mut self.dsp_state.eq_panel, &self.theme);
         let want_import = eq_actions.import_curve;
         let want_export = eq_actions.export_curve;

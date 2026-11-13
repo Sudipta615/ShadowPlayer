@@ -138,6 +138,15 @@ pub struct EqPanelState {
     pub bands: Vec<ParametricBand>,
     pub preamp_db: f32,
     pub auto_headroom: bool,
+    /// The headroom the **engine** is applying right now, in dB (≤ 0), read
+    /// from its settings snapshot each frame before the panel draws.
+    ///
+    /// With auto-headroom on this is the negated peak of the live curve, and
+    /// it is a real attenuation of the whole mix. The panel must show it next
+    /// to the preamp — a `0.0 dB` preamp plus a `−13.7 dB` headroom is a
+    /// `−13.7 dB` mix, and hiding that is what made a working boost look like
+    /// it did nothing. Not persisted: it is a measurement, not a setting.
+    pub engine_headroom_db: f32,
 
     /// Durable, DB-backed presets. The legacy `custom_presets` above predate
     /// the library and remain graphic-only; new saves go here so a curve can
@@ -200,17 +209,6 @@ pub struct EqPanelState {
 
 impl Default for EqPanelState {
     fn default() -> Self {
-        let default_freqs = [
-            31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
-        ];
-        let bands: Vec<ParametricBand> = default_freqs
-            .iter()
-            .map(|&freq| ParametricBand {
-                freq,
-                ..ParametricBand::default()
-            })
-            .collect();
-
         Self {
             is_open: false,
             was_open: false,
@@ -226,12 +224,13 @@ impl Default for EqPanelState {
 
             eq_enabled: false,
             eq_mode: EqMode::Graphic,
-            bands,
+            bands: ParametricBand::default_ladder(),
             preamp_db: 0.0,
             // Static auto-headroom is opt-in. It lowers the *whole* signal by
             // the curve's peak boost, so enabling it silently turns a +6 dB
             // bass slider into 0 dB at the centre and −6 dB everywhere else.
             auto_headroom: false,
+            engine_headroom_db: 0.0,
             library: crate::state::PresetLibraryState::default(),
 
             graphic_enabled: false,

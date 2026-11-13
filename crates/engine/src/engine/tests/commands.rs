@@ -854,6 +854,113 @@ fn test_graphic_eq_auto_headroom_is_static_and_predictable() {
 }
 
 #[test]
+fn test_graphic_eq_low_shelf_reaches_its_slider_without_resonating() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+
+    let mut gains = vec![0.0; 10];
+    gains[0] = 12.0; // the 31.5 Hz low-shelf slider on the TenBand ladder
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::TenBand,
+        gains_db: gains,
+        preamp_db: 0.0,
+        enabled: true,
+        auto_headroom: false,
+    });
+    engine.tick();
+
+    // A shelf's Q is a slope, not a bandwidth. At the peaking band's Q of
+    // 1.414 the +12 dB low shelf measured +14.2 dB near its corner and cut
+    // −2.2 dB above it — a slider that lies and a dip nobody asked for.
+    let at_20 = measured_eq_gain_db(&mut engine, 20.0);
+    let at_40 = measured_eq_gain_db(&mut engine, 40.0);
+    let at_63 = measured_eq_gain_db(&mut engine, 63.0);
+    assert!(
+        at_20 <= 12.4,
+        "+12 dB low shelf overshot to {at_20:.2} dB at 20 Hz"
+    );
+    assert!(
+        at_20 > 9.0,
+        "+12 dB low shelf should approach its slider at 20 Hz, got {at_20:.2} dB"
+    );
+    assert!(
+        at_20 > at_40 && at_40 > at_63,
+        "low shelf must fall monotonically: 20 Hz {at_20:.2}, 40 Hz {at_40:.2}, 63 Hz {at_63:.2}"
+    );
+    assert!(
+        at_63 > -0.5,
+        "low shelf must not cut above its corner, got {at_63:.2} dB at 63 Hz"
+    );
+}
+
+#[test]
+fn test_flat_graphic_eq_is_unity_even_with_auto_headroom() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+    engine.send_command(EngineCommand::SetGraphicEqState {
+        layout: config::GraphicEqLayout::TenBand,
+        gains_db: vec![0.0; 10],
+        preamp_db: 0.0,
+        enabled: true,
+        auto_headroom: true,
+    });
+    engine.tick();
+
+    // Nothing to reserve on a flat curve: enabling the EQ must not move the
+    // level at all. "EQ on with no boost is quieter" is the regression this
+    // guards.
+    assert_eq!(engine.pipeline().eq().eq.headroom_db(), 0.0);
+    let unity = measured_eq_gain_db(&mut engine, 1000.0);
+    assert!(
+        unity.abs() < 0.05,
+        "flat EQ with auto headroom should be unity, got {unity:.3} dB"
+    );
+}
+
+#[test]
+fn test_graphic_eq_auto_headroom_reserves_the_shelf_peak_it_reports() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    engine.send_command(EngineCommand::SetEqMode(config::EqMode::Graphic));
+
+    let mut gains = vec![0.0; 10];
+    gains[0] = 6.0; // 31.5 Hz low shelf
+    gains[5] = 9.0; // 1 kHz peaking band
+    let send = |engine: &mut AudioEngine, auto_headroom: bool| {
+        engine.send_command(EngineCommand::SetGraphicEqState {
+            layout: config::GraphicEqLayout::TenBand,
+            gains_db: gains.clone(),
+            preamp_db: 0.0,
+            enabled: true,
+            auto_headroom,
+        });
+        engine.tick();
+    };
+
+    send(&mut engine, false);
+    let mut raw_peak = f32::NEG_INFINITY;
+    for freq in [20.0, 31.5, 40.0, 125.0, 1000.0, 2000.0, 8000.0, 16000.0] {
+        raw_peak = raw_peak.max(measured_eq_gain_db(&mut engine, freq));
+    }
+
+    send(&mut engine, true);
+    // The reported headroom must be the curve's real peak, not an optimistic
+    // guess: after it is applied, no frequency in the curve may exceed unity.
+    let reported = engine.pipeline().eq().eq.headroom_db();
+    assert!(
+        (-reported - raw_peak).abs() < 0.6,
+        "headroom {reported:.2} dB does not match the measured curve peak +{raw_peak:.2} dB"
+    );
+    let mut residual_peak = f32::NEG_INFINITY;
+    for freq in [20.0, 31.5, 40.0, 125.0, 1000.0, 2000.0, 8000.0, 16000.0] {
+        residual_peak = residual_peak.max(measured_eq_gain_db(&mut engine, freq));
+    }
+    assert!(
+        residual_peak <= 0.5,
+        "headroom {reported:.2} dB left the curve peaking at +{residual_peak:.2} dB"
+    );
+}
+
+#[test]
 fn test_parametric_mode_survives_graphic_snapshots_and_round_trips() {
     let mut engine = AudioEngine::new_default().unwrap();
     let preset = config::EqPreset {
