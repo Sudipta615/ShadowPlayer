@@ -1749,3 +1749,31 @@ fn test_tick_blocking_processes_burst_commands_in_order() {
     assert!((handle.speed() - 1.25).abs() < 1e-4);
     assert_eq!(handle.playlist_len(), 1);
 }
+
+#[test]
+fn test_recommended_tick_wait_pacing() {
+    let engine = AudioEngine::new_default().unwrap();
+    assert_eq!(
+        engine.recommended_tick_wait(),
+        std::time::Duration::from_millis(50)
+    );
+
+    engine.update_playback_state(PlaybackState::Paused);
+    assert_eq!(
+        engine.recommended_tick_wait(),
+        std::time::Duration::from_millis(50)
+    );
+
+    engine.update_playback_state(PlaybackState::Buffering);
+    assert_eq!(
+        engine.recommended_tick_wait(),
+        std::time::Duration::from_millis(2)
+    );
+
+    engine.update_playback_state(PlaybackState::Playing);
+    // Initially buffer is empty, so recommended wait is low (1ms) to quickly fill
+    assert_eq!(
+        engine.recommended_tick_wait(),
+        std::time::Duration::from_millis(1)
+    );
+}

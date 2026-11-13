@@ -574,9 +574,14 @@ impl WasapiOutput {
     }
 
     pub fn reset_buffer(&self) {
-        self.pause();
+        let was_paused = self.paused.load(Ordering::Acquire);
+        if !was_paused {
+            self.pause();
+        }
         self.buffer.reset();
-        self.resume();
+        if !was_paused {
+            self.resume();
+        }
     }
 
     pub fn take_underruns(&self) -> u32 {

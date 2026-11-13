@@ -756,9 +756,14 @@ impl CpalOutput {
 
     /// Reset the output buffer safely.
     pub fn reset_buffer(&self) {
-        self.pause();
+        let was_paused = self.paused.load(Ordering::Acquire);
+        if !was_paused {
+            self.pause();
+        }
         self.buffer.reset();
-        self.resume();
+        if !was_paused {
+            self.resume();
+        }
     }
 
     /// Get the number of underruns since last check

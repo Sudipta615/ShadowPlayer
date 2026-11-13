@@ -73,28 +73,20 @@ impl AudioEngine {
     /// Calculate the recommended tick pacing wait duration based on stream state
     /// and output ring buffer fullness.
     ///
-    /// When playing with a healthy buffer cushion, allows the worker thread to sleep
-    /// for 15–25ms, reducing CPU wakeups and context switching on low-power dual-core CPUs.
-    /// When the buffer is depleting, drops wait time to 2–5ms to rapidly decode more audio.
-    /// When stopped or paused, sleeps for up to 50ms (consuming near 0% CPU).
+    /// When playing, uses low tick wait times (1–5ms) so the worker thread rapidly
+    /// builds and reliably maintains the ring buffer cushion without latency underruns.
+    /// When stopped or paused, sleeps for 50ms (consuming near 0% CPU).
     pub fn recommended_tick_wait(&self) -> Duration {
         match self.current_state() {
             PlaybackState::Playing => {
-                let cap = self.output_buffer.capacity();
                 let avail = self.output_buffer.available();
-                if cap == 0 {
-                    Duration::from_millis(10)
-                } else if avail >= cap * 3 / 4 {
-                    Duration::from_millis(25)
-                } else if avail >= cap / 2 {
-                    Duration::from_millis(15)
-                } else if avail >= cap / 4 {
-                    Duration::from_millis(8)
+                if avail < 8192 {
+                    Duration::from_millis(1)
                 } else {
-                    Duration::from_millis(2)
+                    Duration::from_millis(5)
                 }
             }
-            PlaybackState::Buffering => Duration::from_millis(5),
+            PlaybackState::Buffering => Duration::from_millis(2),
             PlaybackState::Paused | PlaybackState::Stopped => Duration::from_millis(50),
         }
     }
@@ -481,7 +473,8 @@ impl AudioEngine {
             stats.buffer_capacity_frames = self.output_buffer.capacity();
             stats.buffer_available_frames = self.output_buffer.available();
             stats.buffer_fill_ratio = if stats.buffer_capacity_frames > 0 {
-                stats.buffer_available_frames as f32 / stats.buffer_capacity_frames as f32
+                (stats.buffer_available_frames as f32 / stats.buffer_capacity_frames as f32)
+                    .clamp(0.0, 1.0)
             } else {
                 0.0
             };
