@@ -464,12 +464,8 @@ impl SpatialNode {
         } else {
             None
         };
-        self.apply_screen(
-            cfg.center_azimuth_deg,
-            cfg.half_width_deg,
-            cfg.elevation_deg,
-            cfg.gain,
-        );
+        // Room first: it owns the listening position, and the screen is laid
+        // out around the listener.
         let r = &cfg.room;
         self.apply_room(
             r.enabled,
@@ -482,6 +478,12 @@ impl SpatialNode {
             r.late_mix,
             r.late_distance,
             r.wet,
+        );
+        self.apply_screen(
+            cfg.center_azimuth_deg,
+            cfg.half_width_deg,
+            cfg.elevation_deg,
+            cfg.gain,
         );
         self.apply_listener(
             cfg.listener_yaw_deg,

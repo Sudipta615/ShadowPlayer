@@ -159,6 +159,63 @@ fn a_mono_programme_stays_mono() {
 }
 
 #[test]
+fn enabling_crossfeed_does_not_drop_the_programme_level() {
+    // Crossfeed narrows the image by adding a filtered copy of the opposite
+    // channel; it must not attenuate the near channel. The first
+    // implementation blended `direct = 1 − 0.5·level`, so at the engine's
+    // default `level = 1.0` switching crossfeed on took 6 dB off everything —
+    // a level drop, not a stereo change.
+    let frames = 8192;
+    let input = hard_left(1_000.0, frames);
+    let bypass_rms = {
+        let rms: f32 = input.iter().map(|&(l, _)| l * l).sum::<f32>() / frames as f32;
+        rms.sqrt()
+    };
+
+    for (profile, _delay_ms) in PROFILES {
+        let mut crossfeed = crossfeed_for(*profile);
+        let mut out = Vec::with_capacity(frames);
+        for &(l, r) in &input {
+            out.push(crossfeed.process(l, r).0);
+        }
+        // Skip the delay-line fill at the head of the block.
+        let tail = &out[2048..];
+        let rms = (tail.iter().map(|v| v * v).sum::<f32>() / tail.len() as f32).sqrt();
+        let delta_db = 20.0 * (rms / bypass_rms).log10();
+        assert!(
+            delta_db > -1.0 && delta_db < 6.0,
+            "the {profile:?} profile changed the programme level by {delta_db:+.1} dB \
+             (direct path must stay at unity)"
+        );
+    }
+}
+
+#[test]
+fn changing_the_profile_reuses_the_delay_line() {
+    // A profile change used to allocate two new `Vec`s and zero the audio
+    // history on the queued control path — a click per click. The ring is
+    // now sized once, so a profile change keeps the samples in flight.
+    let mut crossfeed = crossfeed_for(CrossfeedProfile::Bauer);
+    for i in 0..512 {
+        let s = (2.0 * std::f32::consts::PI * 1_000.0 * i as f32 / SR).sin() * 0.5;
+        crossfeed.process(s, 0.0);
+    }
+    crossfeed.set_profile(CrossfeedProfile::Jmeier);
+    // The history survived: the crossfed (right) channel is not silent right
+    // after the switch, which is what a zeroed delay line would produce.
+    let mut energy = 0.0f32;
+    for i in 512..1024 {
+        let s = (2.0 * std::f32::consts::PI * 1_000.0 * i as f32 / SR).sin() * 0.5;
+        let (_, r) = crossfeed.process(s, 0.0);
+        energy += r * r;
+    }
+    assert!(
+        energy > 1e-6,
+        "the delay line was flushed by the profile change (right energy {energy:e})"
+    );
+}
+
+#[test]
 fn a_disabled_crossfeed_is_a_bit_exact_passthrough() {
     let frames = 1024;
     let mut crossfeed = Crossfeed::new(SR);

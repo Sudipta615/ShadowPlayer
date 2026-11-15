@@ -487,15 +487,22 @@ impl GraphGeneration {
             limiter.limiter.set_attack(config.limiter.attack_ms);
             limiter.limiter.set_release(config.limiter.release_ms);
             limiter.limiter.set_ceiling_db(config.limiter.ceiling_db);
-            if config.limiter.soft_clip {
-                limiter
-                    .limiter
-                    .set_mode(crate::dsp::limiter::LimiterMode::Saturate);
-            } else {
-                limiter
-                    .limiter
-                    .set_mode(crate::dsp::limiter::LimiterMode::Transparent);
-            }
+            // `soft_clip` is the legacy alias for the Saturate mode: a config
+            // written before `mode` existed carries only the flag. It is only
+            // consulted while `mode` is still the default, because the command
+            // path keeps `mode` and the flag in step — a non-default mode is
+            // always the newer, more specific statement.
+            let mode = match (config.limiter.mode, config.limiter.soft_clip) {
+                (crate::dsp::limiter::LimiterMode::Transparent, true) => {
+                    crate::dsp::limiter::LimiterMode::Saturate
+                }
+                (mode, _) => mode,
+            };
+            limiter.limiter.set_mode(mode);
+            // The detector choice changes the delay line's length (the 4× FIR
+            // carries its own group delay), so replaying it keeps the limiter's
+            // reported latency equal to the one the last session reported.
+            limiter.limiter.enable_true_peak(config.limiter.true_peak);
         }
 
         {
@@ -859,6 +866,28 @@ impl DspGraph {
         }
         let mut generation =
             GraphGeneration::build_with_plans(config, sample_rate, &layout, user, plans);
+        // Tone shelves and mid/side mode are *runtime* EQ state: the player
+        // owns them and sends them as commands, and `EngineConfig` carries no
+        // field for either. A fresh generation therefore has no way to learn
+        // them from config, and a rebuild (a bus-topology change, a preset, a
+        // prepared plan) used to reset both to "off" — a bass shelf the user
+        // had dialled in silently disappeared mid-session. Carry them from the
+        // generation being replaced, the same way user state is carried.
+        let carried_eq = match &self.active.nodes[node_id::EQ] {
+            GraphNode::Eq(node) => Some((
+                node.eq.bass_shelf_gain_db(),
+                node.eq.treble_shelf_gain_db(),
+                node.midside_enabled,
+            )),
+            _ => None,
+        };
+        if let Some((bass_db, treble_db, midside)) = carried_eq {
+            if let GraphNode::Eq(node) = &mut generation.nodes[node_id::EQ] {
+                node.eq.set_bass_shelf(bass_db);
+                node.eq.set_treble_shelf(treble_db);
+                node.midside_enabled = midside;
+            }
+        }
         // DAC profiles are selected by device + output rate, not by the
         // generation's default (stereo/unknown) state. Load them on this
         // control path so the fresh generation does not lose the active

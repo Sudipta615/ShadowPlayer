@@ -42,13 +42,24 @@ impl Crossfeed {
             coeffs: BiquadCoeffs::identity(),
             state_lr: BiquadState::default(),
             state_rl: BiquadState::default(),
-            delay_lr: Vec::new(),
-            delay_rl: Vec::new(),
+            delay_lr: vec![0.0; Self::ring_capacity(sample_rate)],
+            delay_rl: vec![0.0; Self::ring_capacity(sample_rate)],
             delay_pos: 0,
-            delay_len: 0,
+            delay_len: 1,
         };
         cf.update_params();
         cf
+    }
+
+    /// The longest inter-aural delay any profile can ask for, in
+    /// milliseconds. Every profile is a fraction of a millisecond; the cap is
+    /// generous so a custom value never has to reallocate the ring.
+    const MAX_DELAY_MS: f32 = 5.0;
+
+    /// Capacity of the delay rings for `sample_rate`, sized once for the
+    /// largest supported delay.
+    fn ring_capacity(sample_rate: f32) -> usize {
+        ((Self::MAX_DELAY_MS / 1000.0) * sample_rate.max(1.0)).ceil() as usize + 2
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -113,6 +124,12 @@ impl Crossfeed {
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         if (self.sample_rate - sample_rate).abs() > 0.01 {
             self.sample_rate = sample_rate;
+            // A rate change is the one case that must re-size the ring.
+            let cap = Self::ring_capacity(sample_rate);
+            if self.delay_lr.len() != cap {
+                self.delay_lr = vec![0.0; cap];
+                self.delay_rl = vec![0.0; cap];
+            }
             self.update_params();
             self.reset();
         }
@@ -157,17 +174,14 @@ impl Crossfeed {
 
         self.coeffs = BiquadCoeffs::lowpass(self.sample_rate, freq, q);
 
-        // Calculate delay in samples
-        self.delay_len = ((delay_ms / 1000.0) * self.sample_rate) as usize;
-        if self.delay_len == 0 {
-            self.delay_len = 1; // Minimum 1 sample to avoid 0-capacity ring buffer logic
-        }
-
-        if self.delay_lr.len() != self.delay_len {
-            self.delay_lr = vec![0.0; self.delay_len];
-            self.delay_rl = vec![0.0; self.delay_len];
-            self.delay_pos = 0;
-        }
+        // The delay is a *read offset* into a ring that was sized for the
+        // largest supported delay, not a buffer length. Re-sizing the ring
+        // here meant every profile change or custom-delay drag allocated two
+        // `Vec`s and zeroed the audio history on the queued control path — a
+        // click on every click. A longer delay now just reads further back.
+        let cap = self.delay_lr.len().max(1);
+        let want = ((delay_ms / 1000.0) * self.sample_rate) as usize;
+        self.delay_len = want.clamp(1, cap.saturating_sub(1).max(1));
     }
 
     #[inline]
@@ -191,24 +205,40 @@ impl Crossfeed {
         let filtered_to_right = self.state_lr.process(left, &self.coeffs);
         let filtered_to_left = self.state_rl.process(right, &self.coeffs);
 
-        // Process delay line
-        let cross_to_right = self.delay_lr[self.delay_pos];
-        let cross_to_left = self.delay_rl[self.delay_pos];
+        // Process delay line: read `delay_len` frames back, then overwrite the
+        // current slot with the newly filtered opposite channel.
+        let cap = self.delay_lr.len();
+        let read_pos = if self.delay_pos >= self.delay_len {
+            self.delay_pos - self.delay_len
+        } else {
+            self.delay_pos + cap - self.delay_len
+        };
+        let cross_to_right = self.delay_lr[read_pos];
+        let cross_to_left = self.delay_rl[read_pos];
 
         self.delay_lr[self.delay_pos] = filtered_to_right;
         self.delay_rl[self.delay_pos] = filtered_to_left;
 
         self.delay_pos += 1;
-        if self.delay_pos >= self.delay_len {
+        if self.delay_pos >= cap {
             self.delay_pos = 0;
         }
 
-        // Blend the crossfeed signals
+        // Blend the crossfeed signals.
+        //
+        // The direct path stays at unity: crossfeed narrows the image by
+        // *adding* a filtered, delayed opposite channel, it does not attenuate
+        // the near one. The previous `direct = 1 − 0.5·level` took 6 dB off the
+        // direct signal at level 1.0, so enabling crossfeed made the mix
+        // quieter and duller instead of narrower. The cross term is then
+        // normalised by `√(1 + cross²)`, which keeps total power constant for
+        // uncorrelated programme (and mono within ≈+2.6 dB of coherent bass
+        // summing, which is the intended bass lift of the classic networks).
         let cross_level = 0.5 * (self.level as f64);
-        let direct_level = 1.0 - cross_level;
+        let norm = 1.0 / (1.0 + cross_level * cross_level).sqrt();
 
-        let out_l = (left * direct_level) + (cross_to_left * cross_level);
-        let out_r = (right * direct_level) + (cross_to_right * cross_level);
+        let out_l = (left + cross_to_left * cross_level) * norm;
+        let out_r = (right + cross_to_right * cross_level) * norm;
 
         (out_l, out_r)
     }

@@ -555,7 +555,58 @@ pub struct LimiterConfig {
     pub attack_ms: f32,
     pub release_ms: f32,
     pub ceiling_db: f32,
+    /// Legacy alias for [`LimiterMode::Saturate`]. Kept because it is written by
+    /// older configs and by the player's soft-clip toggle; `mode` is the durable
+    /// owner, and this only *upgrades* a limiter to saturation on load. See
+    /// `apply_config` in the engine's graph construction.
     pub soft_clip: bool,
+    /// Post-gain limiter character. The engine's five-mode selector used to live
+    /// only on the live graph, so a `Safety` / `Mastering` / `ClipperLimiter`
+    /// choice reverted to `Transparent` on the next generation rebuild.
+    #[serde(default)]
+    pub mode: LimiterMode,
+    /// True-peak (4× FIR) detection. The 4× detector adds its own group delay,
+    /// so the delay line is sized differently with it armed — a rebuild that
+    /// silently changed this shifted the limiter's latency.
+    #[serde(default = "default_true_peak")]
+    pub true_peak: bool,
+}
+
+fn default_true_peak() -> bool {
+    true
+}
+
+/// Post-gain mode: controls what happens after the gain-reduction multiplier.
+///
+/// Lives here rather than in the engine's `dsp::limiter` module so the persisted
+/// configuration owns it: the engine re-exports it as
+/// `dsp::limiter::LimiterMode`, and a rebuild replays it from the config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LimiterMode {
+    /// Pure dynamics protection — gain reduction only.
+    /// The output signal is multiplied by the smoothed gain.
+    /// Any residual overshoot is hard-clamped at the ceiling.
+    /// **This is the recommended mode for transparent mastering.**
+    #[default]
+    Transparent,
+
+    /// Intentional coloration — applies an exponential soft-clip curve after
+    /// gain reduction. The limiter's brick-wall protection is slightly
+    /// sacrificed for a warmer, rounder transient character.
+    Saturate,
+
+    /// Ultra-fast brickwall safety limiter with microsecond attack for live
+    /// streaming and strict safety enforcement (zero overshoot guarantee).
+    Safety,
+
+    /// High-quality mastering limiter with program-dependent dual-stage release,
+    /// inter-sample peak protection, and adaptive recovery.
+    Mastering,
+
+    /// Combined soft-clipper pre-limiter and lookahead brickwall limiter.
+    /// Shaves transient crest factor before limiting for maximal perceived
+    /// loudness.
+    ClipperLimiter,
 }
 
 impl Default for LimiterConfig {
@@ -567,6 +618,8 @@ impl Default for LimiterConfig {
             release_ms: 100.0,
             ceiling_db: -0.3,
             soft_clip: false,
+            mode: LimiterMode::Transparent,
+            true_peak: default_true_peak(),
         }
     }
 }
@@ -1199,5 +1252,35 @@ not a filter line
         assert_eq!(preset.bands.len(), 1);
         assert_eq!(preset.bands[0].frequency, 100.0);
         assert_eq!(preset.bands[0].gain_db, 6.0);
+    }
+
+    /// The limiter's character and detector are persisted with the rest of the
+    /// limiter settings. They used to live only on the live graph, so a
+    /// `Mastering` choice came back as `Transparent` after a rebuild and
+    /// true-peak detection was never restored (which also shifted the
+    /// limiter's reported latency, because the 4× FIR carries its own delay).
+    #[test]
+    fn limiter_mode_and_true_peak_persist_and_legacy_configs_upgrade() {
+        let cfg = LimiterConfig {
+            mode: LimiterMode::ClipperLimiter,
+            true_peak: false,
+            ..LimiterConfig::default()
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: LimiterConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.mode, LimiterMode::ClipperLimiter);
+        assert!(!back.true_peak);
+
+        // A config written before these fields existed: the limiter keeps its
+        // old (transparent, true-peak) behaviour rather than defaulting to a
+        // coloured mode or to sample-peak metering.
+        let legacy: LimiterConfig = serde_json::from_str(
+            r#"{"enabled":true,"lookahead_ms":5.0,"attack_ms":0.5,
+                "release_ms":100.0,"ceiling_db":-0.3,"soft_clip":false}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.mode, LimiterMode::Transparent);
+        assert!(legacy.true_peak);
+        assert_eq!(legacy.mode, LimiterMode::default());
     }
 }

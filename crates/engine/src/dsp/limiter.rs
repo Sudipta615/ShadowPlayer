@@ -84,32 +84,12 @@ pub enum TruePeakMode {
 }
 
 /// Post-gain mode: controls what happens after the gain-reduction multiplier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum LimiterMode {
-    /// Pure dynamics protection — gain reduction only.
-    /// The output signal is multiplied by the smoothed gain.
-    /// Any residual overshoot is hard-clamped at the ceiling.
-    /// **This is the recommended mode for transparent mastering.**
-    #[default]
-    Transparent,
-
-    /// Intentional coloration — applies an exponential soft-clip curve after
-    /// gain reduction. The limiter's brick-wall protection is slightly
-    /// sacrificed for a warmer, rounder transient character.
-    Saturate,
-
-    /// Ultra-fast brickwall safety limiter with microsecond attack for live streaming
-    /// and strict safety enforcement (zero overshoot guarantee).
-    Safety,
-
-    /// High-quality mastering limiter with program-dependent dual-stage release,
-    /// inter-sample peak protection, and adaptive recovery.
-    Mastering,
-
-    /// Combined soft-clipper pre-limiter and lookahead brickwall limiter.
-    /// Shaves transient crest factor before limiting for maximal perceived loudness.
-    ClipperLimiter,
-}
+///
+/// Defined in the `config` crate so the persisted [`config::LimiterConfig`] owns
+/// it — a mode chosen on the live graph used to be lost on the next generation
+/// rebuild. Re-exported here because that is where the limiter's callers expect
+/// it; there is still exactly one definition.
+pub use config::LimiterMode;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LookaheadLimiter
@@ -424,8 +404,26 @@ impl LookaheadLimiter {
         self.release_coeff = (-1.0_f32 / (self.release_secs * self.sample_rate)).exp();
     }
 
+    /// Set the predictive lookahead window in milliseconds.
+    ///
+    /// This is the **only** setter that has to rebuild the delay lines, so it
+    /// is also the only one that is allowed to flush them. The player sends the
+    /// whole limiter bundle (`lookahead`, `attack`, `release`, `ceiling`, peak
+    /// mode) on every slider drag, and every one of those bundles used to arrive
+    /// here — `rebuild_buffers` zeroed the delay lines and reset the gain, so a
+    /// ceiling drag put a ~6 ms hole in a steady stream (measured: 290 silent
+    /// samples at 48 kHz). A setting that did not change must not touch the
+    /// audio path, so an unchanged lookahead returns immediately.
     pub fn set_lookahead(&mut self, ms: f32) {
-        self.lookahead_secs = ms / 1000.0;
+        let ms = if ms.is_finite() { ms } else { 5.0 };
+        let ms = ms.clamp(0.1, 100.0);
+        let secs = ms / 1000.0;
+        let samples = ((secs * self.sample_rate).round() as usize).max(1);
+        if samples == self.lookahead_samples && !self.delay_lines[0].is_empty() {
+            self.lookahead_secs = secs;
+            return;
+        }
+        self.lookahead_secs = secs;
         self.rebuild_buffers();
     }
 
@@ -1059,13 +1057,26 @@ impl LookaheadLimiter {
         // The audio delay line must hold the lookahead window plus the FIR
         // detector's own group delay when Fir4x mode is active.
         let buf_len = (self.audio_delay_samples() + 1).next_power_of_two();
+        // Only a *length* change invalidates the ring's contents. When the new
+        // configuration still fits the same power-of-two buffer (5 ms → 6 ms at
+        // 48 kHz, say) the delay line is left untouched: the audio stays
+        // continuous instead of restarting with a silent fill. A real resize
+        // does have to restart (the read offset is a ring index), which is a
+        // deliberate, user-initiated discontinuity.
+        let len_changed = self.delay_lines[0].len() != buf_len;
         for line in &mut self.delay_lines {
             // `resize` down is free; `resize` up is the documented one-time
             // allocation for a new, larger configuration.
             line.resize(buf_len, 0.0);
-            line.fill(0.0);
+            if len_changed {
+                line.fill(0.0);
+            }
         }
-        self.delay_write_pos = 0;
+        if len_changed {
+            self.delay_write_pos = 0;
+        } else {
+            self.delay_write_pos &= buf_len - 1;
+        }
         let peak_len = self.lookahead_samples + 2;
         // `reserve` allocates only when the request exceeds the current
         // capacity, so guarding on that makes the steady case free. The deque's
@@ -1074,11 +1085,21 @@ impl LookaheadLimiter {
         if self.monotonic_deque.capacity() < peak_len {
             self.monotonic_deque.reserve(peak_len);
         }
-        self.monotonic_deque.clear();
         for deque in &mut self.link_deques {
             if deque.capacity() < peak_len {
                 deque.reserve(peak_len);
             }
+        }
+        // In-place lookahead change (same buffer length): the deque entries are
+        // absolute sample indices and the window scan pops everything outside
+        // the new window, so they remain valid. Keeping them means the gain
+        // envelope continues from where it was instead of snapping back to
+        // unity on a lookahead edit.
+        if !len_changed {
+            return;
+        }
+        self.monotonic_deque.clear();
+        for deque in &mut self.link_deques {
             deque.clear();
         }
         self.sample_counter = 0;
@@ -1859,8 +1880,67 @@ mod tests {
             assert!(l.abs() <= 1.0 && r.abs() <= 1.0);
         }
     }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
+    /// The player sends the whole limiter bundle on every slider drag, so a
+    /// ceiling/attack/release edit must not touch the delay line. Before the
+    /// `set_lookahead` no-op guard, `rebuild_buffers` zeroed it and a steady
+    /// stream lost ~6 ms of audio (290 samples at 48 kHz) on every drag.
+    #[test]
+    fn editing_a_parameter_leaves_a_steady_stream_intact() {
+        let sr = 48_000.0f32;
+        let mut lim = LookaheadLimiter::new_with_params(sr, 5.0, 0.5, 100.0, -0.3, false);
+        lim.set_enabled(true);
+        let frames = 256usize;
+        let mut out = Vec::new();
+        for blk in 0..80 {
+            let mut l = vec![0.25f32; frames];
+            let mut r = vec![0.25f32; frames];
+            if blk == 60 {
+                // What `SetLimiterParams` applies, unchanged lookahead.
+                lim.set_lookahead(5.0);
+                lim.set_attack(0.5);
+                lim.set_release(100.0);
+                lim.set_ceiling_db(-1.0);
+            }
+            lim.process_block(&mut l, &mut r);
+            if blk >= 55 {
+                out.extend_from_slice(&l);
+            }
+        }
+        // DC below the ceiling passes at unity: no sample may dip.
+        for (i, v) in out.iter().enumerate() {
+            assert!(
+                (v - 0.25).abs() < 1e-6,
+                "sample {i} was {v}, expected steady 0.25 (delay line flushed)"
+            );
+        }
+    }
+
+    /// ... and a lookahead change that still fits the same power-of-two buffer
+    /// must keep the audio continuous too.
+    #[test]
+    fn a_lookahead_change_within_the_same_buffer_keeps_the_stream() {
+        let sr = 48_000.0f32;
+        let mut lim = LookaheadLimiter::new_with_params(sr, 5.0, 0.5, 100.0, -0.3, false);
+        lim.set_enabled(true);
+        let frames = 256usize;
+        let mut out = Vec::new();
+        for blk in 0..60 {
+            let mut l = vec![0.25f32; frames];
+            let mut r = vec![0.25f32; frames];
+            if blk == 40 {
+                lim.set_lookahead(6.0);
+            }
+            lim.process_block(&mut l, &mut r);
+            if blk >= 45 {
+                out.extend_from_slice(&l);
+            }
+        }
+        for (i, v) in out.iter().enumerate() {
+            assert!(
+                (v - 0.25).abs() < 1e-6,
+                "sample {i} was {v}, expected steady 0.25 after a 5→6 ms edit"
+            );
+        }
+    }
+}

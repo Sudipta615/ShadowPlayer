@@ -8,7 +8,13 @@ use crate::dsp::pipeline::VolumePath;
 
 impl AudioEngine {
     pub(super) fn handle_set_stereo_width(&mut self, width: f32) {
+        self.config.stereo_enhancer.width = width;
         self.graph.set_stereo_width(width);
+    }
+
+    pub(super) fn handle_set_stereo_enhancer_enabled(&mut self, enabled: bool) {
+        self.config.stereo_enhancer.enabled = enabled;
+        self.graph.set_stereo_enhancer_enabled(enabled);
     }
 
     /// Wet/dry mix for the canonical chain's convolution insert.
@@ -39,11 +45,20 @@ impl AudioEngine {
         self.config.dither_enabled = enabled;
     }
 
+    /// Runtime controls below mirror their value into `self.config`.
+    ///
+    /// The graph is a *projection* of the config: every generation rebuild
+    /// (track change, sample-rate change, layout change, reconfig) replays
+    /// `apply_config`, so a value that only reached the graph was silently
+    /// discarded the next time the graph was rebuilt. This is the same
+    /// contract `handle_set_convolution_wet_mix` documents.
     pub(super) fn handle_set_crossfeed_enabled(&mut self, enabled: bool) {
+        self.config.crossfeed.enabled = enabled;
         self.graph.set_crossfeed_enabled(enabled);
     }
 
     pub(super) fn handle_set_crossfeed_profile(&mut self, profile: config::CrossfeedProfile) {
+        self.config.crossfeed.profile = profile;
         self.graph.set_crossfeed_profile(profile);
     }
 
@@ -58,12 +73,27 @@ impl AudioEngine {
         q: f32,
         delay_ms: f32,
     ) {
+        self.config.crossfeed.custom_freq = frequency_hz;
+        self.config.crossfeed.custom_q = q;
+        self.config.crossfeed.custom_delay_ms = delay_ms;
         self.graph
             .set_crossfeed_custom_params(frequency_hz, q, delay_ms);
     }
 
     pub(super) fn handle_set_compressor_enabled(&mut self, enabled: bool) {
+        self.config.multiband_compressor.enabled = enabled;
         self.graph.set_compressor_enabled(enabled);
+    }
+
+    /// The config band for a 0-based compressor band index.
+    pub(super) fn multiband_band_mut(&mut self, band: usize) -> Option<&mut config::BandConfig> {
+        let c = &mut self.config.multiband_compressor;
+        match band {
+            0 => Some(&mut c.low_band),
+            1 => Some(&mut c.mid_band),
+            2 => Some(&mut c.high_band),
+            _ => None,
+        }
     }
 
     pub(super) fn handle_set_compressor_band_params(
@@ -75,6 +105,13 @@ impl AudioEngine {
         release_ms: f32,
         makeup_gain_db: f32,
     ) {
+        if let Some(b) = self.multiband_band_mut(band) {
+            b.threshold_db = threshold_db;
+            b.ratio = ratio;
+            b.attack_ms = attack_ms;
+            b.release_ms = release_ms;
+            b.makeup_gain_db = makeup_gain_db;
+        }
         self.graph.set_compressor_band_params(
             band,
             threshold_db,
@@ -124,6 +161,11 @@ impl AudioEngine {
 
     pub(super) fn handle_set_limiter_mode(&mut self, mode: crate::dsp::limiter::LimiterMode) {
         info!("Limiter mode set to {:?}", mode);
+        self.config.limiter.mode = mode;
+        // Keep the legacy alias in step: a config save/reload must not turn an
+        // explicit Transparent choice back into the Saturate that `soft_clip`
+        // implies.
+        self.config.limiter.soft_clip = mode == crate::dsp::limiter::LimiterMode::Saturate;
         self.graph.set_limiter_mode(mode);
     }
 
@@ -132,7 +174,36 @@ impl AudioEngine {
             "Limiter true-peak FIR: {}",
             if enabled { "enabled" } else { "disabled" }
         );
+        self.config.limiter.true_peak = enabled;
         self.graph.set_limiter_true_peak(enabled);
+    }
+
+    pub(super) fn handle_set_limiter_enabled(&mut self, enabled: bool) {
+        self.config.limiter.enabled = enabled;
+        self.graph.set_limiter_enabled(enabled);
+    }
+
+    pub(super) fn handle_set_limiter_params(
+        &mut self,
+        lookahead_ms: f32,
+        attack_ms: f32,
+        release_ms: f32,
+        ceiling_db: f32,
+        soft_clip: bool,
+    ) {
+        self.config.limiter.lookahead_ms = lookahead_ms;
+        self.config.limiter.attack_ms = attack_ms;
+        self.config.limiter.release_ms = release_ms;
+        self.config.limiter.ceiling_db = ceiling_db;
+        self.config.limiter.soft_clip = soft_clip;
+        if soft_clip {
+            // Saturation is a mode, so turn the flag into the setting it means.
+            // Otherwise a rebuild would read `soft_clip` while `mode` still said
+            // `Transparent` and the two would disagree about the character.
+            self.config.limiter.mode = crate::dsp::limiter::LimiterMode::Saturate;
+        }
+        self.graph
+            .set_limiter_params(lookahead_ms, attack_ms, release_ms, ceiling_db, soft_clip);
     }
 
     pub(super) fn handle_set_resampler_quality(&mut self, quality: config::ResamplerQuality) {

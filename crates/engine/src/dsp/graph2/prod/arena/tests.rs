@@ -713,6 +713,80 @@ fn per_slot_user_state_survives_reconfigure() {
     assert_eq!(graph.mix().inputs[1].gain.gain, 1.0, "default gain");
 }
 
+/// Tone shelves and mid/side mode are runtime EQ state with no config field:
+/// a generation rebuild must carry them, or a track/plan change silently
+/// resets controls the user set.
+#[test]
+fn tone_shelves_and_midside_survive_reconfigure() {
+    let sr = 48_000.0;
+    let cfg = EngineConfig::default();
+    let mut graph = DspGraph::from_config(&cfg, sr);
+
+    graph.set_bass_shelf(4.5);
+    graph.set_treble_shelf(-2.5);
+    graph.set_midside_eq(true);
+    graph.drain_queued_control();
+
+    graph.reconfigure(&cfg);
+    graph.drain_queued_control();
+
+    assert!(
+        (graph.eq().eq.bass_shelf_gain_db() - 4.5).abs() < 1e-2,
+        "the bass shelf must survive a rebuild, got {}",
+        graph.eq().eq.bass_shelf_gain_db()
+    );
+    assert!(
+        (graph.eq().eq.treble_shelf_gain_db() + 2.5).abs() < 1e-2,
+        "the treble shelf must survive a rebuild, got {}",
+        graph.eq().eq.treble_shelf_gain_db()
+    );
+    assert!(graph.eq().midside_enabled, "mid/side mode must survive");
+}
+
+/// The dynamic corrective layer shapes audio even when the static EQ is off,
+/// so it must invalidate the bit-perfect verdict on its own.
+#[test]
+fn dynamic_eq_alone_breaks_the_bit_perfect_claim() {
+    use crate::diagnostics::BitPerfectCause;
+    use crate::dsp::pipeline::OutputSampleFormat;
+
+    let sr = 48_000.0;
+    let mut cfg = EngineConfig::default();
+    cfg.eq.enabled = false;
+    cfg.eq.dynamic_eq = config::DynamicEqConfig::default_corrective_set();
+    cfg.eq.dynamic_eq.enabled = true;
+    cfg.limiter.enabled = false;
+    cfg.loudness.mode = config::LoudnessMode::Off;
+    cfg.crossfeed.enabled = false;
+    cfg.stereo_enhancer.enabled = false;
+
+    let graph = DspGraph::from_config(&cfg, sr);
+    assert!(
+        graph.eq().is_dynamic_enabled(),
+        "the dynamic layer must be armed"
+    );
+    assert!(
+        !graph.eq().eq.is_enabled(),
+        "the static bands stay bypassed"
+    );
+
+    let report = graph.bit_perfect_report_with_format(
+        48_000,
+        48_000,
+        24,
+        32,
+        OutputSampleFormat::F32,
+        false,
+        true,
+    );
+    assert!(
+        !report.eq_bypassed,
+        "a dynamic-only EQ is still processing audio"
+    );
+    assert_eq!(report.cause, Some(BitPerfectCause::EqActive));
+    assert!(!report.is_bit_perfect);
+}
+
 // ── N-channel secondary planes + multichannel bus sum ─────────
 
 /// Write a minimal 16-bit mono PCM WAV for the graph-vs-oracle matrix-FIR test.

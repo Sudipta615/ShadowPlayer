@@ -303,8 +303,15 @@ impl DspGraph {
                 && (in_pre.current_gain() - 1.0).abs() <= 1e-4
                 && (in_pre.target_gain - 1.0).abs() <= 1e-4);
 
-        let eq_bypassed =
-            self.bit_perfect || (!self.eq().eq.is_enabled() && !self.eq().midside_enabled);
+        // The dynamic-EQ corrective layer is part of the same stage and
+        // processes the signal whenever it is armed, so it invalidates the
+        // verdict exactly like the static bands do. Checking only the static
+        // flag let a dynamic-only chain report "EQ bypassed" — and even
+        // bit-perfect — while its audio was being shaped.
+        let eq_bypassed = self.bit_perfect
+            || (!self.eq().eq.is_enabled()
+                && !self.eq().midside_enabled
+                && !self.eq().is_dynamic_enabled());
 
         let limiter_bypassed = self.bit_perfect || !self.limiter().limiter.is_enabled();
         let compressor_bypassed = self.bit_perfect || !self.dynamics().compressor.is_enabled();

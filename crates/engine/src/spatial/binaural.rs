@@ -70,7 +70,7 @@ use super::hrtf::{
     ear_delay_sec, head_shadow_alpha, max_itd_sec, read_delayed, Ear, ElevationNotch, HeadShadow,
     HrtfDataset, HrtfMeshKind, DEFAULT_HEAD_RADIUS, DEFAULT_SPEED_OF_SOUND,
 };
-use super::level::{AbsorptionState, AirAbsorption};
+use super::level::{AbsorptionState, AirAbsorption, DistanceModel};
 use super::math::Vec3;
 use super::metering::SpatialMeterState;
 use super::nearfield::NearFieldState;
@@ -626,6 +626,22 @@ impl BinauralRenderer {
         let mut imgs = [ListenerImage::ZERO; MAX_IMAGES];
         let mut ref_az = [0.0f32; MAX_IMAGES];
 
+        // Object-count normalization (constant-power, `1/√N`).
+        //
+        // The renderer pans every program plane into the *same* pair of ears,
+        // so N planes add in power rather than being spread across separate
+        // loudspeakers. Without this, the player's two program objects (L and
+        // R at ±half-width) summed about +3.9 dB above the unprocessed stream
+        // for real programme material, and switching Spatial on/off changed
+        // the programme level by 4 dB — enough to drive the limiter into gain
+        // reduction and make the toggle sound like a compressor kicking in.
+        // `1/√N` is the constant-power convention: one object is unchanged
+        // (N = 1), and two uncorrelated objects keep the same total power.
+        let obj_norm = {
+            let n = scene.objects.iter_enabled().count().max(1) as f32;
+            1.0 / n.sqrt()
+        };
+
         for (obj_ordinal, (slot, obj)) in scene.objects.iter_enabled().enumerate() {
             let obj_idx = slot; // stable id = store slot
 
@@ -688,7 +704,7 @@ impl BinauralRenderer {
                 let ratio = obj.doppler.ratio(v_r);
                 self.doppler[obj_idx].set_ratio(ratio, self.smooth);
             }
-            let obj_gain = gain * dist_gain * dir_gain * occ_gain * nf_gain;
+            let obj_gain = gain * obj_norm * dist_gain * dir_gain * occ_gain * nf_gain;
 
             // Voice admission (spec §76): a dropped voice renders silence
             // (the level-chain smoothing above already advanced, so
@@ -798,6 +814,69 @@ impl BinauralRenderer {
                         &mut imgs,
                     ),
                 };
+                // `wet` is a **wet/dry mix**, so the reflection set is
+                // normalized by its own geometry before it is scaled by `wet`.
+                //
+                // Without it the sum of image amplitudes grew with the image
+                // count: a 2nd-order room added +4.4 dB at 30 % wet and about
+                // +10 dB at 100 %, so the control read as a level boost.
+                // Scaling the image set to unit reflected energy makes the
+                // control what it says — measured, 30 % wet (the player's send)
+                // is level-neutral, 60 % is +1.7 dB, and a fully wet room is
+                // +3.7 dB, the walls' absorption accounting for the rest.
+                //
+                // The normalization uses the *geometric* terms only (`dg` ·
+                // path loss, no absorption), which keeps absorption audible: a
+                // padded room is quieter than a live one.
+                let mut img_geo = [0.0f32; MAX_IMAGES];
+                let mut img_coeff = [0.0f32; MAX_IMAGES];
+                for i in 0..n_img {
+                    let dg = obj
+                        .distance_model
+                        .distance_gain(imgs[i].dist, obj.reference_distance);
+                    // Relative path loss for the reflection. Under
+                    // `DistanceModel::Linear` the distance gain is 1.0 for
+                    // every source, so a reflection image 2–4× farther away
+                    // than the direct path arrived at the *same* amplitude as
+                    // the direct sound: a 2nd-order room added up to +9 dB of
+                    // early-reflection energy and a −0.7 dB L/R imbalance.
+                    // A reflection is never louder than the path that created
+                    // it, so it carries the 1/r ratio to the direct path. The
+                    // attenuating models already fold distance into `dg`, and
+                    // must not be scaled twice.
+                    let path_loss = if obj.distance_model == DistanceModel::Linear {
+                        (dist / imgs[i].dist.max(1e-3)).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    img_geo[i] = dg * path_loss;
+                    img_coeff[i] = imgs[i].coeff;
+                }
+                // Reflections that share a delay arrive *coherently* — a
+                // symmetric room produces mirror-image pairs at the same
+                // distance — so their amplitudes add before the ear sums their
+                // energy. Binning by delay and summing inside each bin is the
+                // energy the room actually delivers; normalizing the plain
+                // root-sum-square instead measured +4.3 dB at full wet because
+                // those pairs were counted as if they were independent.
+                let mut bins: [(usize, f32); MAX_IMAGES] = [(0, 0.0); MAX_IMAGES];
+                let mut n_bins = 0usize;
+                for i in 0..n_img {
+                    let delay = imgs[i].delay as usize;
+                    match bins[..n_bins].iter_mut().find(|b| b.0 == delay) {
+                        Some(b) => b.1 += img_geo[i],
+                        None => {
+                            bins[n_bins] = (delay, img_geo[i]);
+                            n_bins += 1;
+                        }
+                    }
+                }
+                let coh_energy: f32 = bins[..n_bins].iter().map(|b| b.1 * b.1).sum();
+                let ref_norm = if coh_energy > 1e-12 {
+                    1.0 / coh_energy.sqrt()
+                } else {
+                    0.0
+                };
                 for i in 0..n_img {
                     let ldir = xf.apply_to_direction(imgs[i].dir);
                     let az = ldir.azimuth_rad();
@@ -820,10 +899,8 @@ impl BinauralRenderer {
                         )
                     };
                     self.room_er.set_reflection_filter(obj_idx, i, corner);
-                    let dg = obj
-                        .distance_model
-                        .distance_gain(imgs[i].dist, obj.reference_distance);
-                    let target = gain * obj.room_send * imgs[i].coeff * dg;
+                    let target =
+                        gain * obj_norm * obj.room_send * ref_norm * img_coeff[i] * img_geo[i];
                     for ear in 0..Ear::COUNT {
                         let idx = obj_idx * (MAX_IMAGES * Ear::COUNT) + i * Ear::COUNT + ear;
                         let e = Ear::from_index(ear);
@@ -1161,6 +1238,7 @@ impl SpatialRenderer for BinauralRenderer {
                     frames,
                     &mut self.virtual_scratch,
                     &self.virtual_trim,
+                    VIRTUAL_RING_SPEAKERS,
                 );
             }
             if fields_active {
@@ -1170,6 +1248,7 @@ impl SpatialRenderer for BinauralRenderer {
                     frames,
                     &mut self.virtual_scratch,
                     &self.virtual_trim,
+                    VIRTUAL_RING_SPEAKERS,
                 );
             }
             self.binauralize_virtual(frames, out);

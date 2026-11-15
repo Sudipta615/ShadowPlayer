@@ -565,10 +565,17 @@ impl SpatialRenderer for VbapRenderer {
                 frames,
                 out,
                 &self.out_trim,
+                self.speaker_count,
             );
         }
-        self.fields
-            .render(scene, inputs.fields, frames, out, &self.out_trim);
+        self.fields.render(
+            scene,
+            inputs.fields,
+            frames,
+            out,
+            &self.out_trim,
+            self.speaker_count,
+        );
         // Output metering (spec §70).
         let need = self.speaker_count * frames;
         self.meter.clear();

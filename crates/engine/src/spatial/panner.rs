@@ -717,10 +717,17 @@ impl SpatialRenderer for BasicPanner {
                 frames,
                 out,
                 &self.out_trim,
+                self.speaker_count,
             );
         }
-        self.fields
-            .render(scene, inputs.fields, frames, out, &self.out_trim);
+        self.fields.render(
+            scene,
+            inputs.fields,
+            frames,
+            out,
+            &self.out_trim,
+            self.speaker_count,
+        );
         // Output metering (spec §70): channel-aware peak/RMS over the final
         // mixed block. Allocation-free.
         self.meter.clear();

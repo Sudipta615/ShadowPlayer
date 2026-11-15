@@ -822,6 +822,12 @@ impl AudioEngine {
                     config::SpatialQuality::High => Sq::High,
                     config::SpatialQuality::Ultra => Sq::Ultra,
                 };
+                self.config.spatial.quality = match q {
+                    Sq::Low => config::SpatialQuality::Low,
+                    Sq::Medium => config::SpatialQuality::Medium,
+                    Sq::High => config::SpatialQuality::High,
+                    Sq::Ultra => config::SpatialQuality::Ultra,
+                };
                 self.graph.with_graph(|g| g.spatial_mut().set_quality(q));
             }
             EngineCommand::SetSpatialVoice {
@@ -831,6 +837,13 @@ impl AudioEngine {
                 policy,
             } => {
                 use crate::spatial::VoicePriority as Vp;
+                {
+                    let v = &mut self.config.spatial.voice;
+                    v.enabled = enabled;
+                    v.capacity = capacity;
+                    v.full_quality_capacity = full_quality_capacity;
+                    v.policy = policy;
+                }
                 let policy = match policy {
                     config::VoicePriority::Fixed => Vp::Fixed,
                     config::VoicePriority::DistanceWeighted => Vp::DistanceWeighted,
@@ -955,6 +968,7 @@ impl AudioEngine {
 
             // ── Runtime DSP & Mix Controls (Punch List P1 Items 20 & 21) ──
             EngineCommand::SetSpatialEnabled(enabled) => {
+                self.config.spatial.enabled = enabled;
                 self.graph.set_spatial_enabled(enabled);
             }
             EngineCommand::SetSpatialScreen {
@@ -963,6 +977,10 @@ impl AudioEngine {
                 elevation_deg,
                 gain,
             } => {
+                self.config.spatial.center_azimuth_deg = center_azimuth_deg;
+                self.config.spatial.half_width_deg = half_width_deg;
+                self.config.spatial.elevation_deg = elevation_deg;
+                self.config.spatial.gain = gain;
                 self.graph.set_spatial_screen(
                     center_azimuth_deg,
                     half_width_deg,
@@ -982,6 +1000,19 @@ impl AudioEngine {
                 late_distance,
                 wet,
             } => {
+                {
+                    let r = &mut self.config.spatial.room;
+                    r.enabled = enabled;
+                    r.width = width;
+                    r.depth = depth;
+                    r.height = height;
+                    r.absorption = absorption;
+                    r.reflection_order = reflection_order;
+                    r.rt60_ms = rt60_ms;
+                    r.late_mix = late_mix;
+                    r.late_distance = late_distance;
+                    r.wet = wet;
+                }
                 self.graph.set_spatial_room(
                     enabled,
                     width,
@@ -1003,16 +1034,25 @@ impl AudioEngine {
                 pitch_deg,
                 roll_deg,
             } => {
+                self.config.spatial.listener_yaw_deg = yaw_deg;
+                self.config.spatial.listener_pitch_deg = pitch_deg;
+                self.config.spatial.listener_roll_deg = roll_deg;
                 self.graph
                     .set_spatial_listener(yaw_deg, pitch_deg, roll_deg);
             }
             EngineCommand::SetHrtfProfile(id) => {
-                self.graph.with_graph(|g| {
-                    g.spatial_mut().set_hrtf_profile(&id);
-                });
+                let applied = self
+                    .graph
+                    .with_graph(|g| g.spatial_mut().set_hrtf_profile(&id));
+                if !applied {
+                    // A profile the manager does not have must not be a silent
+                    // no-op: the settings field would keep the typed name while
+                    // the renderer kept the previous head model.
+                    log::warn!("HRTF profile '{id}' is not available; keeping the active one");
+                }
             }
             EngineCommand::SetLimiterEnabled(enabled) => {
-                self.graph.set_limiter_enabled(enabled);
+                self.handle_set_limiter_enabled(enabled);
             }
             EngineCommand::SetLimiterParams {
                 lookahead_ms,
@@ -1021,7 +1061,7 @@ impl AudioEngine {
                 ceiling_db,
                 soft_clip,
             } => {
-                self.graph.set_limiter_params(
+                self.handle_set_limiter_params(
                     lookahead_ms,
                     attack_ms,
                     release_ms,
@@ -1035,11 +1075,15 @@ impl AudioEngine {
                 detector,
                 stereo_link,
             } => {
+                if let Some(b) = self.multiband_band_mut(band) {
+                    b.knee_db = knee_db;
+                    b.stereo_link = stereo_link;
+                }
                 self.graph
                     .set_compressor_band_features(band, knee_db, detector, stereo_link);
             }
             EngineCommand::SetStereoEnhancerEnabled(enabled) => {
-                self.graph.set_stereo_enhancer_enabled(enabled);
+                self.handle_set_stereo_enhancer_enabled(enabled);
             }
             EngineCommand::SetLoudnessMode(mode) => {
                 let dsp_mode = match mode {
@@ -1105,5 +1149,145 @@ impl AudioEngine {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::buffer::EngineCommand;
+    use crate::engine::AudioEngine;
+    use config::{CrossfeedProfile, LimiterMode};
+
+    /// A runtime DSP command must land in `self.config` as well as the graph.
+    ///
+    /// A generation rebuild (track change, rate change, layout change,
+    /// `Reconfigure`) replays `apply_config` from `self.config`, so a value that
+    /// only reached the graph is silently discarded on the next rebuild. The
+    /// player writes its spatial screen, room and limiter from the studio, and
+    /// every one of those used to revert — a widened screen snapped back to 30°,
+    /// a room's wet went back to the config file's value — the moment the
+    /// engine changed generation.
+    ///
+    /// One test, not several: the DSP graph is process-global in this build, so
+    /// two engine tests running in parallel would write each other's state.
+    #[test]
+    fn runtime_dsp_commands_survive_a_config_replay() {
+        // `ManuallyDrop`: `AudioEngine::drop` writes the live spatial scene and
+        // DSP state to the user's data directory — by design, so a session
+        // restores what the user tuned. In a test that would leak these values
+        // into every later engine in this process (and into the developer's own
+        // player), and would still do it on a panic. The engine is never
+        // started, so there is no thread to leak with the value.
+        let mut engine = std::mem::ManuallyDrop::new(AudioEngine::new_default().unwrap());
+
+        engine.handle_command(EngineCommand::SetSpatialScreen {
+            center_azimuth_deg: 12.0,
+            half_width_deg: 45.0,
+            elevation_deg: 6.0,
+            gain: 0.8,
+        });
+        engine.handle_command(EngineCommand::SetSpatialRoom {
+            enabled: true,
+            width: 6.0,
+            depth: 5.0,
+            height: 2.6,
+            absorption: 0.5,
+            reflection_order: 2,
+            rt60_ms: 420.0,
+            late_mix: 0.6,
+            late_distance: true,
+            wet: 0.35,
+        });
+        engine.handle_command(EngineCommand::SetSpatialListener {
+            yaw_deg: 15.0,
+            pitch_deg: 2.0,
+            roll_deg: -1.0,
+        });
+        engine.handle_command(EngineCommand::SetLimiterParams {
+            lookahead_ms: 7.0,
+            attack_ms: 1.5,
+            release_ms: 250.0,
+            ceiling_db: -2.0,
+            soft_clip: true,
+        });
+        engine.handle_command(EngineCommand::SetCrossfeedProfile(CrossfeedProfile::Jmeier));
+
+        // Controls and configs are queued for the next block boundary; the
+        // engine's single-threaded tick drains them immediately after dispatch.
+        engine.graph.drain_queued_control();
+
+        // What the engine does when it rebuilds its graph.
+        let persisted = engine.config.clone();
+        engine.set_config(persisted);
+        engine.graph.drain_queued_control();
+
+        let (center, half_width, elevation, gain) =
+            engine.graph.with_graph(|g| g.spatial_mut().screen());
+        assert_eq!(
+            (center, half_width, elevation, gain),
+            (12.0, 45.0, 6.0, 0.8)
+        );
+        let room = engine.graph.with_graph(|g| g.spatial_mut().room());
+        assert!(room.0, "room enable reverted");
+        assert_eq!(room.5, 2, "reflection order reverted");
+        assert!((room.6 - 420.0).abs() < 1e-3, "rt60 reverted: {}", room.6);
+        assert!(
+            (room.9 - 0.35).abs() < 1e-3,
+            "room wet reverted: {}",
+            room.9
+        );
+        let (yaw, pitch, roll) = engine.graph.with_graph(|g| g.spatial_mut().listener());
+        // The listener angle round-trips through radians, so compare with a
+        // tolerance rather than bit equality.
+        assert!((yaw - 15.0).abs() < 1e-3, "yaw {yaw}");
+        assert!((pitch - 2.0).abs() < 1e-3, "pitch {pitch}");
+        assert!((roll + 1.0).abs() < 1e-3, "roll {roll}");
+
+        assert!(
+            (engine.config.limiter.ceiling_db + 2.0).abs() < 1e-6,
+            "limiter params were not mirrored into the config"
+        );
+
+        // The limiter's character is a persisted setting, not live-only state:
+        // a `Safety` / `Mastering` / `ClipperLimiter` choice used to revert to
+        // `Transparent` on the next generation rebuild, and true-peak detection
+        // was never restored at all (its 4× FIR also changes the limiter's
+        // latency, so the drift moved the stream in time).
+        engine.handle_command(EngineCommand::SetLimiterMode(LimiterMode::Mastering));
+        engine.handle_command(EngineCommand::SetLimiterTruePeak(false));
+        engine.graph.drain_queued_control();
+        let persisted = engine.config.clone();
+        engine.set_config(persisted);
+        engine.graph.drain_queued_control();
+        let (mode, true_peak) = engine.graph.with_graph(|g| {
+            (
+                g.limiter().limiter.mode(),
+                g.limiter().limiter.true_peak_enabled(),
+            )
+        });
+        assert_eq!(
+            mode,
+            LimiterMode::Mastering,
+            "limiter mode reverted on rebuild"
+        );
+        assert!(!true_peak, "true-peak detection reverted on rebuild");
+        assert_eq!(
+            engine
+                .graph
+                .with_graph(|g| g.crossfeed().crossfeed.profile()),
+            CrossfeedProfile::Jmeier,
+            "crossfeed profile reverted on rebuild"
+        );
+
+        // An HRTF profile the manager does not know is a no-op that keeps the
+        // active model (and logs), never a silent switch to something else.
+        let before = engine
+            .graph
+            .with_graph(|g| g.spatial_mut().active_hrtf_profile().map(|p| p.id.clone()));
+        engine.handle_command(EngineCommand::SetHrtfProfile("not_a_profile".into()));
+        let after = engine
+            .graph
+            .with_graph(|g| g.spatial_mut().active_hrtf_profile().map(|p| p.id.clone()));
+        assert_eq!(before, after);
     }
 }

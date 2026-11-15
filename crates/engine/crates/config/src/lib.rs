@@ -24,8 +24,9 @@ pub use dsp_config::{
     ChannelTrimEntry, ConvolutionConfig, CorrectionConfig, CorrectionPhaseMode, CorrectionTarget,
     CrossfadeConfig, CrossfeedConfig, CrossoverFilterType, CrossoverSlope, DacCorrectionConfig,
     DacCorrectionProfileConfig, DynamicEqBandConfig, DynamicEqConfig, EqBandConfig, EqConfig,
-    EqMode, EqPreset, GraphicEqConfig, GraphicEqLayout, LfeConfig, LimiterConfig, LoudnessConfig,
-    MatrixFirRouteConfig, MultibandCompressorConfig, SdmConfig, StereoEnhancerConfig,
+    EqMode, EqPreset, GraphicEqConfig, GraphicEqLayout, LfeConfig, LimiterConfig, LimiterMode,
+    LoudnessConfig, MatrixFirRouteConfig, MultibandCompressorConfig, SdmConfig,
+    StereoEnhancerConfig,
 };
 pub use engine_config::{
     default_resampler_cutoff_ratio, AuxBusConfig, ConfigIssue, ConfigIssueKind, ConfigSeverity,

@@ -244,10 +244,16 @@ impl AmbisonicFieldMixer {
         Ok(())
     }
 
-    /// Mix all enabled fields into `out` (interleaved `frames × speakers`).
+    /// Mix all enabled fields into `out` (interleaved `frames × channels`).
     ///
     /// `field_inputs` is one plane per **enabled** field in store order.
-    /// `out_trim` is the renderer's per-speaker calibration level. Allocation-
+    /// `out_trim` is the renderer's per-speaker calibration level.
+    /// `channels` is the interleave stride of `out` — the caller's channel
+    /// count, which is **not** `out.len() / frames` when `out` is a
+    /// capacity-sized scratch buffer. Deriving the stride from the slice
+    /// length scattered the diffuse planes across the buffer whenever the
+    /// block was shorter than the buffer's frame capacity, so fields and the
+    /// room's late field landed on offsets nobody reads (silent). Allocation-
     /// free after `prepare`.
     pub fn render(
         &mut self,
@@ -256,13 +262,13 @@ impl AmbisonicFieldMixer {
         frames: usize,
         out: &mut [f32],
         out_trim: &[f32],
+        channels: usize,
     ) {
         if !self.prepared || frames == 0 || frames > MAX_AUDIO_BLOCK_FRAMES {
             return;
         }
         let n = self.speakers.len();
-        let n_spk = out.len().checked_div(frames).unwrap_or(0);
-        if n == 0 || n_spk == 0 {
+        if n == 0 || channels == 0 || out.len() < channels * frames {
             return;
         }
         // Hoist enabled fields into a fixed stack array (bounded, no alloc).
@@ -293,12 +299,13 @@ impl AmbisonicFieldMixer {
             self.bus[f * AMBISONIC_CHANNELS + 2] = 0.0;
             self.bus[f * AMBISONIC_CHANNELS + 3] = 0.0;
         }
-        self.decode_and_spread(frames, out, out_trim);
+        self.decode_and_spread(frames, out, out_trim, channels);
     }
 
     /// Render one **derived** diffuse plane (e.g. the room's late field)
     /// through the same encode → decode → decorrelation pipeline. `gain`
-    /// scales the plane before the `√N` diffuse compensation. Allocation-free.
+    /// scales the plane before the `√N` diffuse compensation. `channels` is
+    /// the interleave stride of `out` (see [`Self::render`]). Allocation-free.
     pub fn render_extra(
         &mut self,
         input: &[f32],
@@ -306,8 +313,12 @@ impl AmbisonicFieldMixer {
         frames: usize,
         out: &mut [f32],
         out_trim: &[f32],
+        channels: usize,
     ) {
         if !self.prepared || frames == 0 || frames > MAX_AUDIO_BLOCK_FRAMES {
+            return;
+        }
+        if channels == 0 || out.len() < channels * frames {
             return;
         }
         for f in 0..frames {
@@ -317,16 +328,21 @@ impl AmbisonicFieldMixer {
             self.bus[b + 2] = 0.0;
             self.bus[b + 3] = 0.0;
         }
-        self.decode_and_spread(frames, out, out_trim);
+        self.decode_and_spread(frames, out, out_trim, channels);
     }
 
     /// Decode the filled bus into the decorrelation rings and read each
     /// speaker's delayed value into the output (shared by `render` and
-    /// `render_extra`).
-    fn decode_and_spread(&mut self, frames: usize, out: &mut [f32], out_trim: &[f32]) {
+    /// `render_extra`). `channels` is the caller's interleave stride.
+    fn decode_and_spread(
+        &mut self,
+        frames: usize,
+        out: &mut [f32],
+        out_trim: &[f32],
+        channels: usize,
+    ) {
         let n = self.speakers.len();
-        let n_spk = out.len().checked_div(frames).unwrap_or(0);
-        if n == 0 || n_spk == 0 {
+        if n == 0 || channels == 0 || out.len() < channels * frames {
             return;
         }
         // Decode into the ring at a common cursor, then read each speaker's
@@ -351,7 +367,7 @@ impl AmbisonicFieldMixer {
                 let r = (slot + dl - self.delay_samples[k]) % dl;
                 let v = self.delay[k * dl + r] * out_trim.get(spk).copied().unwrap_or(0.0);
                 if v != 0.0 {
-                    out[f * n_spk + spk] += v;
+                    out[f * channels + spk] += v;
                 }
             }
             w += 1;
@@ -421,7 +437,7 @@ mod tests {
         let refs: Vec<&[f32]> = vec![input.as_slice()];
         let mut out = vec![0.0f32; 12 * frames];
         let trim = vec![1.0f32; 12];
-        m.render(&scene, &refs, frames, &mut out, &trim);
+        m.render(&scene, &refs, frames, &mut out, &trim, 12);
 
         for (k, &spk) in m.speakers.iter().enumerate() {
             let d = m.delay_samples[k];
@@ -460,7 +476,7 @@ mod tests {
         let refs: Vec<&[f32]> = vec![input.as_slice()];
         let mut out = vec![0.0f32; 6 * frames];
         let trim = vec![1.0f32; 6];
-        m.render(&scene, &refs, frames, &mut out, &trim);
+        m.render(&scene, &refs, frames, &mut out, &trim, 6);
         let n = m.speakers.len();
         let per = 0.5 / (n as f32).sqrt();
         for (k, &spk) in m.speakers.iter().enumerate() {
@@ -484,7 +500,7 @@ mod tests {
         let input = vec![1.0f32];
         let mut out = vec![0.0f32; 12 * frames];
         let trim = vec![1.0f32; 12];
-        m.render_extra(&input, 1.0, frames, &mut out, &trim);
+        m.render_extra(&input, 1.0, frames, &mut out, &trim, 12);
         for (k, &spk) in m.speakers.iter().enumerate() {
             let got = out[m.delay_samples[k] * 12 + spk];
             assert!((got - per).abs() < 1e-4, "extra plane speaker {spk} {got}");
@@ -499,5 +515,41 @@ mod tests {
             .map(|s| s * s)
             .sum();
         assert!((e - 1.0).abs() < 1e-3, "extra plane energy {e}");
+    }
+    /// The interleave stride is the caller's channel count, not
+    /// `out.len() / frames`.
+    ///
+    /// The renderers hand this mixer a *capacity-sized* scratch buffer (the
+    /// binaural virtual ring is `8 × MAX_AUDIO_BLOCK_FRAMES`), so for any block
+    /// shorter than the capacity the old derivation put the diffuse planes on
+    /// offsets nobody reads: the room's late field and every ambisonic field
+    /// were silently dropped from the output. This pins the layout for a short
+    /// block in a large buffer.
+    #[test]
+    fn a_short_block_lands_on_its_own_stride() {
+        let layout = crate::spatial::speaker::SpeakerLayout::five_point_one();
+        let mut m = AmbisonicFieldMixer::new();
+        m.prepare(&layout, 48_000).unwrap();
+        let n = m.speakers.len();
+        let per = 1.0 / (n as f32).sqrt();
+
+        let frames = m.delay_len + 4;
+        // Capacity-sized scratch, exactly what `BinauralRenderer` passes.
+        let mut out = vec![0.0f32; 8 * MAX_AUDIO_BLOCK_FRAMES];
+        let trim = vec![1.0f32; 8];
+        let input = vec![1.0f32];
+        m.render_extra(&input, 1.0, frames, &mut out, &trim, 8);
+        for (k, &spk) in m.speakers.iter().enumerate() {
+            let got = out[m.delay_samples[k] * 8 + spk];
+            assert!(
+                (got - per).abs() < 1e-4,
+                "speaker {spk} landed at the wrong stride: got {got}, expected {per}"
+            );
+        }
+        // Nothing may be written past the first `frames × 8` samples.
+        assert!(
+            out[frames * 8..].iter().all(|v| *v == 0.0),
+            "the mixer wrote outside its block"
+        );
     }
 }

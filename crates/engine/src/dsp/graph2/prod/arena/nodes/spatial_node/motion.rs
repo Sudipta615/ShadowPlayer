@@ -18,11 +18,17 @@ impl SpatialNode {
         let az_r = (self.center_azimuth_deg + self.half_width_deg).to_radians();
         let el = self.elevation_deg.to_radians();
         let (sin_el, cos_el) = el.sin_cos();
+        // The screen is centred on the *listener*, not the world origin. The
+        // room's origin is a corner, so once `apply_room` moves the listener
+        // into the room the objects have to travel with it or the programme
+        // would end up metres behind the head. With the listener left at the
+        // origin this is the plain `SCREEN_RADIUS` placement.
+        let base = self.scene.listener.position;
         let pos = |az: f32| -> Vec3 {
             Vec3::new(
-                SCREEN_RADIUS * cos_el * az.sin(),
-                SCREEN_RADIUS * cos_el * az.cos(),
-                SCREEN_RADIUS * sin_el,
+                base.x + SCREEN_RADIUS * cos_el * az.sin(),
+                base.y + SCREEN_RADIUS * cos_el * az.cos(),
+                base.z + SCREEN_RADIUS * sin_el,
             )
         };
         let pl = pos(az_l);
@@ -70,6 +76,7 @@ impl SpatialNode {
         r.rt60_ms = rt60_ms.max(1.0);
         r.late_mix = late_mix.clamp(0.0, 1.0);
         r.late_distance = late_distance;
+        let centre = Vec3::new(r.width * 0.5, r.depth * 0.5, r.height * 0.5);
         let wet = wet.clamp(0.0, 1.0);
         for id in [self.obj_l, self.obj_r] {
             self.scene
@@ -77,6 +84,28 @@ impl SpatialNode {
                 .expect("invariant: program objects created in new exist")
                 .room_send = wet;
         }
+
+        // The room's walls are `x ∈ [0, width]`, `y ∈ [0, depth]`,
+        // `z ∈ [0, height]`, so a listener left at the world origin stands in
+        // a corner of the room. Reflections across the two walls through that
+        // corner then arrive at *zero* delay — coincident with the direct
+        // path — and the early-reflection sum turns into a level boost with
+        // comb filtering rather than a room. The listening position is the
+        // room's centre; head tracking may move the listener afterwards, but a
+        // room (re)configuration is a new listening environment.
+        if enabled {
+            self.scene.listener.position = centre;
+            self.listener_target_pos = centre;
+        }
+        // Objects live at world positions derived from the listener, so place
+        // them again after the pose moved. Keeps `apply_room` self-consistent
+        // whichever order the control path calls these in.
+        self.apply_screen(
+            self.center_azimuth_deg,
+            self.half_width_deg,
+            self.elevation_deg,
+            self.screen_gain,
+        );
     }
 
     /// Configure the scene-wide air-absorption model applied to live room

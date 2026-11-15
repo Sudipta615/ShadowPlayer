@@ -44,6 +44,25 @@ use crate::{
 /// audible one disagree.
 const MAX_BAND_GAIN_DB: f32 = 48.0;
 
+/// Length of the wet/dry crossfade applied when the whole EQ is enabled or
+/// bypassed.
+///
+/// A bypass is not a parameter change the filter smoothing can hide: the
+/// stage either runs or it does not. Switching it instantly means the output
+/// jumps from the dry signal to the filtered one (or back), which is a
+/// full-scale discontinuity whenever the curve is boosting or cutting. Five
+/// milliseconds is long enough to be inaudible as a click and short enough to
+/// read as an instant bypass.
+const BYPASS_FADE_MS: f32 = 5.0;
+
+/// Per-sample step of the bypass crossfade at `sample_rate`.
+fn bypass_step_for(sample_rate: f32) -> f32 {
+    let samples = (sample_rate.max(1.0) * BYPASS_FADE_MS / 1000.0)
+        .round()
+        .max(8.0);
+    1.0 / samples
+}
+
 /// Multi-band parametric equalizer.
 #[derive(Debug, Clone)]
 pub struct ParametricEq {
@@ -79,6 +98,18 @@ pub struct ParametricEq {
     scratch_r: Vec<f64>,
     /// What every band's `q` means. See [`ParametricEq::set_bandwidth_mode`].
     bandwidth_mode: BandwidthMode,
+    /// How much of the processed chain reaches the output: 0 = fully bypassed,
+    /// 1 = fully processed. Ramped over [`BYPASS_FADE_MS`] by
+    /// [`Self::advance_bypass`], so enabling and disabling the stage fades
+    /// rather than stepping.
+    bypass_mix: f32,
+    bypass_target: f32,
+    bypass_step: f32,
+    /// Whether this stage has processed a sample yet. A stage that has not
+    /// cannot click, so enabling it starts fully wet instead of fading in —
+    /// that is what makes a freshly built generation bit-identical to one
+    /// that has been running.
+    has_processed: bool,
 }
 
 /// The Q a band actually needs: a shelf's `q` is a slope, not a bandwidth.
@@ -156,6 +187,10 @@ impl ParametricEq {
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             bandwidth_mode: BandwidthMode::EquivalentQ,
+            bypass_mix: 0.0,
+            has_processed: false,
+            bypass_target: 0.0,
+            bypass_step: bypass_step_for(sample_rate),
         }
     }
 
@@ -219,6 +254,10 @@ impl ParametricEq {
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             bandwidth_mode: BandwidthMode::EquivalentQ,
+            bypass_mix: 0.0,
+            has_processed: false,
+            bypass_target: 0.0,
+            bypass_step: bypass_step_for(sample_rate),
         }
     }
 
@@ -293,6 +332,10 @@ impl ParametricEq {
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             bandwidth_mode: BandwidthMode::EquivalentQ,
+            bypass_mix: 0.0,
+            has_processed: false,
+            bypass_target: 0.0,
+            bypass_step: bypass_step_for(sample_rate),
         }
     }
 
@@ -359,13 +402,38 @@ impl ParametricEq {
             scratch_l: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             scratch_r: vec![0.0; crate::buffer::MAX_AUDIO_BLOCK_FRAMES],
             bandwidth_mode: BandwidthMode::EquivalentQ,
+            bypass_mix: 0.0,
+            has_processed: false,
+            bypass_target: 0.0,
+            bypass_step: bypass_step_for(sample_rate),
         }
     }
 
-    /// Enable or disable the EQ
+    /// Enable or disable the EQ.
+    ///
+    /// The switch is a wet/dry crossfade over [`BYPASS_FADE_MS`], not an
+    /// instant change of what the stage does: a hard bypass steps the output
+    /// by the whole curve, which is audible as a click on every toggle.
     pub fn set_enabled(&mut self, enabled: bool) {
+        if self.enabled == enabled {
+            return;
+        }
         self.enabled = enabled;
-        self.refresh_auto_headroom();
+        self.bypass_target = if enabled { 1.0 } else { 0.0 };
+        if !self.has_processed {
+            // Nothing has passed through this stage yet: a preset applied
+            // before playback, or a generation built and enabled before its
+            // first block. There is no audible step to smooth, and fading in
+            // would attenuate the first milliseconds of the material this
+            // stage is about to receive.
+            self.bypass_mix = self.bypass_target;
+        }
+        if enabled {
+            // A disabled curve has no boost to reserve; recompute on the way
+            // in. On the way out the old headroom keeps fading with the wet
+            // signal instead of snapping the mix level up mid-crossfade.
+            self.refresh_auto_headroom();
+        }
     }
 
     /// Whether EQ is enabled
@@ -429,6 +497,30 @@ impl ParametricEq {
         self.preamp.gain = self.preamp.target_gain;
         self.post_gain.gain = self.post_gain.target_gain;
         self.headroom.gain = self.headroom.target_gain;
+        self.bypass_mix = self.bypass_target;
+    }
+
+    /// Advance the wet/dry bypass crossfade by one sample and return the wet
+    /// mix to apply (`0` = bypassed, `1` = fully processed).
+    #[inline]
+    fn advance_bypass(&mut self) -> f32 {
+        self.has_processed = true;
+        if self.bypass_mix < self.bypass_target {
+            self.bypass_mix = (self.bypass_mix + self.bypass_step).min(self.bypass_target);
+        } else if self.bypass_mix > self.bypass_target {
+            self.bypass_mix = (self.bypass_mix - self.bypass_step).max(self.bypass_target);
+        }
+        self.bypass_mix
+    }
+
+    /// The wet mix the bypass crossfade is currently applying.
+    ///
+    /// `0.0` means the stage is passing its input through untouched; `1.0`
+    /// means the full chain is running. A value in between only exists for the
+    /// few milliseconds after an enable or bypass.
+    #[inline]
+    pub fn bypass_mix(&self) -> f32 {
+        self.bypass_mix
     }
 
     /// The pre-EQ headroom actually being applied, as a linear gain.
@@ -523,7 +615,11 @@ impl ParametricEq {
     /// numerically identical to [`Self::process_f64`] up to the final cast.
     #[inline]
     pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
-        if !self.enabled {
+        // Silence still counts as audio passing through the stage: an enable
+        // that arrives after playback started must fade, even if this stage
+        // was bypassed on the previous frame.
+        self.has_processed = true;
+        if !self.enabled && self.bypass_mix == 0.0 {
             return (left, right);
         }
         let (l, r) = self.process_f64(left as f64, right as f64);
@@ -533,9 +629,15 @@ impl ParametricEq {
     /// Process a stereo sample pair in native f64 precision (Quality mode).
     #[inline]
     pub fn process_f64(&mut self, left: f64, right: f64) -> (f64, f64) {
-        if !self.enabled {
+        self.has_processed = true;
+        // Advance the bypass crossfade first: a disabled stage that has
+        // finished fading out is a true pass-through, and an enabled one that
+        // is still fading in blends the dry input with the processed chain.
+        let wet = self.advance_bypass();
+        if wet <= 0.0 {
             return (left, right);
         }
+        let (dry_l, dry_r) = (left, right);
 
         // Advance both input-side ramps, then read them. Order matters only for
         // reproducibility: the preamp and the headroom are applied as a
@@ -557,7 +659,14 @@ impl ParametricEq {
         // apply. The post-gain is the last stage, so a change made during this
         // frame takes effect from the next one rather than from this sample.
         let post_linear = self.post_gain.process_sample(1.0f32) as f64;
-        (l * post_linear, r * post_linear)
+        let (l, r) = (l * post_linear, r * post_linear);
+
+        if wet >= 1.0 {
+            return (l, r);
+        }
+        let wet = wet as f64;
+        let dry = 1.0 - wet;
+        (l * wet + dry_l * dry, r * wet + dry_r * dry)
     }
 
     /// Process a block of stereo frames through the full EQ chain in place.
@@ -565,7 +674,8 @@ impl ParametricEq {
     /// block cascade, and demotes once back to f32.
     #[inline]
     pub fn process_block(&mut self, left: &mut [f32], right: &mut [f32]) {
-        if !self.enabled {
+        self.has_processed = true;
+        if !self.enabled && self.bypass_mix == 0.0 {
             return;
         }
         let n = left.len().min(right.len()).min(self.scratch_l.len());
@@ -591,10 +701,22 @@ impl ParametricEq {
     /// f64 precision. Hoists the whole-EQ enabled check out of the loop.
     #[inline]
     pub fn process_block_f64(&mut self, left: &mut [f64], right: &mut [f64]) {
-        if !self.enabled {
+        self.has_processed = true;
+        if !self.enabled && self.bypass_mix == 0.0 {
             return;
         }
         let n = left.len().min(right.len());
+        // A bypass crossfade needs the dry and wet sample of the same frame,
+        // so it takes the per-sample path for its few milliseconds and the
+        // block path resumes once the mix has settled.
+        if self.bypass_mix != self.bypass_target {
+            for i in 0..n {
+                let (l, r) = self.process_f64(left[i], right[i]);
+                left[i] = l;
+                right[i] = r;
+            }
+            return;
+        }
         // The input gain can no longer be hoisted out of the loop: it is two
         // slewed processors, so it is a different value on every sample of the
         // block whenever a ramp is in progress. Hoisting it was correct only
@@ -918,6 +1040,7 @@ impl ParametricEq {
     /// Update sample rate and recompute all coefficients
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
+        self.bypass_step = bypass_step_for(sample_rate);
         for band in &mut self.bands {
             band.update_coefficients(sample_rate);
         }
@@ -1053,11 +1176,132 @@ mod tests {
             out[out.len() - 1]
         );
     }
-
-    /// Same bound, for the two gain stages that are not the preamp.
+    /// Enabling and bypassing the whole EQ must crossfade the wet chain, not
+    /// step it.
     ///
-    /// Post-gain and headroom were written the same way preamp was, so testing
-    /// only preamp would leave two of the three clicky.
+    /// The curve used here is a +12 dB DC shelf, so the processed signal is a
+    /// constant ~3.98× the input. An instant bypass changes the output from
+    /// 3.98 to 1.0 in one sample — a full-scale click — while both toggles
+    /// must stay under the crossfade's own per-sample step.
+    #[test]
+    fn bypass_fades_the_whole_stage_instead_of_stepping() {
+        let mut eq = enabled_eq();
+        eq.set_band(0, EqBandParams::lowshelf(100.0, 12.0, SHELF_Q));
+        let boosted = settled_gain(&mut eq);
+        let target = 10f64.powf(12.0 / 20.0);
+        assert!(
+            (boosted - target).abs() < 1e-3,
+            "the test needs a settled +12 dB shelf: got {boosted}, wanted {target}"
+        );
+
+        // Bypass: the output must fall to unity over the fade, never in one
+        // sample.
+        eq.set_enabled(false);
+        let mut out = Vec::with_capacity(2048);
+        for _ in 0..2048 {
+            out.push(eq.process_f64(1.0, 1.0).0);
+        }
+        let (max_step, total) = step_profile(&out);
+        let bound = (target - 1.0) / 50.0;
+        assert!(
+            max_step < bound,
+            "bypass stepped the output by {max_step:.6} (bound {bound:.6})"
+        );
+        assert!(
+            (out[out.len() - 1] - 1.0).abs() < 1e-6,
+            "the fade must reach the dry signal, got {}",
+            out[out.len() - 1]
+        );
+        assert!(total < 0.0);
+        assert_eq!(eq.bypass_mix(), 0.0, "a settled bypass is true passthrough");
+
+        // And a fresh bypass must be a bit-exact passthrough the moment the
+        // fade has finished, not a near-unity blend.
+        assert_eq!(eq.process_f64(0.37, -0.42), (0.37, -0.42));
+
+        // Enable: the same bound on the way back in, ending at the curve gain.
+        eq.set_enabled(true);
+        let mut out = Vec::with_capacity(2048);
+        for _ in 0..2048 {
+            out.push(eq.process_f64(1.0, 1.0).0);
+        }
+        let (max_step, _) = step_profile(&out);
+        assert!(
+            max_step < bound,
+            "enable stepped the output by {max_step:.6} (bound {bound:.6})"
+        );
+        assert!(
+            (out[out.len() - 1] - target).abs() < 1e-3,
+            "enable must reach the curve gain, got {}",
+            out[out.len() - 1]
+        );
+    }
+
+    /// A preset load is a boundary, not a live tweak: it must not fade in.
+    #[test]
+    fn a_constructed_preset_is_immediately_at_full_wet() {
+        let mut preset = config::EqPreset {
+            name: "test".into(),
+            output_device_pattern: None,
+            preamp_db: 0.0,
+            bands: Vec::new(),
+        };
+        preset.bands.push(config::EqBandConfig {
+            enabled: true,
+            filter_type: config::FilterType::LowShelf,
+            frequency: 100.0,
+            gain_db: 6.0,
+            q: 0.707,
+        });
+        let mut eq = ParametricEq::from_preset(44_100.0, &preset);
+        assert_eq!(eq.bypass_mix(), 1.0);
+        // The band's own parameter smoothing (64 samples) still runs, but the
+        // bypass crossfade (220 samples here) must be snapped past: at 100
+        // samples the output is already the shaped signal, not a dry/wet
+        // blend of it.
+        let mut out = 0.0;
+        for _ in 0..100 {
+            out = eq.process_f64(1.0, 1.0).0;
+        }
+        assert!(
+            out > 1.7,
+            "a preset must be fully wet once its bands have smoothed, got {out}"
+        );
+    }
+
+    /// A stage that has not received a single frame cannot click, so an
+    /// enable before playback lands fully wet. This is what keeps a freshly
+    /// built generation identical to one that has been running.
+    #[test]
+    fn enabling_a_stage_before_its_first_frame_is_instantly_wet() {
+        let mut eq = ParametricEq::new(10, 48_000.0);
+        assert_eq!(eq.bypass_mix(), 0.0);
+        eq.set_enabled(true);
+        assert_eq!(eq.bypass_mix(), 1.0);
+
+        // The same rule on the way out: disabling pre-playback must not leave
+        // a half-wet stage that the first frame would fade out of.
+        let mut eq = ParametricEq::new(10, 48_000.0);
+        eq.set_enabled(true);
+        eq.set_enabled(false);
+        assert_eq!(eq.bypass_mix(), 0.0);
+        assert_eq!(eq.process(0.5, -0.5), (0.5, -0.5));
+    }
+
+    /// Once frames have flowed — even silent ones, on a bypassed stage — an
+    /// enable is a live toggle and must fade, not step.
+    #[test]
+    fn enabling_after_frames_have_flowed_fades_in() {
+        let mut eq = ParametricEq::new(10, 48_000.0);
+        let _ = eq.process(0.0, 0.0);
+        eq.set_enabled(true);
+        assert_eq!(eq.bypass_mix(), 0.0, "a live enable starts from dry");
+        let step = 1.0 / (48_000.0 * BYPASS_FADE_MS / 1000.0).round();
+        let _ = eq.process(0.0, 0.0);
+        assert!((eq.bypass_mix() - step).abs() < 1e-6);
+        assert!(eq.bypass_mix() < 0.01, "the fade must not snap to wet");
+    }
+
     #[test]
     fn post_gain_and_headroom_also_ramp() {
         for (name, set) in [

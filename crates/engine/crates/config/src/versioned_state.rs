@@ -351,6 +351,7 @@ mod tests {
                 release_ms: 80.0,
                 ceiling_db: -1.0,
                 soft_clip: true,
+                ..LimiterConfig::default()
             },
             output_device: Some("Built-in".to_string()),
             output_backend: AudioBackend::ExclusiveAlsa,
