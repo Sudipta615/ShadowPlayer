@@ -67,6 +67,10 @@ pub enum EqViewMode {
 pub struct EqSnapshot {
     pub graphic_gains: [f32; 64],
     pub graphic_layout: GraphicEqLayout,
+    /// The parametric bank, so an A/B comparison works in Parametric mode too.
+    /// Without it the slots differed only by state the parametric curve never
+    /// reads, and the toggle produced no audible change at all.
+    pub bands: Vec<ParametricBand>,
     pub preamp_db: f32,
     pub bass_shelf_db: f32,
     pub treble_shelf_db: f32,
@@ -296,6 +300,7 @@ impl EqPanelState {
         EqSnapshot {
             graphic_gains: self.graphic_gains,
             graphic_layout: self.graphic_layout.clone(),
+            bands: self.bands.clone(),
             preamp_db: self.preamp_db,
             bass_shelf_db: self.bass_shelf_db,
             treble_shelf_db: self.treble_shelf_db,
@@ -312,6 +317,7 @@ impl EqPanelState {
     pub fn apply_snapshot(&mut self, snap: &EqSnapshot) {
         self.graphic_gains = snap.graphic_gains;
         self.graphic_layout = snap.graphic_layout.clone();
+        self.bands = snap.bands.clone();
         self.preamp_db = snap.preamp_db;
         self.graphic_preamp_db = snap.preamp_db;
         self.bass_shelf_db = snap.bass_shelf_db;
@@ -357,14 +363,32 @@ impl EqPanelState {
         }
     }
 
-    /// Toggle between A/B audition slots with zero latency.
+    /// Toggle between A/B audition slots.
+    ///
+    /// The caller must push every restored stage to the engine (the header
+    /// does): applying the snapshot only updates the panel's model, and the
+    /// old code dispatched the graphic curve alone, so tone, width, balance and
+    /// the mode never reached the audio.
     pub fn toggle_ab_audition(&mut self) {
         if !self.is_auditioning_b {
             self.snapshot_a = Some(self.current_snapshot());
             if self.snapshot_b.is_none() {
+                // Slot B is the *flat* reference: the same chain with every
+                // tonal stage neutralised. Flattening both curves (not just the
+                // graphic one) is what makes the comparison work in Parametric
+                // mode; the protection stages stay as they are so the switch
+                // changes tone only, never level or safety.
                 let mut flat_snap = self.current_snapshot();
                 flat_snap.graphic_gains = [0.0; 64];
                 flat_snap.preamp_db = 0.0;
+                flat_snap.bass_shelf_db = 0.0;
+                flat_snap.treble_shelf_db = 0.0;
+                for band in &mut flat_snap.bands {
+                    band.gain_db = 0.0;
+                    // Zeroing a high-pass/notch still filters, so the flat
+                    // reference has to switch the band off, not just its gain.
+                    band.enabled = false;
+                }
                 self.snapshot_b = Some(flat_snap);
             }
             if let Some(b) = self.snapshot_b.clone() {

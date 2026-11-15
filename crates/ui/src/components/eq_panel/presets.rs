@@ -2,7 +2,7 @@
 //! ten octave gains onto an arbitrary band layout.
 
 use super::{EqPanelActions, EqPanelState};
-use config::GraphicEqLayout;
+use config::{EqMode, GraphicEqLayout};
 use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -165,6 +165,7 @@ pub(super) fn apply_active_preset(state: &mut EqPanelState, actions: &mut EqPane
             // One flag for the whole curve. The old per-band `Option<usize>`
             // survived exactly one assignment, so every preset applied only
             // its final band — the Bass Boost preset ended at 0 dB.
+            make_graphic_the_audible_stage(state, actions);
             actions.graphic_eq_changed = true;
             return;
         }
@@ -181,7 +182,28 @@ pub(super) fn apply_active_preset(state: &mut EqPanelState, actions: &mut EqPane
     if state.needs_extended_range() {
         state.extended_range = true;
     }
+    make_graphic_the_audible_stage(state, actions);
     actions.graphic_eq_changed = true;
+}
+
+/// A preset is a *graphic* curve, so selecting one makes the graphic stage the
+/// one the engine compiles.
+///
+/// The two curve modes are exclusive in the engine: `handle_set_graphic_eq_state`
+/// only compiles the graphic model when `config.eq.mode == Graphic`, and
+/// `handle_set_eq_mode` only compiles the parametric bands. Selecting a preset
+/// used to write the graphic gains and set `graphic_eq_changed` without touching
+/// the mode, so after AutoEQ (which selects Parametric) every Quick Tune and
+/// Graphic-tab preset was written into a stage the engine was not running: the
+/// curve appeared on the canvas, the sound did not change. Switching the mode is
+/// the honest fix — the stage that now plays is the stage the user just edited.
+fn make_graphic_the_audible_stage(state: &mut EqPanelState, actions: &mut EqPanelActions) {
+    if state.eq_mode != EqMode::Graphic {
+        // `set_eq_mode` owns the `graphic_enabled` mirror; the mode pill uses
+        // the same helper, so the two paths cannot disagree.
+        state.set_eq_mode(EqMode::Graphic);
+        actions.eq_mode_changed = true;
+    }
 }
 
 #[cfg(test)]
@@ -342,5 +364,41 @@ mod tests {
                 "{freq} Hz should keep {gain} dB, got {interpolated}"
             );
         }
+    }
+    /// A preset writes a *graphic* curve. If the audible stage is parametric,
+    /// the engine never compiles those gains, so the preset used to be a
+    /// silent no-op after AutoEQ had selected Parametric. Selecting a curve
+    /// must move the audible stage to the one the curve lives in.
+    #[test]
+    fn applying_a_preset_makes_the_graphic_stage_audible() {
+        let mut state = EqPanelState {
+            eq_mode: EqMode::Parametric,
+            eq_enabled: true,
+            selected_preset: EqPreset::BassBoost,
+            ..Default::default()
+        };
+        let mut actions = EqPanelActions::default();
+
+        apply_active_preset(&mut state, &mut actions);
+
+        assert_eq!(state.eq_mode, EqMode::Graphic);
+        assert!(
+            actions.eq_mode_changed,
+            "the engine must be told the mode moved"
+        );
+        assert!(actions.graphic_eq_changed);
+        assert!(state.graphic_enabled);
+    }
+
+    #[test]
+    fn a_preset_on_the_graphic_stage_does_not_re_send_the_mode() {
+        let mut state = EqPanelState {
+            eq_mode: EqMode::Graphic,
+            eq_enabled: true,
+            ..Default::default()
+        };
+        let mut actions = EqPanelActions::default();
+        apply_active_preset(&mut state, &mut actions);
+        assert!(!actions.eq_mode_changed);
     }
 }

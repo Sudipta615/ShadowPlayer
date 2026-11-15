@@ -220,7 +220,13 @@ impl PersistentEqState {
         state.bands = self.bands.clone();
         state.bass_shelf_db = self.bass_shelf_db;
         state.treble_shelf_db = self.treble_shelf_db;
-        state.midside_eq = self.midside_eq;
+        // Mid/Side is not available: the engine feeds one shared curve to
+        // mid and side, which is identical to L/R filtering. A snapshot that
+        // stored the old toggle must not resurrect it — the engine would then
+        // report a mode change (and drop the bit-perfect claim) for something
+        // that does not alter the audio. The field stays in the struct so a
+        // future dual-bank implementation can read it back.
+        state.midside_eq = false;
         state.stereo_width = self.stereo_width;
         state.balance = self.balance;
         state.dither_enabled = self.dither_enabled;

@@ -182,7 +182,7 @@ pub(in crate::components::settings_tab) fn render_spatial_category(
             setting_item(
                 ui,
                 &tr!("HRTF Profile ID"),
-                &tr!("SOFA dataset profile identifier (e.g. KEMAR_diffuse, IRC_1002)"),
+                &tr!("Dataset profile ID — built in: kemar_reference (synthetic KEMAR), spherical_model (analytic head)"),
                 theme,
                 |ui| {
                     let edit = egui::TextEdit::singleline(&mut state.hrtf_profile)

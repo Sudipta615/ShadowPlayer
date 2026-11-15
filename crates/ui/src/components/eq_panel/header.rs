@@ -209,12 +209,25 @@ pub(super) fn render_header(
             );
             if ab_btn
                 .on_hover_text(
-                    "A/B Audition: Instantly toggle between current tweaks (A) and baseline comparison (B)",
+                    "A/B Audition: Instantly toggle between current tweaks (A) and a flat reference (B)",
                 )
                 .clicked()
             {
                 state.toggle_ab_audition();
+                // `apply_snapshot` changes the panel model only. Every stage
+                // it restores has to be re-sent, or the toggle is silent: the
+                // old code pushed the graphic curve alone, so tone shelves, the
+                // parametric bank, width and balance never moved.
+                actions.eq_mode_changed = true;
+                actions.eq_bands_changed = true;
                 actions.graphic_eq_changed = true;
+                actions.bass_shelf_changed = Some(state.bass_shelf_db);
+                actions.treble_shelf_changed = Some(state.treble_shelf_db);
+                actions.stereo_width_changed = Some(state.stereo_width);
+                actions.balance_changed = Some(state.balance);
+                actions.crossfeed_enabled_changed = Some(state.crossfeed_enabled);
+                actions.limiter_enabled_changed = Some(state.limiter_enabled);
+                actions.compressor_enabled_changed = Some(state.compressor_enabled);
             }
 
             // Redo Button

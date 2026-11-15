@@ -75,6 +75,21 @@ fn a_pre_migration_snapshot_drops_the_stale_auto_headroom_default() {
 }
 
 #[test]
+fn a_persisted_midside_toggle_is_not_restored() {
+    // The control is unavailable because one shared curve for mid and side is
+    // identical to L/R filtering. A stale snapshot holding the old toggle must
+    // not bring it back: the engine would report a mode change — and drop the
+    // bit-perfect claim — for something inaudible.
+    let legacy = PersistentEqState {
+        midside_eq: true,
+        ..Default::default()
+    };
+    let mut state = EqPanelState::default();
+    legacy.apply_to(&mut state);
+    assert!(!state.midside_eq);
+}
+
+#[test]
 fn a_legacy_blob_without_a_version_field_is_treated_as_version_zero() {
     // The real upgrade path is JSON, not a struct literal. A blob written by
     // the old build has no `schema_version` key at all, and the container's
@@ -441,6 +456,42 @@ fn ab_audition_swaps_and_restores_slots() {
     assert!(state.is_auditioning_b);
     assert!((state.graphic_gains[0] - 0.0).abs() < 1e-4);
     assert!((state.preamp_db - 0.0).abs() < 1e-4);
+}
+
+/// A/B must also work when the parametric curve is the audible one: the
+/// comparison previously carried no band data, so both slots sounded
+/// identical and the toggle did nothing.
+#[test]
+fn ab_audition_swaps_the_parametric_curve_and_tone() {
+    let mut state = EqPanelState {
+        eq_mode: config::EqMode::Parametric,
+        ..Default::default()
+    };
+    state.bands[0].gain_db = 8.0;
+    state.bands[1].gain_db = -3.0;
+    state.bass_shelf_db = 4.0;
+    state.treble_shelf_db = -2.0;
+
+    state.toggle_ab_audition();
+    assert!(state.is_auditioning_b);
+    assert!(
+        state.bands.iter().all(|band| band.gain_db == 0.0),
+        "the B slot must be the flat parametric reference"
+    );
+    assert_eq!(state.bass_shelf_db, 0.0);
+    assert_eq!(state.treble_shelf_db, 0.0);
+    // A zeroed high-pass still filters, so every band is switched off too.
+    assert!(
+        state.bands.iter().all(|band| !band.enabled),
+        "the flat reference must disable every band, not just zero its gain"
+    );
+
+    state.toggle_ab_audition();
+    assert!(!state.is_auditioning_b);
+    assert!((state.bands[0].gain_db - 8.0).abs() < 1e-4);
+    assert!((state.bands[1].gain_db + 3.0).abs() < 1e-4);
+    assert!((state.bass_shelf_db - 4.0).abs() < 1e-4);
+    assert!((state.treble_shelf_db + 2.0).abs() < 1e-4);
 }
 
 #[test]

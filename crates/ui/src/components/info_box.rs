@@ -432,9 +432,9 @@ pub const INFO_AUTO_HEADROOM: InfoBoxContent = InfoBoxContent {
 pub const INFO_MIDSIDE_EQ: InfoBoxContent = InfoBoxContent {
     title: "Mid/Side Matrix Processing",
     subtitle: "M/S Channel Decomposition",
-    description: "Splits stereo audio into Mid (center vocal/bass) and Side (wide reverb/ambiance) before DSP filtering.",
-    technical_note: "Encodes L/R into Mid/Side components before EQ biquads and decodes back to L/R after filtering. Allows independent acoustic treatment of center vs sides.",
-    recommendation: "Keep in Stereo L/R Mode for standard music playback. Use M/S for specialized remastering.",
+    description: "Would split stereo audio into Mid (center vocal/bass) and Side (wide reverb/ambiance) for independent shaping.",
+    technical_note: "Not available in this build. The engine feeds one shared curve to both mid and side; because the filter is linear, that commutes with the L/R↔M/S matrix and is identical to filtering L/R. Independent centre/side curves need a second EQ bank and are not implemented yet.",
+    recommendation: "No action needed — the EQ already processes the full stereo signal in L/R.",
 };
 
 pub const INFO_DITHER: InfoBoxContent = InfoBoxContent {
@@ -552,8 +552,8 @@ pub const INFO_RESAMPLER_QUALITY: InfoBoxContent = InfoBoxContent {
 pub const INFO_SPATIAL_HRTF: InfoBoxContent = InfoBoxContent {
     title: "Binaural HRTF Spatialization",
     subtitle: "3D Acoustic Soundstage Simulation",
-    description: "Recreates natural human pinna, head, and torso acoustic diffraction for expansive 3D headphone listening.",
-    technical_note: "Convolves stereo audio through Head-Related Transfer Function impulse responses, placing virtual speakers in front of you and eliminating headphone 'in-the-head' fatigue.",
+    description: "Places the L/R program on a virtual speaker screen and models the head's own acoustics, for speaker-like headphone listening.",
+    technical_note: "The built-in model is analytic: Woodworth interaural delay, a Duda-Martens head-shadow shelf and a pinna elevation notch. A measured HRTF dataset (set by profile ID) replaces it with impulse-response convolution, and the quality tier then selects how many taps that convolution uses. Without a dataset, changing the quality tier does not change the sound.",
     recommendation: "Enable on headphones for a natural speaker-like studio listening experience.",
 };
 

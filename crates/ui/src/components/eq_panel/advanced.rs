@@ -101,23 +101,30 @@ pub(super) fn render_advanced_tab(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(theme.space_xl, 0.0);
 
-            // Card 3: Mid/Side Processing (M/S Mode)
-            let mut ms = state.midside_eq;
-            render_advanced_toggle_card(
-                ui,
-                card_w,
-                "Mid/Side Processing (M/S)",
-                &crate::components::info_box::INFO_MIDSIDE_EQ,
-                "Splits audio into Mid (center) and Side (stereo field) channels for independent acoustic shaping.",
-                if ms { "M/S Matrix Active" } else { "Stereo L/R Mode" },
-                ms,
-                &mut ms,
-                |v| {
-                    state.midside_eq = v;
-                    actions.midside_eq_changed = Some(v);
-                },
-                theme,
-            );
+            // Card 3: Mid/Side Processing — shown as unavailable.
+            //
+            // The engine runs one shared curve for mid and side. A linear
+            // filter with the same coefficients on both channels commutes with
+            // the L/R↔M/S matrix, so the toggle is mathematically identical to
+            // filtering L/R and changes nothing audible. Rendering a control
+            // that silently does nothing is exactly what the honesty contract
+            // bans, so the card is disabled and says why until the engine can
+            // carry two independent curves.
+            let mut ms = false;
+            ui.add_enabled_ui(false, |ui| {
+                render_advanced_toggle_card(
+                    ui,
+                    card_w,
+                    "Mid/Side Processing (M/S)",
+                    &crate::components::info_box::INFO_MIDSIDE_EQ,
+                    "Unavailable: the EQ applies one shared curve to mid and side, which is identical to L/R filtering. Independent centre/side curves are not implemented yet.",
+                    "Unavailable",
+                    false,
+                    &mut ms,
+                    |_| {},
+                    theme,
+                );
+            });
 
             // Card 4: TPDF Triangular Dithering
             if two_col {
