@@ -270,3 +270,157 @@ fn phase_vocoder_processing_preserves_audio_power() {
         "Phase vocoder output must produce audio energy: {energy}"
     );
 }
+
+/// At speed 1 the overlap-add reconstruction must be unity gain: with
+/// `hop_s = fft_size / 4` the squared periodic-Hann windows of the four
+/// overlapping frames sum to 1.5, which `fft_norm` divides out. This fails
+/// with the pre-fix implementation, which windowed only the first `hop_s`
+/// samples of each IFFT frame (discarding 75% of every frame).
+#[test]
+fn phase_vocoder_unity_gain_at_speed_one() {
+    let mut pv = PhaseVocoder::new(48_000.0);
+    const TOTAL: usize = 65_536;
+    const BLOCK: usize = 1024;
+    const WARMUP: usize = 8192;
+
+    let mut output_l = Vec::with_capacity(TOTAL);
+    let mut output_r = Vec::with_capacity(TOTAL);
+    for chunk in 0..TOTAL / BLOCK {
+        let mut l = Vec::with_capacity(BLOCK);
+        let mut r = Vec::with_capacity(BLOCK);
+        for i in 0..BLOCK {
+            let t = (chunk * BLOCK + i) as f32 / 48_000.0;
+            let s = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+            l.push(s);
+            r.push(s);
+        }
+        pv.process_block(&mut l, &mut r, 1.0, 1.0);
+        output_l.extend_from_slice(&l);
+        output_r.extend_from_slice(&r);
+    }
+
+    // Skip the overlap-add ramp-in; measure the settled steady state.
+    let out_rms: f32 = output_l[WARMUP..]
+        .iter()
+        .map(|&x| x * x)
+        .sum::<f32>()
+        .sqrt()
+        / ((TOTAL - WARMUP) as f32).sqrt();
+    let in_rms = 0.5 / 2.0f32.sqrt();
+
+    assert!(
+        (out_rms / in_rms - 1.0).abs() < 0.2,
+        "unity-gain OLA violated: out_rms={out_rms:.4} in_rms={in_rms:.4} ratio={:.3}",
+        out_rms / in_rms
+    );
+}
+
+/// With `pitch = 2` and `speed = 1` the output must be pitch-shifted to
+/// 880 Hz while keeping the input's duration (net speed 1). The pre-fix
+/// implementation discarded `pitch_ratio` entirely, leaving the tone at
+/// 440 Hz.
+#[test]
+fn phase_vocoder_pitch_ratio_shifts_spectrum() {
+    let mut pv = PhaseVocoder::new(48_000.0);
+    const TOTAL: usize = 65_536;
+    const BLOCK: usize = 1024;
+    const WARMUP: usize = 16_384;
+
+    let mut output_l = Vec::with_capacity(TOTAL);
+    for chunk in 0..TOTAL / BLOCK {
+        let mut l = Vec::with_capacity(BLOCK);
+        let mut r = Vec::with_capacity(BLOCK);
+        for i in 0..BLOCK {
+            let t = (chunk * BLOCK + i) as f32 / 48_000.0;
+            let s = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+            l.push(s);
+            r.push(s);
+        }
+        pv.process_block(&mut l, &mut r, 1.0, 2.0);
+        output_l.extend_from_slice(&l);
+    }
+
+    // Steady state: dominant frequency via zero crossings.
+    let tail = &output_l[WARMUP..];
+    let mut crossings = 0usize;
+    for w in tail.windows(2) {
+        if w[0] <= 0.0 && w[1] > 0.0 {
+            crossings += 1;
+        }
+    }
+    let measured = crossings as f32 * 48_000.0 / tail.len() as f32;
+
+    assert!(
+        (measured - 880.0).abs() < 880.0 * 0.05,
+        "pitch ratio 2 must shift 440 Hz to ~880 Hz, measured {measured:.1} Hz"
+    );
+}
+
+/// At `speed = 2` and unity pitch the PV time-compresses. With the 1:1
+/// in-place block API the output FIFO is only resupplied at half the read
+/// rate (the same deficit the WSOLA path has — sustained supply is the
+/// transport's job, see `SpeedMode::TimeStretch`), so the output interleaves
+/// active audio with underrun gaps. The contract we can pin on the PV itself
+/// is that the *active* regions carry the original 440 Hz tone at healthy
+/// level: the overlap-add must not detune, attenuate or amplitude-modulate
+/// the compressed stream.
+#[test]
+fn phase_vocoder_speed_two_preserves_frequency_in_active_regions() {
+    let mut pv = PhaseVocoder::new(48_000.0);
+    const TOTAL: usize = 65_536;
+    const BLOCK: usize = 1024;
+
+    let mut output_l = Vec::with_capacity(TOTAL);
+    for chunk in 0..TOTAL / BLOCK {
+        let mut l = vec![0.0f32; BLOCK];
+        let mut r = vec![0.0f32; BLOCK];
+        for (i, s) in l.iter_mut().enumerate() {
+            let t = (chunk * BLOCK + i) as f32 / 48_000.0;
+            *s = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+        }
+        pv.process_block(&mut l, &mut r, 2.0, 1.0);
+        output_l.extend_from_slice(&l);
+    }
+
+    // Steady state (past the startup latency): find the dominant spectral
+    // peak with a fine Goertzel scan. A peak (unlike zero-crossing counting)
+    // is robust to the underrun gaps diluting the waveform.
+    let tail = &output_l[16_384..];
+    let mut rms_sq = 0.0f64;
+    for &x in tail {
+        rms_sq += (x as f64) * (x as f64);
+    }
+    let rms = (rms_sq / tail.len() as f64).sqrt() as f32;
+    assert!(rms > 0.15, "output must not be mostly silent, rms={rms:.4}");
+
+    let mut best_freq = 0.0f32;
+    let mut best_mag = -1.0f64;
+    for f in 300..=600 {
+        let f = f as f64;
+        let omega = std::f64::consts::TAU * f / 48_000.0;
+        let cos_omega = omega.cos();
+        let coeff = 2.0 * cos_omega;
+        let (mut s1, mut s2) = (0.0f64, 0.0f64);
+        for &x in tail {
+            let s0 = coeff * s1 - s2 + x as f64;
+            s2 = s1;
+            s1 = s0;
+        }
+        let mag2 = s1 * s1 + s2 * s2 - cos_omega * s1 * s2;
+        if mag2 > best_mag {
+            best_mag = mag2;
+            best_freq = f as f32;
+        }
+    }
+
+    assert!(
+        (best_freq - 440.0).abs() < 440.0 * 0.05,
+        "speed 2 must keep the tone at ~440 Hz, measured {best_freq:.1} Hz"
+    );
+
+    let rms: f32 = (tail.iter().map(|&x| x * x).sum::<f32>() / tail.len() as f32).sqrt();
+    assert!(
+        rms > 0.15,
+        "speed 2 output must carry real audio energy, rms={rms:.4}"
+    );
+}

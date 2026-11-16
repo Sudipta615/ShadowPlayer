@@ -46,6 +46,66 @@ fn hann_window(len: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Build the normalized windowed-sinc interpolation table shared by the WSOLA
+/// and Phase Vocoder pitch resamplers. One implementation by contract
+/// (`AGENTS.md` §6): both resamplers must read through this table.
+pub(crate) fn pitch_interp_table() -> Vec<f32> {
+    let mut table = vec![0.0f32; PITCH_PHASES * PITCH_TAPS];
+    for p in 0..PITCH_PHASES {
+        let t = p as f32 / PITCH_PHASES as f32;
+        let row = p * PITCH_TAPS;
+        let mut sum = 0.0f32;
+        for tap in 0..PITCH_TAPS {
+            let offset = tap as f32 - (PITCH_TAPS_HALF as f32 - 1.0);
+            let d = t - offset;
+            let sinc = if d.abs() < 1e-6 {
+                1.0
+            } else {
+                (PI * d).sin() / (PI * d)
+            };
+            let coefficient = sinc * blackman_harris4(d, PITCH_TAPS_HALF as f32);
+            table[row + tap] = coefficient;
+            sum += coefficient;
+        }
+        for tap in 0..PITCH_TAPS {
+            table[row + tap] /= sum;
+        }
+    }
+    table
+}
+
+/// Windowed-sinc interpolation of `fifo[base_idx]` at fractional position
+/// `phase / PITCH_PHASES`, drawing past taps from a rolling `history` ring and
+/// future taps from the FIFO ahead of `base_idx`. Shared by the WSOLA and
+/// Phase Vocoder pitch resamplers.
+pub(crate) fn pitch_interpolate(
+    interp_table: &[f32],
+    phase: usize,
+    history: &[f32],
+    history_len: usize,
+    fifo: &[f32],
+    fifo_cap: usize,
+    base_idx: usize,
+) -> f32 {
+    let row = &interp_table[phase * PITCH_TAPS..(phase + 1) * PITCH_TAPS];
+    let mut acc = 0.0f32;
+    for (tap, &coefficient) in row.iter().enumerate() {
+        let offset = tap as isize - (PITCH_TAPS_HALF as isize - 1);
+        let sample = if offset < 0 {
+            let k = (-offset) as usize;
+            if k <= history_len {
+                history[history.len() - k]
+            } else {
+                0.0
+            }
+        } else {
+            fifo[(base_idx + offset as usize) % fifo_cap]
+        };
+        acc += coefficient * sample;
+    }
+    acc
+}
+
 /// Real-time stereo time-stretcher and pitch-shifter.
 pub struct TimeStretcher {
     pub(crate) sample_rate: f32,
@@ -102,6 +162,13 @@ pub struct TimeStretcher {
     pub(crate) pv: PhaseVocoder,
     pub(crate) transient: TransientDetector,
     pub(crate) formant_preservation: bool,
+
+    /// Input frames dropped because the input ring was full. Counted on the
+    /// audio thread and read from the control thread through a getter — the
+    /// diagnostic must not log there (`AGENTS.md` §1.3: no logging on the
+    /// audio thread), and the counter mirrors the pipeline's
+    /// `DspPipeline::oversize_blocks` pattern.
+    dropped_input_frames: u64,
 }
 
 impl TimeStretcher {
@@ -123,27 +190,7 @@ impl TimeStretcher {
         let fifo_cap = (max_win * 8).next_power_of_two().max(32768);
         let scratch_f64_cap = MAX_AUDIO_BLOCK_FRAMES;
 
-        let mut interp_table = vec![0.0f32; PITCH_PHASES * PITCH_TAPS];
-        for p in 0..PITCH_PHASES {
-            let t = p as f32 / PITCH_PHASES as f32;
-            let row = p * PITCH_TAPS;
-            let mut sum = 0.0f32;
-            for tap in 0..PITCH_TAPS {
-                let offset = tap as f32 - (PITCH_TAPS_HALF as f32 - 1.0);
-                let d = t - offset;
-                let sinc = if d.abs() < 1e-6 {
-                    1.0
-                } else {
-                    (PI * d).sin() / (PI * d)
-                };
-                let coefficient = sinc * blackman_harris4(d, PITCH_TAPS_HALF as f32);
-                interp_table[row + tap] = coefficient;
-                sum += coefficient;
-            }
-            for tap in 0..PITCH_TAPS {
-                interp_table[row + tap] /= sum;
-            }
-        }
+        let interp_table = pitch_interp_table();
 
         let pv = PhaseVocoder::new(sample_rate);
         let transient = TransientDetector::new(sample_rate);
@@ -183,7 +230,15 @@ impl TimeStretcher {
             pv,
             transient,
             formant_preservation: false,
+            dropped_input_frames: 0,
         }
+    }
+
+    /// Input frames dropped because the input ring was full (lifetime count).
+    ///
+    /// Read from the control thread; the audio path only increments it.
+    pub fn dropped_input_frames(&self) -> u64 {
+        self.dropped_input_frames
     }
 
     /// Enable or disable the time-stretcher.
@@ -565,23 +620,15 @@ impl TimeStretcher {
         fifo_cap: usize,
         base_idx: usize,
     ) -> f32 {
-        let row = &self.interp_table[phase * PITCH_TAPS..(phase + 1) * PITCH_TAPS];
-        let mut acc = 0.0f32;
-        for (tap, &coefficient) in row.iter().enumerate() {
-            let offset = tap as isize - (PITCH_TAPS_HALF as isize - 1);
-            let sample = if offset < 0 {
-                let k = (-offset) as usize;
-                if k <= history_len {
-                    history[history.len() - k]
-                } else {
-                    0.0
-                }
-            } else {
-                fifo[(base_idx + offset as usize) % fifo_cap]
-            };
-            acc += coefficient * sample;
-        }
-        acc
+        pitch_interpolate(
+            &self.interp_table,
+            phase,
+            history,
+            history_len,
+            fifo,
+            fifo_cap,
+            base_idx,
+        )
     }
 
     /// Process stereo block with time-stretching and pitch-shifting.
@@ -637,10 +684,14 @@ impl TimeStretcher {
 
         let accepted = self.push_input(&left[..n], &right[..n]);
         if accepted < n {
-            log::warn!(
-                "TimeStretcher input ring full; dropping {} input frames to preserve realtime safety",
-                n - accepted
-            );
+            // No logging here: this runs inside `process_post_mix_block*` on
+            // the audio thread, and a `log::warn!` is a format allocation, a
+            // logger lock and possibly I/O — a realtime-contract violation
+            // (AGENTS.md §1.1/§1.3). Count the loss; the control thread reads
+            // it through `dropped_input_frames`.
+            self.dropped_input_frames = self
+                .dropped_input_frames
+                .saturating_add((n - accepted) as u64);
         }
 
         let pitch_ratio = self.current_pitch_ratio as f64;

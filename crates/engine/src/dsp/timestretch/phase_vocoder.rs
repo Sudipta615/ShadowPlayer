@@ -10,6 +10,10 @@ use std::sync::Arc;
 use num_complex::Complex;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
+use super::stretcher::{
+    pitch_interp_table, pitch_interpolate, PITCH_HISTORY_LEN, PITCH_PHASES, PITCH_TAPS_HALF,
+};
+
 /// Default Phase Vocoder FFT frame size.
 pub const PV_FFT_SIZE: usize = 2048;
 /// Default synthesis hop size (75% overlap).
@@ -59,6 +63,18 @@ pub struct PhaseVocoder {
     synth_accum_r: Vec<f32>,
     synth_read_pos: usize,
     synth_available: usize,
+
+    // Pitch resampler: the stretch stage bakes the duration ratio
+    // `speed / pitch` into the analysis hop, and this stage reads the
+    // stretched stream `pitch_ratio` times faster through a windowed-sinc
+    // interpolator, yielding a net duration of `1 / speed` and a net pitch
+    // of `pitch_ratio`.
+    pitch_ratio: f32,
+    interp_table: Vec<f32>,
+    pitch_history_l: Vec<f32>,
+    pitch_history_r: Vec<f32>,
+    pitch_history_len: usize,
+    resample_phase: f64,
 
     output_fifo_l: Vec<f32>,
     output_fifo_r: Vec<f32>,
@@ -124,6 +140,12 @@ impl PhaseVocoder {
             synth_accum_r: vec![0.0; ring_cap],
             synth_read_pos: 0,
             synth_available: 0,
+            pitch_ratio: 1.0,
+            interp_table: pitch_interp_table(),
+            pitch_history_l: vec![0.0; PITCH_HISTORY_LEN],
+            pitch_history_r: vec![0.0; PITCH_HISTORY_LEN],
+            pitch_history_len: 0,
+            resample_phase: 0.0,
             output_fifo_l: vec![0.0; fifo_cap],
             output_fifo_r: vec![0.0; fifo_cap],
             output_write_pos: 0,
@@ -143,6 +165,9 @@ impl PhaseVocoder {
         self.input_available = 0;
         self.synth_read_pos = 0;
         self.synth_available = 0;
+        self.pitch_ratio = 1.0;
+        self.pitch_history_len = 0;
+        self.resample_phase = 0.0;
         self.output_write_pos = 0;
         self.output_read_pos = 0;
         self.output_available = 0;
@@ -151,6 +176,8 @@ impl PhaseVocoder {
         self.input_ring_r.fill(0.0);
         self.synth_accum_l.fill(0.0);
         self.synth_accum_r.fill(0.0);
+        self.pitch_history_l.fill(0.0);
+        self.pitch_history_r.fill(0.0);
         self.output_fifo_l.fill(0.0);
         self.output_fifo_r.fill(0.0);
 
@@ -171,11 +198,20 @@ impl PhaseVocoder {
     }
 
     /// Update stretch ratio (`speed`) and pitch ratio.
+    ///
+    /// The synthesis hop is fixed; the analysis hop carries the *duration*
+    /// multiplier `S = pitch / speed`, so the PV stretches the signal to
+    /// `pitch / speed` times its original duration. The pitch resampler then
+    /// reads that stream `pitch` times faster, giving a net duration of
+    /// `1 / speed` and a net pitch of `pitch` — the same composition WSOLA
+    /// expresses as `effective_stretch = speed / pitch`.
     pub fn update_parameters(&mut self, speed: f32, pitch_ratio: f32) {
         let speed = speed.clamp(0.25, 4.0);
-        let _pitch = pitch_ratio.clamp(0.25, 4.0);
-        // Synthesis hop is fixed, analysis hop scales with speed
-        let ha = ((self.hop_s as f32 * speed).round() as usize).clamp(64, self.fft_size / 2);
+        let pitch = pitch_ratio.clamp(0.25, 4.0);
+        self.pitch_ratio = pitch;
+        // Synthesis hop is fixed, analysis hop scales with the duration ratio
+        let ha =
+            ((self.hop_s as f32 * speed / pitch).round() as usize).clamp(64, self.fft_size / 2);
         self.hop_a = ha;
     }
 
@@ -207,25 +243,86 @@ impl PhaseVocoder {
 
         // 2. Perform STFT analysis & synthesis while sufficient input is available
         while self.input_available >= self.fft_size {
-            self.process_frame(pitch_ratio);
+            self.process_frame(self.pitch_ratio);
         }
 
-        // 3. Read processed samples from output FIFO
+        // 3. Read processed samples from the output FIFO. When pitch-shifting,
+        //    read at `pitch_ratio` times the natural rate through the shared
+        //    windowed-sinc interpolator (the analysis hop already stretched
+        //    the stream by `pitch / speed`, so this restores the requested
+        //    duration while shifting pitch).
         let fifo_cap = self.output_fifo_l.len();
-        let read_count = frames.min(self.output_available);
-        for i in 0..read_count {
-            let rp = self.output_read_pos;
-            left[i] = self.output_fifo_l[rp];
-            right[i] = self.output_fifo_r[rp];
-            self.output_read_pos = (rp + 1) % fifo_cap;
-        }
-        self.output_available -= read_count;
+        let pitch = self.pitch_ratio;
 
-        // If FIFO had fewer samples than requested (e.g. startup latency), fill remaining with 0
-        if read_count < frames {
-            for i in read_count..frames {
-                left[i] = 0.0;
-                right[i] = 0.0;
+        if (pitch - 1.0).abs() > 0.001 {
+            let pitch_f = pitch as f64;
+            let mut read_idx = self.output_read_pos;
+
+            for i in 0..frames {
+                if self.output_available >= PITCH_TAPS_HALF {
+                    let phase =
+                        (self.resample_phase * PITCH_PHASES as f64).floor() as usize % PITCH_PHASES;
+
+                    left[i] = pitch_interpolate(
+                        &self.interp_table,
+                        phase,
+                        &self.pitch_history_l,
+                        self.pitch_history_len,
+                        &self.output_fifo_l,
+                        fifo_cap,
+                        read_idx,
+                    );
+                    right[i] = pitch_interpolate(
+                        &self.interp_table,
+                        phase,
+                        &self.pitch_history_r,
+                        self.pitch_history_len,
+                        &self.output_fifo_r,
+                        fifo_cap,
+                        read_idx,
+                    );
+
+                    self.resample_phase += pitch_f;
+                    let advance = self.resample_phase.floor() as usize;
+                    self.resample_phase -= advance as f64;
+                    let advance_clamped = advance.min(self.output_available);
+
+                    for step in 0..advance_clamped {
+                        let idx = (read_idx + step) % fifo_cap;
+                        for h in 0..PITCH_HISTORY_LEN - 1 {
+                            self.pitch_history_l[h] = self.pitch_history_l[h + 1];
+                            self.pitch_history_r[h] = self.pitch_history_r[h + 1];
+                        }
+                        self.pitch_history_l[PITCH_HISTORY_LEN - 1] = self.output_fifo_l[idx];
+                        self.pitch_history_r[PITCH_HISTORY_LEN - 1] = self.output_fifo_r[idx];
+                        self.pitch_history_len =
+                            (self.pitch_history_len + 1).min(PITCH_HISTORY_LEN);
+                    }
+                    read_idx = (read_idx + advance_clamped) % fifo_cap;
+                    self.output_available = self.output_available.saturating_sub(advance_clamped);
+                } else {
+                    left[i] = 0.0;
+                    right[i] = 0.0;
+                }
+            }
+
+            self.output_read_pos = read_idx;
+        } else {
+            let read_count = frames.min(self.output_available);
+            for i in 0..read_count {
+                let rp = self.output_read_pos;
+                left[i] = self.output_fifo_l[rp];
+                right[i] = self.output_fifo_r[rp];
+                self.output_read_pos = (rp + 1) % fifo_cap;
+            }
+            self.output_available -= read_count;
+
+            // If FIFO had fewer samples than requested (e.g. startup latency), fill remaining with 0
+            if read_count < frames {
+                for i in read_count..frames {
+                    left[i] = 0.0;
+                    right[i] = 0.0;
+                }
             }
         }
     }
@@ -347,22 +444,46 @@ impl PhaseVocoder {
             .inverse_fft
             .process(&mut self.synth_spec_r, &mut self.time_out_r);
 
-        // Synthesis windowing and overlap-add into output FIFO
+        // Synthesis windowing and overlap-add.
+        //
+        // The full `fft_size` IFFT frame is windowed and accumulated at its
+        // synthesis position; with `hop_s = fft_size / 4` each output sample
+        // collects contributions from four overlapping frames whose squared
+        // Hann windows sum to 1.5 (COLA), so `fft_norm = 1 / (N * 1.5)`
+        // reconstructs unity gain. Only the first `hop_s` samples of the
+        // accumulator are complete (every contributing frame has landed) and
+        // are drained to the output FIFO.
         let fft_norm = 1.0 / (fft_size as f32 * 1.5);
+        let accum_cap = self.synth_accum_l.len();
         let fifo_cap = self.output_fifo_l.len();
 
-        for i in 0..hs {
-            let wp = (self.output_write_pos + i) % fifo_cap;
+        for i in 0..fft_size {
+            let ap = (self.synth_read_pos + i) % accum_cap;
             let w = self.window[i];
-            let out_l = self.time_out_l[i] * w * fft_norm;
-            let out_r = self.time_out_r[i] * w * fft_norm;
+            self.synth_accum_l[ap] += self.time_out_l[i] * w * fft_norm;
+            self.synth_accum_r[ap] += self.time_out_r[i] * w * fft_norm;
+        }
 
-            self.output_fifo_l[wp] += out_l;
-            self.output_fifo_r[wp] += out_r;
+        for i in 0..hs {
+            let ap = (self.synth_read_pos + i) % accum_cap;
+            let wp = (self.output_write_pos + i) % fifo_cap;
+            self.output_fifo_l[wp] = self.synth_accum_l[ap];
+            self.output_fifo_r[wp] = self.synth_accum_r[ap];
+            self.synth_accum_l[ap] = 0.0;
+            self.synth_accum_r[ap] = 0.0;
+        }
+
+        // If this hop cannot fit, drop the oldest samples instead of
+        // clobbering slots that have not been read yet.
+        if self.output_available + hs > fifo_cap {
+            let excess = self.output_available + hs - fifo_cap;
+            self.output_read_pos = (self.output_read_pos + excess) % fifo_cap;
+            self.output_available -= excess;
         }
 
         self.output_write_pos = (self.output_write_pos + hs) % fifo_cap;
-        self.output_available = (self.output_available + hs).min(fifo_cap);
+        self.output_available += hs;
+        self.synth_read_pos = (self.synth_read_pos + hs) % accum_cap;
         self.input_available = self.input_available.saturating_sub(ha);
     }
 }
