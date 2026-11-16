@@ -1311,12 +1311,21 @@ impl<T: AudioFloat> SmoothedBiquad<T> {
     }
 
     /// Update the sample rate, recomputing smooth steps for ≈1.5 ms duration.
+    ///
+    /// The settled coefficients are re-derived at the new rate immediately:
+    /// `advance_smoothing` only recomputes while a ramp is active, so without
+    /// this the next sample would be filtered with coefficients designed for
+    /// the old rate. (`EqBand::update_coefficients` re-arms a ramp right after,
+    /// which masked this for the parametric path — but `SmoothedBiquad` is
+    /// public, and a rate change without a following target install must not
+    /// leave the filter filtering at the wrong rate indefinitely.)
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         if !sample_rate.is_finite() || sample_rate <= 0.0 {
             return;
         }
         self.sample_rate = sample_rate;
         self.smooth_steps = (sample_rate * 0.0015).clamp(8.0, 4096.0) as u32;
+        self.current_coeffs = self.coefficients_for(self.current_params);
     }
 
     /// Set new target parameters — begins smooth transition.
@@ -1549,6 +1558,51 @@ mod tests {
         for v in [c.b0, c.b1, c.b2, c.a1, c.a2] {
             assert!(v.is_finite() && v.abs() < 1.0e6, "coefficient {v} escaped");
         }
+    }
+
+    /// Regression: `set_sample_rate` must re-derive the *settled*
+    /// coefficients at the new rate. Before the fix it only updated
+    /// `sample_rate` and `smooth_steps`, so a rate change without a following
+    /// target install left the filter running with coefficients designed for
+    /// the old rate indefinitely.
+    #[test]
+    fn set_sample_rate_recomputes_settled_coefficients() {
+        let mut bq = SmoothedBiquad::<f32>::new();
+        bq.set_target_params(1_000.0, 6.0, 1.0, FilterType::Peaking);
+        // Settle the ramp immediately: one step lands on the target.
+        bq.remaining = 1;
+        bq.advance_smoothing();
+
+        let params = bq.current_params;
+        let at_44k = bq.current_coeffs;
+        assert_eq!(
+            bq.remaining, 0,
+            "ramp must be settled before the rate change"
+        );
+
+        bq.set_sample_rate(96_000.0);
+
+        // The settled coefficients must now be the ones designed at 96 kHz,
+        // and they must actually differ from the 44.1 kHz design (ω₀ depends
+        // on the rate).
+        let expected = bq.coefficients_for(params);
+        for (name, old, now, want) in [
+            ("b0", at_44k.b0, bq.current_coeffs.b0, expected.b0),
+            ("b1", at_44k.b1, bq.current_coeffs.b1, expected.b1),
+            ("b2", at_44k.b2, bq.current_coeffs.b2, expected.b2),
+            ("a1", at_44k.a1, bq.current_coeffs.a1, expected.a1),
+            ("a2", at_44k.a2, bq.current_coeffs.a2, expected.a2),
+        ] {
+            assert_relative_eq!(now, want, epsilon = 1e-6);
+            assert_ne!(
+                old, now,
+                "{name} must change when the sample rate changes 44.1k → 96k"
+            );
+        }
+
+        // And the filter must still process signal cleanly afterwards.
+        let out = bq.process_sample(0, 0.25);
+        assert!(out.is_finite(), "output went non-finite");
     }
 
     #[test]
