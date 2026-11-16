@@ -390,6 +390,17 @@ impl RtPlan {
                     // a separate scalar the render applies to the input
                     // before the per-path adds.
                     let paths = scene_ref.spectral_taps(obj, ACOUSTIC_IR_LEN);
+                    // Clamp excess delays into the history ring's capacity
+                    // (excess + kernel span must fit; see the offline
+                    // executor's identical clamp).
+                    let ring_cap = super::exec::ACOUSTIC_HISTORY as i64;
+                    let paths = paths
+                        .into_iter()
+                        .map(|(excess, kernel)| {
+                            let limit = (ring_cap - 1 - kernel.len() as i64).max(0);
+                            (excess.min(limit), kernel)
+                        })
+                        .collect();
                     plan.direct_gains[idx] = obj.direct().map(|d| d.gain).unwrap_or(1.0);
                     plan.acoustics[idx] = Some(AcousticState {
                         key: Some(obj.key),

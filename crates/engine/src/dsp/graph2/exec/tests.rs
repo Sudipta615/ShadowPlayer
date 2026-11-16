@@ -18,16 +18,27 @@ use crate::spatial::room_model::path::PathKind;
 /// equals; `run_acoustic` now applies true per-path spectral filters via
 /// [`spectral_taps`], which collapses to these exact taps when every path
 /// is flat.
+///
+/// (v3.49) The collapsed gains carry the distance-model ratio the node
+/// applies (`spectral_taps_with`), rendered with the same defaults as the
+/// free [`spectral_taps`] (`InverseReference` at a 1.0 m reference).
 pub(crate) fn acoustic_taps(
     obj: &crate::spatial::room_model::bake::BakedObject,
 ) -> Vec<(i64, f32)> {
+    let model = crate::spatial::level::DistanceModel::InverseReference;
+    let reference = 1.0;
     let direct_delay = obj.direct().map(|d| d.delay_samples).unwrap_or(0.0);
+    let direct_gain = obj
+        .direct()
+        .map(|d| model.distance_gain(d.distance, reference))
+        .unwrap_or(1.0);
     obj.paths
         .iter()
         .filter(|p| p.kind != crate::spatial::room_model::path::PathKind::Direct)
         .map(|p| {
             let excess = (p.delay_samples - direct_delay).max(0.0).round() as i64;
-            (excess, p.gain)
+            let ratio = model.distance_gain(p.distance, reference) / direct_gain.max(f32::EPSILON);
+            (excess, p.gain * ratio)
         })
         .collect()
 }
@@ -291,15 +302,21 @@ fn acoustic_node_reproduces_baked_room_response() {
 
     // Oracle first (releases the scene borrow): direct at 0 (direct
     // gain), plus each non-direct path at its excess delay with its
-    // gain — the same arithmetic the node runs.
+    // gain scaled by the scene's distance-model ratio — the same
+    // arithmetic the node runs (`spectral_taps_with`, v3.49).
     let obj = scene.get(pos).expect("baked object");
-    let direct_delay = obj.direct().unwrap().delay_samples;
+    let (model, reference) = scene.distance_model();
+    let direct = obj.direct().unwrap();
+    let direct_delay = direct.delay_samples;
+    let direct_ref_gain = model.distance_gain(direct.distance, reference);
     let mut expected = vec![0.0f32; 2048];
-    expected[0] = obj.direct().unwrap().gain;
+    expected[0] = direct.gain;
     for p in obj.paths.iter().filter(|p| p.kind != PathKind::Direct) {
         let excess = (p.delay_samples - direct_delay).max(0.0).round() as usize;
         if excess < 2048 {
-            expected[excess] += p.gain;
+            let ratio =
+                model.distance_gain(p.distance, reference) / direct_ref_gain.max(f32::EPSILON);
+            expected[excess] += p.gain * ratio;
         }
     }
     assert!(
@@ -716,16 +733,24 @@ fn named_scenes_render_per_listener_responses() {
     let back = baker.bake_single(pos, Vec3::new(6.0, 2.0, 1.5), SR, BakePolicy::default());
     assert_ne!(front.get(pos).unwrap().paths, back.get(pos).unwrap().paths);
 
-    // Oracle: the node's impulse response for one scene at `pos`.
+    // Oracle: the node's impulse response for one scene at `pos` —
+    // direct gain at 0, each non-direct path at its excess delay with
+    // its gain scaled by the scene's distance-model ratio (v3.49, the
+    // arithmetic `spectral_taps_with` renders).
     let response = |scene: &crate::spatial::room_model::bake::BakedScene| {
         let obj = scene.get(pos).unwrap();
-        let direct_delay = obj.direct().unwrap().delay_samples;
+        let (model, reference) = scene.distance_model();
+        let direct = obj.direct().unwrap();
+        let direct_delay = direct.delay_samples;
+        let direct_ref_gain = model.distance_gain(direct.distance, reference);
         let mut e = vec![0.0f32; 2048];
-        e[0] = obj.direct().unwrap().gain;
+        e[0] = direct.gain;
         for p in obj.paths.iter().filter(|p| p.kind != PathKind::Direct) {
             let excess = (p.delay_samples - direct_delay).max(0.0).round() as usize;
             if excess < e.len() {
-                e[excess] += p.gain;
+                let ratio =
+                    model.distance_gain(p.distance, reference) / direct_ref_gain.max(f32::EPSILON);
+                e[excess] += p.gain * ratio;
             }
         }
         e

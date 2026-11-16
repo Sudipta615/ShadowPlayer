@@ -27,9 +27,9 @@
 //!   renderers (EarlyReflections tap placement)
 //! ```
 
-use crate::spatial::level::AirAbsorption;
+use crate::spatial::level::{AirAbsorption, DistanceModel};
 use crate::spatial::math::Vec3;
-use crate::spatial::room::{ListenerImage, MAX_IMAGES};
+use crate::spatial::room::{ListenerImage, MAX_IMAGES, MAX_ROOM_DELAY_SAMPLES};
 use crate::spatial::room_model::geometry::Wall;
 use crate::spatial::room_model::material::{surface_lowpass_hz, MaterialSpectrum};
 use crate::spatial::room_model::path::{AcousticPath, PathKind};
@@ -142,7 +142,13 @@ impl BakedScene {
     /// golden oracles share this function, so a rendered room and its
     /// expected curve always agree.
     pub fn spectral_taps(&self, obj: &BakedObject, ir_len: usize) -> Vec<(i64, Vec<f32>)> {
-        spectral_taps_with(obj, ir_len, self.air_absorption)
+        spectral_taps_with(
+            obj,
+            ir_len,
+            self.air_absorption,
+            self.distance_model,
+            self.distance_reference,
+        )
     }
 }
 
@@ -152,7 +158,13 @@ impl BakedScene {
 /// classic per-path kernels until a scene opt-in via
 /// [`BakedScene::set_air_absorption`].
 pub fn spectral_taps(obj: &BakedObject, ir_len: usize) -> Vec<(i64, Vec<f32>)> {
-    spectral_taps_with(obj, ir_len, AirAbsorption::default())
+    spectral_taps_with(
+        obj,
+        ir_len,
+        AirAbsorption::default(),
+        DistanceModel::InverseReference,
+        1.0,
+    )
 }
 
 /// Per-path spectral taps threaded with the scene's air-absorption model
@@ -161,21 +173,37 @@ pub fn spectral_taps(obj: &BakedObject, ir_len: usize) -> Vec<(i64, Vec<f32>)> {
 /// [`AirAbsorption::cutoff_hz`]`(path.distance)` — so a farther reflection
 /// darkens (loses highs) exactly as the model intends, while staying
 /// equal at DC. With a disabled model this is the classic kernel verbatim.
+///
+/// (v3.49) Each non-direct kernel also carries its distance-model gain
+/// ratio, `level.distance_gain(p.distance, reference)` divided by the same
+/// gain at the direct path's distance — the relative wet/dry balance the
+/// realtime renderer realizes for the same geometry. The direct path is the
+/// ratio's unity, so absolute direct level is untouched; with no direct
+/// path the ratio is taken against unity at the reference distance.
 pub fn spectral_taps_with(
     obj: &BakedObject,
     ir_len: usize,
     air: AirAbsorption,
+    level: DistanceModel,
+    reference: f32,
 ) -> Vec<(i64, Vec<f32>)> {
     let direct_delay = obj.direct().map(|d| d.delay_samples).unwrap_or(0.0);
+    let direct_gain = obj
+        .direct()
+        .map(|d| level.distance_gain(d.distance, reference))
+        .unwrap_or(1.0);
     obj.paths
         .iter()
         .filter(|p| p.kind != PathKind::Direct)
         .map(|p| {
             let excess = (p.delay_samples - direct_delay).max(0.0).round() as i64;
-            (
-                excess,
-                path_filter_kernel_with(p, obj.sample_rate, ir_len, air),
-            )
+            let distance_ratio =
+                level.distance_gain(p.distance, reference) / direct_gain.max(f32::EPSILON);
+            let mut kernel = path_filter_kernel_with(p, obj.sample_rate, ir_len, air);
+            for t in kernel.iter_mut() {
+                *t *= distance_ratio;
+            }
+            (excess, kernel)
         })
         .collect()
 }
@@ -349,6 +377,33 @@ pub struct BakedScene {
     /// (bit-exact).
     #[serde(default)]
     air_absorption: AirAbsorption,
+    /// Scene-scoped distance model applied to the Acoustic node's kernels.
+    ///
+    /// The kernels are otherwise pure room colour (`BakedPath::gain`
+    /// deliberately carries no distance term), and the Acoustic node is a
+    /// renderer that was never applying the model either — so an offline
+    /// render's reflections did not roll off with path length, and the
+    /// offline and realtime wet/dry balances disagreed for identical
+    /// geometry. `spectral_taps` now folds each non-direct kernel's gain
+    /// ratio `gain(p.distance) / gain(direct.distance)` under this model
+    /// (the direct path is the ratio's unity, so absolute direct level is
+    /// untouched). Defaults to the spatial objects' default model
+    /// ([`DistanceModel::InverseReference`] at 1 m), which preserves every
+    /// ratio in rooms under the reference distance and rolls far paths off.
+    /// `#[serde(default)]`: older logs without the fields load with these
+    /// defaults.
+    #[serde(default = "default_scene_distance_model")]
+    distance_model: DistanceModel,
+    #[serde(default = "default_scene_distance_reference")]
+    distance_reference: f32,
+}
+
+fn default_scene_distance_model() -> DistanceModel {
+    DistanceModel::InverseReference
+}
+
+fn default_scene_distance_reference() -> f32 {
+    1.0
 }
 
 impl Default for BakedScene {
@@ -367,7 +422,22 @@ impl BakedScene {
             sample_rate: 48_000.0,
             policy: BakePolicy::default(),
             air_absorption: AirAbsorption::default(),
+            distance_model: default_scene_distance_model(),
+            distance_reference: default_scene_distance_reference(),
         }
+    }
+
+    /// Attach the scene-scoped distance model for the Acoustic kernels (see
+    /// the field's doc). `reference` is the model's unity-gain distance in
+    /// metres.
+    pub fn set_distance_model(&mut self, model: DistanceModel, reference: f32) {
+        self.distance_model = model;
+        self.distance_reference = reference.max(0.05);
+    }
+
+    /// The scene's distance model and reference distance.
+    pub fn distance_model(&self) -> (DistanceModel, f32) {
+        (self.distance_model, self.distance_reference)
     }
 
     /// Attach the scene-scoped air-absorption model (v3.48). Reflections are
@@ -519,11 +589,22 @@ impl BakedScene {
             let lowpass_hz =
                 self.air_absorption
                     .compose_corner_hz(surface_hz, p.distance, obj.sample_rate);
+            // The excess delay must clamp to the delay ring's capacity,
+            // exactly as the live solver does (`room/early.rs` clamps
+            // `rel` to `MAX_ROOM_DELAY_SAMPLES - 1`). Left unclamped, the
+            // value is later truncated to `u16` in `add_tap` and read with
+            // `% ring_len`, so an excess beyond the ring wraps around and
+            // the reflection arrives *early* — a pre-direct echo — instead
+            // of being held at the ring end. Baked and live renderers of
+            // the same room must agree (rooms ≳ 25 m with second-order
+            // images, or sources outside the room, hit this).
+            let excess = (p.delay_samples - direct_delay).max(0.0);
+            let excess = excess.min((MAX_ROOM_DELAY_SAMPLES - 1) as f32);
             out[count] = ListenerImage {
                 dir: p.direction,
                 dist: p.distance,
                 coeff: p.gain,
-                delay: (p.delay_samples - direct_delay).max(0.0).round() as u32,
+                delay: excess.round() as u32,
                 lowpass_hz,
             };
             count += 1;

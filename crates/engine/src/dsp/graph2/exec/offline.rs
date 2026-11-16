@@ -259,6 +259,18 @@ impl OfflineExecutor {
             };
         }
         let ring_len = st.raw.len();
+        // The largest offset any path may reach: excess delay + the kernel's
+        // span. A baked scene with a huge excess path (very large rooms)
+        // would otherwise wrap the ring via `rem_euclid` and arrive early.
+        // Clamping to the ring's capacity mirrors the live solver's clamp to
+        // its own delay ring.
+        let max_excess = (ring_len - 1) as i64;
+        for (excess, kernel) in st.paths.iter_mut() {
+            let limit = max_excess - kernel.len() as i64;
+            if *excess > limit {
+                *excess = limit.max(0);
+            }
+        }
         for i in 0..self.block {
             st.raw[st.pos] = in_plane[i];
             for (excess, kernel) in &st.paths {

@@ -14,7 +14,7 @@ use crate::dsp::biquad::{BiquadCoeffsF32, BiquadStateF32};
 ///
 /// This phase implements the four analytic laws below; a user-defined
 /// distance law is a declared seam.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DistanceModel {
     /// No distance attenuation — level is constant regardless of distance.
     Linear,
@@ -39,10 +39,17 @@ impl DistanceModel {
     /// NaN).
     pub fn distance_gain(&self, distance: f32, reference: f32) -> f32 {
         let d = distance.max(f32::EPSILON);
+        // `reference` is the distance at which the law passes unity gain.
+        // The inverse laws must honour it — a hard-coded 1 m normalization
+        // made `reference_distance` a dead knob for them (a reference of
+        // 3 m still yielded 1/9 at 3 m instead of unity). The default
+        // reference is 1.0, so existing scenes are unchanged. The *result*
+        // is still clamped to `MAX_GAIN`, not the reference.
+        let reference = reference.max(f32::EPSILON);
         match self {
             Self::Linear => 1.0,
-            Self::Inverse => (1.0 / d).min(MAX_GAIN),
-            Self::InverseSquare => (1.0 / (d * d)).min(MAX_GAIN),
+            Self::Inverse => (reference / d).min(MAX_GAIN),
+            Self::InverseSquare => (reference * reference / (d * d)).min(MAX_GAIN),
             Self::InverseReference => {
                 if distance <= reference || reference <= f32::EPSILON {
                     1.0
