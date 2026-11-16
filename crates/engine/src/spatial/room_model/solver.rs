@@ -141,19 +141,23 @@ impl AcousticWorld {
             m.reflection[4] // 1 kHz — the reference band
         };
 
-        // BFS frontiers, mirroring room.rs.
+        // BFS frontiers, mirroring room.rs. An image's crossed-wall list is
+        // `[Option<Wall>; MAX_REFLECTION_ORDER]`: the slot is the BFS level
+        // and `None` means "not crossed". (A `Wall::MaxX` sentinel cannot do
+        // that job — it is also a real wall, so both the slot scan and the
+        // `skip == MaxX` filters would silently drop a genuine MaxX bounce.)
         let mut current = [(Vec3::ZERO, 0.0f32); 32 * 4];
         let mut next = [(Vec3::ZERO, 0.0f32); 32 * 4];
         let mut seen = [Vec3::ZERO; 32 * 4];
-        let mut crossed = [[Wall::MaxX; MAX_REFLECTION_ORDER as usize]; 32 * 4];
+        let mut crossed = [[None; MAX_REFLECTION_ORDER as usize]; 32 * 4];
         current[0] = (source, 1.0);
-        crossed[0] = [Wall::MaxX; 2];
+        crossed[0] = [None; MAX_REFLECTION_ORDER as usize];
         let mut n_cur = 1usize;
         seen[0] = source;
         let mut n_seen = 1usize;
         let mut count = 0usize;
 
-        for _ in 0..order {
+        for level in 0..order as usize {
             let mut n_next = 0usize;
             for ci in 0..n_cur {
                 let (pos, _) = current[ci];
@@ -182,28 +186,22 @@ impl AcousticWorld {
                     seen[n_seen] = c;
                     n_seen += 1;
                     // Accumulate the crossed walls into the image's wall
-                    // list (first free slot in the fixed-size array).
+                    // list. The slot is the BFS level: each level adds
+                    // exactly one wall, so no "free slot" scan is needed (a
+                    // scan keyed on a real wall as sentinel corrupts the
+                    // list — see the block comment above).
                     let mut walls = crossed_here;
-                    let slot = walls
-                        .iter()
-                        .position(|&s| s == Wall::MaxX)
-                        .unwrap_or(MAX_REFLECTION_ORDER as usize);
-                    if slot < MAX_REFLECTION_ORDER as usize {
-                        walls[slot] = w;
+                    if level < MAX_REFLECTION_ORDER as usize {
+                        walls[level] = Some(w);
                     }
                     let mut coeff = 1.0f32;
-                    for &cw in walls.iter() {
-                        if cw != Wall::MaxX {
-                            coeff *= wall_r(cw);
-                        }
+                    for cw in walls.iter().flatten() {
+                        coeff *= wall_r(*cw);
                     }
                     if count < out.len() {
                         // Build the image's accumulated material spectrum.
                         let mut acc: Option<MaterialSpectrum> = None;
-                        for cw in walls.iter() {
-                            if *cw == Wall::MaxX {
-                                continue;
-                            }
+                        for cw in walls.iter().flatten() {
                             acc = Some(match acc {
                                 None => r.walls[wall_index(*cw)],
                                 Some(a) => multiply_spectra(&a, &r.walls[wall_index(*cw)]),
