@@ -878,6 +878,13 @@ impl LoudnessMeter {
     }
 
     /// Average of the `n` most recent 100ms segments.
+    ///
+    /// Short-term loudness is the mean square over the whole window, silence
+    /// included (BS.1770: a silent segment contributes zero power, not an
+    /// exclusion). Skipping silent segments here but dividing by the skipped
+    /// count inflated short-term loudness by the silence's share of the
+    /// window; the momentary path already does the right thing by summing
+    /// every segment's power over every segment's samples.
     fn recent_mean(&self, n: usize) -> f32 {
         let filled = self.short_term_filled.min(n);
         if filled == 0 {
@@ -885,25 +892,17 @@ impl LoudnessMeter {
         }
         let ring_len = self.short_term_ring.len();
         let mut sum = 0.0f64;
-        // Count the entries actually SUMMED, not the entries stored. An entry
-        // can be non-finite or non-positive: `lufs_from_power` yields -inf for
-        // digital silence, and `-inf * 10` is not reliably a negative float, so
-        // a silent segment lands below zero. The loop skipped those when
-        // summing but divided by `filled`, which counts them — biasing
-        // short-term loudness low for up to 3 seconds.
-        let mut counted = 0usize;
         for i in 0..filled {
             let idx = (self.short_term_idx + ring_len - 1 - i) % ring_len;
             let v = self.short_term_ring[idx];
-            if v.is_finite() && v > 0.0 {
-                sum += v as f64;
-                counted += 1;
+            // A non-finite entry is pathological (a NaN sample somewhere);
+            // contribute zero power rather than poisoning the window, but it
+            // still occupies its segment of the denominator.
+            if v.is_finite() {
+                sum += v.max(0.0) as f64;
             }
         }
-        if counted == 0 {
-            return 0.0;
-        }
-        (sum / counted as f64) as f32
+        (sum / filled as f64) as f32
     }
 
     /// Mean of all values in `self.short_term_ring` (30 × 100ms = 3s short-term).
