@@ -154,6 +154,15 @@ pub struct BinauralRenderer {
 
     out_trim: [f32; 2],
     prepared: bool,
+    /// The layout and rate the renderer was last prepared with, so a
+    /// control-path reconfiguration (head radius, dataset swap) can re-derive
+    /// everything `prepare_layout` sizes: the `itd_len` rings, the shelf/notch
+    /// rate constants, and the FIR tap budget. `DspNode::prepare` only fires
+    /// on sample-rate changes, so without this a live profile switch would
+    /// leave the FIR path unsized (silent direct path) and a radius change
+    /// would leave stale rings and shelf corners.
+    last_layout: Option<SpeakerLayout>,
+    last_rate: u32,
 
     /// Per-object occlusion low-pass state.
     occ: Vec<OcclusionState>,
@@ -301,6 +310,8 @@ impl BinauralRenderer {
             },
             out_trim: [1.0; 2],
             prepared: false,
+            last_layout: None,
+            last_rate: 0,
             occ: vec![OcclusionState::default(); MAX_SPATIAL_OBJECTS],
             abs: vec![AbsorptionState::default(); MAX_SPATIAL_OBJECTS],
             nf: vec![NearFieldState::default(); MAX_SPATIAL_OBJECTS],
@@ -457,10 +468,19 @@ impl BinauralRenderer {
     }
 
     /// Override the head parameters (radius in metres, speed of sound in
-    /// m/s). Must be set before `prepare`.
+    /// m/s).
+    ///
+    /// Must be set before `prepare` on a fresh renderer; on a *prepared*
+    /// renderer the change triggers an immediate re-prepare (`reconfigure`),
+    /// because the radius feeds the `itd_len` ring span and every
+    /// head-shadow shelf's corner frequency — leaving those stale would
+    /// truncate the ITD and misplace the shadow corner.
     pub fn set_head_parameters(&mut self, radius: f32, speed: f32) -> &mut Self {
         self.head_radius = radius;
         self.speed_of_sound = speed;
+        if self.prepared {
+            self.reconfigure();
+        }
         self
     }
 
@@ -492,6 +512,14 @@ impl BinauralRenderer {
             log::info!("HRTF: dataset cleared — analytic head model in use");
         }
         self.dataset = dataset;
+        // On a live renderer the FIR path must be re-sized now: its tap
+        // budget and rings are derived from the dataset, and nothing else
+        // re-runs `size_fir_path` until the next `prepare` (which only
+        // happens on a sample-rate change). Pre-prepare, the sizing runs in
+        // `prepare_layout`.
+        if self.prepared {
+            self.size_fir_path();
+        }
         self
     }
 
@@ -548,6 +576,27 @@ impl BinauralRenderer {
             return Err(RenderError::InvalidLayout);
         }
         self.sample_rate = sample_rate as f32;
+        // A dataset whose IRs are expressed at a different rate than the
+        // render rate would time-scale on playback (ITDs halve at 2×, the
+        // spectral cues shift an octave). Registered in-memory datasets are
+        // handed over without load-time resampling, and `DspNode::prepare`
+        // fires on rate changes without re-resolving the profile — so this
+        // is the one place every path can be checked. Render the analytic
+        // model and say so rather than silently misrendering measured data.
+        // A rate of 0 (unknown — only `from_planes` can produce it) cannot
+        // be validated and is accepted as-is.
+        if let Some(ds) = &self.dataset {
+            let ds_rate = ds.sample_rate();
+            if ds_rate > 0.0 && (ds_rate - self.sample_rate).abs() > 1.0 {
+                log::warn!(
+                    "HRTF: dataset IR rate {:.0} Hz != render rate {:.0} Hz — dataset bypassed, \
+                     analytic head model in use (reload the dataset at the render rate)",
+                    ds_rate,
+                    self.sample_rate
+                );
+                self.dataset = None;
+            }
+        }
         self.itd_len = (max_itd_sec(self.head_radius, self.speed_of_sound) * sample_rate as f32)
             .ceil() as usize
             + 4;
@@ -601,7 +650,20 @@ impl BinauralRenderer {
         self.fields.prepare(&virtual_ring_layout(), sample_rate)?;
         self.virtual_scratch.fill(0.0);
         self.prepared = true;
+        self.last_layout = Some(layout.clone());
+        self.last_rate = sample_rate;
         Ok(())
+    }
+
+    /// Re-run the prepare pass with the last prepared layout and rate.
+    ///
+    /// Control path. No-op when the renderer has never been prepared. This
+    /// is what a live head-radius or dataset change triggers (see
+    /// [`Self::set_head_parameters`] / [`Self::use_dataset`]).
+    pub fn reconfigure(&mut self) {
+        if let Some(layout) = self.last_layout.clone() {
+            let _ = self.prepare_layout(&layout, self.last_rate);
+        }
     }
 
     /// Render the scene's objects through the head model.
