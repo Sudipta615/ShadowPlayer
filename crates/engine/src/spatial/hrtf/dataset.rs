@@ -58,6 +58,23 @@ pub struct HrtfDataset {
     taps: usize,
     mesh_kind: HrtfMeshKind,
     interpolator: Option<SphericalHrtfInterpolator>,
+    /// The sample rate the IRs are expressed at (Hz). `0.0` = unknown (only
+    /// the programmatic `from_planes` path can produce this; corpus and
+    /// synthetic loads always know it). A renderer must not play IRs at a
+    /// rate they were not measured at: the ITD inside the IR and every
+    /// spectral cue scale with it.
+    sample_rate: f32,
+}
+
+/// The rate a corpus-loaded dataset's IRs are realized at: the explicit
+/// load target when one was requested (the IRs are resampled to it), the
+/// corpus's own rate otherwise.
+fn dataset_load_rate(options: &HrtfLoadOptions, corpus_rate: u32) -> f32 {
+    if options.target_sample_rate > 0 {
+        options.target_sample_rate as f32
+    } else {
+        corpus_rate.max(1) as f32
+    }
 }
 
 impl HrtfDataset {
@@ -103,7 +120,15 @@ impl HrtfDataset {
             taps,
             mesh_kind: HrtfMeshKind::RegularGrid,
             interpolator: None,
+            sample_rate: 0.0,
         })
+    }
+
+    /// Record the rate the IRs are expressed at (builder for the explicit
+    /// `from_planes` path, which cannot know it).
+    pub fn with_sample_rate(mut self, rate: f32) -> Self {
+        self.sample_rate = rate.max(0.0);
+        self
     }
 
     /// A synthetic dataset discretizing the analytic model (head-shadow
@@ -142,12 +167,28 @@ impl HrtfDataset {
                     let mut notch = ElevationNotch::new();
                     notch.prepare(fs);
                     notch.set_target(el, 1.0);
+                    // The synthetic IR is the shadowed/notched impulse
+                    // scattered across the fractional ITD delay line.
+                    // Both branches must *accumulate*: the next iteration's
+                    // first branch writes the same slot the previous
+                    // iteration's second branch fed, so an assignment here
+                    // clobbered every fractional contribution (the IR
+                    // rendered at (1−frac) of its level — up to −6 dB at
+                    // half-sample ITD — and no fractional delay at all).
+                    // `decompose::reconstruct_ir` does the same scatter
+                    // correctly.
+                    //
+                    // A taps budget smaller than the ITD (a tiny synthetic
+                    // grid) would otherwise scatter nothing at all — an
+                    // all-zero IR and a silent direction; clamp the delay
+                    // into the buffer instead of rendering silence.
+                    let whole = whole.min(taps.saturating_sub(1));
                     for k in 0..taps {
                         let imp = if k == 0 { 1.0 } else { 0.0 };
                         let mut v = sh.process(imp);
                         v = notch.process(v);
                         if k >= whole {
-                            irs[idx + k] = v * (1.0 - frac);
+                            irs[idx + k] += v * (1.0 - frac);
                             if k + 1 < taps {
                                 irs[idx + k + 1] += v * frac;
                             }
@@ -164,6 +205,7 @@ impl HrtfDataset {
             taps,
             mesh_kind: HrtfMeshKind::RegularGrid,
             interpolator: None,
+            sample_rate: fs,
         }
     }
 
@@ -319,6 +361,7 @@ impl HrtfDataset {
             taps,
             mesh_kind: HrtfMeshKind::RegularGrid,
             interpolator: None,
+            sample_rate: dataset_load_rate(options, corpus.sample_rate),
         })
     }
 
@@ -408,6 +451,7 @@ impl HrtfDataset {
             taps,
             mesh_kind: HrtfMeshKind::IrregularMesh,
             interpolator: Some(interpolator),
+            sample_rate: dataset_load_rate(options, corpus.sample_rate),
         })
     }
 
@@ -421,6 +465,11 @@ impl HrtfDataset {
 
     pub fn taps(&self) -> usize {
         self.taps
+    }
+
+    /// The rate the IRs are expressed at (Hz), or `0.0` when unknown.
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
     }
 
     pub fn mesh_kind(&self) -> HrtfMeshKind {

@@ -248,13 +248,17 @@ impl HrtfProfile {
         let front_dir = Vec3::new(0.0, 1.0, 0.0);
         let back_dir = Vec3::new(0.0, -1.0, 0.0);
 
-        let mut r_buf_l = [0.0f32; 64];
-        let mut r_buf_r = [0.0f32; 64];
+        // Buffer length is the dataset's own taps, not a fixed 64: a loaded
+        // dataset with longer IRs would have `interpolate_direction` (which
+        // writes exactly `taps` samples) run past fixed arrays.
+        let taps = dataset.taps();
+        let mut r_buf_l = vec![0.0f32; taps];
+        let mut r_buf_r = vec![0.0f32; taps];
         dataset.interpolate_direction(right_dir, Ear::Left, &mut r_buf_l);
         dataset.interpolate_direction(right_dir, Ear::Right, &mut r_buf_r);
 
-        let mut f_buf = [0.0f32; 64];
-        let mut b_buf = [0.0f32; 64];
+        let mut f_buf = vec![0.0f32; taps];
+        let mut b_buf = vec![0.0f32; taps];
         dataset.interpolate_direction(front_dir, Ear::Left, &mut f_buf);
         dataset.interpolate_direction(back_dir, Ear::Left, &mut b_buf);
 
@@ -274,7 +278,9 @@ impl HrtfProfile {
             0.0
         };
 
-        // Theoretical maximum Woodworth lateral ITD = 3 * a / c
+        // Theoretical maximum lateral ITD = 3·a/c — the Kuhn low-frequency
+        // limit. (Woodworth's HF limit is (a/c)(π/2 + 1) ≈ 2.571·a/c; the
+        // larger Kuhn bound is the conservative "maximum" for a metric.)
         let theoretical_itd_us = (3.0 * self.anthropometry.head_radius_m / 343.0)
             * 1_000_000.0
             * self.personalization.itd_scaling;
