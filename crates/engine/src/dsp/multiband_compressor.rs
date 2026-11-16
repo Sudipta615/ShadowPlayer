@@ -524,6 +524,13 @@ impl MultibandCompressor {
 
     /// Set detector features for a band: soft-knee width, detector mode and
     /// stereo linking.
+    ///
+    /// `gain_for_envelope` reads the precomputed `knee_half`/`recip_two_knee`
+    /// constants, not `knee_db`, so the knee change must refresh them here —
+    /// otherwise a knee-width edit is silently ignored by the DSP, and a
+    /// `set_sample_rate` rebuild (which re-derives them from the default knee)
+    /// leaves the runtime knee at the default while `knee_db` claims the
+    /// configured value.
     pub fn set_band_features(
         &mut self,
         band: usize,
@@ -537,12 +544,18 @@ impl MultibandCompressor {
             2 => (&mut self.comp_high_l, &mut self.comp_high_r),
             _ => return,
         };
-        comp_l.knee_db = knee_db.max(0.0);
-        comp_l.detector = detector;
-        comp_l.stereo_link = stereo_link;
-        comp_r.knee_db = knee_db.max(0.0);
-        comp_r.detector = detector;
-        comp_r.stereo_link = stereo_link;
+        let knee_val = knee_db.max(0.0) as f64;
+        for comp in [comp_l, comp_r] {
+            comp.knee_db = knee_db.max(0.0);
+            comp.knee_half = knee_val * 0.5;
+            comp.recip_two_knee = if knee_val > 0.0 {
+                1.0 / (2.0 * knee_val)
+            } else {
+                0.0
+            };
+            comp.detector = detector;
+            comp.stereo_link = stereo_link;
+        }
 
         if let Some(mirror) = self.band_user_params.get_mut(band) {
             mirror.knee_db = knee_db.max(0.0);
