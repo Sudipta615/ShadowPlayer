@@ -1080,21 +1080,29 @@ fn apply_band_params(band: &mut EqBand, index: usize, params: EqBandParams) {
             band.params.gain_db
         );
     }
-    if params.frequency.is_finite() {
+    // Non-positive values must be rejected here, not merely warned about
+    // downstream: they are installed as smoothing *targets*, and a target the
+    // parameter lerp has to cross through zero makes every ramp step build
+    // coefficients from an invalid parameter — logging (and the allocation in
+    // the log message) per sample on the audio thread, inside
+    // `advance_smoothing`. `BiquadCoeffs::validate_params` would clamp each
+    // step back to validity, but only after paying that per-sample cost, so
+    // the honest place to draw the line is the control path.
+    if params.frequency.is_finite() && params.frequency > 0.0 {
         band.params.frequency = params.frequency;
     } else {
         log::warn!(
-            "ParametricEq::set_band: band {} non-finite frequency {}; keeping {}",
+            "ParametricEq::set_band: band {} invalid frequency {}; keeping {}",
             index,
             params.frequency,
             band.params.frequency
         );
     }
-    if params.q.is_finite() {
+    if params.q.is_finite() && params.q > 0.0 {
         band.params.q = params.q;
     } else {
         log::warn!(
-            "ParametricEq::set_band: band {} non-finite Q {}; keeping {}",
+            "ParametricEq::set_band: band {} invalid Q {}; keeping {}",
             index,
             params.q,
             band.params.q
@@ -1176,6 +1184,35 @@ mod tests {
             out[out.len() - 1]
         );
     }
+    /// A non-positive frequency or Q must be rejected at the install point,
+    /// not merely clamped at coefficient time: the value is installed as a
+    /// smoothing *target*, and a target the parameter lerp has to cross
+    /// through zero makes every ramp step build coefficients from an invalid
+    /// parameter — a per-sample `log::warn!` (with its `format!` allocation)
+    /// on the audio thread, inside `advance_smoothing`.
+    #[test]
+    fn non_positive_frequency_and_q_are_rejected_not_installed() {
+        let mut eq = enabled_eq();
+        eq.set_band(0, EqBandParams::peaking(200.0, 2.0, 1.0));
+        let settled_freq = eq.bands[0].params.frequency;
+        let settled_q = eq.bands[0].params.q;
+
+        for bad_freq in [0.0, -5.0, f32::NAN] {
+            eq.set_band(0, EqBandParams::peaking(bad_freq, 2.0, 1.0));
+            assert_eq!(
+                eq.bands[0].params.frequency, settled_freq,
+                "invalid frequency {bad_freq} must keep the settled value"
+            );
+        }
+        for bad_q in [0.0, -1.0, f32::NAN] {
+            eq.set_band(0, EqBandParams::peaking(200.0, 2.0, bad_q));
+            assert_eq!(
+                eq.bands[0].params.q, settled_q,
+                "invalid Q {bad_q} must keep the settled value"
+            );
+        }
+    }
+
     /// Enabling and bypassing the whole EQ must crossfade the wet chain, not
     /// step it.
     ///
