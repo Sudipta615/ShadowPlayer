@@ -283,7 +283,12 @@ fn source_position_direction(pos: &[f32], spherical: bool) -> Option<Vec3> {
         let cos_el = el.cos();
         Vec3::new(cos_el * az_engine.sin(), cos_el * az_engine.cos(), el.sin())
     } else {
-        Vec3::new(pos[0], pos[1], pos[2])
+        // SOFA cartesian (AES69): X is the listening direction (front), Y is
+        // the *left* side, Z is up. The engine frame is +X right, +Y front,
+        // so engine = (−Y, X, Z): a SOFA (1,0,0) source (straight ahead)
+        // lands on engine +Y (front), and SOFA-left lands on engine −X. A
+        // 1:1 component copy mapped front to hard-right and left to front.
+        Vec3::new(-pos[1], pos[0], pos[2])
     };
     // Normalize (radius may encode distance, not a unit vector).
     v.normalized()
@@ -352,7 +357,21 @@ fn read_sampling_rate(r: &mut CdfReader<'_>) -> Result<u32, SofaImportError> {
             .collect(),
         _ => return Err(SofaImportError::IrRate),
     };
-    let rate = seq.iter().cloned().fold(f64::NAN, f64::max);
+    // The rate must be uniform across every measurement: a dataset with
+    // per-measurement rates is not renderable as one IR grid (the module
+    // contract raises `IrRate` rather than silently taking the max, which
+    // would time-scale the minority measurements).
+    let first = seq[0];
+    if !first.is_finite() || first <= 0.0 {
+        return Err(SofaImportError::IrRate);
+    }
+    if seq
+        .iter()
+        .any(|&v| (v - first).abs() > f64::EPSILON * first.abs().max(1.0))
+    {
+        return Err(SofaImportError::IrRate);
+    }
+    let rate = first;
     if !rate.is_finite() || rate <= 0.0 {
         return Err(SofaImportError::IrRate);
     }
