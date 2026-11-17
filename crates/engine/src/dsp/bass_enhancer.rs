@@ -53,12 +53,25 @@ impl Default for BassEnhancerParams {
 }
 
 /// Stereo Psychoacoustic Bass Enhancer.
+///
+/// The sub/dry split is a **Linkwitz-Riley 4th-order** crossover (two
+/// cascaded 2nd-order Butterworth sections per path). The LR4 alignment is
+/// required by the recombination below: a single 2nd-order Butterworth
+/// LP/HP pair is only *power*-complementary, so `dry + sub` re-sums with a
+/// several-dB suckout at the crossover (the LR re-sum is magnitude-flat —
+/// the classic LR4 allpass property).
 #[derive(Debug, Clone)]
 pub struct BassEnhancer {
     params: BassEnhancerParams,
-    // Per-channel crossover filters (split sub-bass from highs)
+    // Per-channel crossover, section A (splits the input; its LP feeds the
+    // LP chain and its HP feeds the HP chain).
     crossover_l: SvfFilter<f64>,
     crossover_r: SvfFilter<f64>,
+    // Per-channel crossover, section B of each path (LR4 cascade).
+    crossover_lp2_l: SvfFilter<f64>,
+    crossover_lp2_r: SvfFilter<f64>,
+    crossover_hp2_l: SvfFilter<f64>,
+    crossover_hp2_r: SvfFilter<f64>,
     // Subsonic rumble filters (highpass sub-bass at 30 Hz)
     subsonic_l: SvfFilter<f64>,
     subsonic_r: SvfFilter<f64>,
@@ -93,6 +106,10 @@ impl BassEnhancer {
             params: BassEnhancerParams::default(),
             crossover_l: SvfFilter::new(sr as f64),
             crossover_r: SvfFilter::new(sr as f64),
+            crossover_lp2_l: SvfFilter::new(sr as f64),
+            crossover_lp2_r: SvfFilter::new(sr as f64),
+            crossover_hp2_l: SvfFilter::new(sr as f64),
+            crossover_hp2_r: SvfFilter::new(sr as f64),
             subsonic_l: SvfFilter::new(sr as f64),
             subsonic_r: SvfFilter::new(sr as f64),
             harmonic_bpf_l: SvfFilter::new(sr as f64),
@@ -142,6 +159,10 @@ impl BassEnhancer {
         self.sample_rate = sr;
         self.crossover_l = SvfFilter::new(sr as f64);
         self.crossover_r = SvfFilter::new(sr as f64);
+        self.crossover_lp2_l = SvfFilter::new(sr as f64);
+        self.crossover_lp2_r = SvfFilter::new(sr as f64);
+        self.crossover_hp2_l = SvfFilter::new(sr as f64);
+        self.crossover_hp2_r = SvfFilter::new(sr as f64);
         self.subsonic_l = SvfFilter::new(sr as f64);
         self.subsonic_r = SvfFilter::new(sr as f64);
         self.harmonic_bpf_l = SvfFilter::new(sr as f64);
@@ -154,8 +175,13 @@ impl BassEnhancer {
         let sub_hz = self.params.subsonic_cut_hz.clamp(15.0, 50.0) as f64;
 
         let q_butterworth = std::f64::consts::FRAC_1_SQRT_2;
+        // LR4: both cascaded sections share the cutoff and the Butterworth Q.
         self.crossover_l.set_params(co_hz, q_butterworth);
         self.crossover_r.set_params(co_hz, q_butterworth);
+        self.crossover_lp2_l.set_params(co_hz, q_butterworth);
+        self.crossover_lp2_r.set_params(co_hz, q_butterworth);
+        self.crossover_hp2_l.set_params(co_hz, q_butterworth);
+        self.crossover_hp2_r.set_params(co_hz, q_butterworth);
 
         self.subsonic_l.set_params(sub_hz, q_butterworth);
         self.subsonic_r.set_params(sub_hz, q_butterworth);
@@ -177,6 +203,10 @@ impl BassEnhancer {
     pub fn reset(&mut self) {
         self.crossover_l.reset();
         self.crossover_r.reset();
+        self.crossover_lp2_l.reset();
+        self.crossover_lp2_r.reset();
+        self.crossover_hp2_l.reset();
+        self.crossover_hp2_r.reset();
         self.subsonic_l.reset();
         self.subsonic_r.reset();
         self.harmonic_bpf_l.reset();
@@ -203,15 +233,23 @@ impl BassEnhancer {
         let h_mix = self.params.harmonics_mix.clamp(0.0, 2.0) as f64;
         let sub_mix = self.params.direct_sub_mix.clamp(0.0, 1.0) as f64;
 
-        // 1. Crossover split: (sub_bass, _, dry_high, _)
-        let (sub_l, _, dry_l, _) = self.crossover_l.process_multimode(left);
-        let (sub_r, _, dry_r, _) = self.crossover_r.process_multimode(right);
+        // 1. LR4 crossover split, section A: its LP output seeds the sub
+        // chain and its HP output seeds the dry chain (see the struct docs
+        // for why the split is 4th-order).
+        let (sub1_l, _, dry1_l, _) = self.crossover_l.process_multimode(left);
+        let (sub1_r, _, dry1_r, _) = self.crossover_r.process_multimode(right);
 
-        // 2. Highpass sub-bass to remove subsonic rumble
-        let rumble_free_l = self.subsonic_l.process(sub_l, SvfMode::HighPass);
-        let rumble_free_r = self.subsonic_r.process(sub_r, SvfMode::HighPass);
+        // 2. LR4 section B: each path cascades a second identical section.
+        let (sub2_l, _, _, _) = self.crossover_lp2_l.process_multimode(sub1_l);
+        let (sub2_r, _, _, _) = self.crossover_lp2_r.process_multimode(sub1_r);
+        let (_, _, dry_l, _) = self.crossover_hp2_l.process_multimode(dry1_l);
+        let (_, _, dry_r, _) = self.crossover_hp2_r.process_multimode(dry1_r);
 
-        // 3. Generate 2nd and 3rd harmonics using asymmetrical polynomial shaper
+        // 3. Highpass sub-bass to remove subsonic rumble
+        let rumble_free_l = self.subsonic_l.process(sub2_l, SvfMode::HighPass);
+        let rumble_free_r = self.subsonic_r.process(sub2_r, SvfMode::HighPass);
+
+        // 4. Generate 2nd and 3rd harmonics using asymmetrical polynomial shaper
         let xl = (rumble_free_l * drive).clamp(-20.0, 20.0);
         let xr = (rumble_free_r * drive).clamp(-20.0, 20.0);
 
@@ -220,7 +258,7 @@ impl BassEnhancer {
         let sat_l = 0.55 * (xl * xl).copysign(xl) + 0.45 * ((xl * xl * xl) / (1.0 + xl.abs()));
         let sat_r = 0.55 * (xr * xr).copysign(xr) + 0.45 * ((xr * xr * xr) / (1.0 + xr.abs()));
 
-        // 4. Sample-rate invariant DC Blocker on generated harmonics with denormal flushing
+        // 5. Sample-rate invariant DC Blocker on generated harmonics with denormal flushing
         let dc_l =
             crate::buffer::flush_denormal_f64(sat_l - self.dc_x1_l + self.dc_pole * self.dc_y1_l);
         self.dc_x1_l = crate::buffer::flush_denormal_f64(sat_l);
@@ -231,11 +269,11 @@ impl BassEnhancer {
         self.dc_x1_r = crate::buffer::flush_denormal_f64(sat_r);
         self.dc_y1_r = if dc_r.is_finite() { dc_r } else { 0.0 };
 
-        // 5. Bandpass the harmonics into the audible 90-250 Hz range
+        // 6. Bandpass the harmonics into the audible 90-250 Hz range
         let (_, harm_l, _, _) = self.harmonic_bpf_l.process_multimode(self.dc_y1_l);
         let (_, harm_r, _, _) = self.harmonic_bpf_r.process_multimode(self.dc_y1_r);
 
-        // 6. Sum: Dry Highs + Direct Sub (scaled) + Synthesized Harmonics
+        // 7. Sum: Dry Highs + Direct Sub (scaled) + Synthesized Harmonics
         let out_l = dry_l + (rumble_free_l * sub_mix) + (harm_l * h_mix);
         let out_r = dry_r + (rumble_free_r * sub_mix) + (harm_r * h_mix);
 
@@ -309,6 +347,78 @@ mod tests {
         assert!(
             max_out > 0.05,
             "harmonics must be generated from 40 Hz fundamental, got {max_out}"
+        );
+    }
+
+    /// The LR4 recombination contract: with the harmonic path off and the
+    /// sub band re-added at unity, `dry + sub` must re-sum to (≈) unity
+    /// magnitude across the crossover. A 2nd-order Butterworth pair fails
+    /// this — its re-sum dips several dB around the cutoff — which is why
+    /// the split is 4th-order (see the struct docs).
+    #[test]
+    fn crossover_resum_is_flat_across_the_crossover() {
+        let sr = 48_000.0f64;
+        for &f0 in &[63.0, 80.0, 100.0, 125.0, 160.0] {
+            // At and above the crossover the LR4 re-sum is the property under
+            // test and must hold tightly (±0.5 dB). Below the crossover the
+            // sub path additionally runs through the 30 Hz subsonic
+            // high-pass, whose non-unity gain (−0.2 dB at 63 Hz) and ≈40°
+            // phase at 2.1× its cutoff perturb the coherent re-sum; ±0.8 dB
+            // there still leaves it an order of magnitude better than the
+            // −5…−10 dB suckout of the 2nd-order split this fix removed.
+            let tol_db = if f0 < 80.0 { 0.8 } else { 0.5 };
+            let mut be = BassEnhancer::new(sr as f32);
+            be.params.enabled = true;
+            be.params.harmonics_mix = 0.0;
+            be.params.direct_sub_mix = 1.0;
+
+            let n = sr as usize; // 1 s: ample settling
+            let mut in_sq = 0.0f64;
+            let mut out_sq = 0.0f64;
+            let measure_from = n / 2;
+            for i in 0..n {
+                let t = i as f64 / sr;
+                let sample = 0.1 * (std::f64::consts::TAU * f0 * t).sin();
+                let (out_l, _) = be.process_sample(sample, sample);
+                if i >= measure_from {
+                    in_sq += sample * sample;
+                    out_sq += out_l * out_l;
+                }
+            }
+            let ratio_db = 10.0 * (out_sq / in_sq.max(1e-20)).log10();
+            assert!(
+                ratio_db.abs() < tol_db,
+                "re-sum at {f0} Hz must be flat (±{tol_db} dB), got {ratio_db:.2} dB"
+            );
+        }
+    }
+
+    /// The subsonic rumble cut must survive the LR4 change: at 20 Hz the
+    /// sub path's 30 Hz high-pass still removes the content.
+    #[test]
+    fn subsonic_cut_still_removes_rumble() {
+        let sr = 48_000.0f64;
+        let mut be = BassEnhancer::new(sr as f32);
+        be.params.enabled = true;
+        be.params.harmonics_mix = 0.0;
+        be.params.direct_sub_mix = 1.0;
+
+        let n = sr as usize;
+        let mut in_sq = 0.0f64;
+        let mut out_sq = 0.0f64;
+        for i in 0..n {
+            let t = i as f64 / sr;
+            let sample = 0.1 * (std::f64::consts::TAU * 20.0 * t).sin();
+            let (out_l, _) = be.process_sample(sample, sample);
+            if i >= n / 2 {
+                in_sq += sample * sample;
+                out_sq += out_l * out_l;
+            }
+        }
+        let ratio_db = 10.0 * (out_sq / in_sq.max(1e-20)).log10();
+        assert!(
+            ratio_db < -6.0,
+            "20 Hz must be attenuated by the subsonic cut, got {ratio_db:.2} dB"
         );
     }
 
