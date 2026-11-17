@@ -223,6 +223,63 @@ fn test_gain_clamps_bound_boost_and_attenuation() {
     );
 }
 
+/// The clamps are magnitudes: whatever sign the host passes, a boost cap
+/// bounds the boost and an attenuation cap bounds the cut. A host that
+/// passes a positive attenuation magnitude must get an attenuation floor,
+/// never a boost *up to* that magnitude (that would be the exact opposite
+/// of what the control promises).
+#[test]
+fn test_gain_clamps_are_sign_normalized_magnitudes() {
+    // Attenuation cap passed as a positive magnitude.
+    let mut norm = LoudnessNormalizer::new(44100.0);
+    norm.set_mode(LoudnessMode::EbuR128);
+    norm.set_target_lufs(-23.0);
+    norm.set_gain_clamps(Some(3.0), Some(6.0));
+
+    // A loud track wants −12 dB; the clamp must cap the cut at −6 dB.
+    let meta = LoudnessMetadata {
+        ebu_r128_loudness: Some(-11.0),
+        ebu_r128_peak: Some(-2.0),
+        ..Default::default()
+    };
+    norm.set_track_metadata(&meta);
+    let atten_db = 20.0 * norm.target_gain_linear.log10();
+    assert!(
+        (atten_db - (-6.0)).abs() < 0.01,
+        "positive attenuation magnitude must bound the cut at −6 dB, got {atten_db:.3} dB"
+    );
+
+    // A quiet track wants +7 dB; the cut clamp must not touch boosts.
+    let meta = LoudnessMetadata {
+        ebu_r128_loudness: Some(-30.0),
+        ebu_r128_peak: Some(-28.0),
+        ..Default::default()
+    };
+    norm.set_track_metadata(&meta);
+    let boost_db = 20.0 * norm.target_gain_linear.log10();
+    assert!(
+        (boost_db - 3.0).abs() < 0.01,
+        "boost cap must still apply, got {boost_db:.3} dB"
+    );
+
+    // A boost cap passed as a negative number must still bound the boost.
+    let mut norm = LoudnessNormalizer::new(44100.0);
+    norm.set_mode(LoudnessMode::EbuR128);
+    norm.set_target_lufs(-23.0);
+    norm.set_gain_clamps(Some(-3.0), None);
+    let meta = LoudnessMetadata {
+        ebu_r128_loudness: Some(-35.0),
+        ebu_r128_peak: Some(-30.0),
+        ..Default::default()
+    };
+    norm.set_track_metadata(&meta);
+    let boost_db = 20.0 * norm.target_gain_linear.log10();
+    assert!(
+        (boost_db - 3.0).abs() < 0.01,
+        "negative boost value must behave as a magnitude, got {boost_db:.3} dB"
+    );
+}
+
 #[test]
 fn test_gain_clamps_unlimited_by_default() {
     let mut norm = LoudnessNormalizer::new(44100.0);

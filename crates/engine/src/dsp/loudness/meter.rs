@@ -230,9 +230,17 @@ impl LoudnessNormalizer {
 
     /// Configure the gain-range clamps (spec §21 "max boost" /
     /// "max attenuation"). `None` leaves the corresponding bound unlimited.
+    ///
+    /// Both arguments are *magnitudes* and are sign-normalized here: a boost
+    /// cap is a positive dB ceiling, and an attenuation cap is a positive dB
+    /// magnitude whose negation is the gain floor. Passing either sign lands
+    /// on the same state, so a host that writes `Some(-6.0)` and one that
+    /// writes `Some(6.0)` both bound attenuation at −6 dB.
     pub fn set_gain_clamps(&mut self, max_boost_db: Option<f32>, max_attenuation_db: Option<f32>) {
-        self.max_boost_db = max_boost_db.filter(|v| v.is_finite());
-        self.max_attenuation_db = max_attenuation_db.filter(|v| v.is_finite());
+        self.max_boost_db = max_boost_db.filter(|v| v.is_finite()).map(|v| v.abs());
+        self.max_attenuation_db = max_attenuation_db
+            .filter(|v| v.is_finite())
+            .map(|v| v.abs());
     }
 
     /// Set preamp in dB
@@ -309,8 +317,10 @@ impl LoudnessNormalizer {
             }
         }
         if let Some(max_attenuation) = self.max_attenuation_db {
-            if adjusted_gain < max_attenuation {
-                adjusted_gain = max_attenuation;
+            // Stored as a positive magnitude; the floor is its negation.
+            let floor = -max_attenuation;
+            if adjusted_gain < floor {
+                adjusted_gain = floor;
             }
         }
         self.target_gain_linear = 10.0_f32.powf(adjusted_gain / 20.0);
