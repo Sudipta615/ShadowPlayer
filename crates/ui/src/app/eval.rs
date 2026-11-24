@@ -136,7 +136,7 @@ impl ShadowPlayerApp {
                         eq.bass_shelf_db = 4.0;
                         eq.limiter_enabled = true;
                         eq.crossfeed_enabled = true;
-                        eq.crossfeed_profile = config::CrossfeedProfile::Jmeier;
+                        eq.crossfeed_profile = audio_session::engine::config::CrossfeedProfile::Jmeier;
                         eq.bands[2].freq = 315.0;
                         eq.bands[2].gain_db = -5.5;
                         eq.comp_threshold[0] = -28.0;
@@ -190,7 +190,7 @@ impl ShadowPlayerApp {
                         assert!((eq.bass_shelf_db - 4.0).abs() < 1e-6, "bass shelf lost");
                         assert!(eq.limiter_enabled, "limiter lost");
                         assert!(eq.crossfeed_enabled, "crossfeed lost");
-                        assert_eq!(eq.crossfeed_profile, config::CrossfeedProfile::Jmeier);
+                        assert_eq!(eq.crossfeed_profile, audio_session::engine::config::CrossfeedProfile::Jmeier);
                         assert!((eq.bands[2].gain_db + 5.5).abs() < 1e-6, "EQ band lost");
                         assert!(
                             (eq.comp_threshold[0] + 28.0).abs() < 1e-6,

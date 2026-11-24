@@ -12,7 +12,7 @@
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 
-use engine::decode::{Decoder, EditorialTags};
+use audio_session::engine::decode::{Decoder, EditorialTags};
 use serde::{Deserialize, Serialize};
 
 use crate::dynlib;
@@ -407,7 +407,7 @@ fn decode_all(input: &Path) -> Result<(Vec<f32>, usize, u32, f32), MediaError> {
                 }
                 samples.extend_from_slice(&chunk.samples);
             }
-            Err(engine::decode::DecodeError::EndOfStream) => break,
+            Err(audio_session::engine::decode::DecodeError::EndOfStream) => break,
             Err(error) => {
                 return Err(MediaError::Decode {
                     path: input.to_path_buf(),
@@ -420,7 +420,7 @@ fn decode_all(input: &Path) -> Result<(Vec<f32>, usize, u32, f32), MediaError> {
 }
 
 fn copy_editorial_tags(input: &Path, output: &Path) -> Result<bool, String> {
-    let tags = engine::decode::extract_track_metadata(input);
+    let tags = audio_session::engine::decode::extract_track_metadata(input);
     let year = tags.date.trim().get(0..4).and_then(|s| s.parse().ok());
     let editorial = EditorialTags {
         title: non_empty(tags.title),
@@ -441,7 +441,7 @@ fn copy_editorial_tags(input: &Path, output: &Path) -> Result<bool, String> {
     if !has_any {
         return Ok(false);
     }
-    engine::decode::write_editorial_tags(output, &editorial)
+    audio_session::engine::decode::write_editorial_tags(output, &editorial)
         .map(|()| true)
         .map_err(|error| error.to_string())
 }

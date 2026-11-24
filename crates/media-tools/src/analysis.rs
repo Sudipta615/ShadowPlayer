@@ -2,13 +2,13 @@
 //!
 //! The recommendation core is deliberately dependency-free: it asks the host
 //! for three short PCM windows and does the DSP itself. This module is the
-//! host side of that boundary. It opens the same [`engine::decode::Decoder`]
+//! host side of that boundary. It opens the same [`audio_session::engine::decode::Decoder`]
 //! playback uses, seeks to the requested interval, and decodes only that
 //! interval — it never decodes a whole album image to analyse one CUE track.
 
 use std::path::{Path, PathBuf};
 
-use engine::decode::Decoder;
+use audio_session::engine::decode::Decoder;
 use recommendation::{AudioReadError, AudioWindowSource, PcmWindow};
 
 use crate::{MediaError, Result};
@@ -73,7 +73,7 @@ impl DecoderWindowSource {
                 virtual_path.display()
             ))
         })?;
-        let sheet = engine::decode::CueSheet::parse_file(&sheet_path).map_err(|error| {
+        let sheet = audio_session::engine::decode::CueSheet::parse_file(&sheet_path).map_err(|error| {
             MediaError::InvalidInput(format!(
                 "could not read CUE sheet {}: {error}",
                 sheet_path.display()
@@ -190,7 +190,7 @@ impl AudioWindowSource for DecoderWindowSource {
                         break;
                     }
                 }
-                Err(engine::decode::DecodeError::EndOfStream) => break,
+                Err(audio_session::engine::decode::DecodeError::EndOfStream) => break,
                 Err(error) => return Err(self.decode_error(error.to_string())),
             }
         }

@@ -4,7 +4,7 @@ use super::{
     CrossfeedViewMode, CustomEqPreset, EqPanelState, EqPreset, EqTab, EqViewMode, ParametricBand,
 };
 use audio_session::engine::dsp::limiter::LimiterMode;
-use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
+use audio_session::engine::config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use serde::{Deserialize, Serialize};
 
 /// The version of the persisted EQ snapshot's *meaning*.
@@ -92,7 +92,7 @@ pub struct PersistentEqState {
     pub correction_ir_path: String,
     /// The creative-effects settings.
     #[serde(default)]
-    pub fx: config::FxConfig,
+    pub fx: audio_session::engine::config::FxConfig,
 }
 
 impl From<&EqPanelState> for PersistentEqState {

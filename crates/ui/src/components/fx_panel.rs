@@ -10,7 +10,7 @@
 //! takes: the panel cannot describe a state the engine cannot run.
 
 use crate::theme::Theme;
-use config::{DistortionShape, FxConfig};
+use audio_session::engine::config::{DistortionShape, FxConfig};
 use eframe::egui::{self, CornerRadius, Margin, Stroke, Vec2};
 
 /// Render the creative-effects tab.

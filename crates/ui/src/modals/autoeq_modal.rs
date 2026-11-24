@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use config::ImportedCurve;
+use audio_session::engine::config::ImportedCurve;
 use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, TextWrapMode, Vec2};
 
 use crate::state::AutoEqCatalog;
@@ -427,11 +427,11 @@ fn render_selection(
         });
 }
 
-fn filter_label(filter_type: config::FilterType) -> String {
+fn filter_label(filter_type: audio_session::engine::config::FilterType) -> String {
     match filter_type {
-        config::FilterType::LowShelf => tr!("Low shelf"),
-        config::FilterType::HighShelf => tr!("High shelf"),
-        config::FilterType::Peaking => tr!("Peaking"),
+        audio_session::engine::config::FilterType::LowShelf => tr!("Low shelf"),
+        audio_session::engine::config::FilterType::HighShelf => tr!("High shelf"),
+        audio_session::engine::config::FilterType::Peaking => tr!("Peaking"),
         other => format!("{other:?}"),
     }
 }

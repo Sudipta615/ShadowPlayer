@@ -19,7 +19,6 @@ search = { path = "../search" }
 playback = { path = "../playback" }
 media-tools = { path = "../media-tools" }
 recommendation = { package = "shadow-recommender", path = "../recommendation" }
-config = { package = "config", path = "../engine/crates/config" }
 # No direct `audio-engine` dependency: AGENTS.md §1 makes `audio-session` the
 # only bridge to the engine. Engine types are reached as
 # `audio_session::engine::…`, which also means a new capability has to be

@@ -2,7 +2,7 @@
 //! ten octave gains onto an arbitrary band layout.
 
 use super::{EqPanelActions, EqPanelState};
-use config::{EqMode, GraphicEqLayout};
+use audio_session::engine::config::{EqMode, GraphicEqLayout};
 use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ fn make_graphic_the_audible_stage(state: &mut EqPanelState, actions: &mut EqPane
 mod tests {
     use super::*;
     use crate::components::eq_panel::EqPanelActions;
-    use config::GraphicEqLayout;
+    use audio_session::engine::config::GraphicEqLayout;
 
     #[test]
     fn factory_preset_writes_every_band_on_a_64_band_layout() {

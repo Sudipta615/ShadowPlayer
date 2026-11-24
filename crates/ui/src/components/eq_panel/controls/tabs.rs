@@ -9,8 +9,8 @@ use eframe::egui::{self, CornerRadius, Margin, Pos2, Sense, Stroke, Vec2};
 // ─────────────────────────────────────────────────────────────────────────────
 fn is_tab_stage_active(tab: EqTab, state: &EqPanelState) -> bool {
     match tab {
-        EqTab::Graphic => state.eq_enabled && state.eq_mode == config::EqMode::Graphic,
-        EqTab::Parametric => state.eq_enabled && state.eq_mode == config::EqMode::Parametric,
+        EqTab::Graphic => state.eq_enabled && state.eq_mode == audio_session::engine::config::EqMode::Graphic,
+        EqTab::Parametric => state.eq_enabled && state.eq_mode == audio_session::engine::config::EqMode::Parametric,
         EqTab::Tone => {
             state.bass_shelf_db.abs() > 0.05
                 || state.treble_shelf_db.abs() > 0.05
@@ -38,7 +38,7 @@ pub(in crate::components::eq_panel) fn render_tab_navigation(
     //   Stage 4: Creative Effects (Chorus, Flanger, Phaser, Delay, Tube saturation)
     //   Stage 5: Dynamics (Multiband compressor & True-Peak mastering limiter)
     // Followed by Advanced settings (TPDF dither, Auto-headroom, AutoEQ catalog).
-    let eq_tab = if state.eq_mode == config::EqMode::Parametric {
+    let eq_tab = if state.eq_mode == audio_session::engine::config::EqMode::Parametric {
         EqTab::Parametric
     } else {
         EqTab::Graphic
@@ -118,17 +118,17 @@ pub(in crate::components::eq_panel) fn render_tab_navigation(
                         .color(theme.text_muted),
                 );
 
-                let is_graphic = state.eq_mode == config::EqMode::Graphic;
+                let is_graphic = state.eq_mode == audio_session::engine::config::EqMode::Graphic;
                 let graphic_label = format!("{} (10-64 Bands)", tr!("Graphic EQ"));
                 if choice_pill(ui, &graphic_label, is_graphic, theme.accent_warm, theme).clicked()
                     && !is_graphic
                 {
                     state.active_tab = EqTab::Graphic;
-                    state.set_eq_mode(config::EqMode::Graphic);
+                    state.set_eq_mode(audio_session::engine::config::EqMode::Graphic);
                     actions.eq_mode_changed = true;
                 }
 
-                let is_parametric = state.eq_mode == config::EqMode::Parametric;
+                let is_parametric = state.eq_mode == audio_session::engine::config::EqMode::Parametric;
                 let parametric_label = format!("{} (AutoEQ / Biquad)", tr!("Parametric"));
                 if choice_pill(
                     ui,
@@ -141,7 +141,7 @@ pub(in crate::components::eq_panel) fn render_tab_navigation(
                     && !is_parametric
                 {
                     state.active_tab = EqTab::Parametric;
-                    state.set_eq_mode(config::EqMode::Parametric);
+                    state.set_eq_mode(audio_session::engine::config::EqMode::Parametric);
                     actions.eq_mode_changed = true;
                     actions.eq_bands_changed = true;
                 }
@@ -260,11 +260,11 @@ fn render_tab_button_custom(
         state.active_tab = tab;
         match tab {
             EqTab::Graphic => {
-                state.set_eq_mode(config::EqMode::Graphic);
+                state.set_eq_mode(audio_session::engine::config::EqMode::Graphic);
                 actions.eq_mode_changed = true;
             }
             EqTab::Parametric => {
-                state.set_eq_mode(config::EqMode::Parametric);
+                state.set_eq_mode(audio_session::engine::config::EqMode::Parametric);
                 actions.eq_mode_changed = true;
                 actions.eq_bands_changed = true;
             }

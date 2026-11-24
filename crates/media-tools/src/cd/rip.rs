@@ -206,7 +206,24 @@ impl CdRipper {
                 )));
             }
             let total = track.last_sector.saturating_sub(track.first_sector) + 1;
-            let mut pcm = Vec::with_capacity(total as usize * CD_SAMPLES_PER_SECTOR);
+            // Stream sectors straight to disk instead of buffering the whole
+            // track in RAM: write the WAV header up front (the sector count is
+            // known) and append each sector as it is read.
+            let data_len = total as usize * CD_SAMPLES_PER_SECTOR * 2;
+            let mut file = std::fs::File::create(&wav_path)?;
+            use std::io::Write;
+            file.write_all(b"RIFF")?;
+            file.write_all(&((36 + data_len) as u32).to_le_bytes())?;
+            file.write_all(b"WAVEfmt ")?;
+            file.write_all(&16u32.to_le_bytes())?;
+            file.write_all(&1u16.to_le_bytes())?;
+            file.write_all(&2u16.to_le_bytes())?;
+            file.write_all(&44_100u32.to_le_bytes())?;
+            file.write_all(&(44_100u32 * 2 * 2).to_le_bytes())?;
+            file.write_all(&4u16.to_le_bytes())?;
+            file.write_all(&16u16.to_le_bytes())?;
+            file.write_all(b"data")?;
+            file.write_all(&(data_len as u32).to_le_bytes())?;
             for sector in 0..total {
                 let pointer = unsafe { (paranoia.read)(handle, std::ptr::null_mut()) };
                 if pointer.is_null() {
@@ -216,11 +233,10 @@ impl CdRipper {
                         track.first_sector + sector
                     )));
                 }
-                // `paranoia_read` returns a full raw sector (`CDIO_CD_FRAMESIZE_RAW`
-                // bytes = `CD_SAMPLES_PER_SECTOR` i16 values). The API returns
-                // no length, so a non-null pointer is the sector's memory.
                 let samples = unsafe { std::slice::from_raw_parts(pointer, CD_SAMPLES_PER_SECTOR) };
-                pcm.extend_from_slice(samples);
+                for sample in samples {
+                    file.write_all(&sample.to_le_bytes())?;
+                }
                 if !progress(RipProgress {
                     track_number: track.number,
                     track_count: disc.tracks.len() as u32,
@@ -232,7 +248,7 @@ impl CdRipper {
                     return Err(MediaError::Cancelled);
                 }
             }
-            write_wav_i16(&wav_path, 44_100, 2, &pcm)
+            file.flush()?;
         })();
         unsafe {
             (paranoia.free)(handle);
@@ -314,7 +330,7 @@ fn write_cd_tags(path: &Path, disc: &CdDisc, track: &CdTrack) -> Result<(), Medi
     } else {
         Some(track.artist.clone())
     };
-    let tags = engine::decode::EditorialTags {
+    let tags = audio_session::engine::decode::EditorialTags {
         title: Some(track.title.clone()).filter(|title| !title.trim().is_empty()),
         artist: artist.filter(|artist| !artist.trim().is_empty()),
         album: disc.metadata.title.clone(),
@@ -323,7 +339,7 @@ fn write_cd_tags(path: &Path, disc: &CdDisc, track: &CdTrack) -> Result<(), Medi
         track_number: Some(track.number),
         disc_number: None,
     };
-    engine::decode::write_editorial_tags(path, &tags).map_err(|error| MediaError::Encode {
+    audio_session::engine::decode::write_editorial_tags(path, &tags).map_err(|error| MediaError::Encode {
         path: path.to_path_buf(),
         message: format!("the audio was written but tagging failed: {error}"),
     })

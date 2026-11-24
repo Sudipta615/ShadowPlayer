@@ -1,6 +1,6 @@
 //! Types and domain models for acoustic alignment and speaker setup.
 
-use config::{CrossoverFilterType, CrossoverSlope};
+use audio_session::engine::config::{CrossoverFilterType, CrossoverSlope};
 use serde::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
 

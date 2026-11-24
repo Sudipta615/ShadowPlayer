@@ -341,7 +341,7 @@ Filter 1: ON LSC Fc 105 Hz Gain 4.0 dB Q 0.70
 Filter 2: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.20
 Filter 3: ON HSC Fc 10000 Hz Gain 2.0 dB Q 0.70
 ";
-    let curve = config::parse_curve("imported", text).unwrap();
+    let curve = audio_session::engine::config::parse_curve("imported", text).unwrap();
     let mut state = EqPanelState {
         eq_enabled: false,
         auto_headroom: true,
@@ -365,7 +365,7 @@ Filter 3: ON HSC Fc 10000 Hz Gain 2.0 dB Q 0.70
 #[test]
 fn graphic_import_lands_on_the_active_ladder_without_dropping_points() {
     let text = "GraphicEQ: 31.5 4.0; 1000 -2.0; 16000 3.0";
-    let curve = config::parse_curve("graphic", text).unwrap();
+    let curve = audio_session::engine::config::parse_curve("graphic", text).unwrap();
     let mut state = EqPanelState {
         graphic_layout: GraphicEqLayout::ThirtyOneBand,
         ..Default::default()
@@ -387,13 +387,13 @@ fn graphic_import_lands_on_the_active_ladder_without_dropping_points() {
 #[test]
 fn exported_parametric_text_reimports_to_the_same_curve() {
     let text = "Preamp: -2.0 dB\nFilter 1: ON PK Fc 500 Hz Gain -4.0 dB Q 1.00";
-    let curve = config::parse_curve("exported", text).unwrap();
+    let curve = audio_session::engine::config::parse_curve("exported", text).unwrap();
     let mut state = EqPanelState::default();
     state.apply_imported_curve(&curve);
 
     let (name, exported) = state.export_curve_text();
     assert!(name.ends_with(".txt"));
-    let reparsed = config::parse_curve("reimported", &exported).unwrap();
+    let reparsed = audio_session::engine::config::parse_curve("reimported", &exported).unwrap();
     assert_eq!(reparsed.bands.len(), 1);
     assert!((reparsed.preamp_db + 2.0).abs() < 1e-6);
     assert!((reparsed.bands[0].gain_db + 4.0).abs() < 1e-6);
@@ -464,7 +464,7 @@ fn ab_audition_swaps_and_restores_slots() {
 #[test]
 fn ab_audition_swaps_the_parametric_curve_and_tone() {
     let mut state = EqPanelState {
-        eq_mode: config::EqMode::Parametric,
+        eq_mode: audio_session::engine::config::EqMode::Parametric,
         ..Default::default()
     };
     state.bands[0].gain_db = 8.0;

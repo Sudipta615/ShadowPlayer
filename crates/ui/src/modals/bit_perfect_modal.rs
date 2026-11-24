@@ -274,7 +274,7 @@ pub fn show_bit_perfect_modal(
 
                         // 2. Equalizer
                         if dsp_state.eq_panel.eq_enabled {
-                            let (name, details) = if dsp_state.eq_panel.eq_mode == config::EqMode::Graphic {
+                            let (name, details) = if dsp_state.eq_panel.eq_mode == audio_session::engine::config::EqMode::Graphic {
                                 let n = dsp_state.eq_panel.graphic_layout.num_bands();
                                 (
                                     tr!("Graphic Equalizer"),
@@ -310,10 +310,10 @@ pub fn show_bit_perfect_modal(
                         // 4. Headphone Crossfeed
                         if dsp_state.eq_panel.crossfeed_enabled {
                             let profile = match dsp_state.eq_panel.crossfeed_profile {
-                                config::CrossfeedProfile::Bauer => "Bauer standard",
-                                config::CrossfeedProfile::Jmeier => "Jan Meier natural",
-                                config::CrossfeedProfile::ChuMoy => "Chu Moy classic",
-                                config::CrossfeedProfile::Custom => "Custom parameters",
+                                audio_session::engine::config::CrossfeedProfile::Bauer => "Bauer standard",
+                                audio_session::engine::config::CrossfeedProfile::Jmeier => "Jan Meier natural",
+                                audio_session::engine::config::CrossfeedProfile::ChuMoy => "Chu Moy classic",
+                                audio_session::engine::config::CrossfeedProfile::Custom => "Custom parameters",
                             };
                             let details = format!(
                                 "{} ({:.0} Hz, {:.1} ms delay)",

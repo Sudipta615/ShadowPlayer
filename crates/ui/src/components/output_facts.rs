@@ -7,7 +7,7 @@
 //! missing or worded differently in the other.
 
 use audio_session::engine::output::OutputInfo;
-use config::OutputAccessMode;
+use audio_session::engine::config::OutputAccessMode;
 use eframe::egui;
 
 use crate::theme::Theme;
@@ -256,7 +256,7 @@ mod tests {
             "hw:1,0".into(),
             96_000,
             2,
-            Some(config::AudioBackend::ExclusiveAlsa),
+            Some(audio_session::engine::config::AudioBackend::ExclusiveAlsa),
         );
         info.sample_format = OutputSampleFormat::I24Le;
         info.buffer_size_frames = 4096;
@@ -297,8 +297,8 @@ mod tests {
             96_000,
             48_000,
             2,
-            Some(config::AudioBackend::ExclusiveAlsa),
-            Some(config::AudioBackend::PipeWire),
+            Some(audio_session::engine::config::AudioBackend::ExclusiveAlsa),
+            Some(audio_session::engine::config::AudioBackend::PipeWire),
             "hw:1,0 was busy",
         );
         let facts = output_facts(Some(&info), 9.0);

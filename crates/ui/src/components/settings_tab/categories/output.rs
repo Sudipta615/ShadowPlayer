@@ -7,7 +7,7 @@ use super::super::widgets::{
 };
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use config::{
+use audio_session::engine::config::{
     DsdNoiseFilter, DsdOutput, FallbackPolicy, NoiseShaper, PrecisionMode, ResamplerFilter,
     ResamplerQuality, SampleRatePolicy, SdmModulator, SdmRate, UltrasonicFilter, VolumeMode,
 };
@@ -833,7 +833,7 @@ pub(in crate::components::settings_tab) fn render_output_category(
                     state
                         .dac_correction
                         .profiles
-                        .push(config::DacCorrectionProfileConfig::default());
+                        .push(audio_session::engine::config::DacCorrectionProfileConfig::default());
                     state.dac_correction.enabled = true;
                     correction_changed = true;
                 }

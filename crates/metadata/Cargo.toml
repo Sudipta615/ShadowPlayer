@@ -6,8 +6,8 @@ license = "Apache-2.0"
 
 
 [dependencies]
+audio-session = { path = "../audio-session" }
 domain = { path = "../domain" }
-engine = { package = "audio-engine", path = "../engine" }
 log = "0.4"
 thiserror = "2.0"
 # Reads embedded lyrics. Symphonia's readers surface Vorbis comments but no

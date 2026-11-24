@@ -1,6 +1,6 @@
 //! Types, preset definitions, and acoustic physics for headphone crossfeed.
 
-use config::CrossfeedProfile;
+use audio_session::engine::config::CrossfeedProfile;
 use serde::{Deserialize, Serialize};
 
 /// Calibrated acoustic presets for headphone crossfeed.

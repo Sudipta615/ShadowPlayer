@@ -18,16 +18,16 @@ pub(super) fn exclusive_backend_sentence() -> String {
     for backend in audio_session::engine::output::available_backends() {
         let label = crate::components::backend_options::backend_label(backend);
         let detail = match backend {
-            config::AudioBackend::ExclusiveAlsa => {
+            audio_session::engine::config::AudioBackend::ExclusiveAlsa => {
                 "locks the Linux ALSA hardware device node (`hw:X,Y` direct MMAP)"
             }
-            config::AudioBackend::ExclusiveWasapi => {
+            audio_session::engine::config::AudioBackend::ExclusiveWasapi => {
                 "locks the Windows endpoint in event-driven pull mode"
             }
-            config::AudioBackend::ExclusiveAsio => {
+            audio_session::engine::config::AudioBackend::ExclusiveAsio => {
                 "interfaces with professional studio drivers through the ASIO COM API"
             }
-            config::AudioBackend::ExclusiveCoreAudioHog => {
+            audio_session::engine::config::AudioBackend::ExclusiveCoreAudioHog => {
                 "claims the macOS device in hog mode and renders through a direct IO proc"
             }
             _ => continue,

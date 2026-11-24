@@ -118,6 +118,7 @@ pub use engine::{OfflineRenderResult, OfflineRenderer};
 #[cfg(feature = "network-streaming")]
 pub use audio_io::NetworkByteSource;
 pub use audio_io::{AudioByteSource, FileByteSource, MemoryByteSource};
+pub use config;
 pub use config::{AudioBackend, EngineConfig, ResamplerQuality, SampleRatePolicy};
 pub use decode::extract_track_metadata;
 pub use decode::{SharedPcm, SharedPcmDecoder};

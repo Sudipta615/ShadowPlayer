@@ -4,7 +4,7 @@
 use super::index::SettingsCategory;
 use audio_session::engine::output::devices::OutputDeviceInfo;
 use audio_session::engine::AudioSource;
-use config::{
+use audio_session::engine::config::{
     AudioBackend, BassManagementConfig, ChannelMixConfig, ChannelRoutingConfig, CrossfadeCurve,
     DacCorrectionConfig, DsdNoiseFilter, DsdOutput, FallbackPolicy, LfeConfig, LoudnessMode,
     NoiseShaper, PrecisionMode, ResamplerFilter, ResamplerQuality, SampleRatePolicy, SdmConfig,

@@ -38,14 +38,14 @@ pub fn extract_metadata(path: &Path) -> Result<ExtractedMetadata, MetadataError>
     // stream format and the cover art. This used to be two engine calls plus a
     // third `symphonia` probe of the same file in this crate — three opens and
     // three tag parses per scanned file.
-    let engine::decode::ProbedMetadata {
+    let audio_session::engine::decode::ProbedMetadata {
         tags,
         loudness,
         sample_rate,
         channels,
         bits_per_sample,
         artwork,
-    } = engine::decode::probe_metadata(path);
+    } = audio_session::engine::decode::probe_metadata(path);
 
     let format_name = path
         .extension()
@@ -215,7 +215,7 @@ fn parse_bpm(raw: &str) -> Option<u16> {
 /// shares the sheet's stem. The scanner uses this to index an album image
 /// *either* as CUE tracks *or* as one file, never as both.
 pub fn cue_referenced_audio(cue_path: &Path) -> Option<PathBuf> {
-    let sheet = engine::decode::cue::CueSheet::parse_file(cue_path).ok()?;
+    let sheet = audio_session::engine::decode::cue::CueSheet::parse_file(cue_path).ok()?;
     let parent_dir = cue_path.parent().unwrap_or(Path::new("."));
 
     if let Some(name) = sheet.files.first() {
@@ -237,7 +237,7 @@ pub fn cue_referenced_audio(cue_path: &Path) -> Option<PathBuf> {
 
 /// Extract tracks from a standalone .cue sheet and resolve boundaries to audio files
 pub fn extract_cue_metadata(cue_path: &Path) -> Result<Vec<ExtractedMetadata>, MetadataError> {
-    let sheet = engine::decode::cue::CueSheet::parse_file(cue_path)
+    let sheet = audio_session::engine::decode::cue::CueSheet::parse_file(cue_path)
         .map_err(|_| MetadataError::ExtractionFailed)?;
 
     let audio_path = cue_referenced_audio(cue_path).ok_or(MetadataError::ExtractionFailed)?;

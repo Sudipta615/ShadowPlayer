@@ -1,6 +1,6 @@
 //! Channel inspector and bass management controls.
 
-use config::{CrossoverFilterType, CrossoverSlope};
+use audio_session::engine::config::{CrossoverFilterType, CrossoverSlope};
 use eframe::egui::{self, CornerRadius, Margin, Stroke};
 
 use super::types::{DistanceUnit, SpeakerChannelConfig, SpeakerSetupModalState, SpeakerSizePreset};

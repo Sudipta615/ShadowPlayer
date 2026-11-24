@@ -11,7 +11,7 @@
 //! a silent gap: applying a different curve than the one named would be worse
 //! than showing an explicit failure.
 
-use config::{EqBandConfig, FilterType, ImportedCurve};
+use audio_session::engine::config::{EqBandConfig, FilterType, ImportedCurve};
 
 const MAGIC: &[u8; 6] = b"SHAEQ\x01";
 const MAX_ENTRIES: u32 = 50_000;

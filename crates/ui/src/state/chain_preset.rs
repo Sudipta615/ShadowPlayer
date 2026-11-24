@@ -22,7 +22,7 @@
 //! the result to the audio session with `DspState::sync_chain_to_session`.
 
 use audio_session::engine::dsp::limiter::LimiterMode;
-use config::{
+use audio_session::engine::config::{
     BassManagementConfig, ChannelMixConfig, CrossfeedProfile, EqMode, GraphicEqLayout, LfeConfig,
 };
 use serde::{Deserialize, Serialize};

@@ -4,14 +4,14 @@ use crate::state::chain_preset::{self, ChainPreset};
 use crate::state::clap_rack::{ClapRackActions, ClapRackState};
 use audio_session::engine::output::devices::OutputDeviceInfo;
 use audio_session::AudioSession;
-use config::{AudioBackend, CrossfadeConfig, TransitionMode};
+use audio_session::engine::config::{AudioBackend, CrossfadeConfig, TransitionMode};
 
 /// The stages Pure Direct neutralises, kept so leaving it restores the sound
 /// the user had before the bypass instead of leaving every stage off.
 #[derive(Clone, Copy)]
 struct PureDirectSaved {
     eq_enabled: bool,
-    eq_mode: config::EqMode,
+    eq_mode: audio_session::engine::config::EqMode,
     preamp_db: f32,
     speed: f32,
     volume: f32,

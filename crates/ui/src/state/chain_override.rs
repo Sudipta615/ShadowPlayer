@@ -12,7 +12,7 @@
 //! overridable (and testable) without another match arm here.
 
 use crate::state::chain_preset::{ChainEq, ChainPreset};
-use config::EqMode;
+use audio_session::engine::config::EqMode;
 use serde_json::{Map, Value};
 
 /// The JSON object that turns `base` into `current`, or `None` when they are
@@ -378,9 +378,9 @@ pub fn default_chain() -> ChainPreset {
         name: String::new(),
         note: String::new(),
         eq: ChainEq::default(),
-        bass_management: config::BassManagementConfig::default(),
-        lfe: config::LfeConfig::default(),
-        channel_mix: config::ChannelMixConfig::default(),
+        bass_management: audio_session::engine::config::BassManagementConfig::default(),
+        lfe: audio_session::engine::config::LfeConfig::default(),
+        channel_mix: audio_session::engine::config::ChannelMixConfig::default(),
     }
 }
 

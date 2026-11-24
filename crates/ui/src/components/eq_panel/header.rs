@@ -122,7 +122,7 @@ pub(super) fn render_header(
             let mut eq_active = state.eq_enabled;
             if custom_toggle_switch(ui, &mut eq_active, "Enable Equalizer", theme) {
                 state.eq_enabled = eq_active;
-                state.graphic_enabled = eq_active && state.eq_mode == config::EqMode::Graphic;
+                state.graphic_enabled = eq_active && state.eq_mode == audio_session::engine::config::EqMode::Graphic;
                 actions.eq_enabled_changed = Some(eq_active);
             }
             ui.label(

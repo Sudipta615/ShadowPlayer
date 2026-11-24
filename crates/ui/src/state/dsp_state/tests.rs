@@ -6,7 +6,7 @@ use super::*;
 fn pure_direct_round_trip_restores_the_chain_state() {
     let mut state = DspState::default();
     state.eq_panel.eq_enabled = true;
-    state.eq_panel.set_eq_mode(config::EqMode::Graphic);
+    state.eq_panel.set_eq_mode(audio_session::engine::config::EqMode::Graphic);
     state.eq_panel.set_preamp(-7.5);
     state.eq_panel.limiter_enabled = true;
     state.eq_panel.compressor_enabled = true;
@@ -28,11 +28,11 @@ fn pure_direct_round_trip_restores_the_chain_state() {
     let saved = state
         .restore_pure_direct_state()
         .expect("the bypass must have saved a snapshot");
-    assert_eq!(saved.eq_mode, config::EqMode::Graphic);
+    assert_eq!(saved.eq_mode, audio_session::engine::config::EqMode::Graphic);
     assert!((saved.volume - 0.7).abs() < 1e-6);
     assert!((state.settings_tab.speed - 1.25).abs() < 1e-6);
     assert!(state.eq_panel.eq_enabled);
-    assert_eq!(state.eq_panel.eq_mode, config::EqMode::Graphic);
+    assert_eq!(state.eq_panel.eq_mode, audio_session::engine::config::EqMode::Graphic);
     assert!(state.eq_panel.graphic_enabled);
     assert!((state.eq_panel.preamp_db - (-7.5)).abs() < 1e-6);
     assert!(state.eq_panel.limiter_enabled);
@@ -45,7 +45,7 @@ fn pure_direct_round_trip_restores_the_chain_state() {
 fn entering_pure_direct_twice_does_not_overwrite_the_snapshot() {
     let mut state = DspState::default();
     state.eq_panel.eq_enabled = true;
-    state.eq_panel.set_eq_mode(config::EqMode::Graphic);
+    state.eq_panel.set_eq_mode(audio_session::engine::config::EqMode::Graphic);
     state.eq_panel.set_preamp(-4.0);
     state.capture_pure_direct(0.7);
     state.eq_panel.eq_enabled = false;

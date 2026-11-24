@@ -15,7 +15,7 @@ mod controls;
 mod types;
 
 use audio_session::AudioSession;
-use config::{BassManagementConfig, ChannelTrimConfig, ChannelTrimEntry};
+use audio_session::engine::config::{BassManagementConfig, ChannelTrimConfig, ChannelTrimEntry};
 use eframe::egui::{self, CornerRadius, Vec2};
 
 use crate::theme::Theme;
