@@ -750,7 +750,7 @@
   "SBC852D991319CD53": "ファイルを整理",
   "SBCF81C89E8FBB1C9": "オフ（デフォルト）: 2回目の起動時はこのウィンドウを前面に表示して終了します。オン: 別のウィンドウを開きます。SQLiteライブラリはWALモードであるため、複数ウィンドウの同時起動も安全です。次回起動時に有効になります。",
   "SBD860070F3703BBA": "{count} 件の重複トラックを削除しました",
-  "SBD949AD592F70415": "Dataset profile ID — built in: kemar_reference (synthetic KEMAR), spherical_model (analytic head)",
+  "SBD949AD592F70415": "データセットプロファイル ID — 内蔵: kemar_reference（合成 KEMAR）、spherical_model（解析的頭部）",
   "SBDBDD827622353E5": "1. 3D-Binaural-HRTF und virtuelle Raumakustik",
   "SBDE29ACA7B5D70C3": "マルチチャンネルルーティングステージを有効にします。各ルートはソースをモノラル (または第1チャンネル) IRと畳み込み、結果を出力先に加算します。パーティションブロックにより遅延が発生し、エンジンによって報告されます。",
   "SBE02DA81DAB96BEC": "Freigabe:",
