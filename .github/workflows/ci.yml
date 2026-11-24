@@ -13,7 +13,7 @@ jobs:
     name: Player workspace (fmt, clippy, test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The engine links ALSA on Linux, and eframe/winit need the X11 and
       # Wayland client libraries even for a headless `cargo test`.
@@ -101,7 +101,7 @@ jobs:
       run:
         working-directory: crates/engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies
         run: |
@@ -179,7 +179,7 @@ jobs:
       run:
         working-directory: crates/engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -218,7 +218,7 @@ jobs:
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies (Linux)
         if: runner.os == 'Linux'
@@ -263,7 +263,7 @@ jobs:
       run:
         working-directory: crates/engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -288,7 +288,7 @@ jobs:
       run:
         working-directory: crates/engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies
         run: |
@@ -331,7 +331,7 @@ jobs:
     name: Wayland GUI smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies
         run: |
@@ -362,7 +362,7 @@ jobs:
       run:
         working-directory: crates/engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies
         run: |
@@ -397,7 +397,7 @@ jobs:
       run:
         working-directory: crates/engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies
         run: |
@@ -417,7 +417,7 @@ jobs:
         run: cargo bench -- --save-baseline ci
 
       - name: Upload the report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: criterion-report
           path: crates/engine/target/criterion
@@ -426,7 +426,7 @@ jobs:
     name: Supply chain
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -446,7 +446,7 @@ jobs:
     name: Documentation truth
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies
         run: |
@@ -469,7 +469,7 @@ jobs:
     name: Coverage floors
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System dependencies
         run: |

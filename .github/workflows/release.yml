@@ -33,7 +33,7 @@ jobs:
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Check out the commit being released, not whatever the default
           # branch holds when a manual dispatch runs.
@@ -85,7 +85,7 @@ jobs:
       contents: write
     steps:
       - name: Download the artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: target/distrib
           merge-multiple: true

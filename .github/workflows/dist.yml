@@ -41,7 +41,7 @@ jobs:
           - { os: macos-latest,     target: x86_64-apple-darwin }
           - { os: macos-latest,     target: aarch64-apple-darwin }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref }}
 
@@ -102,7 +102,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: target/distrib/
