@@ -117,6 +117,62 @@ mod unit {
         assert!(result.is_empty());
     }
 
+    /// Terms may match different fields, as they did in one FTS row: the
+    /// artist and the album need not be the same column.
+    #[test]
+    fn a_query_may_span_several_fields() {
+        let tracks = vec![track(
+            "/music/miles.flac",
+            "So What",
+            "Miles Davis",
+            "Kind of Blue",
+        )];
+
+        let engine = SearchEngine::new();
+        let result = engine.search("miles kind", &tracks, &[], 10);
+        assert_eq!(result.tracks.len(), 1);
+        assert_eq!(result.tracks[0].title, "So What");
+    }
+
+    /// The file path was part of the indexed row, so a folder name is a hit.
+    #[test]
+    fn tracks_are_found_by_path() {
+        let tracks = vec![track(
+            "/music/Live at Leeds/01.flac",
+            "Untitled",
+            "Someone",
+            "Somewhere",
+        )];
+
+        let engine = SearchEngine::new();
+        let result = engine.search("leeds", &tracks, &[], 10);
+        assert_eq!(result.tracks.len(), 1);
+    }
+
+    /// Artist and album results are capped like the per-repository queries
+    /// they replaced, so a broad query cannot return the whole library.
+    #[test]
+    fn artist_and_album_lists_are_bounded_by_the_limit() {
+        let tracks: Vec<Track> = (0..5)
+            .map(|i| {
+                track(
+                    &format!("/music/{i}.flac"),
+                    "Same Title",
+                    &format!("Artist {i}"),
+                    &format!("Album {i}"),
+                )
+            })
+            .collect();
+
+        let engine = SearchEngine::new();
+        let result = engine.search("Artist", &tracks, &[], 2);
+        assert_eq!(
+            result.artists,
+            vec!["Artist 0".to_string(), "Artist 1".to_string()]
+        );
+        assert_eq!(result.tracks.len(), 2);
+    }
+
     #[test]
     fn wildcards_in_a_query_are_literal() {
         let tracks = vec![

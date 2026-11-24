@@ -4168,8 +4168,6 @@ name = "search"
 version = "0.31.0"
 dependencies = [
  "domain",
- "log",
- "thiserror 2.0.20",
 ]
 
 [[package]]

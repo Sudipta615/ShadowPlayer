@@ -38,9 +38,10 @@ impl SearchEngine {
             return SearchResult::default();
         }
 
-        // Tokenise like the old FTS path: whitespace-separated terms, each
-        // term's alphanumeric runs lowercased and ANDed. A term with no
-        // alphanumeric run is dropped; if nothing survives, return nothing.
+        // Tokenise like the FTS query this replaces: whitespace-separated
+        // terms, each term's alphanumeric runs lowercased and ANDed. A term
+        // with no alphanumeric run is dropped; if nothing survives, return
+        // nothing.
         let terms: Vec<Vec<String>> = trimmed
             .split_whitespace()
             .map(|term| {
@@ -55,59 +56,70 @@ impl SearchEngine {
             return SearchResult::default();
         }
 
-        let matches_terms = |text: &str| -> bool {
-            let haystack = text.to_lowercase();
-            terms.iter().all(|term_tokens| {
-                // Each whitespace term must have all its alphanumeric runs
-                // present, in order, as substrings.
-                let mut pos = 0;
-                term_tokens.iter().all(|tok| {
-                    if let Some(idx) = haystack[pos..].find(tok) {
-                        pos += idx + tok.len();
-                        true
-                    } else {
-                        false
-                    }
-                })
-            })
+        // A term may match any of the columns the ``tracks_fts`` row indexed,
+        // and different terms may match different columns — a search for
+        // "miles kind" still finds Miles Davis' *Kind of Blue*. The path is
+        // included because folder and file names were indexed too.
+        let text_matches = |fields: &[&str]| -> bool {
+            terms
+                .iter()
+                .all(|tokens| fields.iter().any(|field| term_in_field(field, tokens)))
         };
 
-        // Tracks: match across the text fields, ranked by simple title-first
-        // then input order, truncated to `limit`.
-        let matched_tracks: Vec<Track> = tracks
+        // Tracks: a title hit ranks above a hit in another field, then input
+        // order, and only the first `limit` are cloned.
+        let mut matched: Vec<(bool, &Track)> = tracks
             .iter()
-            .filter(|t| {
-                matches_terms(&t.title)
-                    || matches_terms(&t.artist)
-                    || matches_terms(&t.album)
-                    || t.genre.as_deref().map(matches_terms).unwrap_or(false)
+            .filter_map(|track| {
+                let genre = track.genre.as_deref().unwrap_or("");
+                let path = track.path.to_string_lossy();
+                let fields = [
+                    track.title.as_str(),
+                    track.artist.as_str(),
+                    track.album.as_str(),
+                    genre,
+                    path.as_ref(),
+                ];
+                if !text_matches(&fields) {
+                    return None;
+                }
+                Some((text_matches(&[track.title.as_str()]), track))
             })
-            .cloned()
+            .collect();
+        matched.sort_by_key(|(title_match, _)| !*title_match);
+        let matched_tracks: Vec<Track> = matched
+            .into_iter()
             .take(limit)
+            .map(|(_, track)| track.clone())
             .collect();
 
-        // Artists: distinct, containing the query.
+        // Artists: distinct, containing every term. Capped like the old
+        // per-repository queries, so a one-letter query cannot produce a
+        // result list the size of the library.
         let mut artists: Vec<String> = tracks
             .iter()
             .map(|t| t.artist.clone())
-            .filter(|a| !a.is_empty() && matches_terms(a))
+            .filter(|a| !a.is_empty() && text_matches(&[a]))
             .collect();
         artists.sort();
         artists.dedup();
+        artists.truncate(limit);
 
-        // Albums: distinct.
+        // Albums: distinct, same cap.
         let mut albums: Vec<String> = tracks
             .iter()
             .map(|t| t.album.clone())
-            .filter(|a| !a.is_empty() && matches_terms(a))
+            .filter(|a| !a.is_empty() && text_matches(&[a]))
             .collect();
         albums.sort();
         albums.dedup();
+        albums.truncate(limit);
 
         // Playlists by name.
         let matched_playlists: Vec<Playlist> = playlists
             .iter()
-            .filter(|p| matches_terms(&p.name))
+            .filter(|p| text_matches(&[&p.name]))
+            .take(limit)
             .cloned()
             .collect();
 
@@ -118,4 +130,18 @@ impl SearchEngine {
             albums,
         }
     }
+}
+
+/// Whether every token of a whitespace term appears in `field`, in order.
+fn term_in_field(field: &str, tokens: &[String]) -> bool {
+    let haystack = field.to_lowercase();
+    let mut pos = 0;
+    tokens.iter().all(|token| {
+        if let Some(index) = haystack[pos..].find(token) {
+            pos += index + token.len();
+            true
+        } else {
+            false
+        }
+    })
 }
