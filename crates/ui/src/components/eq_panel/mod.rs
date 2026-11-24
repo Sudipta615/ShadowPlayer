@@ -17,8 +17,8 @@
 //! `mod.rs` owns the panel state and the window shell.
 
 use crate::theme::Theme;
-use audio_session::engine::dsp::limiter::LimiterMode;
 use audio_session::engine::config::{CrossfeedProfile, EqMode, GraphicEqLayout};
+use audio_session::engine::dsp::limiter::LimiterMode;
 use eframe::egui::{self, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
 use serde::{Deserialize, Serialize};
 
@@ -486,7 +486,10 @@ impl EqPanelState {
     /// off for the same reason the AutoEQ dialog does it — the curve already
     /// carries its own level, and attenuating it twice is not "safer", it is
     /// quieter than intended.
-    pub fn apply_imported_curve(&mut self, curve: &audio_session::engine::config::ImportedCurve) -> bool {
+    pub fn apply_imported_curve(
+        &mut self,
+        curve: &audio_session::engine::config::ImportedCurve,
+    ) -> bool {
         self.eq_enabled = true;
         if curve.is_graphic() {
             self.eq_mode = EqMode::Graphic;
@@ -561,7 +564,10 @@ impl EqPanelState {
             let count = freqs.len().min(self.graphic_gains.len());
             (
                 "shadowplayer-graphic.txt".to_string(),
-                audio_session::engine::config::write_graphic(&freqs[..count], &self.graphic_gains[..count]),
+                audio_session::engine::config::write_graphic(
+                    &freqs[..count],
+                    &self.graphic_gains[..count],
+                ),
             )
         }
     }

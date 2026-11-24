@@ -2,14 +2,14 @@
 //! context the view supplies.
 
 use super::index::SettingsCategory;
-use audio_session::engine::output::devices::OutputDeviceInfo;
-use audio_session::engine::AudioSource;
 use audio_session::engine::config::{
     AudioBackend, BassManagementConfig, ChannelMixConfig, ChannelRoutingConfig, CrossfadeCurve,
     DacCorrectionConfig, DsdNoiseFilter, DsdOutput, FallbackPolicy, LfeConfig, LoudnessMode,
     NoiseShaper, PrecisionMode, ResamplerFilter, ResamplerQuality, SampleRatePolicy, SdmConfig,
     SpatialQuality, SpeedMode, TransitionMode, UltrasonicFilter, VolumeMode,
 };
+use audio_session::engine::output::devices::OutputDeviceInfo;
+use audio_session::engine::AudioSource;
 use domain::ids::ScanRootId;
 use domain::models::ScanRoot;
 use serde::{Deserialize, Serialize};

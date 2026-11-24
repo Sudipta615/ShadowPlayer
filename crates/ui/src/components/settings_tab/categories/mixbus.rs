@@ -8,8 +8,8 @@ use super::super::widgets::{
 };
 use super::super::{SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use audio_session::engine::AudioSource;
 use audio_session::engine::config::{ChannelMixTemplate, CrossoverFilterType, CrossoverSlope};
+use audio_session::engine::AudioSource;
 use eframe::egui::{self, Vec2};
 
 pub(in crate::components::settings_tab) fn render_mixbus_category(

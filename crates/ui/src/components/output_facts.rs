@@ -6,8 +6,8 @@
 //! Both now render this exact list, so a fact cannot appear in one place and be
 //! missing or worded differently in the other.
 
-use audio_session::engine::output::OutputInfo;
 use audio_session::engine::config::OutputAccessMode;
+use audio_session::engine::output::OutputInfo;
 use eframe::egui;
 
 use crate::theme::Theme;

@@ -9,8 +9,12 @@ use eframe::egui::{self, CornerRadius, Margin, Pos2, Sense, Stroke, Vec2};
 // ─────────────────────────────────────────────────────────────────────────────
 fn is_tab_stage_active(tab: EqTab, state: &EqPanelState) -> bool {
     match tab {
-        EqTab::Graphic => state.eq_enabled && state.eq_mode == audio_session::engine::config::EqMode::Graphic,
-        EqTab::Parametric => state.eq_enabled && state.eq_mode == audio_session::engine::config::EqMode::Parametric,
+        EqTab::Graphic => {
+            state.eq_enabled && state.eq_mode == audio_session::engine::config::EqMode::Graphic
+        }
+        EqTab::Parametric => {
+            state.eq_enabled && state.eq_mode == audio_session::engine::config::EqMode::Parametric
+        }
         EqTab::Tone => {
             state.bass_shelf_db.abs() > 0.05
                 || state.treble_shelf_db.abs() > 0.05
@@ -128,7 +132,8 @@ pub(in crate::components::eq_panel) fn render_tab_navigation(
                     actions.eq_mode_changed = true;
                 }
 
-                let is_parametric = state.eq_mode == audio_session::engine::config::EqMode::Parametric;
+                let is_parametric =
+                    state.eq_mode == audio_session::engine::config::EqMode::Parametric;
                 let parametric_label = format!("{} (AutoEQ / Biquad)", tr!("Parametric"));
                 if choice_pill(
                     ui,

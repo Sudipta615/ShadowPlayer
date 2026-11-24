@@ -73,12 +73,13 @@ impl DecoderWindowSource {
                 virtual_path.display()
             ))
         })?;
-        let sheet = audio_session::engine::decode::CueSheet::parse_file(&sheet_path).map_err(|error| {
-            MediaError::InvalidInput(format!(
-                "could not read CUE sheet {}: {error}",
-                sheet_path.display()
-            ))
-        })?;
+        let sheet =
+            audio_session::engine::decode::CueSheet::parse_file(&sheet_path).map_err(|error| {
+                MediaError::InvalidInput(format!(
+                    "could not read CUE sheet {}: {error}",
+                    sheet_path.display()
+                ))
+            })?;
 
         let decoder = Decoder::open(&audio_path).map_err(|error| MediaError::Decode {
             path: audio_path.clone(),
