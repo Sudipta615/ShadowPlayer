@@ -379,7 +379,9 @@ fn random_token() -> String {
     let mut bytes = [0u8; 32];
     if getrandom::fill(&mut bytes).is_err() {
         // Extremely unlikely; a token derived from the clock and pid is still
-        // better than refusing to start. The listener is loopback-only.
+        // better than refusing to start. The listener is loopback-only and the
+        // fallback provides only ~64 bits of entropy, so treat this path as a
+        // degraded-security mode.
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         (std::process::id(), std::time::SystemTime::now()).hash(&mut hasher);
