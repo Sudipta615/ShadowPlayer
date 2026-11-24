@@ -10,8 +10,13 @@ impl ThemeManager {
 
     /// Persist the currently active theme ID to disk.
     pub fn save_active_id(&self) {
-        let _ = std::fs::create_dir_all(&self.themes_dir);
-        let _ = std::fs::write(self.active_theme_path(), &self.active_id);
+        if let Err(e) = std::fs::create_dir_all(&self.themes_dir) {
+            log::warn!("Could not create themes dir: {e}");
+            return;
+        }
+        if let Err(e) = std::fs::write(self.active_theme_path(), &self.active_id) {
+            log::warn!("Could not persist active theme id: {e}");
+        }
     }
 
     /// Load the saved active theme ID from disk if it exists.
@@ -55,7 +60,9 @@ impl ThemeManager {
         let loaded = LoadedTheme::from_file(src_path).map_err(|e| format!("{e}"))?;
 
         // Ensure custom-theme directory exists
-        let _ = std::fs::create_dir_all(&self.custom_themes_dir);
+        if let Err(e) = std::fs::create_dir_all(&self.custom_themes_dir) {
+            log::warn!("Could not create custom themes dir: {e}");
+        }
 
         let file_name = src_path
             .file_name()
@@ -93,7 +100,9 @@ impl ThemeManager {
 
     /// Open the `custom-theme/` folder in the system file manager.
     pub fn open_custom_themes_folder(&self) {
-        let _ = std::fs::create_dir_all(&self.custom_themes_dir);
+        if let Err(e) = std::fs::create_dir_all(&self.custom_themes_dir) {
+            log::warn!("Could not create custom themes dir: {e}");
+        }
         #[cfg(target_os = "linux")]
         let _ = std::process::Command::new("xdg-open")
             .arg(&self.custom_themes_dir)
@@ -110,7 +119,9 @@ impl ThemeManager {
 
     /// Write an example theme file to `themes/custom-theme/example_ocean_night.stm`.
     pub fn write_example_theme(&self) -> std::io::Result<PathBuf> {
-        let _ = std::fs::create_dir_all(&self.custom_themes_dir);
+        if let Err(e) = std::fs::create_dir_all(&self.custom_themes_dir) {
+            log::warn!("Could not create custom themes dir: {e}");
+        }
         let path = self.custom_themes_dir.join("example_ocean_night.stm");
         if path.exists() {
             return Ok(path);

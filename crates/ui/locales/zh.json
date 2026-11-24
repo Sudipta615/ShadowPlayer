@@ -750,6 +750,7 @@
   "SBC852D991319CD53": "整理文件",
   "SBCF81C89E8FBB1C9": "关闭（默认）：再次启动时将此窗口置于前端并退出。开启：打开另一个窗口；SQLite 数据库处于 WAL 模式，因此多窗口并发是安全的。下次启动时生效。",
   "SBD860070F3703BBA": "已移除 {count} 首重复曲目",
+  "SBD949AD592F70415": "Dataset profile ID — built in: kemar_reference (synthetic KEMAR), spherical_model (analytic head)",
   "SBDBDD827622353E5": "1. 3D-Binaural-HRTF und virtuelle Raumakustik",
   "SBDE29ACA7B5D70C3": "启用多声道路由级。每条路由将其源与单声道（或第一声道）IR 进行卷积，并将结果叠加至目标通道。分区块会引入由引擎报告的延迟。",
   "SBE02DA81DAB96BEC": "Freigabe:",

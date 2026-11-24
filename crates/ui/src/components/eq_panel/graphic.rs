@@ -6,7 +6,7 @@ use super::curve::render_spline_eq_canvas;
 use super::presets::{apply_active_preset, CustomEqPreset, EqPreset};
 use super::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
-use config::GraphicEqLayout;
+use audio_session::engine::config::GraphicEqLayout;
 use eframe::egui::{self, CornerRadius, Margin, Stroke, Vec2};
 
 // ─────────────────────────────────────────────────────────────────────────────

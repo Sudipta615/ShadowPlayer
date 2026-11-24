@@ -111,18 +111,18 @@ impl DspState {
     /// no reason.
     pub fn push_imported_eq(&self, session: &AudioSession) {
         let eq = &self.eq_panel;
-        if eq.eq_mode == config::EqMode::Graphic {
-            session.set_eq_mode(config::EqMode::Graphic);
+        if eq.eq_mode == audio_session::engine::config::EqMode::Graphic {
+            session.set_eq_mode(audio_session::engine::config::EqMode::Graphic);
             self.push_graphic_eq_state(session);
             return;
         }
 
-        session.set_eq_mode(config::EqMode::Parametric);
+        session.set_eq_mode(audio_session::engine::config::EqMode::Parametric);
         session.set_eq_enabled(eq.eq_enabled);
-        let bands: Vec<config::EqBandConfig> = eq
+        let bands: Vec<audio_session::engine::config::EqBandConfig> = eq
             .bands
             .iter()
-            .map(|band| config::EqBandConfig {
+            .map(|band| audio_session::engine::config::EqBandConfig {
                 enabled: band.enabled,
                 filter_type: band.filter_type.into(),
                 frequency: band.freq,
@@ -261,7 +261,7 @@ impl DspState {
             st.voice_budget_enabled,
             st.voice_capacity,
             st.voice_capacity / 2,
-            config::VoicePriority::DistanceWeighted,
+            audio_session::engine::config::VoicePriority::DistanceWeighted,
         );
         session.set_stereo_enhancer_enabled(st.stereo_enhancer_enabled);
 
@@ -289,7 +289,7 @@ impl DspState {
         let parametric_bands = eq
             .bands
             .iter()
-            .map(|band| config::EqBandConfig {
+            .map(|band| audio_session::engine::config::EqBandConfig {
                 enabled: band.enabled,
                 filter_type: band.filter_type.into(),
                 frequency: band.freq,
@@ -334,7 +334,7 @@ impl DspState {
             session.set_compressor_band_features(
                 band,
                 eq.comp_knee_db[band],
-                config::CompressorDetector::Rms,
+                audio_session::engine::config::CompressorDetector::Rms,
                 eq.comp_stereo_link[band],
             );
         }

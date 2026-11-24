@@ -15,7 +15,7 @@ impl DspState {
             self.push_graphic_eq_state(session);
         }
         if let Some(enabled) = eq_actions.eq_enabled_changed {
-            if self.eq_panel.eq_mode == config::EqMode::Graphic {
+            if self.eq_panel.eq_mode == audio_session::engine::config::EqMode::Graphic {
                 // The atomic snapshot carries the enable state, so this cannot
                 // race a layout/slider update from the same frame.
                 self.push_graphic_eq_state(session);
@@ -43,7 +43,7 @@ impl DspState {
                 .eq_panel
                 .bands
                 .iter()
-                .map(|band| config::EqBandConfig {
+                .map(|band| audio_session::engine::config::EqBandConfig {
                     enabled: band.enabled,
                     filter_type: band.filter_type.into(),
                     frequency: band.freq,
@@ -125,7 +125,7 @@ impl DspState {
             session.set_compressor_band_features(
                 band,
                 s.comp_knee_db[band],
-                config::CompressorDetector::Rms,
+                audio_session::engine::config::CompressorDetector::Rms,
                 s.comp_stereo_link[band],
             );
         }
@@ -143,7 +143,7 @@ impl DspState {
                 session.set_compressor_band_features(
                     band,
                     s.comp_knee_db[band],
-                    config::CompressorDetector::Rms,
+                    audio_session::engine::config::CompressorDetector::Rms,
                     s.comp_stereo_link[band],
                 );
             }

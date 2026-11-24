@@ -6,7 +6,7 @@ use super::super::widgets::{
 };
 use super::super::{SettingsExtraContext, SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use config::{CrossfadeCurve, LoudnessMode, SpeedMode, TransitionMode};
+use audio_session::engine::config::{CrossfadeCurve, LoudnessMode, SpeedMode, TransitionMode};
 use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub(in crate::components::settings_tab) fn render_playback_category(

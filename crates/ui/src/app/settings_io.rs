@@ -407,11 +407,19 @@ impl ShadowPlayerApp {
     /// Skips the write while the eval harness is driving the UI, so a
     /// screenshot run never overwrites the real settings file.
     pub(super) fn persist_settings_if_dirty(&mut self) {
-        // 11. Event-driven settings persistence across sessions.
-        if !eval_holds_persistence() && self.settings_dirty {
-            self.save_persisted_settings();
-            self.settings_dirty = false;
+        // Throttle disk writes: a dirty flag set on every frame (e.g. during a
+        // volume-slider drag) must not produce dozens of full settings saves per
+        // second. Flush at most once a second while dirty; the final flush
+        // happens in `save()` on exit.
+        if eval_holds_persistence() || !self.settings_dirty {
+            return;
         }
+        if self.settings_last_save.elapsed() < std::time::Duration::from_secs(1) {
+            return;
+        }
+        self.save_persisted_settings();
+        self.settings_dirty = false;
+        self.settings_last_save = std::time::Instant::now();
     }
 
     /// Recompute the effective theme from the active/staged theme and the

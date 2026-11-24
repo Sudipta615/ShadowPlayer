@@ -1,7 +1,7 @@
 //! Unit tests for acoustic alignment and speaker setup suite.
 
 use super::types::*;
-use config::{CrossoverFilterType, CrossoverSlope};
+use audio_session::engine::config::{CrossoverFilterType, CrossoverSlope};
 
 #[test]
 fn test_unit_conversion_and_speed_of_sound() {

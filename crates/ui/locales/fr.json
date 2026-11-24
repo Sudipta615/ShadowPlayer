@@ -750,6 +750,7 @@
   "SBC852D991319CD53": "Organiser les fichiers",
   "SBCF81C89E8FBB1C9": "Désactivé (par défaut) : un second lancement ramène cette fenêtre au premier plan et se termine. Activé : ouvre une autre fenêtre ; la base SQLite est en mode WAL, les fenêtres simultanées sont donc sécurisées. Prend effet au prochain lancement.",
   "SBD860070F3703BBA": "{count} piste(s) en double supprimée(s)",
+  "SBD949AD592F70415": "Dataset profile ID — built in: kemar_reference (synthetic KEMAR), spherical_model (analytic head)",
   "SBDBDD827622353E5": "1. 3D-Binaural-HRTF und virtuelle Raumakustik",
   "SBDE29ACA7B5D70C3": "Active l'étage de routage multicanal. Chaque route effectue la convolution de sa source avec une réponse impulsionnelle (IR) mono (ou du premier canal) et somme le résultat vers la destination. Le partitionnement ajoute une latence, signalée par le moteur.",
   "SBE02DA81DAB96BEC": "Freigabe:",

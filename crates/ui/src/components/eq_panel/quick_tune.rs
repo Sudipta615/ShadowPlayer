@@ -7,7 +7,7 @@ use super::controls::render_footer_controls;
 use super::presets::{apply_active_preset, EqPreset};
 use super::{EqPanelActions, EqPanelState, EqTab, EqViewMode};
 use crate::theme::Theme;
-use config::CrossfeedProfile;
+use audio_session::engine::config::CrossfeedProfile;
 use eframe::egui::{self, CornerRadius, Margin, Stroke, Vec2};
 
 pub(super) fn render_quick_tune_view(

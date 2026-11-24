@@ -146,7 +146,7 @@ fn state_with(library: Vec<Track>) -> (LibraryState, Database) {
 fn rebuild(state: &mut LibraryState, db: &Database, sort: SortField) -> Duration {
     let started = Instant::now();
     state.update_displayed_tracks(
-        &SearchEngine::new(db.clone()),
+        &SearchEngine::new(),
         &HistoryRepo::new(db.clone()),
         &PlaylistRepo::new(db.clone()),
         &SmartPlaylistRepo::new(db.clone()),

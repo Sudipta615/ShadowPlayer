@@ -7,7 +7,7 @@ use super::super::widgets::{
 };
 use super::super::{SettingsTabActions, SettingsTabState};
 use crate::theme::Theme;
-use config::SpatialQuality;
+use audio_session::engine::config::SpatialQuality;
 use eframe::egui::{self, CornerRadius, Stroke, Vec2};
 
 pub(in crate::components::settings_tab) fn render_spatial_category(

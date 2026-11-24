@@ -249,10 +249,10 @@ pub(super) fn render_this_build_tab(ui: &mut egui::Ui, _state: &mut HelpState, t
             .filter(|b| {
                 matches!(
                     b,
-                    config::AudioBackend::ExclusiveAlsa
-                        | config::AudioBackend::ExclusiveWasapi
-                        | config::AudioBackend::ExclusiveAsio
-                        | config::AudioBackend::ExclusiveCoreAudioHog
+                    audio_session::engine::config::AudioBackend::ExclusiveAlsa
+                        | audio_session::engine::config::AudioBackend::ExclusiveWasapi
+                        | audio_session::engine::config::AudioBackend::ExclusiveAsio
+                        | audio_session::engine::config::AudioBackend::ExclusiveCoreAudioHog
                 )
             })
             .map(|b| crate::components::backend_options::backend_label(*b))

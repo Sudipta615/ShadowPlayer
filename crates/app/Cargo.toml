@@ -19,7 +19,6 @@ lyrics = { path = "../lyrics" }
 search = { path = "../search" }
 playback = { path = "../playback" }
 ui = { path = "../ui" }
-config = { package = "config", path = "../engine/crates/config" }
 engine = { package = "audio-engine", path = "../engine" }
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 env_logger = "0.11"

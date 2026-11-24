@@ -5,8 +5,8 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
+audio-session = { path = "../audio-session" }
 domain = { path = "../domain" }
-engine = { package = "audio-engine", path = "../engine", features = ["tag-write"] }
 recommendation = { package = "shadow-recommender", path = "../recommendation" }
 libloading = "0.8"
 serde = { version = "1.0", features = ["derive"] }

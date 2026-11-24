@@ -17,8 +17,8 @@
 //! `mod.rs` owns the panel state and the window shell.
 
 use crate::theme::Theme;
+use audio_session::engine::config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use audio_session::engine::dsp::limiter::LimiterMode;
-use config::{CrossfeedProfile, EqMode, GraphicEqLayout};
 use eframe::egui::{self, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2, Window};
 use serde::{Deserialize, Serialize};
 
@@ -208,7 +208,7 @@ pub struct EqPanelState {
     //
     /// One struct, not five: the engine's insert is configured in one go, so
     /// the panel cannot describe a state the engine cannot run.
-    pub fx: config::FxConfig,
+    pub fx: audio_session::engine::config::FxConfig,
 }
 
 impl Default for EqPanelState {
@@ -281,7 +281,7 @@ impl Default for EqPanelState {
             correction_enabled: false,
             correction_depth: 1.0,
             correction_ir_path: String::new(),
-            fx: config::FxConfig::default(),
+            fx: audio_session::engine::config::FxConfig::default(),
             window_pos: None,
             window_size: None,
             view_mode: EqViewMode::StudioPro,
@@ -486,7 +486,10 @@ impl EqPanelState {
     /// off for the same reason the AutoEQ dialog does it — the curve already
     /// carries its own level, and attenuating it twice is not "safer", it is
     /// quieter than intended.
-    pub fn apply_imported_curve(&mut self, curve: &config::ImportedCurve) -> bool {
+    pub fn apply_imported_curve(
+        &mut self,
+        curve: &audio_session::engine::config::ImportedCurve,
+    ) -> bool {
         self.eq_enabled = true;
         if curve.is_graphic() {
             self.eq_mode = EqMode::Graphic;
@@ -536,14 +539,14 @@ impl EqPanelState {
     /// ladder so the file reproduces exactly what the engine is playing.
     pub fn export_curve_text(&self) -> (String, String) {
         if self.eq_mode == EqMode::Parametric && !self.bands.is_empty() {
-            let preset = config::EqPreset {
+            let preset = audio_session::engine::config::EqPreset {
                 name: "ShadowPlayer parametric EQ".to_string(),
                 output_device_pattern: None,
                 preamp_db: self.preamp_db,
                 bands: self
                     .bands
                     .iter()
-                    .map(|band| config::EqBandConfig {
+                    .map(|band| audio_session::engine::config::EqBandConfig {
                         enabled: band.enabled,
                         filter_type: band.filter_type.into(),
                         frequency: band.freq,
@@ -554,14 +557,17 @@ impl EqPanelState {
             };
             (
                 "shadowplayer-parametric.txt".to_string(),
-                config::write_parametric(&preset),
+                audio_session::engine::config::write_parametric(&preset),
             )
         } else {
             let freqs = self.graphic_layout.frequencies();
             let count = freqs.len().min(self.graphic_gains.len());
             (
                 "shadowplayer-graphic.txt".to_string(),
-                config::write_graphic(&freqs[..count], &self.graphic_gains[..count]),
+                audio_session::engine::config::write_graphic(
+                    &freqs[..count],
+                    &self.graphic_gains[..count],
+                ),
             )
         }
     }

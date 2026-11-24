@@ -146,6 +146,8 @@ pub struct ShadowPlayerApp {
     /// egui's font atlas must be rebuilt before the next frame is drawn.
     applied_fonts: Option<ThemeFonts>,
     settings_dirty: bool,
+    /// Last time settings were flushed to disk; used to throttle writes.
+    settings_last_save: std::time::Instant,
     /// Whether the persisted interface scale has been installed in egui.
     /// The first frame must not treat egui's default zoom as a user change.
     ui_scale_applied: bool,
@@ -254,7 +256,7 @@ impl ShadowPlayerApp {
         } else {
             playback::ZoneCoordinator::from_stored(stored_zones, stored_rules)
         };
-        let search_engine = SearchEngine::new(db.clone());
+        let search_engine = SearchEngine::new();
         let coordinator = PlaybackCoordinator::new(session.clone(), db.clone());
 
         let artwork_service = ArtworkService::new();
@@ -334,6 +336,7 @@ impl ShadowPlayerApp {
             applied_theme: None,
             applied_fonts: None,
             settings_dirty: false,
+            settings_last_save: std::time::Instant::now(),
             ui_scale_applied: false,
             ui_scale_grace: 0,
 

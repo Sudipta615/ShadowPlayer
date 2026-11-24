@@ -174,7 +174,7 @@ impl DspState {
                 st.voice_budget_enabled,
                 st.voice_capacity,
                 st.voice_capacity / 2,
-                config::VoicePriority::DistanceWeighted,
+                audio_session::engine::config::VoicePriority::DistanceWeighted,
             );
         }
         if let Some(src) = s.add_track.clone() {

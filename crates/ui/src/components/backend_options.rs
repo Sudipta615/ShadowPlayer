@@ -7,7 +7,7 @@
 //! cpal stream instead, so the picker claimed exclusivity the engine never
 //! negotiated.
 
-use config::AudioBackend;
+use audio_session::engine::config::AudioBackend;
 use eframe::egui;
 
 use crate::theme::Theme;

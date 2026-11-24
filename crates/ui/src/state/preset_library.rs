@@ -10,7 +10,7 @@
 //! the same path as a text import, so a preset, an AutoEQ file and a pasted
 //! REW export all obey one set of clamps and one preamp rule.
 
-use config::{EqBandConfig, EqMode, GraphicEqLayout, ImportedCurve};
+use audio_session::engine::config::{EqBandConfig, EqMode, GraphicEqLayout, ImportedCurve};
 use serde::{Deserialize, Serialize};
 
 use crate::components::eq_panel::EqPanelState;
@@ -245,7 +245,7 @@ impl PresetLibraryState {
 mod tests {
     use super::*;
     use crate::components::eq_panel::ParametricBand;
-    use config::FilterType;
+    use audio_session::engine::config::FilterType;
 
     fn parametric_panel() -> EqPanelState {
         let mut panel = EqPanelState {

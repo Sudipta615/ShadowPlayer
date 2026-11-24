@@ -23,7 +23,7 @@ pub use types::{
 use super::controls::custom_toggle_switch;
 use super::{EqPanelActions, EqPanelState};
 use crate::theme::Theme;
-use config::CrossfeedProfile;
+use audio_session::engine::config::CrossfeedProfile;
 use eframe::egui::{self, Vec2};
 
 /// Render the complete Headphone Crossfeed Studio card.

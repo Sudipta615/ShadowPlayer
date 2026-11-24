@@ -5,8 +5,8 @@
 use super::{gradient_horizontal_slider, preamp_display_limit};
 use crate::components::eq_panel::{EqPanelActions, EqPanelState, EqTab};
 use crate::theme::Theme;
+use audio_session::engine::config::CrossfeedProfile;
 use audio_session::engine::dsp::limiter::LimiterMode;
-use config::CrossfeedProfile;
 use eframe::egui::{self, CornerRadius, Margin, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// The shared master preamp: one compact card with a label, a readout, and a

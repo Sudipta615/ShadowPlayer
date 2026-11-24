@@ -5,12 +5,12 @@
 //! seconds to open. The UI only polls [`PresetIoService::poll`] once per frame
 //! and never touches the filesystem itself.
 //!
-//! Parsing lives in `config::parse_curve`, so the same grammar is used by the
+//! Parsing lives in `audio_session::engine::config::parse_curve`, so the same grammar is used by the
 //! tests, by the AutoEQ database importer and by this service.
 
 use std::path::PathBuf;
 
-use config::{parse_curve, ImportedCurve};
+use audio_session::engine::config::{parse_curve, ImportedCurve};
 use crossbeam::channel::{unbounded, Receiver};
 
 /// Refuse files larger than this. A curve is a few kilobytes; anything larger

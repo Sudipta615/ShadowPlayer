@@ -1,7 +1,7 @@
 //! Unit tests for crossfeed presets and acoustic models.
 
 use super::types::*;
-use config::CrossfeedProfile;
+use audio_session::engine::config::CrossfeedProfile;
 
 #[test]
 fn itd_and_path_offset_are_physically_grounded() {
