@@ -249,6 +249,7 @@ impl CdRipper {
                 }
             }
             file.flush()?;
+            Ok(())
         })();
         unsafe {
             (paranoia.free)(handle);
