@@ -3,6 +3,7 @@ use crate::dynlib;
 use crate::transcode::{self, TranscodeOptions};
 use crate::MediaError;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 impl CdRipper {
@@ -210,8 +211,11 @@ impl CdRipper {
             // track in RAM: write the WAV header up front (the sector count is
             // known) and append each sector as it is read.
             let data_len = total as usize * CD_SAMPLES_PER_SECTOR * 2;
-            let mut file = std::fs::File::create(&wav_path)?;
-            use std::io::Write;
+            // Buffered: a compact disc is 176,400 bytes of audio per second,
+            // and an unbuffered `File` would turn that into one syscall per
+            // two-byte sample.
+            let mut file =
+                std::io::BufWriter::with_capacity(64 * 1024, std::fs::File::create(&wav_path)?);
             file.write_all(b"RIFF")?;
             file.write_all(&((36 + data_len) as u32).to_le_bytes())?;
             file.write_all(b"WAVEfmt ")?;
@@ -224,6 +228,7 @@ impl CdRipper {
             file.write_all(&16u16.to_le_bytes())?;
             file.write_all(b"data")?;
             file.write_all(&(data_len as u32).to_le_bytes())?;
+            let mut sector_bytes = Vec::with_capacity(CD_SAMPLES_PER_SECTOR * 2);
             for sector in 0..total {
                 let pointer = unsafe { (paranoia.read)(handle, std::ptr::null_mut()) };
                 if pointer.is_null() {
@@ -234,9 +239,11 @@ impl CdRipper {
                     )));
                 }
                 let samples = unsafe { std::slice::from_raw_parts(pointer, CD_SAMPLES_PER_SECTOR) };
+                sector_bytes.clear();
                 for sample in samples {
-                    file.write_all(&sample.to_le_bytes())?;
+                    sector_bytes.extend_from_slice(&sample.to_le_bytes());
                 }
+                file.write_all(&sector_bytes)?;
                 if !progress(RipProgress {
                     track_number: track.number,
                     track_count: disc.tracks.len() as u32,
@@ -340,9 +347,11 @@ fn write_cd_tags(path: &Path, disc: &CdDisc, track: &CdTrack) -> Result<(), Medi
         track_number: Some(track.number),
         disc_number: None,
     };
-    audio_session::engine::decode::write_editorial_tags(path, &tags).map_err(|error| MediaError::Encode {
-        path: path.to_path_buf(),
-        message: format!("the audio was written but tagging failed: {error}"),
+    audio_session::engine::decode::write_editorial_tags(path, &tags).map_err(|error| {
+        MediaError::Encode {
+            path: path.to_path_buf(),
+            message: format!("the audio was written but tagging failed: {error}"),
+        }
     })
 }
 
