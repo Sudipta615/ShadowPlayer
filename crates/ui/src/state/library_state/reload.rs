@@ -167,7 +167,7 @@ impl LibraryState {
                 self.search_result = search::SearchResult::default();
                 self.recommended_tracks()
             } else if !search_query.trim().is_empty() {
-                let result = search_engine.search(search_query, 100);
+                let result = search_engine.search(search_query, &self.all_tracks, &self.playlists, 100);
                 self.search_result = result.clone();
                 result.tracks
             } else {

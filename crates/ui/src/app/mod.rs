@@ -256,7 +256,7 @@ impl ShadowPlayerApp {
         } else {
             playback::ZoneCoordinator::from_stored(stored_zones, stored_rules)
         };
-        let search_engine = SearchEngine::new(db.clone());
+        let search_engine = SearchEngine::new();
         let coordinator = PlaybackCoordinator::new(session.clone(), db.clone());
 
         let artwork_service = ArtworkService::new();

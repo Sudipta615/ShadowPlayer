@@ -1,15 +1,8 @@
-//! Search-level tests.
-//!
-//! The engine used to derive its artist and album results from the already
-//! truncated track page, so a match that ranked past `limit` did not exist as
-//! far as the search box was concerned. These tests pin the direct queries.
-
 #[cfg(test)]
 mod unit {
     use crate::SearchEngine;
-    use database::{Database, PlaylistRepo, TrackRepo};
     use domain::ids::TrackId;
-    use domain::models::Track;
+    use domain::models::{Playlist, Track};
     use std::path::PathBuf;
 
     fn track(path: &str, title: &str, artist: &str, album: &str) -> Track {
@@ -51,24 +44,32 @@ mod unit {
         }
     }
 
-    /// An artist whose tracks all rank past the limit still gets an artist hit.
+    fn playlist(name: &str) -> Playlist {
+        Playlist {
+            id: domain::ids::PlaylistId::new(),
+            name: name.to_string(),
+            description: None,
+            track_count: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
     #[test]
     fn an_artist_past_the_track_limit_still_appears() {
-        let db = Database::in_memory().unwrap();
-        let tracks = TrackRepo::new(db.clone());
-        for i in 0..5 {
-            tracks
-                .upsert(&track(
+        let tracks: Vec<Track> = (0..5)
+            .map(|i| {
+                track(
                     &format!("/music/deep/{i}.flac"),
                     &format!("Filler {i}"),
                     "Obscure Collective",
                     "Deep Cuts",
-                ))
-                .unwrap();
-        }
+                )
+            })
+            .collect();
 
-        let engine = SearchEngine::new(db);
-        let result = engine.search("Obscure", 1);
+        let engine = SearchEngine::new();
+        let result = engine.search("Obscure", &tracks, &[], 1);
 
         assert_eq!(result.tracks.len(), 1, "the track list is truncated");
         assert_eq!(
@@ -78,73 +79,53 @@ mod unit {
         );
     }
 
-    /// Albums are found by their own title, deduplicated like before.
     #[test]
     fn albums_are_found_and_deduplicated() {
-        let db = Database::in_memory().unwrap();
-        let tracks = TrackRepo::new(db.clone());
-        // Two different artists with an album of the same name, plus one more
-        // track on each copy so the ordering is by track count.
+        let mut tracks = Vec::new();
         for (i, artist) in ["First Artist", "Second Artist"].iter().enumerate() {
             for j in 0..(i + 1) {
-                tracks
-                    .upsert(&track(
-                        &format!("/music/same/{artist}/{j}.flac"),
-                        &format!("Song {j}"),
-                        artist,
-                        "Shared Name",
-                    ))
-                    .unwrap();
+                tracks.push(track(
+                    &format!("/music/same/{artist}/{j}.flac"),
+                    &format!("Song {j}"),
+                    artist,
+                    "Shared Name",
+                ));
             }
         }
 
-        let engine = SearchEngine::new(db);
-        let result = engine.search("Shared", 10);
+        let engine = SearchEngine::new();
+        let result = engine.search("Shared", &tracks, &[], 10);
         assert_eq!(result.albums, vec!["Shared Name".to_string()]);
     }
 
-    /// Playlists are queried by name, not scanned from a full table read.
     #[test]
     fn playlists_are_found_by_name() {
-        let db = Database::in_memory().unwrap();
-        let playlists = PlaylistRepo::new(db.clone());
-        playlists.create("Road Trip", None).unwrap();
-        playlists.create("Focus", None).unwrap();
+        let playlists = vec![playlist("Road Trip"), playlist("Focus")];
 
-        let engine = SearchEngine::new(db);
-        let result = engine.search("road", 10);
+        let engine = SearchEngine::new();
+        let result = engine.search("road", &[], &playlists, 10);
         assert_eq!(result.playlists.len(), 1);
         assert_eq!(result.playlists[0].name, "Road Trip");
     }
 
-    /// A query the tokenizer cannot turn into tokens returns nothing, and says
-    /// nothing: no panic, no FTS syntax error, no accidental "match all".
     #[test]
     fn a_query_without_tokens_returns_nothing() {
-        let db = Database::in_memory().unwrap();
-        TrackRepo::new(db.clone())
-            .upsert(&track("/music/a.flac", "Anything", "Someone", "Somewhere"))
-            .unwrap();
+        let tracks = vec![track("/music/a.flac", "Anything", "Someone", "Somewhere")];
 
-        let engine = SearchEngine::new(db);
-        let result = engine.search("!!!", 10);
+        let engine = SearchEngine::new();
+        let result = engine.search("!!!", &tracks, &[], 10);
         assert!(result.is_empty());
     }
 
-    /// `%` and `_` in a query are literals in the artist/album lookups.
     #[test]
     fn wildcards_in_a_query_are_literal() {
-        let db = Database::in_memory().unwrap();
-        let tracks = TrackRepo::new(db.clone());
-        tracks
-            .upsert(&track("/music/a.flac", "A", "100% Proof", "Covered"))
-            .unwrap();
-        tracks
-            .upsert(&track("/music/b.flac", "B", "Plain Artist", "Plain Album"))
-            .unwrap();
+        let tracks = vec![
+            track("/music/a.flac", "A", "100% Proof", "Covered"),
+            track("/music/b.flac", "B", "Plain Artist", "Plain Album"),
+        ];
 
-        let engine = SearchEngine::new(db);
-        let result = engine.search("100%", 10);
+        let engine = SearchEngine::new();
+        let result = engine.search("100%", &tracks, &[], 10);
         assert_eq!(result.artists, vec!["100% Proof".to_string()]);
         assert!(
             result.albums.is_empty(),
@@ -153,3 +134,4 @@ mod unit {
         );
     }
 }
+PY
