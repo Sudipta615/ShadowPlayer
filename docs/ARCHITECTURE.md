@@ -110,6 +110,9 @@ consumer, as this table does.
 outer crates (`recommendation`, `media-tools`, `library`) consume analysis
 results through that boundary rather than linking engine DSP code.
 
+As of this revision `media-tools`, `metadata` and `ui` also reach the engine
+only through `audio-session` (the `config` crate via `audio_session::engine`).
+
 ## State
 
 | State | Owner | Storage |
