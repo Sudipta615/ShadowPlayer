@@ -8,11 +8,12 @@ pub fn show_track_properties_modal(
     is_open: &mut bool,
     theme: &Theme,
 ) {
-    if !*is_open || track.is_none() {
+    let Some(track) = track else {
+        return;
+    };
+    if !*is_open {
         return;
     }
-
-    let track = track.unwrap();
 
     let closed = crate::dialog::show_modal_scrollable(
         ctx,

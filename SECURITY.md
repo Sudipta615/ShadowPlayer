@@ -7,9 +7,9 @@ memory-safety or parser bug is a security bug, not only a crash.
 
 | Line | Version | Support |
 | --- | --- | --- |
-| Player | `0.30.x` | Security fixes |
+| Player | `0.31.x` | Security fixes |
 | Engine | `1.14.x` | Security fixes |
-| Older | `< 0.30` / `< 1.14` | Best effort; upgrade first |
+| Older | `< 0.31` / `< 1.14` | Best effort; upgrade first |
 
 ## Reporting a vulnerability
 

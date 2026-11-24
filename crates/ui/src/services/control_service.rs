@@ -9,7 +9,7 @@
 //! `shadowplayer-remote` and the second-launch activation path are both thin
 //! clients of this protocol.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -275,7 +275,7 @@ fn run_listener(
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(25));
+                std::thread::sleep(Duration::from_millis(100));
             }
             Err(e) => {
                 log::warn!("Loopback control listener stopped: {e}");
@@ -296,7 +296,13 @@ fn serve_connection(
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
-    reader.read_line(&mut line)?;
+    // Cap the request line before parsing so a hostile local client cannot
+    // exhaust memory with a single enormous line.
+    reader.by_ref().take(4097).read_line(&mut line)?;
+    if line.len() > 4096 {
+        write_response(stream, &ControlResponse::error("request too large"))?;
+        return Ok(());
+    }
     let request: ControlRequest = match serde_json::from_str(&line) {
         Ok(request) => request,
         Err(e) => {

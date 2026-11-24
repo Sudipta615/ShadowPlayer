@@ -750,6 +750,7 @@
   "SBC852D991319CD53": "Organizar archivos",
   "SBCF81C89E8FBB1C9": "Desactivado (predeterminado): un segundo inicio trae esta ventana al frente y se cierra. Activado: abre otra ventana; la base SQLite funciona en modo WAL, por lo que múltiples ventanas son seguras. Se aplica en el próximo inicio.",
   "SBD860070F3703BBA": "{count} pista(s) duplicada(s) eliminada(s)",
+  "SBD949AD592F70415": "Dataset profile ID — built in: kemar_reference (synthetic KEMAR), spherical_model (analytic head)",
   "SBDBDD827622353E5": "1. 3D-Binaural-HRTF und virtuelle Raumakustik",
   "SBDE29ACA7B5D70C3": "Habilita la etapa de enrutamiento multicanal. Cada ruta convoluciona su fuente con una respuesta impulsional (IR) mono (o del primer canal) y suma el resultado en el destino. El bloque de partición añade latencia, informada por el motor.",
   "SBE02DA81DAB96BEC": "Freigabe:",
