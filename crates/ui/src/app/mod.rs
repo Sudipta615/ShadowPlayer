@@ -9,7 +9,6 @@ use database::{
 use domain::models::Track;
 use eframe::egui::{self, Margin, Pos2, Rect, Sense, Vec2};
 use playback::PlaybackCoordinator;
-use search::SearchEngine;
 
 use crate::components::clap_rack_panel::show_clap_rack_panel;
 use crate::components::command_palette::{PaletteAction, PaletteEntry};
@@ -69,7 +68,6 @@ use settings_io::eval_holds_persistence;
 pub struct ShadowPlayerApp {
     session: Arc<AudioSession>,
     coordinator: PlaybackCoordinator,
-    search_engine: SearchEngine,
 
     track_repo: TrackRepo,
     track_dsp_repo: database::TrackDspRepo,
@@ -256,7 +254,6 @@ impl ShadowPlayerApp {
         } else {
             playback::ZoneCoordinator::from_stored(stored_zones, stored_rules)
         };
-        let search_engine = SearchEngine::new();
         let coordinator = PlaybackCoordinator::new(session.clone(), db.clone());
 
         let artwork_service = ArtworkService::new();
@@ -287,7 +284,6 @@ impl ShadowPlayerApp {
         let mut app = Self {
             session,
             coordinator,
-            search_engine,
 
             track_repo,
             track_dsp_repo,

@@ -15,7 +15,6 @@ impl ShadowPlayerApp {
             &self.genre_repo,
             &self.scan_roots_repo,
             &self.history_repo,
-            &self.search_engine,
             self.app_state.active_nav,
             &self.app_state.search_query,
             self.app_state.current_sort,
@@ -71,7 +70,6 @@ impl ShadowPlayerApp {
             return;
         }
         self.library_state.update_displayed_tracks(
-            &self.search_engine,
             &self.history_repo,
             &self.playlist_repo,
             &self.smart_playlist_repo,

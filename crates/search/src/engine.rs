@@ -1,4 +1,40 @@
+use std::collections::BTreeSet;
+
 use domain::models::{Playlist, Track};
+
+/// Bitmask of ASCII letters present in a lowercased string: bit (c - 'a') is
+/// set when the string contains that letter. Used to make single-letter
+/// queries O(1) per track.
+fn ascii_mask(s: &str) -> u32 {
+    let mut mask = 0u32;
+    for b in s.bytes() {
+        if b.is_ascii_lowercase() {
+            mask |= 1u32 << (b - b'a');
+        }
+    }
+    mask
+}
+
+fn contains_token(field: &str, mask: u32, token: &str) -> bool {
+    // Fast reject: every ASCII letter in the token must be present in the
+    // field. This avoids an expensive substring search for most misses.
+    let mut required = 0u32;
+    for b in token.bytes() {
+        if b.is_ascii_lowercase() {
+            required |= 1u32 << (b - b'a');
+        }
+    }
+    if required != 0 && (mask & required) != required {
+        return false;
+    }
+    if token.len() == 1 {
+        let b = token.as_bytes()[0];
+        if b.is_ascii_lowercase() {
+            return (mask >> (b - b'a')) & 1 == 1;
+        }
+    }
+    field.contains(token)
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct SearchResult {
@@ -33,6 +69,71 @@ impl SearchEngine {
         playlists: &[Playlist],
         limit: usize,
     ) -> SearchResult {
+        SearchIndex::build(tracks).search(query, playlists, limit)
+    }
+}
+
+/// A library pre-lowercased once, so a per-keystroke search never allocates
+/// or re-folds a tag. `LibraryState` keeps one of these and rebuilds it only
+/// when the library changes.
+#[derive(Debug, Clone, Default)]
+pub struct SearchIndex {
+    entries: Vec<IndexedTrack>,
+    distinct_artists: Vec<String>,
+    distinct_albums: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct IndexedTrack {
+    track: Track,
+    title: String,
+    title_mask: u32,
+    haystack: String,
+    haystack_mask: u32,
+}
+
+impl SearchIndex {
+    pub fn build(tracks: &[Track]) -> Self {
+        let entries = tracks
+            .iter()
+            .map(|track| {
+                let title = track.title.to_lowercase();
+                let artist = track.artist.to_lowercase();
+                let album = track.album.to_lowercase();
+                let genre = track.genre.as_deref().unwrap_or("").to_lowercase();
+                let path = track.path.to_string_lossy().to_lowercase();
+                // Combined haystack used for the cheap "does this track match
+                // at all" test; one contains per term instead of five.
+                let haystack = format!("{title} {artist} {album} {genre} {path}");
+                IndexedTrack {
+                    title_mask: ascii_mask(&title),
+                    title,
+                    haystack_mask: ascii_mask(&haystack),
+                    haystack,
+                    track: track.clone(),
+                }
+            })
+            .collect();
+        // Unique artist/album names, so side lists are matched over the
+        // distinct set instead of once per track.
+        let mut artists: BTreeSet<String> = BTreeSet::new();
+        let mut albums: BTreeSet<String> = BTreeSet::new();
+        for track in tracks {
+            if !track.artist.is_empty() {
+                artists.insert(track.artist.clone());
+            }
+            if !track.album.is_empty() {
+                albums.insert(track.album.clone());
+            }
+        }
+        Self {
+            entries,
+            distinct_artists: artists.into_iter().collect(),
+            distinct_albums: albums.into_iter().collect(),
+        }
+    }
+
+    pub fn search(&self, query: &str, playlists: &[Playlist], limit: usize) -> SearchResult {
         let trimmed = query.trim();
         if trimmed.is_empty() {
             return SearchResult::default();
@@ -54,71 +155,78 @@ impl SearchEngine {
             .collect();
         if terms.is_empty() {
             return SearchResult::default();
-        }
-
-        // A term may match any of the columns the ``tracks_fts`` row indexed,
-        // and different terms may match different columns — a search for
-        // "miles kind" still finds Miles Davis' *Kind of Blue*. The path is
-        // included because folder and file names were indexed too.
-        let text_matches = |fields: &[&str]| -> bool {
-            terms
+        } // term_in checks that every token of a term appears (in order, as
+          // substrings) in the field. The haystacks are already lowercased.
+          // Single ASCII letters are tested against a precomputed bitmask,
+          // which is much cheaper than a substring search.
+        let term_in = |field: &str, mask: u32, tokens: &[String]| -> bool {
+            tokens
                 .iter()
-                .all(|tokens| fields.iter().any(|field| term_in_field(field, tokens)))
+                .all(|token| contains_token(field, mask, token))
+        };
+        let all_terms_in = |field: &str, mask: u32| -> bool {
+            terms.iter().all(|tokens| term_in(field, mask, tokens))
         };
 
-        // Tracks: a title hit ranks above a hit in another field, then input
-        // order, and only the first `limit` are cloned.
-        let mut matched: Vec<(bool, &Track)> = tracks
-            .iter()
-            .filter_map(|track| {
-                let genre = track.genre.as_deref().unwrap_or("");
-                let path = track.path.to_string_lossy();
-                let fields = [
-                    track.title.as_str(),
-                    track.artist.as_str(),
-                    track.album.as_str(),
-                    genre,
-                    path.as_ref(),
-                ];
-                if !text_matches(&fields) {
-                    return None;
+        let mut title_matches: Vec<&Track> = Vec::new();
+        let mut other_matches: Vec<&Track> = Vec::new();
+
+        for entry in &self.entries {
+            // Cheap combined test first: one contains per term.
+            let combined_hit = terms
+                .iter()
+                .all(|tokens| term_in(&entry.haystack, entry.haystack_mask, tokens));
+            if !combined_hit {
+                continue;
+            }
+
+            let title_hit = all_terms_in(&entry.title, entry.title_mask);
+
+            if title_hit {
+                if title_matches.len() < limit {
+                    title_matches.push(&entry.track);
                 }
-                Some((text_matches(&[track.title.as_str()]), track))
+            } else if other_matches.len() < limit {
+                other_matches.push(&entry.track);
+            }
+        }
+
+        // Side lists matched over distinct names only.
+        let matched_artists: Vec<String> = self
+            .distinct_artists
+            .iter()
+            .filter(|name| {
+                let lower = name.to_lowercase();
+                all_terms_in(&lower, ascii_mask(&lower))
             })
-            .collect();
-        matched.sort_by_key(|(title_match, _)| !*title_match);
-        let matched_tracks: Vec<Track> = matched
-            .into_iter()
             .take(limit)
-            .map(|(_, track)| track.clone())
+            .cloned()
             .collect();
-
-        // Artists: distinct, containing every term. Capped like the old
-        // per-repository queries, so a one-letter query cannot produce a
-        // result list the size of the library.
-        let mut artists: Vec<String> = tracks
+        let matched_albums: Vec<String> = self
+            .distinct_albums
             .iter()
-            .map(|t| t.artist.clone())
-            .filter(|a| !a.is_empty() && text_matches(&[a]))
+            .filter(|name| {
+                let lower = name.to_lowercase();
+                all_terms_in(&lower, ascii_mask(&lower))
+            })
+            .take(limit)
+            .cloned()
             .collect();
-        artists.sort();
-        artists.dedup();
-        artists.truncate(limit);
 
-        // Albums: distinct, same cap.
-        let mut albums: Vec<String> = tracks
-            .iter()
-            .map(|t| t.album.clone())
-            .filter(|a| !a.is_empty() && text_matches(&[a]))
+        let matched_tracks: Vec<Track> = title_matches
+            .into_iter()
+            .chain(other_matches)
+            .take(limit)
+            .cloned()
             .collect();
-        albums.sort();
-        albums.dedup();
-        albums.truncate(limit);
-
-        // Playlists by name.
         let matched_playlists: Vec<Playlist> = playlists
             .iter()
-            .filter(|p| text_matches(&[&p.name]))
+            .filter(|p| {
+                let name = p.name.to_lowercase();
+                terms
+                    .iter()
+                    .all(|tokens| tokens.iter().all(|token| name.contains(token.as_str())))
+            })
             .take(limit)
             .cloned()
             .collect();
@@ -126,22 +234,8 @@ impl SearchEngine {
         SearchResult {
             tracks: matched_tracks,
             playlists: matched_playlists,
-            artists,
-            albums,
+            artists: matched_artists,
+            albums: matched_albums,
         }
     }
-}
-
-/// Whether every token of a whitespace term appears in `field`, in order.
-fn term_in_field(field: &str, tokens: &[String]) -> bool {
-    let haystack = field.to_lowercase();
-    let mut pos = 0;
-    tokens.iter().all(|token| {
-        if let Some(index) = haystack[pos..].find(token) {
-            pos += index + token.len();
-            true
-        } else {
-            false
-        }
-    })
 }

@@ -25,7 +25,7 @@ use database::{
 };
 use domain::ids::TrackId;
 use domain::models::{SortField, SortOrder, Track};
-use search::SearchEngine;
+use search::SearchIndex;
 use ui::components::sidebar::NavItem;
 use ui::state::library_state::LibraryState;
 
@@ -40,6 +40,10 @@ const LIBRARY_SIZE: usize = 100_000;
 const BUDGET_REBUILD_MS: u128 = 250;
 const BUDGET_SORT_MS: u128 = 250;
 const BUDGET_CLONE_MS: u128 = 250;
+/// One keystroke in the search box rebuilds the visible list; typing must not
+/// make the window stutter. 25 ms keeps it comfortably interactive while
+/// leaving room for CI variance on shared runners.
+const BUDGET_SEARCH_MS: u128 = 25;
 
 /// A synthetic library.
 ///
@@ -135,7 +139,8 @@ fn synthetic_library(count: usize) -> Vec<Track> {
 fn state_with(library: Vec<Track>) -> (LibraryState, Database) {
     let db = Database::in_memory().expect("an in-memory database");
     let mut state = LibraryState::default();
-    state.all_tracks = library;
+    state.all_tracks = library.clone();
+    state.search_index = SearchIndex::build(&library);
     (state, db)
 }
 
@@ -146,7 +151,6 @@ fn state_with(library: Vec<Track>) -> (LibraryState, Database) {
 fn rebuild(state: &mut LibraryState, db: &Database, sort: SortField) -> Duration {
     let started = Instant::now();
     state.update_displayed_tracks(
-        &SearchEngine::new(),
         &HistoryRepo::new(db.clone()),
         &PlaylistRepo::new(db.clone()),
         &SmartPlaylistRepo::new(db.clone()),
@@ -166,11 +170,31 @@ fn ms(duration: Duration) -> u128 {
     duration.as_millis()
 }
 
+/// The rebuild the app performs while the user types in the search box.
+fn typed_query(state: &mut LibraryState, db: &Database, query: &str) -> Duration {
+    let started = Instant::now();
+    state.update_displayed_tracks(
+        &HistoryRepo::new(db.clone()),
+        &PlaylistRepo::new(db.clone()),
+        &SmartPlaylistRepo::new(db.clone()),
+        &AlbumRepo::new(db.clone()),
+        &ArtistRepo::new(db.clone()),
+        &GenreRepo::new(db.clone()),
+        &TrackRepo::new(db.clone()),
+        NavItem::Home,
+        query,
+        SortField::Title,
+        SortOrder::Ascending,
+    );
+    started.elapsed()
+}
+
 /// A 100,000-track library rebuilds inside the budget.
 #[test]
 fn a_hundred_thousand_track_library_rebuilds_inside_the_budget() {
     let library = synthetic_library(LIBRARY_SIZE);
     let (mut state, db) = state_with(library);
+    state.search_index = SearchIndex::build(&state.all_tracks);
 
     // The first rebuild sorts the library by title.
     let first = rebuild(&mut state, &db, SortField::Title);
@@ -302,6 +326,75 @@ fn changing_the_sort_does_not_rebuild_the_list() {
     assert!(
         first.artist.to_lowercase() <= second.artist.to_lowercase(),
         "the list is sorted by artist"
+    );
+}
+
+/// Typing a search query rebuilds the list inside a frame.
+///
+/// Search runs over the in-memory library on the UI thread, so its cost is a
+/// frame cost: a query that walks 100,000 tracks per keystroke must still be
+/// cheap enough that the caret keeps up. Each listed query is one keystroke,
+/// including broad prefixes that match most of the library.
+#[test]
+fn typing_a_search_query_stays_inside_the_budget() {
+    let library = synthetic_library(LIBRARY_SIZE);
+    let (mut state, db) = state_with(library);
+    state.search_index = SearchIndex::build(&state.all_tracks);
+
+    let queries = [
+        "a",
+        "au",
+        "aur",
+        "auro",
+        "auror",
+        "aurora",
+        "aurora f",
+        "aurora fi",
+        "aurora fie",
+        "aurora fiel",
+        "aurora field",
+    ];
+
+    // Warm the caches so the budget measures steady-state typing, not the
+    // one-time cold start of the first keystroke.
+    for query in queries {
+        typed_query(&mut state, &db, query);
+    }
+
+    let mut worst = Duration::ZERO;
+    let mut total = Duration::ZERO;
+    for query in queries {
+        let elapsed = typed_query(&mut state, &db, query);
+        total += elapsed;
+        worst = worst.max(elapsed);
+    }
+    let mean = total / queries.len() as u32;
+
+    eprintln!(
+        "search over {LIBRARY_SIZE}: mean {} ms, worst {} ms",
+        ms(mean),
+        ms(worst)
+    );
+
+    // "aurora field" matches every track in the synthetic library.
+    assert_eq!(
+        state.displayed_tracks.len(),
+        100,
+        "the search result is capped at the requested limit"
+    );
+    assert!(
+        state
+            .displayed_tracks
+            .iter()
+            .all(|t| t.artist == "Aurora Field"),
+        "only the matching tracks are shown"
+    );
+
+    assert!(
+        ms(worst) < BUDGET_SEARCH_MS,
+        "a search keystroke over {LIBRARY_SIZE} tracks took {} ms, which is \
+         over the {BUDGET_SEARCH_MS} ms budget",
+        ms(worst)
     );
 }
 

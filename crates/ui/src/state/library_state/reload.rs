@@ -37,7 +37,6 @@ impl LibraryState {
         genre_repo: &GenreRepo,
         scan_roots_repo: &ScanRootsRepo,
         history_repo: &HistoryRepo,
-        search_engine: &SearchEngine,
         active_nav: NavItem,
         search_query: &str,
         current_sort: SortField,
@@ -48,6 +47,7 @@ impl LibraryState {
             domain::models::SortOrder::Ascending,
         ) {
             self.all_tracks = tracks;
+            self.search_index = SearchIndex::build(&self.all_tracks);
         }
         // Selected ids may reference tracks that were just removed.
         self.prune_selection();
@@ -88,7 +88,6 @@ impl LibraryState {
         self.displayed_key = None;
 
         self.update_displayed_tracks(
-            search_engine,
             history_repo,
             playlist_repo,
             smart_repo,
@@ -106,7 +105,6 @@ impl LibraryState {
     #[allow(clippy::too_many_arguments)]
     pub fn update_displayed_tracks(
         &mut self,
-        search_engine: &SearchEngine,
         history_repo: &HistoryRepo,
         playlist_repo: &PlaylistRepo,
         smart_repo: &SmartPlaylistRepo,
@@ -161,88 +159,87 @@ impl LibraryState {
         self.displayed_key = Some(key);
         self.rebuilds += 1;
 
-        let mut tracks = if self.quick_filter == QuickFilter::ForYou
-            && search_query.trim().is_empty()
-        {
-            // The feed is the whole view, not a narrowing of the current tab.
-            self.search_result = search::SearchResult::default();
-            self.recommended_tracks()
-        } else if !search_query.trim().is_empty() {
-            let result = search_engine.search(search_query, &self.all_tracks, &self.playlists, 100);
-            self.search_result = result.clone();
-            result.tracks
-        } else {
-            self.search_result = search::SearchResult::default();
-            match active_nav {
-                NavItem::Favorites => {
-                    let mut favs =
-                        Vec::with_capacity(self.favorite_ids.len().min(self.all_tracks.len()));
-                    for t in &self.all_tracks {
-                        if self.favorite_ids.contains(&t.id) {
-                            favs.push(t.clone());
+        let mut tracks =
+            if self.quick_filter == QuickFilter::ForYou && search_query.trim().is_empty() {
+                // The feed is the whole view, not a narrowing of the current tab.
+                self.search_result = search::SearchResult::default();
+                self.recommended_tracks()
+            } else if !search_query.trim().is_empty() {
+                let result = self.search_index.search(search_query, &self.playlists, 100);
+                self.search_result = result.clone();
+                result.tracks
+            } else {
+                self.search_result = search::SearchResult::default();
+                match active_nav {
+                    NavItem::Favorites => {
+                        let mut favs =
+                            Vec::with_capacity(self.favorite_ids.len().min(self.all_tracks.len()));
+                        for t in &self.all_tracks {
+                            if self.favorite_ids.contains(&t.id) {
+                                favs.push(t.clone());
+                            }
                         }
+                        favs
                     }
-                    favs
-                }
-                NavItem::RecentlyPlayed => match history_repo.list_recently_played(100) {
-                    Ok(tracks) => tracks,
-                    Err(e) => {
-                        log::warn!("Could not load the recently played list: {e}");
-                        Vec::new()
-                    }
-                },
-                NavItem::MostPlayed => match history_repo.list_most_played(100) {
-                    Ok(tracks) => tracks,
-                    Err(e) => {
-                        log::warn!("Could not load the most played list: {e}");
-                        Vec::new()
-                    }
-                },
-                // Newest imports first. Index sort avoids deep-cloning all 100k
-                // tracks just to keep 200, saving ~500k allocations on low-end CPUs.
-                NavItem::RecentlyAdded => {
-                    let k = 200.min(self.all_tracks.len());
-                    if k == 0 {
-                        Vec::new()
-                    } else {
-                        let mut indices: Vec<usize> = (0..self.all_tracks.len()).collect();
-                        if indices.len() > k {
-                            indices.select_nth_unstable_by_key(k - 1, |&i| {
+                    NavItem::RecentlyPlayed => match history_repo.list_recently_played(100) {
+                        Ok(tracks) => tracks,
+                        Err(e) => {
+                            log::warn!("Could not load the recently played list: {e}");
+                            Vec::new()
+                        }
+                    },
+                    NavItem::MostPlayed => match history_repo.list_most_played(100) {
+                        Ok(tracks) => tracks,
+                        Err(e) => {
+                            log::warn!("Could not load the most played list: {e}");
+                            Vec::new()
+                        }
+                    },
+                    // Newest imports first. Index sort avoids deep-cloning all 100k
+                    // tracks just to keep 200, saving ~500k allocations on low-end CPUs.
+                    NavItem::RecentlyAdded => {
+                        let k = 200.min(self.all_tracks.len());
+                        if k == 0 {
+                            Vec::new()
+                        } else {
+                            let mut indices: Vec<usize> = (0..self.all_tracks.len()).collect();
+                            if indices.len() > k {
+                                indices.select_nth_unstable_by_key(k - 1, |&i| {
+                                    std::cmp::Reverse(self.all_tracks[i].added_at)
+                                });
+                                indices.truncate(k);
+                            }
+                            indices.sort_unstable_by_key(|&i| {
                                 std::cmp::Reverse(self.all_tracks[i].added_at)
                             });
-                            indices.truncate(k);
+                            indices
+                                .into_iter()
+                                .map(|i| self.all_tracks[i].clone())
+                                .collect()
                         }
-                        indices.sort_unstable_by_key(|&i| {
-                            std::cmp::Reverse(self.all_tracks[i].added_at)
-                        });
-                        indices
-                            .into_iter()
-                            .map(|i| self.all_tracks[i].clone())
-                            .collect()
                     }
-                }
-                NavItem::Playlist(pl_id) => match playlist_repo.get_tracks_resolved(&pl_id) {
-                    Ok(tracks) => tracks,
-                    Err(e) => {
-                        log::warn!("Could not load the playlist: {e}");
-                        Vec::new()
-                    }
-                },
-                NavItem::SmartPlaylist(sp_id) => {
-                    let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
-                    match playlist {
-                        // The policy decides whether the query runs now or
-                        // the previous result is served.
-                        Some(sp) => {
-                            let sp = sp.clone();
-                            self.smart_playlist_tracks(smart_repo, &sp, now_secs())
+                    NavItem::Playlist(pl_id) => match playlist_repo.get_tracks_resolved(&pl_id) {
+                        Ok(tracks) => tracks,
+                        Err(e) => {
+                            log::warn!("Could not load the playlist: {e}");
+                            Vec::new()
                         }
-                        None => Vec::new(),
+                    },
+                    NavItem::SmartPlaylist(sp_id) => {
+                        let playlist = self.smart_playlists.iter().find(|sp| sp.id == sp_id);
+                        match playlist {
+                            // The policy decides whether the query runs now or
+                            // the previous result is served.
+                            Some(sp) => {
+                                let sp = sp.clone();
+                                self.smart_playlist_tracks(smart_repo, &sp, now_secs())
+                            }
+                            None => Vec::new(),
+                        }
                     }
+                    _ => self.all_tracks.clone(),
                 }
-                _ => self.all_tracks.clone(),
-            }
-        };
+            };
 
         // Quality/format chips narrow whatever the view produced. Safe on top
         // of search results too.

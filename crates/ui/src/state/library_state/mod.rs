@@ -8,7 +8,7 @@ use database::{
 use domain::ids::TrackId;
 use domain::models::{Album, Artist, Genre, Playlist, ScanRoot, Track};
 use domain::smart::{SmartPlaylist, SmartRefreshPolicy, SmartRefreshSettings};
-use search::SearchEngine;
+use search::SearchIndex;
 
 use crate::components::sidebar::NavItem;
 use crate::components::songs_table::QuickFilter;
@@ -39,6 +39,9 @@ pub struct SmartPlaylistSnapshot {
 #[derive(Default)]
 pub struct LibraryState {
     pub all_tracks: Vec<Track>,
+    /// Lowercased copy of `all_tracks`, rebuilt only when the library changes,
+    /// so a per-keystroke search never re-folds a tag.
+    pub search_index: SearchIndex,
     pub displayed_tracks: Vec<Track>,
     /// Non-track matches from the latest query, used for the grouped search
     /// strip above the table.
