@@ -123,6 +123,8 @@ its own README, test matrix, and C ABI.
 - **Opt-in update check.** Contacts GitHub only when asked, selects the right
   asset, requires a published SHA-256 checksum, verifies the bytes, and hands
   back a file. It never installs or runs the download.
+- **Album liner notes.** User-written Markdown kept one document per album and
+  rendered by the bundled dependency-free reader.
 - **Loudness inspector, scrobble log, listening history, and library
   statistics** for the questions a music collection inevitably raises.
 
