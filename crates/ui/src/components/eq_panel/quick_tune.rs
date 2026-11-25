@@ -266,6 +266,7 @@ fn render_crossfeed_quick_card(
                     let profiles = [
                         (CrossfeedProfile::Bauer, "Bauer"),
                         (CrossfeedProfile::ChuMoy, "Chu Moy"),
+                        (CrossfeedProfile::Jmeier, "Jmeier"),
                         (CrossfeedProfile::Custom, "Custom"),
                     ];
                     for (prof, lbl) in profiles {
