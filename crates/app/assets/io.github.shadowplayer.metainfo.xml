@@ -40,6 +40,11 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.32.0" date="2026-11-25">
+      <description>
+        <p>Quick-tune gains the Jan Meier crossfeed profile, green main pushes ship installable builds for every target, and the EQ reports the shelf slope and applied headroom it actually uses.</p>
+      </description>
+    </release>
     <release version="0.31.0" date="2026-11-11">
       <description>
         <p>Unified player card across library views, independent volume slider widget, pruned legacy collections, podcasts, radio and meter codes.</p>

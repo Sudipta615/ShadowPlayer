@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-25
+
+*Released with audio-engine 1.14.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
 ### Added
 - **Installable builds on every green `main` push.** CI now calls the same packaging
   matrix as the release workflow (`.github/workflows/dist.yml`), so a
@@ -15,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.zip`). The artifacts are test builds kept for 14 days, not releases; a
   version tag still produces the reviewed draft release through
   `release.yml`.
+- **Quick-tune now offers the Jan Meier crossfeed profile.** The quick-tune
+  crossfeed strip listed only Bauer, Chu Moy and Custom, so `Jmeier` — the
+  Meier design foobar2000 ships and the full crossfeed panel already offers —
+  was unreachable from quick-tune. It is now a fourth pill, labelled `Jmeier`
+  to match the panel and the locale catalogue.
 
 ### Fixed
 - **EQ bands now do what their labels say, and a boost is audible.** Three
