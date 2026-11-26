@@ -6,6 +6,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-26
+
+*Released with audio-engine 1.15.0. The player and the engine are versioned separately and released
+together; the startup log prints both.*
+
+### Added
+- **Optional summation-headroom law for the N-input mix bus.** Up to eight
+  unity-gain inputs could sum to `+18 dB` before the limiter with nothing in
+  the UI saying so. The Mix Bus panel now offers `Off` (the default, and the
+  historical unity-per-input sum), `1/√N` (equal-power) and `1/N` (−6 dB per
+  doubling). The law weights each input by its own applied gain, so trimming a
+  lane returns headroom to the rest of the bus instead of changing its share.
+  `Off` is bit-exact with the previous behaviour.
+- **DoP from PCM synthesis.** With “DoP from PCM” enabled, a source that cannot
+  open a native DSD endpoint is framed as DSD over PCM (`dsd_rate / 16` at 24
+  bit) instead of falling back to plain PCM. It requires a stereo source and an
+  exclusive 24-bit PCM stream; when either is unavailable the engine still
+  reports the PCM fallback and its reason, and the negotiated state now carries
+  a `dop` flag so the UI can say which transport is actually running.
+- **Mix-bus lanes persist their source and their trim.** Each lane records the
+  file it plays alongside its gain, pan, mute and active state, so a relaunch
+  re-opens every lane into its own slot and reapplies the trim that belonged to
+  it. The engine gained `AddTrackAt`, which places a stream in a requested slot
+  and rejects an occupied or out-of-range one rather than silently remapping —
+  a saved trim can no longer follow a different stream.
+- **Lane gain reads in dB.** The channel strip shows the trim next to the gain
+  multiplier (`0.0 dB`, `−∞ dB` at silence), so a lane reads like a mixer strip
+  rather than a bare factor.
+
+### Changed
+- **Channel-management DSP runs on stereo when it is configured.** The routing
+  head (per-channel trim, channel matrix, bass management, sparse matrix FIR)
+  used to be reachable only on the `>2`-channel path. It is now selected for a
+  stereo block whenever its configuration is active, which makes sparse
+  matrix-FIR routing usable on a stereo rig; a default configuration keeps the
+  bit-exact stereo plan. The stage's advertised position is now “pre-mix (when
+  channel routing is active)” in both the capabilities table and the pipeline
+  docs.
+- The lane gain slider and the Help page agree with the engine's `[0, 1]` lane
+  gain bound; the Help text had advertised a `2.0x` ceiling the engine clamped.
+
+### Fixed
+- **A removed or replaced lane no longer keeps a stale trim or source.** Lane
+  state is keyed by slot, so removing a lane clears the slot instead of leaving
+  values behind for the next stream that lands there.
+
 ## [0.32.0] - 2026-11-25
 
 *Released with audio-engine 1.14.0. The player and the engine are versioned separately and released

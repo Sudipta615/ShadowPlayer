@@ -119,16 +119,34 @@ impl AudioEngine {
         // modulator stage. A failed restore is an explicit PCM fallback.
         let mut needs_start = true;
         let mut sdm_was_disabled = false;
+        let mut dop_restored = false;
         if self.dsd.sdm_active {
-            match self.try_restore_sdm(new_output.as_mut()) {
+            let restored = if self.dsd.dop_from_pcm {
+                self.try_restore_sdm_dop(new_output.as_mut())
+            } else {
+                self.try_restore_sdm(new_output.as_mut())
+            };
+            match restored {
                 Ok(rate) => {
                     actual_rate = rate;
                     needs_start = false;
                     new_output.set_dither_enabled(false);
-                    info!(
-                        "PCM→SDM native DSD transport restored during recovery (working {} Hz)",
-                        rate
-                    );
+                    if self.dsd.dop_from_pcm {
+                        // The replacement stream is already at the DoP rate;
+                        // the later DoP block must not reconfigure it twice.
+                        dop_restored = true;
+                        self.dsd.dop_active = true;
+                        info!(
+                            "PCM→DoP transport restored during recovery ({} Hz DoP frames, working {} Hz)",
+                            self.dsd.dop_rate,
+                            rate
+                        );
+                    } else {
+                        info!(
+                            "PCM→SDM native DSD transport restored during recovery (working {} Hz)",
+                            rate
+                        );
+                    }
                 }
                 Err(e) => {
                     warn!("PCM→SDM recovery failed ({e}); falling back to PCM");
@@ -138,6 +156,11 @@ impl AudioEngine {
                     self.dsd.sdm_fallback_reason = Some(format!(
                         "output device changed during PCM→SDM; PCM fallback ({e})"
                     ));
+                    if self.dsd.dop_from_pcm {
+                        self.dsd.clear_sdm_dop();
+                        self.dsd.dop_active = false;
+                        self.dsd.dop_rate = 0;
+                    }
                     sdm_was_disabled = true;
                     let _ = new_output.set_native_dsd(None);
                     actual_rate = new_output.sample_rate();
@@ -151,7 +174,6 @@ impl AudioEngine {
         // Exact wire/rate/channel support is verified by the backend here.
         let mut native_was_disabled = false;
         let mut dop_was_disabled = false;
-        let mut dop_restored = false;
         let mut native_failure_reason: Option<String> = None;
         if self.dsd.native_dsd_active {
             let native_result = self.active_native_dsd_params();
@@ -586,6 +608,45 @@ impl AudioEngine {
         if let Some(stage) = self.dsd.sdm_output.as_mut() {
             stage.reset();
         }
+        Ok(plan.working_rate)
+    }
+
+    /// Restore a PCM→SDM→DoP transport on a replacement output.
+    ///
+    /// The replacement stream must accept the negotiated 24-bit container at
+    /// `dsd_rate / 16` with verified exclusive access. The modulator stage's
+    /// signal state is reset (the device change already broke continuity), but
+    /// the plan and the stage itself are kept so the transport resumes without
+    /// a re-negotiation. Returns the **working** rate, which is what the PCM
+    /// DSP chain and the resampler resume at; the device clock is
+    /// `dsd.dop_rate`.
+    fn try_restore_sdm_dop(
+        &mut self,
+        new_output: &mut dyn crate::output::Output,
+    ) -> Result<u32, crate::output::OutputError> {
+        let plan = self.dsd.sdm_plan.ok_or_else(|| {
+            crate::output::OutputError::StreamError("missing PCM→DoP rate plan".to_string())
+        })?;
+        let dop_rate = (plan.dsd_rate / 16).max(1);
+        let actual = new_output.reconfigure_sample_format(dop_rate, cpal::SampleFormat::I32)?;
+        if actual != dop_rate
+            || new_output.sample_format() != cpal::SampleFormat::I32
+            || !new_output.output_info().access_state.is_bit_perfect()
+        {
+            return Err(crate::output::OutputError::StreamError(format!(
+                "replacement output settled on {} Hz/{:?} without verified exclusive access \
+                 (need {} Hz I32)",
+                actual,
+                new_output.sample_format(),
+                dop_rate
+            )));
+        }
+        new_output.set_dither_enabled(false);
+        if let Some(stage) = self.dsd.sdm_dop_output.as_mut() {
+            stage.reset();
+        }
+        self.dsd.dop_pending.clear();
+        self.dsd.dop_rate = dop_rate;
         Ok(plan.working_rate)
     }
 

@@ -198,7 +198,7 @@ pub(super) fn render_mixbus_tab(ui: &mut egui::Ui, _state: &mut HelpState, theme
 
         ui.label(
             egui::RichText::new(
-                tr!("ShadowPlayer includes a multi-track mixing engine allowing you to inject auxiliary stems, click tracks, or commentary channels alongside your primary music. Each channel slot provides independent float gain (0.0x to 2.0x), true stereo pan balancing (-1.0 Left to +1.0 Right), and instantaneous mute toggling.")
+                tr!("ShadowPlayer includes a multi-track mixing engine allowing you to inject auxiliary stems, click tracks, or commentary channels alongside your primary music. Each channel slot provides independent float gain (0.0x to 1.0x), true stereo pan balancing (-1.0 Left to +1.0 Right), and instantaneous mute toggling.")
             )
             .font(crate::theme::font(13.0))
             .color(theme.text_secondary),

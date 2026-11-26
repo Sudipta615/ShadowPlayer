@@ -11,7 +11,7 @@
 //! buffers, so a warmed-up instance is allocation-free on the audio thread.
 
 use crate::buffer::MAX_CHANNELS;
-use crate::decode::dsd::{DsdWireFormat, NativeDsdPacker};
+use crate::decode::dsd::{DopPacker, DsdWireFormat, NativeDsdPacker};
 
 use super::interpolator::PolyphaseInterpolator;
 use super::modulator::{SdmModulator, MODULATION_DEPTH};
@@ -35,6 +35,15 @@ pub struct SdmBlock {
     pub words: usize,
     /// Bytes written to the caller's packed buffer.
     pub output_bytes: usize,
+}
+
+/// Result of one [`SdmDopOutput::process_block`] call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SdmDopBlock {
+    /// Working-rate PCM frames consumed.
+    pub input_frames: usize,
+    /// DoP frames (24-bit words per channel) produced.
+    pub frames: usize,
 }
 
 /// Snapshot of the stage's measured behaviour.
@@ -233,5 +242,192 @@ impl SdmOutput {
     #[inline]
     pub fn wire(&self) -> DsdWireFormat {
         self.wire
+    }
+}
+
+// ── DoP synthesis from PCM ────────────────────────────────────────────────
+
+/// PCM→SDM→**DoP** output stage.
+///
+/// The native path above repacks the one-bit stream into a DAC's native DSD
+/// wire format. This stage targets the other common converter: one that
+/// accepts no native DSD but does accept 24-bit PCM, where DoP v1.1 carries
+/// 16 DSD bits per channel per 24-bit frame at `dsd_rate / 16`.
+///
+/// It is deliberately stereo-only. DoP v1.1 frames pair the two channels of
+/// one stereo stream under a shared marker; a multichannel DoP transport is a
+/// different framing problem (channel-pair groups with their own locking), and
+/// the engine's DSD-source DoP path is stereo-only for the same reason.
+///
+/// The stage produces normalized f32 words in `[-1, 1]` exactly as
+/// [`DopPacker::pack_stereo_frame_f32`] does, so the output backend's existing
+/// `f32 → i32` conversion (×2³¹) reproduces the 24-bit word bit-for-bit.
+pub struct SdmDopOutput {
+    plan: SdmRatePlan,
+    interpolators: Vec<PolyphaseInterpolator>,
+    modulators: Vec<SdmModulator>,
+    packer: DopPacker,
+    /// Per-channel partial 16-bit DSD words carried across blocks. A DSD64
+    /// plan emits eight bits per working frame, so a word spans two frames.
+    bit_acc: [u32; 2],
+    bit_count: [u8; 2],
+    interp_scratch: Vec<f64>,
+    input_frames: u64,
+}
+
+impl SdmDopOutput {
+    /// Build the stage for a stereo `plan`.
+    ///
+    /// Returns `None` for any channel count other than two (the DoP frame is
+    /// a stereo construction) or when the plan's interpolation factor cannot
+    /// fill a 16-bit word (it always can: the factor is a positive multiple of
+    /// eight).
+    pub fn new(plan: SdmRatePlan, channels: usize, modulator_order: usize) -> Option<Self> {
+        if channels != 2 {
+            return None;
+        }
+        let factor = plan.stage_factor as usize;
+        let interpolator = PolyphaseInterpolator::new(factor, DEFAULT_TAPS)?;
+        let modulator = SdmModulator::new(modulator_order, plan.multiple)?;
+        Some(Self {
+            plan,
+            interpolators: vec![interpolator; channels],
+            modulators: vec![modulator; channels],
+            packer: DopPacker::new(),
+            bit_acc: [0; 2],
+            bit_count: [0; 2],
+            interp_scratch: vec![0.0; factor],
+            input_frames: 0,
+        })
+    }
+
+    /// Convert one interleaved stereo block at the **working rate** into
+    /// interleaved stereo DoP f32 frames at `dsd_rate / 16`.
+    ///
+    /// `out` is cleared and refilled. Every input frame is consumed; a plan
+    /// whose factor is eight produces one DoP frame per two input frames and
+    /// carries the remaining eight bits to the next call. The caller must have
+    /// room for at most `output_capacity_frames(input_frames)` frames, which
+    /// is what [`Self::output_capacity_frames`] reports.
+    pub fn process_block(&mut self, input: &[f32], out: &mut Vec<f32>) -> SdmDopBlock {
+        out.clear();
+        let frames = input.len() / 2;
+        let factor = self.plan.stage_factor as usize;
+        // At most `factor / 16` whole words per input frame (4 for DSD512),
+        // plus the carried partial word. Fixed on the stack: no audio-path
+        // allocation, and the factor is a compile-time-bounded multiple.
+        let mut words_l = [0u16; 8];
+        let mut words_r = [0u16; 8];
+
+        for frame in 0..frames {
+            let base = frame * 2;
+            let mut count_l = 0usize;
+            let mut count_r = 0usize;
+            for ch in 0..2 {
+                let sample = input[base + ch] as f64;
+                self.interpolators[ch].process_sample(sample, &mut self.interp_scratch);
+                let mut words = [0u16; 8];
+                let mut count = 0usize;
+                for i in 0..factor {
+                    let y = self.modulators[ch].process_sample(self.interp_scratch[i]);
+                    let bit = u32::from(y > 0.0);
+                    self.bit_acc[ch] |= bit << self.bit_count[ch];
+                    self.bit_count[ch] += 1;
+                    if self.bit_count[ch] == 16 {
+                        words[count] = self.bit_acc[ch] as u16;
+                        count += 1;
+                        self.bit_acc[ch] = 0;
+                        self.bit_count[ch] = 0;
+                    }
+                }
+                if ch == 0 {
+                    words_l = words;
+                    count_l = count;
+                } else {
+                    words_r = words;
+                    count_r = count;
+                }
+            }
+            // Both channels advance by the same number of bits per frame, so
+            // the two counts agree; `min` is the defensive pairing rule.
+            for w in 0..count_l.min(count_r) {
+                let (l, r) = self.packer.pack_stereo_frame_f32(words_l[w], words_r[w]);
+                out.push(l);
+                out.push(r);
+            }
+        }
+
+        self.input_frames += frames as u64;
+        SdmDopBlock {
+            input_frames: frames,
+            frames: out.len() / 2,
+        }
+    }
+
+    /// Worst-case DoP frames produced for `input_frames` working-rate frames:
+    /// `ceil(input_frames × stage_factor / 16)`.
+    #[inline]
+    pub fn output_capacity_frames(&self, input_frames: usize) -> usize {
+        let bits = input_frames.saturating_mul(self.plan.stage_factor as usize);
+        bits.div_ceil(16)
+    }
+
+    /// Drop signal state after a seek or track change.
+    pub fn reset(&mut self) {
+        for m in &mut self.modulators {
+            m.reset();
+        }
+        for i in &mut self.interpolators {
+            i.reset();
+        }
+        self.packer.reset();
+        self.bit_acc = [0; 2];
+        self.bit_count = [0; 2];
+        self.input_frames = 0;
+    }
+
+    /// Measured telemetry, never asserted values.
+    pub fn telemetry(&self) -> SdmTelemetry {
+        let mut clips = 0;
+        let mut recoveries = 0;
+        let mut ones = 0u64;
+        let mut samples = 0u64;
+        let mut peak = 0.0f64;
+        for m in &self.modulators {
+            clips += m.clip_count();
+            recoveries += m.state_recoveries();
+            ones += m.ones();
+            samples += m.samples();
+            peak = peak.max(m.input_peak());
+        }
+        SdmTelemetry {
+            input_frames: self.input_frames,
+            clips,
+            state_recoveries: recoveries,
+            input_peak: peak,
+            ones_ratio: if samples == 0 {
+                0.0
+            } else {
+                ones as f64 / samples as f64
+            },
+            interpolator_delay_ms: self.plan.interpolator_delay_ms(DEFAULT_TAPS / 2),
+            modulation_depth: MODULATION_DEPTH,
+        }
+    }
+
+    #[inline]
+    pub fn plan(&self) -> SdmRatePlan {
+        self.plan
+    }
+
+    /// PCM sample rate the DoP frames must be clocked at (`dsd_rate / 16`).
+    #[inline]
+    pub fn dop_rate(&self) -> u32 {
+        (self.plan.dsd_rate / 16).max(1)
+    }
+
+    #[inline]
+    pub fn channels(&self) -> usize {
+        2
     }
 }

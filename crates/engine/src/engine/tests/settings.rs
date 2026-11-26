@@ -145,6 +145,7 @@ fn new_filter_and_dsd_commands_reach_the_engine_config() {
         modulator: SdmModulator::SeventhOrder,
         rate: SdmRate::Dsd256,
         dsd_bypass: true,
+        dop: true,
     };
     let dac = DacCorrectionConfig {
         enabled: true,

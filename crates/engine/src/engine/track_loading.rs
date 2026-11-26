@@ -78,8 +78,13 @@ impl AudioEngine {
         );
         let wants_sdm = transport_plan == super::dsd_state::DsdTransportPlan::Sdm;
         let wants_native = transport_plan == super::dsd_state::DsdTransportPlan::Native;
-        let needs_teardown =
-            (self.dsd.native_dsd_active && !wants_native) || (self.dsd.sdm_active && !wants_sdm);
+        // PCM→DoP synthesis also owns the output format (24-bit PCM at
+        // `dsd_rate / 16`), so every load leaves it before renegotiating. It
+        // is not a native DSD stream, but the rate and container are just as
+        // specific and a stale one would feed raw PCM into a DoP-rate stream.
+        let needs_teardown = (self.dsd.native_dsd_active && !wants_native)
+            || (self.dsd.sdm_active && !wants_sdm)
+            || self.dsd.dop_from_pcm;
         if needs_teardown {
             let output_rate = {
                 let output = self.audio_output.as_mut().ok_or_else(|| {
@@ -100,6 +105,9 @@ impl AudioEngine {
             self.dsd.sdm_active = false;
             self.dsd.sdm_output = None;
             self.dsd.sdm_plan = None;
+            self.dsd.clear_sdm_dop();
+            self.dsd.dop_active = false;
+            self.dsd.dop_rate = 0;
             self.graph.set_dop_bypass(false);
             // The primary output is PCM again and may have a different rate
             // than when the monitor was built; its conversion ratio belongs
@@ -115,6 +123,7 @@ impl AudioEngine {
         self.dsd.sdm_output = None;
         self.dsd.sdm_plan = None;
         self.dsd.sdm_fallback_reason = None;
+        self.dsd.clear_sdm_dop();
         // The decimation filter only matters on the PCM-conversion path, but
         // selecting it here (before any decode) keeps the cascade in sync with
         // the config for the whole track.
@@ -158,8 +167,13 @@ impl AudioEngine {
             }
         }
         let mut sdm_active = false;
+        // Output PCM rate of a synthesised DoP stream (`dsd_rate / 16`).
+        let mut sdm_dop_rate: Option<u32> = None;
         if wants_sdm {
-            match self.negotiate_sdm(&decoder) {
+            // Native DSD first. A failure is not the end of the modulator: if
+            // the host opted in, the same one-bit stream is framed as DoP
+            // into a 24-bit PCM transport.
+            let native = match self.negotiate_sdm(&decoder) {
                 Ok((plan, format, buffer)) => {
                     let channels = decoder.info().channels;
                     match crate::dsp::sdm::SdmOutput::new(
@@ -189,24 +203,80 @@ impl AudioEngine {
                                 plan.stage_factor,
                                 format.label(),
                             );
+                            Ok(())
                         }
                         None => {
-                            let reason = format!(
-                                "could not build the {} modulator for {} channels",
-                                self.config.sdm.modulator.label(),
-                                channels
-                            );
-                            warn!("PCM→SDM unavailable: {reason}; staying on PCM");
-                            self.dsd.sdm_fallback_reason = Some(reason);
                             if let Some(output) = self.audio_output.as_mut() {
                                 let _ = output.set_native_dsd(None);
                             }
+                            Err(format!(
+                                "could not build the {} modulator for {} channels",
+                                self.config.sdm.modulator.label(),
+                                channels
+                            ))
                         }
                     }
                 }
-                Err(e) => {
-                    warn!("PCM→SDM unavailable ({e}); staying on PCM");
-                    self.dsd.sdm_fallback_reason = Some(e.to_string());
+                Err(e) => Err(e.to_string()),
+            };
+
+            if let Err(native_err) = native {
+                if self.config.sdm.dop && decoder.info().channels == 2 {
+                    match self.negotiate_sdm_dop(&decoder) {
+                        Ok((plan, dop_rate)) => match crate::dsp::sdm::SdmDopOutput::new(
+                            plan,
+                            2,
+                            self.config.sdm.modulator.order(),
+                        ) {
+                            Some(stage) => {
+                                sdm_active = true;
+                                sdm_dop_rate = Some(dop_rate);
+                                self.dsd.dop_from_pcm = true;
+                                self.dsd.dop_pending = Vec::with_capacity(
+                                    stage.output_capacity_frames(
+                                        crate::buffer::MAX_AUDIO_BLOCK_FRAMES,
+                                    ) * 2,
+                                );
+                                self.dsd.sdm_dop_output = Some(stage);
+                                self.dsd.sdm_plan = Some(plan);
+                                self.output_sample_rate = plan.working_rate;
+                                self.graph.update_sample_rate(plan.working_rate as f32);
+                                dsd_report = crate::decode::DsdTransportReport::new(
+                                    crate::decode::DsdTransport::Dop,
+                                    crate::decode::DsdTransport::Dop,
+                                );
+                                dsd_report.bit_rate = Some(plan.dsd_rate);
+                                info!(
+                                    "PCM→DoP active: {} modulator, 2 ch, {} Hz → {} bps \
+                                     (working {} Hz, ×{}, DoP {} Hz via 24-bit PCM)",
+                                    self.config.sdm.modulator.label(),
+                                    plan.pcm_rate,
+                                    plan.dsd_rate,
+                                    plan.working_rate,
+                                    plan.stage_factor,
+                                    dop_rate,
+                                );
+                            }
+                            None => {
+                                let reason = "could not build the stereo DoP packing stage";
+                                warn!("PCM→DoP unavailable: {reason}; staying on PCM");
+                                self.dsd.sdm_fallback_reason = Some(format!(
+                                    "native DSD unavailable ({native_err}); {reason}"
+                                ));
+                            }
+                        },
+                        Err(e) => {
+                            let reason = format!(
+                                "native DSD unavailable ({native_err}); DoP synthesis \
+                                 unavailable ({e})"
+                            );
+                            warn!("PCM→SDM unavailable: {reason}; staying on PCM");
+                            self.dsd.sdm_fallback_reason = Some(reason);
+                        }
+                    }
+                } else {
+                    warn!("PCM→SDM unavailable ({native_err}); staying on PCM");
+                    self.dsd.sdm_fallback_reason = Some(native_err);
                 }
             }
         }
@@ -315,28 +385,43 @@ impl AudioEngine {
         if dsd_report.actual == crate::decode::DsdTransport::PcmConversion {
             dsd_report.noise_filter = decoder.dsd_noise_filter();
         }
-        self.dsd.dop_active = dop_active;
-        self.dsd.dop_rate = if dop_active { dop_rate.unwrap_or(0) } else { 0 };
+        // `dop_active` covers both DoP transports: a DSD source packed by the
+        // decoder (DSP bypassed) and PCM→SDM frames synthesised here (DSP
+        // active at the working rate). Keep them distinguishable.
+        let dop_from_pcm = sdm_dop_rate.is_some();
+        self.dsd.dop_active = dop_active || dop_from_pcm;
+        self.dsd.dop_rate = if dop_active {
+            dop_rate.unwrap_or(0)
+        } else {
+            sdm_dop_rate.unwrap_or(0)
+        };
         self.dsd.native_dsd_active = native_dsd_active;
         self.dsd.sdm_active = sdm_active;
         self.dsd.dsd_transport_report = dsd_report;
-        if dop_active || native_dsd_active {
-            self.graph.set_dop_bypass(true);
+        let bitstream_bypass = native_dsd_active || (dop_active && !dop_from_pcm);
+        self.graph.set_dop_bypass(bitstream_bypass);
+        // Dither must be off for every DoP transport: it would overwrite the
+        // 24-bit DoP word (marker included) with shaped quantization noise.
+        if bitstream_bypass || dop_from_pcm {
             if let Some(ref output) = self.audio_output {
                 output.set_dither_enabled(false);
             }
+        } else if let Some(ref output) = self.audio_output {
+            output.set_dither_enabled(self.config.dither_enabled);
+        }
+        if bitstream_bypass || dop_from_pcm {
             self.speed = 1.0;
-            if dop_active {
-                info!(
-                    "DSD DoP active: {} Hz to DAC (DSP bypassed, dither off)",
-                    self.dsd.dop_rate
-                );
-            }
-        } else {
-            self.graph.set_dop_bypass(false);
-            if let Some(ref output) = self.audio_output {
-                output.set_dither_enabled(self.config.dither_enabled);
-            }
+        }
+        if dop_active && !dop_from_pcm {
+            info!(
+                "DSD DoP active: {} Hz to DAC (DSP bypassed, dither off)",
+                self.dsd.dop_rate
+            );
+        } else if dop_from_pcm {
+            info!(
+                "PCM→DoP active: {} Hz DoP frames to DAC (DSP at working rate, dither off)",
+                self.dsd.dop_rate
+            );
         }
 
         let info = decoder.info().clone();
@@ -874,6 +959,90 @@ impl AudioEngine {
         Err(last_error.unwrap_or_else(|| {
             OutputError::StreamError("no native DSD rate could be negotiated".to_string())
         }))
+    }
+
+    /// Negotiate a **PCM→SDM→DoP** transport: an exclusive 24-bit PCM stream
+    /// at `dsd_rate / 16`, into which the modulator's one-bit output is
+    /// framed.
+    ///
+    /// DoP is a stereo framing (one marker shared by the two channels of a
+    /// stereo word), and a shared-mode mixer would rewrite the 24-bit words,
+    /// so both are hard requirements. Candidate rates are the same clock-family
+    /// multiples the native path uses; each is filtered against the device's
+    /// advertised PCM rates and then verified by actually reconfiguring the
+    /// stream, because a device that lists a rate may still refuse it.
+    fn negotiate_sdm_dop(
+        &mut self,
+        decoder: &Decoder,
+    ) -> Result<(crate::dsp::sdm::SdmRatePlan, u32), OutputError> {
+        let info = decoder.info();
+        if info.channels != 2 {
+            return Err(OutputError::StreamError(
+                "DoP synthesis is stereo-only".to_string(),
+            ));
+        }
+        let plans = crate::dsp::sdm::candidates(info.sample_rate, self.config.sdm.rate, &[]);
+        if plans.is_empty() {
+            return Err(OutputError::StreamError(format!(
+                "no PCM→DoP rate plan for a {} Hz source (requested {})",
+                info.sample_rate,
+                self.config.sdm.rate.label()
+            )));
+        }
+        let supported_rates = {
+            let output = self.audio_output.as_ref().ok_or_else(|| {
+                OutputError::StreamError("no output device is active".to_string())
+            })?;
+            let out_info = output.output_info();
+            if !out_info.access_state.is_bit_perfect() {
+                return Err(OutputError::StreamError(format!(
+                    "DoP requires an exclusive output — {}",
+                    dop_exclusive_reason(&out_info, self.config.output_backend)
+                )));
+            }
+            output.capabilities().sample_rates
+        };
+
+        let mut last_error = None;
+        for plan in plans {
+            let dop_rate = (plan.dsd_rate / 16).max(1);
+            if dop_rate < 44_100 {
+                continue;
+            }
+            if !supported_rates.is_empty() && !supported_rates.contains(&dop_rate) {
+                last_error = Some(format!(
+                    "the output does not advertise the {} Hz DoP container rate",
+                    dop_rate
+                ));
+                continue;
+            }
+            let Some(output) = self.audio_output.as_mut() else {
+                return Err(OutputError::StreamError(
+                    "no output device is active".to_string(),
+                ));
+            };
+            match output.reconfigure_sample_format(dop_rate, cpal::SampleFormat::I32) {
+                Ok(actual)
+                    if actual == dop_rate
+                        && output.sample_format() == cpal::SampleFormat::I32
+                        && output.output_info().access_state.is_bit_perfect() =>
+                {
+                    return Ok((plan, dop_rate));
+                }
+                Ok(actual) => {
+                    last_error = Some(format!(
+                        "the output settled on {} Hz/{:?} (need {} Hz I32 exclusive)",
+                        actual,
+                        output.sample_format(),
+                        dop_rate
+                    ));
+                }
+                Err(e) => last_error = Some(e.to_string()),
+            }
+        }
+        Err(OutputError::StreamError(last_error.unwrap_or_else(|| {
+            "no DoP container rate could be negotiated".to_string()
+        })))
     }
 
     /// Sample-accurate gapless handoff to the next track.

@@ -104,6 +104,12 @@ pub struct EngineConfig {
     pub transition_mode: TransitionMode,
     #[serde(default = "default_mix_slots")]
     pub mix_slots: usize,
+    /// Automatic summation-headroom law for the N-input mix bus. `Off`
+    /// (default) keeps the historical unity-per-input sum; see
+    /// [`crate::SummationHeadroom`]. Read when a generation is built, so a
+    /// change takes effect on the next prepared generation.
+    #[serde(default)]
+    pub bus_summation: crate::SummationHeadroom,
     #[serde(default)]
     pub mix_trims: Vec<SlotTrimEntry>,
     #[serde(default)]
@@ -603,6 +609,7 @@ impl Default for EngineConfig {
             channel_mix: ChannelMixConfig::default(),
             transition_mode: TransitionMode::default(),
             mix_slots: default_mix_slots(),
+            bus_summation: crate::SummationHeadroom::default(),
             mix_trims: Vec::new(),
             mix_sends: Vec::new(),
             aux: AuxBusConfig::default(),

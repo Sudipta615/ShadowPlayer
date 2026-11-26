@@ -377,6 +377,14 @@ impl AudioSession {
         self.send(EngineCommand::AddTrack(source));
     }
 
+    /// Add a track as a lane on a specific mix-bus slot ≥ 2. Used when the
+    /// caller owns the slot mapping (restoring saved lanes), so the trim stored
+    /// for that slot stays attached to its own stream. The engine rejects an
+    /// occupied or out-of-range slot instead of remapping it.
+    pub fn add_track_at(&self, slot: u8, source: engine::AudioSource) {
+        self.send(EngineCommand::AddTrackAt { slot, source });
+    }
+
     /// Remove the lane on the given mix-bus slot and silence it.
     pub fn remove_track(&self, slot: u8) {
         self.send(EngineCommand::RemoveTrack(slot));
@@ -443,6 +451,14 @@ impl AudioSession {
     /// Activate or detach an input mix lane.
     pub fn set_input_active(&self, slot: u8, active: bool) {
         self.handle.set_input_active(slot, active);
+    }
+
+    /// Select the automatic summation-headroom law for the N-input mix bus.
+    ///
+    /// `Off` is the historical unity-per-input sum. The engine rebuilds the
+    /// generation so the law is applied to every input, including aux taps.
+    pub fn set_bus_summation(&self, law: engine::config::SummationHeadroom) {
+        self.send(EngineCommand::SetBusSummation(law));
     }
 
     /// Attach or clear a parameter automation curve for a mix slot.

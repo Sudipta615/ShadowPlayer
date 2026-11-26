@@ -3,7 +3,7 @@
 use crate::buffer::DsdByteBuffer;
 use crate::decode::dsd::DsdWireFormat;
 use crate::decode::DsdTransportReport;
-use crate::dsp::sdm::{SdmOutput, SdmRatePlan};
+use crate::dsp::sdm::{SdmDopOutput, SdmOutput, SdmRatePlan};
 use std::sync::Arc;
 
 /// Build the reason text for why DoP cannot engage because the output is not
@@ -124,18 +124,46 @@ pub(crate) struct DsdTransportState {
     /// transport plus ordered fallback steps (native → DoP → PCM).
     pub(crate) dsd_transport_report: DsdTransportReport,
 
-    /// True while a PCM source is being converted to native DSD by the
+    /// True while a PCM source is being converted to a one-bit stream by the
     /// engine's own modulator. Distinct from `native_dsd_active`: the DSP
-    /// chain still runs at the working rate, and the transport is native DSD.
+    /// chain still runs at the working rate. The transport is native DSD
+    /// unless `dop_from_pcm` is also set, in which case the one-bit stream is
+    /// framed as DoP into the PCM sink.
     pub(crate) sdm_active: bool,
+    /// True when the active DoP stream is **synthesised from a PCM source**
+    /// (PCM→SDM→DoP), not a DSD source packed through `DopPacker` by the
+    /// decoder. The DSP chain runs (unlike DSD-source DoP) and the output
+    /// sink is PCM at `dop_rate`.
+    pub(crate) dop_from_pcm: bool,
     /// The per-channel interpolation + modulation + packing stage. `None`
     /// when PCM output is active.
     pub(crate) sdm_output: Option<SdmOutput>,
+    /// The stereo PCM→SDM→DoP stage. `Some` only while `dop_from_pcm` is set.
+    pub(crate) sdm_dop_output: Option<SdmDopOutput>,
+    /// Converted DoP f32 frames the sink has not accepted yet. Bounded to one
+    /// converted block; the next call drains it before converting more, which
+    /// is how a short sink write is retried without re-modulating the source.
+    pub(crate) dop_pending: Vec<f32>,
     /// Negotiated PCM→SDM rate plan (working rate, DSD rate, factor).
     pub(crate) sdm_plan: Option<SdmRatePlan>,
     /// Why a requested PCM→SDM conversion did not engage. Preserved across
     /// the whole track so the UI can explain the PCM fallback.
     pub(crate) sdm_fallback_reason: Option<String>,
+}
+
+impl DsdTransportState {
+    /// The active DoP stream is PCM→SDM synthesis, not a DSD source.
+    #[inline]
+    pub(crate) fn sdm_dop_active(&self) -> bool {
+        self.sdm_active && self.dop_from_pcm
+    }
+
+    /// Drop the PCM→DoP stage and any frames it produced but did not deliver.
+    pub(crate) fn clear_sdm_dop(&mut self) {
+        self.dop_from_pcm = false;
+        self.sdm_dop_output = None;
+        self.dop_pending.clear();
+    }
 }
 
 impl Default for DsdTransportState {
@@ -149,7 +177,10 @@ impl Default for DsdTransportState {
             dsd_pack_scratch: Vec::with_capacity(1 << 16),
             dsd_transport_report: DsdTransportReport::default(),
             sdm_active: false,
+            dop_from_pcm: false,
             sdm_output: None,
+            sdm_dop_output: None,
+            dop_pending: Vec::new(),
             sdm_plan: None,
             sdm_fallback_reason: None,
         }

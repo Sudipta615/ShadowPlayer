@@ -58,6 +58,14 @@ pub enum EngineCommand {
     /// Add a track as an independent lane on the first free mix-bus slot
     /// ≥ 2, playing alongside the primary stream.
     AddTrack(AudioSource),
+    /// Add a track as a lane on a **specific** mix-bus slot ≥ 2. Used when the
+    /// caller owns the slot mapping (a player restoring saved lanes), so a
+    /// saved trim stays attached to its own stream. An occupied or
+    /// out-of-range slot is rejected rather than remapped.
+    AddTrackAt {
+        slot: u8,
+        source: AudioSource,
+    },
     /// Remove the lane on the given mix-bus slot (if any) and silence it.
     RemoveTrack(u8),
     /// Set a lane's linear gain in [0, 1].
@@ -675,6 +683,10 @@ pub enum EngineCommand {
         slot: u8,
         active: bool,
     },
+    /// Mix bus: automatic summation-headroom law (off, 1/√N, or 1/N).
+    /// Rebuilds the generation so the mix node's scale is re-derived from the
+    /// new active-input count.
+    SetBusSummation(config::SummationHeadroom),
     /// Mix-lane / bus: parameter automation curve for a mix slot.
     SetSlotAutomation {
         slot: u8,

@@ -25,12 +25,12 @@
 //!
 //! ── Summation gain law ─────────────────────────────────────────────────────
 //!
-//! The bus sums its inputs at their **per-input user gain, with no automatic
-//! headroom compensation**: there is no `-6 dB`/slot or `1/√N` law applied
-//! anywhere in this module, and none is documented as a default elsewhere in
-//! the project. This is stated here because it is a deliberate property of the
-//! current design AND the single most important thing to know when adding
-//! lanes:
+//! The bus sums its inputs at their **per-input user gain**. By default there
+//! is no automatic headroom compensation: `EngineConfig::bus_summation`
+//! defaults to [`config::SummationHeadroom::Off`], so a default configuration
+//! behaves exactly as it always has and the bit-exact equivalence suite stays
+//! meaningful. This is still the single most important thing to know when
+//! adding lanes:
 //!
 //!   * `MAX_MIX_SLOTS` is 8, and each input's `gain` defaults to `1.0`.
 //!   * 8 unity-gain inputs summing **coherently** reach **+18.1 dB**;
@@ -45,11 +45,39 @@
 //! suite pins — are unaffected: a crossfade cross-fades the pair rather than
 //! summing them at unity, so the bus peak is unchanged.
 //!
-//! Changing this to a normalised law is a *sound* change for every existing
-//! user and would have to be mirrored in the frozen `dsp::pipeline` oracle to
-//! keep `tests/fidelity/graph_pipeline_equivalence` meaningful, so it is not
-//! something to change incidentally. The available levers for a host are
-//! per-input `gain` and `SlotSend::master_gain`.
+//! A host that wants automatic headroom opts in with
+//! [`config::SummationHeadroom::InverseSqrt`] (`1/√N`, equal-power) or
+//! [`config::SummationHeadroom::InverseN`] (`1/N`, ‑6 dB per doubling). The law
+//! scales every input — including aux taps, so the send/return balance is
+//! preserved — and derives `N` from the active inputs: the transition pair
+//! counts as one program input on the stereo bus (it cross-fades rather than
+//! sums), while every active slot counts on the multichannel bus (slots ≥ 1
+//! sum there). It is opt-in because it is a *sound* change, not a correction
+//! the engine applies silently; the frozen `dsp::pipeline` oracle has no
+//! equivalent law, so a non-`Off` setting is a production-graph policy feature
+//! (like DAC correction), and the default chain is what the oracle pins.
+//!
+//! ── Per-input weighting ────────────────────────────────────────────────────
+//!
+//! `N` is not a raw lane count: each input enters the law at the **gain it is
+//! currently applying**, so the normalization tracks what the bus actually
+//! carries. A lane trimmed to half contributes a quarter of the power
+//! (`InverseSqrt`) or half of the coherent sum (`InverseN`); trimming it to
+//! silence removes it from `N` entirely and returns that headroom to the rest
+//! of the bus. Slot 0 always weighs 1.0 — on the stereo bus it is the program
+//! pair, which cross-fades rather than sums, and on the multichannel bus it is
+//! the primary stream the lanes are mixed around; its own gain is still
+//! applied, only its share of `N` is fixed. With every input at unity the
+//! weighted sums collapse to the lane count, so `1/√N` / `1/N` mean exactly
+//! what they always did.
+//!
+//! Because the weighted `N` is recomputed every block from the applied gains, a
+//! lane fade moves the bus scale gradually instead of stepping it: the lane's
+//! own gain ramp and the normalization share the same time constant. Attaching
+//! or detaching a lane still steps the scale by one law increment (3 dB for
+//! `InverseSqrt` when the weighted `N` doubles). A host that needs a click-free
+//! attach should fade the lane at the source, as with any other bus change. The
+//! remaining manual levers are per-input `gain` and `SlotSend::master_gain`.
 
 pub mod envelope;
 pub mod sum;
@@ -570,6 +598,10 @@ pub struct MixBusNode {
     pub curve: CrossfadeCurve,
     /// Whether crossfade transitions are enabled (`config.crossfade.enabled`).
     pub crossfade_enabled: bool,
+    /// Automatic summation-headroom law. `Off` is the bit-exact default; the
+    /// scale is derived from the active inputs weighted by their applied
+    /// gains (see [`Self::summation_gain_stereo`] / [`Self::summation_gain_mc`]).
+    pub headroom: config::SummationHeadroom,
     /// Program-gated ducking. `None` = ducking disabled, which
     /// keeps the sum bit-exact. Runtime gain is advanced once per block by
     /// [`Self::duck_tick`] and folded into the target slots' gains.
@@ -652,8 +684,84 @@ impl MixBusNode {
                 as usize,
             curve: curve.into(),
             crossfade_enabled,
+            headroom: config::SummationHeadroom::default(),
             duck: None,
             send_bus,
+        }
+    }
+
+    /// Select the automatic summation-headroom law for this generation.
+    pub fn set_summation_headroom(&mut self, law: config::SummationHeadroom) {
+        self.headroom = law;
+    }
+
+    /// Scale applied to every input of the stereo bus.
+    ///
+    /// The transition pair counts as **one** program input because it
+    /// cross-fades rather than sums; each active lane (slot ≥ 2) enters the
+    /// law at its applied gain. `Off` returns exactly `1.0`, so the default
+    /// path is bit-identical.
+    pub(crate) fn summation_gain_stereo(&self) -> f32 {
+        let mut power = 1.0f32;
+        let mut coherent = 1.0f32;
+        for (k, input) in self.inputs.iter().enumerate().skip(2) {
+            if !input.active {
+                continue;
+            }
+            let w = self.summation_weight(k);
+            power += w * w;
+            coherent += w;
+        }
+        self.summation_gain(power, coherent)
+    }
+
+    /// Scale applied to every input of the multichannel bus, where slots ≥ 1
+    /// are independent streams summed channel-wise at their applied gain.
+    pub(crate) fn summation_gain_mc(&self) -> f32 {
+        let mut power = 0.0f32;
+        let mut coherent = 0.0f32;
+        for (k, input) in self.inputs.iter().enumerate() {
+            if !input.active {
+                continue;
+            }
+            let w = self.summation_weight(k);
+            power += w * w;
+            coherent += w;
+        }
+        self.summation_gain(power, coherent)
+    }
+
+    /// The weight one input contributes to the headroom law: the gain it is
+    /// currently applying (see the module's per-input weighting notes).
+    ///
+    /// Slot 0 weighs 1.0 by definition — it is the program input the lanes are
+    /// mixed around, and on the stereo bus it is the cross-fading pair — so a
+    /// program fader does not shrink the normalization the lanes are held to.
+    #[inline]
+    fn summation_weight(&self, index: usize) -> f32 {
+        if index == 0 {
+            return 1.0;
+        }
+        let gain = self.inputs[index].gain.current_gain();
+        if gain.is_finite() {
+            gain.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Resolve the law for a weighted bus. `power` is `Σ wᵢ²` and `coherent`
+    /// is `Σ wᵢ` over the inputs that count; all-unity weights make them the
+    /// lane count and its square, so the historical `1/√N` / `1/N` values are
+    /// the special case. A bus with no weight left keeps the unity scale —
+    /// there is nothing to normalize.
+    #[inline]
+    fn summation_gain(&self, power: f32, coherent: f32) -> f32 {
+        match self.headroom {
+            config::SummationHeadroom::Off => 1.0,
+            config::SummationHeadroom::InverseSqrt if power > 0.0 => power.sqrt().recip(),
+            config::SummationHeadroom::InverseN if coherent > 0.0 => coherent.recip(),
+            _ => 1.0,
         }
     }
 

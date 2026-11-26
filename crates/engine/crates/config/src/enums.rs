@@ -785,6 +785,52 @@ impl NoiseShaper {
     pub const ALL: [Self; 5] = [Self::Tpdf, Self::Shibata, Self::Ns5, Self::Ns9, Self::Lns15];
 }
 
+/// Automatic summation-headroom law for the N-input mix bus.
+///
+/// The bus sums its inputs at their per-input user gain. Without a law that
+/// proceeds unchecked: `MAX_MIX_SLOTS` unity-gain inputs can reach
+/// `+20·log10(N)` dB coherently before the limiter. These laws trade some
+/// level for headroom, applied to every input so the mix's internal balance
+/// (including aux sends and returns) is preserved:
+///
+/// - `Off` — no automatic scaling. The historical only-choice behaviour and
+///   the default, so existing configurations and the bit-exact equivalence
+///   oracle are unchanged.
+/// - `InverseSqrt` — each input is scaled by `1/√N` (equal-power). Uncorrelated
+///   material keeps its perceived level; coherent material can still reach
+///   `+10·log10(N)` dB.
+/// - `InverseN` — each input is scaled by `1/N` (‑6 dB per doubling). Coherent
+///   material cannot exceed the level of a single unity input.
+///
+/// `N` is the number of active inputs: the transition pair counts as one
+/// program input on the stereo bus (it cross-fades rather than sums), while
+/// every active slot counts on the multichannel bus (slots ≥ 1 sum there).
+/// This is an audible policy choice, deliberately opt-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SummationHeadroom {
+    /// No automatic scaling (historical behaviour).
+    #[default]
+    Off,
+    /// Scale every input by `1/√N` (equal-power).
+    InverseSqrt,
+    /// Scale every input by `1/N` (‑6 dB per doubling).
+    InverseN,
+}
+
+impl SummationHeadroom {
+    /// Stable configuration-file spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::InverseSqrt => "InverseSqrt",
+            Self::InverseN => "InverseN",
+        }
+    }
+
+    /// Every variant, in configuration order.
+    pub const ALL: [Self; 3] = [Self::Off, Self::InverseSqrt, Self::InverseN];
+}
+
 /// Fallback strategy when the exact desired sample rate is not supported by the hardware device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RateFallbackPolicy {

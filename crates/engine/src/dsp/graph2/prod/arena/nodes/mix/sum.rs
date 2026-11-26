@@ -19,10 +19,14 @@ impl MixBusNode {
     /// it while the per-input borrows stay alive.
     pub(super) fn mix_stereo(&mut self, planes: &mut [&mut [f32]]) {
         let frames = planes[0].len();
+        // Automatic summation headroom, folded into the per-slot gains so the
+        // aux taps (taken post-fader) carry the same scale as the master sum.
+        // Off = exactly 1.0 = the historical bit-exact path.
+        let headroom = self.summation_gain_stereo();
         // Duck state first (borrows `self.duck`), before the inputs are split
         // out for the frame loop. Gains are 1.0 when ducking is disabled.
-        let d0 = self.duck_gain_for(0);
-        let d1 = self.duck_gain_for(1);
+        let d0 = self.duck_gain_for(0) * headroom;
+        let d1 = self.duck_gain_for(1) * headroom;
         self.duck_tick(frames);
 
         let (l, r) = planes.split_at_mut(1);
@@ -182,7 +186,7 @@ impl MixBusNode {
         // Canonical layout is exactly two, so this tail never runs in
         // the bit-exact-equivalence domain.
         if self.inputs.len() > 2 {
-            self.sum_extra_slots(out_l, out_r, frames);
+            self.sum_extra_slots(out_l, out_r, frames, headroom);
         }
     }
 
@@ -192,7 +196,13 @@ impl MixBusNode {
     /// fixed `duck_gains`/automation tables — index-based is the clear
     /// spelling, so needless_range_loop is allowed (mirrored on the f64 twin).
     #[allow(clippy::needless_range_loop)]
-    pub(super) fn sum_extra_slots(&mut self, out_l: &mut [f32], out_r: &mut [f32], frames: usize) {
+    pub(super) fn sum_extra_slots(
+        &mut self,
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        frames: usize,
+        headroom: f32,
+    ) {
         // Duck gains per slot, computed before the inputs are
         // borrowed. 1.0 when disabled / not a target. NOTE: the duck envelope
         // must advance exactly ONCE per block — the caller (`mix_stereo` /
@@ -210,7 +220,7 @@ impl MixBusNode {
             if !input.active {
                 continue;
             }
-            let dk = duck_gains[k];
+            let dk = duck_gains[k] * headroom;
             let m = input.send.master_gain;
             let (b0l, b0r) = balance_gains(input.balance);
             let (p0l, p0r) = pan_gains(input.pan, input.pan_law);
@@ -334,8 +344,9 @@ impl MixBusNode {
     /// f32 and widened, and the sum is `out_l * out_gain + next_l * in_gain`.
     pub(super) fn mix_stereo_f64(&mut self, planes: &mut [&mut [f64]]) {
         let frames = planes[0].len();
-        let d0 = self.duck_gain_for(0);
-        let d1 = self.duck_gain_for(1);
+        let headroom = self.summation_gain_stereo();
+        let d0 = self.duck_gain_for(0) * headroom;
+        let d1 = self.duck_gain_for(1) * headroom;
         self.duck_tick(frames);
 
         let (l, r) = planes.split_at_mut(1);
@@ -484,7 +495,7 @@ impl MixBusNode {
         // aux node sets its own `written` flag from `send_active`).
 
         if self.inputs.len() > 2 {
-            self.sum_extra_slots_f64(out_l, out_r, frames);
+            self.sum_extra_slots_f64(out_l, out_r, frames, headroom);
         }
     }
 
@@ -495,6 +506,7 @@ impl MixBusNode {
         out_l: &mut [f64],
         out_r: &mut [f64],
         frames: usize,
+        headroom: f32,
     ) {
         let duck_gains: [f32; MAX_MIX_SLOTS] = std::array::from_fn(|k| self.duck_gain_for(k));
         let mut auto_l = [1.0f32; MAX_AUDIO_BLOCK_FRAMES];
@@ -505,7 +517,7 @@ impl MixBusNode {
             if !input.active {
                 continue;
             }
-            let dk = duck_gains[k];
+            let dk = duck_gains[k] * headroom;
             let m = input.send.master_gain;
             let (b0l, b0r) = balance_gains(input.balance);
             let (p0l, p0r) = pan_gains(input.pan, input.pan_law);
@@ -637,6 +649,9 @@ impl MixBusNode {
     pub(super) fn mix_multichannel(&mut self, planes: &mut [&mut [f32]]) {
         let channels = planes.len();
         let frames = planes[0].len();
+        // Multichannel bus headroom: slots ≥ 1 are independent streams summed
+        // channel-wise here, so every active input counts.
+        let headroom = self.summation_gain_mc();
         // Input 0: pre-mixed in place, scaled by its own gain / balance
         // (the master-send fold applies to the pair here too, and
         // slot 0's post-fader aux tap joins the accumulator like every other
@@ -664,7 +679,7 @@ impl MixBusNode {
                 }
             } else if balance != 0.0 {
                 for i in 0..frames {
-                    let u = g.process_sample(1.0);
+                    let u = g.process_sample(1.0) * headroom;
                     for (ch, plane) in planes.iter_mut().enumerate() {
                         let v = plane[i];
                         let gch = if ch == 0 {
@@ -689,7 +704,7 @@ impl MixBusNode {
                 }
             } else if m0 != 1.0 {
                 for i in 0..frames {
-                    let ug = g.process_sample(1.0);
+                    let ug = g.process_sample(1.0) * headroom;
                     for (ch, plane) in planes.iter_mut().enumerate() {
                         let v = plane[i];
                         plane[i] = v * (ug * m0);
@@ -706,7 +721,7 @@ impl MixBusNode {
                 }
             } else {
                 for i in 0..frames {
-                    let u = g.process_sample(1.0);
+                    let u = g.process_sample(1.0) * headroom;
                     if u != 1.0 || tap_aux {
                         for (ch, plane) in planes.iter_mut().enumerate() {
                             let v = plane[i];
@@ -746,7 +761,7 @@ impl MixBusNode {
             if src_channels == 0 {
                 continue;
             }
-            let dk = duck_gains[k];
+            let dk = duck_gains[k] * headroom;
             let m = input.send.master_gain;
             let (b0l, b0r) = balance_gains(input.balance);
             let (p0l, p0r) = pan_gains(input.pan, input.pan_law);
@@ -877,6 +892,7 @@ impl MixBusNode {
     pub(super) fn mix_multichannel_f64(&mut self, planes: &mut [&mut [f64]]) {
         let channels = planes.len();
         let frames = planes[0].len();
+        let headroom = self.summation_gain_mc();
         // Input 0: pre-mixed in place, scaled by its own gain / balance
         // (the master-send fold applies to the pair here too, and
         // slot 0's post-fader aux tap joins the accumulator like every other
@@ -904,7 +920,7 @@ impl MixBusNode {
                 }
             } else if balance != 0.0 {
                 for i in 0..frames {
-                    let u = g.process_sample(1.0) as f64;
+                    let u = g.process_sample(1.0) as f64 * headroom as f64;
                     for (ch, plane) in planes.iter_mut().enumerate() {
                         let v = plane[i];
                         let gch = if ch == 0 {
@@ -929,7 +945,7 @@ impl MixBusNode {
                 }
             } else if m0 != 1.0 {
                 for i in 0..frames {
-                    let ug = g.process_sample(1.0) as f64;
+                    let ug = g.process_sample(1.0) as f64 * headroom as f64;
                     for (ch, plane) in planes.iter_mut().enumerate() {
                         let v = plane[i];
                         plane[i] = v * (ug * m0 as f64);
@@ -946,7 +962,7 @@ impl MixBusNode {
                 }
             } else {
                 for i in 0..frames {
-                    let u = g.process_sample(1.0) as f64;
+                    let u = g.process_sample(1.0) as f64 * headroom as f64;
                     if u != 1.0 || tap_aux {
                         for (ch, plane) in planes.iter_mut().enumerate() {
                             let v = plane[i];
@@ -977,7 +993,7 @@ impl MixBusNode {
             if !input.active || input.mute {
                 continue;
             }
-            let dk = duck_gains[k];
+            let dk = duck_gains[k] * headroom;
             let m = input.send.master_gain;
             let src_channels = input.channels.min(channels);
             if src_channels == 0 {

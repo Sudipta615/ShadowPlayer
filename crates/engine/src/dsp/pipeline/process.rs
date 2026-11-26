@@ -73,6 +73,14 @@ impl DspPipeline {
             // the sample sequence in Bit-Perfect mode.
             return;
         }
+        // Channel management on the front pair. The production graph selects
+        // its routing head for a stereo block when this same configuration is
+        // active; running it here keeps the reference pipeline the oracle for
+        // that path instead of letting the graph grow a stage the oracle does
+        // not have. A default configuration is inactive and costs one check.
+        if self.channel_trim.is_active(2) {
+            self.process_routing_stereo(left, right);
+        }
         match self.precision_mode {
             PrecisionMode::Performance => {
                 self.process_outgoing_block(left, right);
@@ -103,6 +111,36 @@ impl DspPipeline {
                 self.scratch_f64_r = r64;
             }
         }
+    }
+
+    /// Apply the channel-management stage (trim, routing matrix, LFE, mains
+    /// high-pass, per-channel EQ, sparse matrix FIR) to the stereo front pair.
+    ///
+    /// The stage owns `Vec` planes, so the pair is copied into dedicated
+    /// scratch rather than borrowed from `self.scratch_mc`; that bank is moved
+    /// out of `self` for the duration of a multichannel block, including the
+    /// ≤2-channel delegation that calls back into `process_block`.
+    ///
+    /// The stage is f32 by design — its matrix-FIR convolvers are f32 — so the
+    /// f64 chain sees the routed pair promoted afterwards, matching the graph's
+    /// routing node, which also crosses the f32 boundary internally.
+    fn process_routing_stereo(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let n = left.len().min(right.len());
+        if n == 0 {
+            return;
+        }
+        let mut planes = [
+            std::mem::take(&mut self.routing_scratch_l),
+            std::mem::take(&mut self.routing_scratch_r),
+        ];
+        planes[0][..n].copy_from_slice(&left[..n]);
+        planes[1][..n].copy_from_slice(&right[..n]);
+        self.channel_trim.process_planes(&mut planes, 2, n);
+        left[..n].copy_from_slice(&planes[0][..n]);
+        right[..n].copy_from_slice(&planes[1][..n]);
+        let [l, r] = planes;
+        self.routing_scratch_l = l;
+        self.routing_scratch_r = r;
     }
 
     /// Process an interleaved block of `channels`-channel frames in place.

@@ -303,15 +303,19 @@ impl GraphGeneration {
 
         let send_bus = AuxSendBus::new();
         let nodes = vec![
-            GraphNode::Mix(MixBusNode::with_slots(
-                config.mix_slots,
-                sample_rate,
-                config.crossfade.duration_ms,
-                config.crossfade.enabled,
-                config.crossfade.curve,
-                PREAMP_RAMP_DURATION_MS,
-                send_bus.clone(),
-            )),
+            GraphNode::Mix({
+                let mut mix = MixBusNode::with_slots(
+                    config.mix_slots,
+                    sample_rate,
+                    config.crossfade.duration_ms,
+                    config.crossfade.enabled,
+                    config.crossfade.curve,
+                    PREAMP_RAMP_DURATION_MS,
+                    send_bus.clone(),
+                );
+                mix.set_summation_headroom(config.bus_summation);
+                mix
+            }),
             GraphNode::Eq(EqNode::new(num_bands, sample_rate)),
             GraphNode::Dynamics(DynamicsNode::new(sample_rate)),
             GraphNode::Convolution(ConvolutionNode::new(sample_rate, 8192)),

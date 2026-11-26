@@ -40,6 +40,11 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.33.0" date="2026-11-26">
+      <description>
+        <p>Mix-bus lanes remember their source and trim across restarts, an opt-in summation-headroom law trades level for headroom, PCM sources can reach DoP-only DACs, and sparse matrix-FIR routing works on stereo.</p>
+      </description>
+    </release>
     <release version="0.32.0" date="2026-11-25">
       <description>
         <p>Quick-tune gains the Jan Meier crossfeed profile, green main pushes ship installable builds for every target, and the EQ reports the shelf slope and applied headroom it actually uses.</p>

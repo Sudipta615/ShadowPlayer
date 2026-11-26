@@ -25,7 +25,7 @@ pub mod output;
 pub mod rates;
 
 pub use modulator::SdmModulator;
-pub use output::{SdmBlock, SdmOutput, SdmTelemetry, DEFAULT_TAPS};
+pub use output::{SdmBlock, SdmDopBlock, SdmDopOutput, SdmOutput, SdmTelemetry, DEFAULT_TAPS};
 pub use rates::{candidates, clock_family, SdmRatePlan};
 
 #[cfg(test)]
@@ -273,5 +273,98 @@ mod tests {
         assert_eq!(t.state_recoveries, 0);
         assert!((t.modulation_depth - 0.5).abs() < 1e-12);
         assert!(t.interpolator_delay_ms > 0.0);
+    }
+
+    // ── PCM→SDM→DoP stage ─────────────────────────────────────────────────
+
+    fn plan_for(multiple: u32) -> SdmRatePlan {
+        SdmRatePlan {
+            pcm_rate: 44_100,
+            working_rate: WORKING,
+            dsd_rate: 44_100 * multiple,
+            multiple,
+            stage_factor: multiple / 8,
+            family: 44_100,
+        }
+    }
+
+    /// Recover the 24-bit DoP word from the normalized f32 sample.
+    fn dop_word(sample: f32) -> u32 {
+        let word = (sample as f64 * 8_388_608.0).round() as i64 as i32;
+        (word as u32) & 0x00FF_FFFF
+    }
+
+    #[test]
+    fn dop_stage_frames_are_marker_aligned_and_stereo() {
+        let plan = plan_for(64); // DSD64: 8 bits per working frame
+        let mut stage = SdmDopOutput::new(plan, 2, 5).expect("stage");
+        let frames = 256;
+        let input: Vec<f32> = (0..frames * 2)
+            .map(|i| if i % 2 == 0 { 0.1 } else { -0.1 })
+            .collect();
+        let mut out = Vec::new();
+        let block = stage.process_block(&input, &mut out);
+        assert_eq!(block.input_frames, frames);
+        assert_eq!(block.frames, frames / 2, "one DoP frame per two inputs");
+        assert_eq!(out.len(), block.frames * 2);
+        assert_eq!(stage.dop_rate(), 2_822_400 / 16);
+
+        for frame in 0..block.frames {
+            let l = dop_word(out[frame * 2]);
+            let r = dop_word(out[frame * 2 + 1]);
+            let (ml, mr) = ((l >> 16) as u8, (r >> 16) as u8);
+            assert_eq!(ml, mr, "DoP markers must match across channels");
+            assert!(
+                matches!(ml, 0x05 | 0xFA | 0x06 | 0xFB),
+                "frame {frame}: bad DoP marker {ml:#04x}"
+            );
+            // Marker alternation: adjacent frames use the opposite pair.
+            if frame > 0 {
+                let prev = (dop_word(out[(frame - 1) * 2]) >> 16) as u8;
+                assert_ne!(ml, prev, "DoP marker must alternate per frame");
+            }
+        }
+    }
+
+    #[test]
+    fn dop_stage_carries_partial_words_across_blocks() {
+        let plan = plan_for(64); // 8 bits per frame: a 16-bit word spans two frames
+        let mut stage = SdmDopOutput::new(plan, 2, 5).expect("stage");
+        let mut out = Vec::new();
+
+        // 129 frames × 8 bits = 64 whole words plus an 8-bit carry.
+        let first = stage.process_block(&vec![0.0f32; 129 * 2], &mut out);
+        assert_eq!(first.frames, 64);
+        // One more frame completes the carried half word.
+        let second = stage.process_block(&[0.0f32; 2], &mut out);
+        assert_eq!(
+            second.frames, 1,
+            "the carried eight bits must complete one word"
+        );
+        assert_eq!(stage.telemetry().input_frames, 130);
+    }
+
+    #[test]
+    fn dop_stage_matches_the_container_rate_for_higher_multiples() {
+        for multiple in [64u32, 128, 256] {
+            let plan = plan_for(multiple);
+            let mut stage = SdmDopOutput::new(plan, 2, 5).expect("stage");
+            let frames = 64;
+            let input = vec![0.0f32; frames * 2];
+            let mut out = Vec::new();
+            let block = stage.process_block(&input, &mut out);
+            let expected = frames * plan.stage_factor as usize / 16;
+            assert_eq!(block.frames, expected, "DSD{multiple}");
+            assert_eq!(stage.dop_rate(), plan.dsd_rate / 16);
+            assert!(stage.output_capacity_frames(frames) >= expected);
+        }
+    }
+
+    #[test]
+    fn dop_stage_is_stereo_only() {
+        let plan = plan_for(64);
+        assert!(SdmDopOutput::new(plan, 1, 5).is_none());
+        assert!(SdmDopOutput::new(plan, 6, 5).is_none());
+        assert!(SdmDopOutput::new(plan, 2, 5).is_some());
     }
 }

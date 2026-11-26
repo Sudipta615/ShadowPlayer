@@ -12,6 +12,7 @@
   "S04074FBB8EAB85B7": "‹ Zurück zu den Ordnern",
   "S0449E2B0D04F69FB": "Es ist kein Exklusivmodus-Backend einkompiliert, daher kann dieser Build ein Gerät nicht ohne den Mixer des Betriebssystems öffnen. Die Wiedergabe ist hier nicht bit-perfekt.",
   "S047707614EA5E464": "No FIR routes loaded",
+  "S4F60628101309120": "DoP aus PCM",
   "S05779989792F4072": "Crossfeed aktivieren",
   "S05AA4E66B74E7FD1": "Bisher stimmen keine Titel überein.",
   "S05CDEDDA9284DB76": "Messung gespeichert unter {path}",
@@ -90,7 +91,7 @@
   "S17EA5197A736908E": "Verlauf löschen",
   "S17FF0EE010CC8A9A": "Surround (5.1)",
   "S180AEB13CF68FB97": "Schwelle & Tiefe",
-  "S188F79E857CB79C6": "ShadowPlayer enthält eine Mehrspur-Misch-Engine, mit der Sie zusätzliche Stems, Click-Tracks oder Kommentarkanäle parallel zu Ihrer Hauptmusik einbinden können. Jeder Kanalsteckplatz bietet unabhängige Gain-Regelung (0,0x bis 2,0x), echtes Stereo-Pan-Balancing (-1,0 Links bis +1,0 Rechts) und verzögerungsfreie Stummschaltung.",
+  "SBAC4B98A2CEF8471": "ShadowPlayer enthält eine Mehrspur-Misch-Engine, mit der Sie zusätzliche Stems, Click-Tracks oder Kommentarkanäle parallel zu Ihrer Hauptmusik einbinden können. Jeder Kanalsteckplatz bietet unabhängige Gain-Regelung (0,0x bis 1,0x), echtes Stereo-Pan-Balancing (-1,0 Links bis +1,0 Rechts) und verzögerungsfreie Stummschaltung.",
   "S18CFD4E19705CDB3": "Die Empfehlungs-Engine sortiert deine Bibliothek. Das läuft nicht im Audio-Thread, die Wiedergabe läuft weiter.",
   "S192BD2E10078A2D1": "Keine Playlist ausgewählt",
   "S192F406841C97C2D": "Importierte Dateiorte:",
@@ -305,6 +306,7 @@
   "S4EA0F21FC2A338A1": "Nach oben verschieben",
   "S4F3BAC5375A3D7F8": "Filtersteilheit",
   "S4FADD265E23DD537": "SDM Conversion",
+  "S4FE2362DC57F8293": "Summierungs-Headroom des Busses",
   "S5000BDAB5A32F780": "Eingerichtete Ordner",
   "S5013919EF1B04196": "Sie können Audiodateien oder ganze Ordner jederzeit direkt per Drag & Drop in ShadowPlayer ziehen.",
   "S5037321907974B38": "Überlappungszeit in Sekunden zwischen dem Ausblenden des aktuellen und dem Einblenden des nächsten Titels",
@@ -829,6 +831,7 @@
   "SDC4932D8AABB325F": "Nächster Titel",
   "SDC673E73B5C13AEA": "Löschen",
   "SDC76DA3F35BF400E": "Stream-Wiederherstellung der Audio-Engine",
+  "SDD3A0B97434FD2B2": "Verpackt den PCM→SDM-Bitstream als DoP, wenn natives DSD nicht verfügbar ist. Erfordert eine Stereo-Quelle und einen exklusiven 24-Bit-PCM-Stream bei dsd_rate/16; andernfalls meldet die Engine den PCM-Fallback.",
   "SDDAA683A7FAA2D5E": "{analyzed} von {total} Titeln analysiert · {feedback} Feedback-Ereignisse",
   "SDDABA94F15E24F5D": "Pure Direct beenden (DSP-Kette wiederherstellen)",
   "SDE0B06B549269586": "Nach Dauer sortieren",
@@ -960,5 +963,6 @@
   "SFF5EEB2A47D95656": "Polyphasen-FIR-Filterqualität, die verwendet wird, wenn eine Abtastratenkonvertierung erforderlich ist",
   "SFFCE72DBF9B56B3F": "Stereo-Klangfeld-Veredler",
   "SFFDF8E71C18FAB23": "Abtastraten-Richtlinien & Resampling-Präzision",
-  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche"
+  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche",
+  "S7E6B100836E9B234": "Skaliert jeden Mix-Bus-Eingang mit 1/√N oder 1/N, solange Lanes aktiv sind, und tauscht Pegel gegen Headroom. Der aktuell angewandte Gain jeder Lane gewichtet ihren Anteil an N; eine abgesenkte Lane gibt dem Rest des Busses Headroom zurück. Off behält die historische Summe mit Einheitsverstärkung."
 }

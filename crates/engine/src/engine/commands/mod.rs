@@ -403,6 +403,7 @@ impl AudioEngine {
             // ── Multi-track lanes ──
             EngineCommand::AddTrack(source) => self.handle_add_track(source),
             EngineCommand::RemoveTrack(slot) => self.handle_remove_track(slot),
+            EngineCommand::AddTrackAt { slot, source } => self.handle_add_track_at(slot, source),
             EngineCommand::SetTrackGain { slot, gain } => self.handle_set_track_gain(slot, gain),
             EngineCommand::SetTrackPan { slot, pan } => self.handle_set_track_pan(slot, pan),
             EngineCommand::SetTrackMasterGain { slot, gain } => {
@@ -1125,6 +1126,15 @@ impl AudioEngine {
             }
             EngineCommand::SetInputActive { slot, active } => {
                 self.graph.set_input_active(slot, active);
+            }
+            EngineCommand::SetBusSummation(law) => {
+                self.config.bus_summation = law;
+                // The scale lives in the mix node, so the new law becomes
+                // audible on the next prepared generation. A generation swap
+                // is glitch-free by construction and this is a rare, deliberate
+                // policy change, not a per-block control.
+                self.graph.reconfigure(&self.config);
+                log::info!("Mix-bus summation headroom: {}", law.as_str());
             }
             EngineCommand::SetSlotAutomation {
                 slot,

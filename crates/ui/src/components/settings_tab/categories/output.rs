@@ -611,6 +611,19 @@ pub(in crate::components::settings_tab) fn render_output_category(
             actions.sdm_config_changed = Some(state.sdm.clone());
         }
 
+        let dop_changed = setting_item_toggle(
+            ui,
+            &tr!("DoP from PCM"),
+            &tr!(
+                "Frame the PCM→SDM bitstream as DoP when native DSD is unavailable. Requires a stereo source and an exclusive 24-bit PCM stream at dsd_rate/16; otherwise the engine reports the PCM fallback."
+            ),
+            theme,
+            &mut state.sdm.dop,
+        );
+        if dop_changed {
+            actions.sdm_config_changed = Some(state.sdm.clone());
+        }
+
         let dsd_bypass_changed = setting_item_toggle(
             ui,
             &tr!("Bypass for Native DSD"),

@@ -8,7 +8,7 @@ A local-first desktop music player built in Rust: bit-perfect output, a
 studio-grade DSP chain, a 100,000-track library that stays fast, and no
 accounts, cloud, or telemetry.
 
-[![Version](https://img.shields.io/badge/version-0.32.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.33.0-blue?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)](#platform-support)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org/)
@@ -502,8 +502,11 @@ Deliberate product choices live in
     crossfeed, stereo and bass enhancement, time-stretch, creative FX, and the
     output resampler leave the centre, surrounds, and LFE untouched; the engine
     reports exactly which stages are front-pair-only.
-  - **Sparse matrix FIR is a multichannel-path feature.** FIR routes exist only
-    in the `>2`-channel routing stage; the stereo plan has no routing stage.
+  - **Sparse matrix FIR runs on stereo only when routes apply to two
+    channels.** The stereo entry points switch to the routing-capable plan at
+    runtime when a route's input/output pair fits a stereo stream; with no
+    stereo route active the compiled stereo plan and its bit-exact path are
+    unchanged.
   - **DAC correction is a device profile, not room correction.** Profiles are
     matched by device name and output rate; the engine neither measures nor
     derives them.
@@ -518,15 +521,21 @@ Deliberate product choices live in
     output clock family.** At ordinary PCM rates the stage reports itself
     inactive instead of installing a filter that cannot exist; the
     `20/30/40/50 kHz` selections are the ones that act at normal rates.
-  - **Noise-shaper selection is global and applies at stream open.** It is one
-    process-wide choice, and a running converter keeps the family it was built
-    with until the next stream open.
-  - **PCM→SDM is native-DSD only, and its high rates are CPU-bound.** DoP is
-    not synthesized from PCM, and DSD256 is not real-time on a low-power
-    dual-core.
-  - **The N-input mix bus has no automatic summation headroom.** Slots sum at
-    their per-input gain, so eight unity-gain slots reach +18 dB coherent
-    before the limiter.
+  - **Noise-shaper selection is captured per stream, not live.**
+    `EngineConfig.noise_shaper` is read when each output stream is constructed
+    and that converter keeps its own copy; a change applies at the next stream
+    open, and one endpoint cannot reshape another.
+  - **PCM→SDM prefers native DSD and can fall back to DoP.** With `sdm.dop`
+    enabled, a stereo source whose native request fails is instead framed as
+    DoP into an exclusive 24-bit PCM stream at `dsd_rate/16`;
+    without it, or when that stream cannot be negotiated, the engine reports
+    the PCM fallback rather than claiming DSD. DSD256 is still not real-time on
+    a low-power dual-core.
+  - **The N-input mix bus sums at unity unless you opt into a headroom law.**
+    `bus_summation` defaults to `Off`, so eight unity-gain slots reach +18 dB
+    coherent before the limiter; `InverseSqrt`/`InverseN` scale the bus by
+    `1/√N`/`1/N`, weighted by each lane's applied gain, so a trimmed lane gives
+    headroom back to the rest of the bus.
   - **`plugin-dylib` is not sandboxed.** Plugins run in-process behind only a
     `catch_unwind` boundary, so only load plugins you trust.
 

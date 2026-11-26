@@ -12,6 +12,7 @@
   "S04074FBB8EAB85B7": "‹ Volver a las carpetas",
   "S0449E2B0D04F69FB": "No se ha compilado ningún backend en modo exclusivo, por lo que esta compilación no puede abrir un dispositivo sin el mezclador del sistema operativo. La reproducción no es bit-perfect aquí.",
   "S047707614EA5E464": "No hay rutas FIR cargadas",
+  "S4F60628101309120": "DoP desde PCM",
   "S05779989792F4072": "Activar crossfeed",
   "S05AA4E66B74E7FD1": "Aún no coincide ninguna pista.",
   "S05CDEDDA9284DB76": "Medición guardada en {path}",
@@ -90,7 +91,7 @@
   "S17EA5197A736908E": "Borrar historial",
   "S17FF0EE010CC8A9A": "Envolvente (5.1)",
   "S180AEB13CF68FB97": "Umbral y profundidad",
-  "S188F79E857CB79C6": "ShadowPlayer incluye un motor de mezcla multipista que le permite inyectar pistas secundarias (stems), claquetas de clic o canales de comentarios junto con su música principal. Cada ranura de canal proporciona ganancia flotante independiente (0,0x a 2,0x), balance panorámico estéreo real (-1,0 Izquierda a +1,0 Derecha) y activación instantánea de silencio.",
+  "SBAC4B98A2CEF8471": "ShadowPlayer incluye un motor de mezcla multipista que le permite inyectar pistas secundarias (stems), claquetas de clic o canales de comentarios junto con su música principal. Cada ranura de canal proporciona ganancia flotante independiente (0,0x a 1,0x), balance panorámico estéreo real (-1,0 Izquierda a +1,0 Derecha) y activación instantánea de silencio.",
   "S18CFD4E19705CDB3": "El motor de recomendaciones está clasificando tu biblioteca. Se ejecuta fuera del hilo de audio, por lo que la reproducción continúa.",
   "S192BD2E10078A2D1": "Ninguna lista seleccionada",
   "S192F406841C97C2D": "Ubicaciones de archivos importados:",
@@ -305,6 +306,7 @@
   "S4EA0F21FC2A338A1": "Mover hacia arriba",
   "S4F3BAC5375A3D7F8": "Pendiente del filtro",
   "S4FADD265E23DD537": "Conversión SDM",
+  "S4FE2362DC57F8293": "Margen de suma del bus",
   "S5000BDAB5A32F780": "Eingerichtete Ordner",
   "S5013919EF1B04196": "También puede arrastrar y soltar archivos de audio o carpetas completas directamente en ShadowPlayer en cualquier momento.",
   "S5037321907974B38": "Tiempo de superposición en segundos entre el desvanecimiento de la canción saliente y la entrante",
@@ -829,6 +831,7 @@
   "SDC4932D8AABB325F": "Nächster Titel",
   "SDC673E73B5C13AEA": "Löschen",
   "SDC76DA3F35BF400E": "Stream-Wiederherstellung der Audio-Engine",
+  "SDD3A0B97434FD2B2": "Encapsula el flujo PCM→SDM como DoP cuando el DSD nativo no está disponible. Requiere una fuente estéreo y un flujo PCM de 24 bits exclusivo a dsd_rate/16; de lo contrario, el motor informa del respaldo PCM.",
   "SDDAA683A7FAA2D5E": "{analyzed} de {total} pistas analizadas · {feedback} eventos de comentarios",
   "SDDABA94F15E24F5D": "Salir de Pure Direct (Restaurar cadena DSP)",
   "SDE0B06B549269586": "Nach Dauer sortieren",
@@ -960,5 +963,6 @@
   "SFF5EEB2A47D95656": "Calidad del filtre FIR polifásico utilizado cuando se requiere conversión de frecuencia",
   "SFFCE72DBF9B56B3F": "Stereo-Klangfeld-Veredler",
   "SFFDF8E71C18FAB23": "Abtastraten-Richtlinien & Resampling-Präzision",
-  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche"
+  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche",
+  "S7E6B100836E9B234": "Escala cada entrada del bus de mezcla por 1/√N o 1/N cuando hay canales activos, cambiando nivel por margen. La ganancia aplicada de cada canal pondera su parte de N, así que atenuar un canal devuelve margen al resto del bus. Off conserva la suma histórica con ganancia unitaria."
 }

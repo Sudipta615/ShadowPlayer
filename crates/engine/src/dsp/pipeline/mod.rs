@@ -164,7 +164,7 @@ pub static DSP_STAGE_CAPABILITIES: &[DspStageCapability] = &[
     DspStageCapability {
         name: "channel_trim",
         channel_support: StageChannelSupport::AllChannels,
-        position: "pre-mix (MC path only)",
+        position: "pre-mix (when channel routing is active)",
         stateful: true,
         realtime_safe: true,
         bit_perfect_compatible: false,
@@ -174,7 +174,7 @@ pub static DSP_STAGE_CAPABILITIES: &[DspStageCapability] = &[
     DspStageCapability {
         name: "channel_eq",
         channel_support: StageChannelSupport::AllChannels,
-        position: "pre-mix (MC path only)",
+        position: "pre-mix (when channel routing is active)",
         stateful: true,
         realtime_safe: true,
         bit_perfect_compatible: false,
@@ -184,7 +184,7 @@ pub static DSP_STAGE_CAPABILITIES: &[DspStageCapability] = &[
     DspStageCapability {
         name: "bass_management",
         channel_support: StageChannelSupport::AllChannels,
-        position: "pre-mix (MC path only)",
+        position: "pre-mix (when channel routing is active)",
         stateful: true,
         realtime_safe: true,
         bit_perfect_compatible: false,
@@ -424,11 +424,12 @@ pub struct DspPipeline {
     /// Optional output ultrasonic low-pass, applied before the limiter.
     pub ultrasonic: crate::dsp::ultrasonic::UltrasonicStage,
 
-    /// Multichannel management stage: per-channel gain/delay/polarity trim,
+    /// Channel-management stage: per-channel gain/delay/polarity trim,
     /// routing, LFE management, mains high-pass, and per-channel EQ. Runs on
-    /// **every** channel of the `>2`-channel passthrough path, before the
-    /// pre-mix chain, and is bypassed in bit-perfect / DoP modes like every
-    /// other user DSP stage.
+    /// **every** channel of the `>2`-channel path, and on the front pair of a
+    /// stereo block when its configuration is active (the production graph
+    /// selects the routing head the same way), before the pre-mix chain. It
+    /// is bypassed in bit-perfect / DoP modes like every other user DSP stage.
     pub channel_trim: ChannelTrimmer,
     /// Active multichannel layout, used to derive LFE-role channel indices
     /// for [`Self::channel_trim`].
@@ -458,6 +459,13 @@ pub struct DspPipeline {
     /// [`MAX_CHANNELS`]). Reused across calls so the >2-channel path stays
     /// allocation-free after warm-up.
     scratch_mc: Vec<Vec<f32>>,
+    /// Stereo routing scratch. The routing stage takes `Vec` planes, so the
+    /// stereo path copies the front pair here instead of borrowing
+    /// [`Self::scratch_mc`] — that scratch is moved out of `self` while
+    /// [`Self::process_block_multichannel`] delegates a ≤2-channel block to
+    /// `process_block`, and a nested take would see an empty bank.
+    routing_scratch_l: Vec<f32>,
+    routing_scratch_r: Vec<f32>,
     /// Blocks dropped because the caller asked for more channels than
     /// [`MAX_CHANNELS`].
     ///
@@ -528,6 +536,8 @@ impl DspPipeline {
             scratch_mc: (0..MAX_CHANNELS)
                 .map(|_| vec![0.0; MAX_AUDIO_BLOCK_FRAMES])
                 .collect(),
+            routing_scratch_l: vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
+            routing_scratch_r: vec![0.0; MAX_AUDIO_BLOCK_FRAMES],
             oversize_blocks: 0,
         };
 

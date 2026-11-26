@@ -3,6 +3,41 @@
 use super::*;
 
 impl DspState {
+    /// Re-open the lanes the panel remembers, each into its own slot.
+    ///
+    /// The engine honours the requested slot, so a saved trim stays attached to
+    /// its own stream; a source it cannot open is reported by the engine and
+    /// simply stays absent rather than pulling another slot's trim with it.
+    /// Runs once at startup, before [`Self::sync_lane_trims_to_session`].
+    pub(super) fn restore_lanes_to_session(&self, session: &AudioSession) {
+        let st = &self.settings_tab;
+        for slot in 2..crate::components::settings_tab::LANE_SLOTS {
+            let Some(path) = st.lane_state(slot as u8).source else {
+                continue;
+            };
+            session.add_track_at(slot as u8, audio_session::engine::AudioSource::File(path));
+        }
+    }
+
+    /// Replay the persisted per-lane trims. Called at startup and after a lane
+    /// is attached, because a new lane starts at factory values rather than at
+    /// the trim the panel remembers for its slot. Slots 0/1 are the transition
+    /// pair, not user lanes; a default trim is skipped because it is what the
+    /// engine already holds.
+    pub(super) fn sync_lane_trims_to_session(&self, session: &AudioSession) {
+        let st = &self.settings_tab;
+        for slot in 2..crate::components::settings_tab::LANE_SLOTS {
+            let trim = st.lane_state(slot as u8);
+            if trim.is_default() {
+                continue;
+            }
+            session.set_track_gain(slot as u8, trim.gain);
+            session.set_track_pan(slot as u8, trim.pan);
+            session.set_input_mute(slot as u8, trim.muted);
+            session.set_input_active(slot as u8, trim.active);
+        }
+    }
+
     pub(super) fn capture_pure_direct(&mut self, volume: f32) {
         if self.pure_direct_saved.is_none() {
             self.pure_direct_saved = Some(PureDirectSaved {
@@ -224,6 +259,9 @@ impl DspState {
         session.set_dsd_noise_filter(st.dsd_noise_filter);
         session.set_ultrasonic_filter(st.ultrasonic_filter);
         session.set_sdm_config(st.sdm.clone());
+        session.set_bus_summation(st.bus_summation);
+        self.restore_lanes_to_session(session);
+        self.sync_lane_trims_to_session(session);
         session.set_channel_routing(st.channel_routing.clone());
         session.set_dac_correction(st.dac_correction.clone());
         // Only push precision mode once the user has actually chosen one, so the

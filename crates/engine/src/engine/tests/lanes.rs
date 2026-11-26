@@ -356,3 +356,85 @@ fn lane_slot_addresses_survive_removal_and_readd() {
     let _ = std::fs::remove_file(&lane_b);
     let _ = std::fs::remove_file(&lane_c);
 }
+
+#[test]
+fn add_track_at_honours_the_requested_slot_and_rejects_collisions() {
+    // A saved lane comes back into its own slot: the engine must not remap the
+    // request to the first free slot, or the trim stored beside it would be
+    // applied to a different stream.
+    let silent = std::env::temp_dir().join(format!(
+        "lane_at_silent_{}_{}.wav",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    write_i16_wav(
+        &silent,
+        44100,
+        &vec![0i16; 44100 * 30],
+        &vec![0i16; 44100 * 30],
+    );
+    let lane = write_custom_wav_at(44100, 44100 * 30, "lane-at");
+    let other = write_custom_wav_at(44100, 44100 * 30, "lane-at-other");
+
+    // The bus starts with the transition pair only; slot 4 has to be grown.
+    let config = EngineConfig {
+        mix_slots: 2,
+        ..EngineConfig::default()
+    };
+    let mut engine = AudioEngine::new(config).unwrap();
+    engine.load_track(&silent).expect("load silent primary");
+    engine.send_command(EngineCommand::Play);
+    assert!(
+        tick_until(&mut engine, 5.0, |e| e.playback_info().position_secs > 0.01),
+        "primary playback did not progress"
+    );
+
+    engine.send_command(EngineCommand::AddTrackAt {
+        slot: 4,
+        source: AudioSource::File(lane.clone()),
+    });
+    assert!(
+        tick_until(&mut engine, 10.0, |e| master_peak(e) > -40.0),
+        "lane requested on slot 4 never became audible"
+    );
+    assert_eq!(
+        engine.lanes.iter().map(|l| l.slot).collect::<Vec<_>>(),
+        vec![4],
+        "the lane must land on the requested slot"
+    );
+
+    // An occupied slot is rejected, not silently given a second stream.
+    engine.send_command(EngineCommand::AddTrackAt {
+        slot: 4,
+        source: AudioSource::File(other.clone()),
+    });
+    for _ in 0..50 {
+        engine.tick();
+    }
+    assert_eq!(
+        engine.lanes.len(),
+        1,
+        "a second lane must not be attached to an occupied slot"
+    );
+
+    // Slots 0/1 are the cross-fading transition pair; a lane there is invalid.
+    engine.send_command(EngineCommand::AddTrackAt {
+        slot: 1,
+        source: AudioSource::File(other.clone()),
+    });
+    for _ in 0..50 {
+        engine.tick();
+    }
+    assert_eq!(
+        engine.lanes.len(),
+        1,
+        "slot 1 belongs to the transition pair, not to a lane"
+    );
+
+    let _ = std::fs::remove_file(&silent);
+    let _ = std::fs::remove_file(&lane);
+    let _ = std::fs::remove_file(&other);
+}

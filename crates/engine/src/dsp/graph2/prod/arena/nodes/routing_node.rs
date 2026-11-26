@@ -22,6 +22,17 @@ impl RoutingNode {
                 .collect(),
         }
     }
+
+    /// Whether the stage would change a block with `channels` channels.
+    ///
+    /// The plan runner uses this to decide whether a stereo block needs the
+    /// routing head: a channel-routing matrix, per-channel trim, bass
+    /// management, or a sparse matrix-FIR route is reason enough to run the
+    /// stage on the front pair, while a default configuration stays on the
+    /// bit-exact stereo plan.
+    pub fn applies_to(&self, channels: usize) -> bool {
+        channels > 0 && self.trimmer.is_active(channels)
+    }
 }
 
 impl DspNode for RoutingNode {
@@ -29,7 +40,7 @@ impl DspNode for RoutingNode {
         DspStageCapability {
             name: "channel_trim",
             channel_support: StageChannelSupport::AllChannels,
-            position: "pre-mix (MC path only)",
+            position: "pre-mix (when channel routing is active)",
             stateful: true,
             realtime_safe: true,
             bit_perfect_compatible: false,

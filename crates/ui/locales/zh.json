@@ -12,6 +12,7 @@
   "S04074FBB8EAB85B7": "‹ 返回文件夹",
   "S0449E2B0D04F69FB": "未编译独占模式后端，因此此构建版本无法在绕过操作系统混音器的情况下打开设备。此处的播放不是位完美的。",
   "S047707614EA5E464": "未加载 FIR 路由",
+  "S4F60628101309120": "PCM 转 DoP",
   "S05779989792F4072": "启用交叉馈送",
   "S05AA4E66B74E7FD1": "暂无匹配的曲目。",
   "S05CDEDDA9284DB76": "测量结果已保存至 {path}",
@@ -90,7 +91,7 @@
   "S17EA5197A736908E": "清除历史记录",
   "S17FF0EE010CC8A9A": "环绕声 (5.1)",
   "S180AEB13CF68FB97": "阈值与深度",
-  "S188F79E857CB79C6": "ShadowPlayer 包含一个多轨混音引擎，允许您在主流音乐的同时注入辅助分轨 (stem)、节拍音轨或解说声道。每个通道插槽均提供独立的浮点增益 (0.0x 至 2.0x)、真正的立体声声像平衡 (-1.0 左 至 +1.0 右) 和即时静音切换。",
+  "SBAC4B98A2CEF8471": "ShadowPlayer 包含一个多轨混音引擎，允许您在主流音乐的同时注入辅助分轨 (stem)、节拍音轨或解说声道。每个通道插槽均提供独立的浮点增益 (0.0x 至 1.0x)、真正的立体声声像平衡 (-1.0 左 至 +1.0 右) 和即时静音切换。",
   "S18CFD4E19705CDB3": "推荐引擎正在对您的媒体库进行排序。此过程在音频线程之外运行，因此播放不会中断。",
   "S192BD2E10078A2D1": "未选择播放列表",
   "S192F406841C97C2D": "已导入文件位置:",
@@ -305,6 +306,7 @@
   "S4EA0F21FC2A338A1": "上移",
   "S4F3BAC5375A3D7F8": "滤波器斜率",
   "S4FADD265E23DD537": "SDM 转换",
+  "S4FE2362DC57F8293": "总线求和余量",
   "S5000BDAB5A32F780": "Eingerichtete Ordner",
   "S5013919EF1B04196": "您也可以随时将音频文件或整个文件夹直接拖放到 ShadowPlayer 中。",
   "S5037321907974B38": "淡出当前歌曲与淡入下一首歌曲之间的重叠时间 (秒)",
@@ -829,6 +831,7 @@
   "SDC4932D8AABB325F": "Nächster Titel",
   "SDC673E73B5C13AEA": "Löschen",
   "SDC76DA3F35BF400E": "Stream-Wiederherstellung der Audio-Engine",
+  "SDD3A0B97434FD2B2": "当原生 DSD 不可用时，将 PCM→SDM 比特流封装为 DoP。需要立体声源以及 dsd_rate/16 的独占 24 位 PCM 流；否则引擎会报告 PCM 回退。",
   "SDDAA683A7FAA2D5E": "已分析 {total} 首中的 {analyzed} 首曲目 · {feedback} 个反馈事件",
   "SDDABA94F15E24F5D": "退出 Pure Direct (恢复 DSP 处理链)",
   "SDE0B06B549269586": "Nach Dauer sortieren",
@@ -960,5 +963,6 @@
   "SFF5EEB2A47D95656": "需要进行采样率转换时所使用的多相 FIR 滤波器质量",
   "SFFCE72DBF9B56B3F": "Stereo-Klangfeld-Veredler",
   "SFFDF8E71C18FAB23": "Abtastraten-Richtlinien & Resampling-Präzision",
-  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche"
+  "SFFE6E788D7AF4B82": "3. Bedienelemente und Aufbau der Oberfläche",
+  "S7E6B100836E9B234": "当通道启用时，按 1/√N 或 1/N 缩放混音总线的每一路输入，以电平换取余量。每条通道的当前增益会对其 N 份额加权，因此调低一条通道会把余量还给总线的其余部分。Off 保持历史上按单位增益求和的行为。"
 }

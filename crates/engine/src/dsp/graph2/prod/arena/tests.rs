@@ -633,6 +633,118 @@ fn mix_stream_slots_sum_independently_and_detach() {
 // ── Slot-count parameter + per-slot user state ────────────────
 
 #[test]
+fn summation_headroom_laws_scale_every_active_input() {
+    let sr = 48000.0;
+    let run = |law: config::SummationHeadroom| {
+        let mut cfg = EngineConfig::default();
+        cfg.crossfade.enabled = false;
+        cfg.mix_slots = 3;
+        cfg.bus_summation = law;
+        let mut graph = DspGraph::from_config(&cfg, sr);
+        graph.mix_mut().inputs[2].gain.set_gain(0.5);
+        graph.mix_mut().inputs[2].gain.snap();
+
+        let n = 64;
+        let mut l0 = vec![0.5f32; n];
+        let mut r0 = vec![0.5f32; n];
+        let mut l1 = vec![0.25f32; n];
+        let mut r1 = vec![0.25f32; n];
+        let mut l2 = vec![0.125f32; n];
+        let mut r2 = vec![0.125f32; n];
+        graph.process_block_streams(
+            (&mut l0, &mut r0),
+            &mut [(&mut l1, &mut r1), (&mut l2, &mut r2)],
+        );
+        l0[0]
+    };
+
+    // Pair + one lane trimmed to 0.5: the pair counts as one program input
+    // at unity, and the lane enters the law at its applied gain, so the
+    // weighted coherent sum is 1 + 0.5 = 1.5 and the weighted power is
+    // 1 + 0.5² = 1.25.
+    let unprocessed = 0.5 + 0.125 * 0.5;
+    assert!((run(config::SummationHeadroom::Off) - unprocessed).abs() < 1e-6);
+    assert!(
+        (run(config::SummationHeadroom::InverseN) - unprocessed / 1.5).abs() < 1e-6,
+        "1/N must divide the bus sum by the summed input weights"
+    );
+    assert!(
+        (run(config::SummationHeadroom::InverseSqrt) - unprocessed / 1.25_f32.sqrt()).abs() < 1e-6,
+        "1/√N must divide the bus sum by sqrt of the weighted power"
+    );
+}
+
+#[test]
+fn summation_headroom_weights_each_lane_by_its_gain() {
+    let sr = 48000.0;
+    let cfg = EngineConfig {
+        mix_slots: 4,
+        bus_summation: config::SummationHeadroom::InverseSqrt,
+        ..EngineConfig::default()
+    };
+    let mut graph = DspGraph::from_config(&cfg, sr);
+
+    // Two lanes at unity: the pair counts 1, so power = 1 + 1 + 1 = 3.
+    assert!((graph.mix().summation_gain_stereo() - 1.0 / 3.0_f32.sqrt()).abs() < 1e-6);
+
+    // Trimming one lane to half a gain removes three quarters of its power:
+    // 1 + 1 + 0.25 = 2.25, i.e. 1/1.5 — the bus gains back headroom.
+    graph.mix_mut().inputs[2].gain.set_gain(0.5);
+    graph.mix_mut().inputs[2].gain.snap();
+    assert!((graph.mix().summation_gain_stereo() - 1.0 / 1.5).abs() < 1e-6);
+
+    // A trimmed-to-silence lane stops counting entirely: power = 1 + 1.
+    graph.mix_mut().inputs[2].gain.set_gain(0.0);
+    graph.mix_mut().inputs[2].gain.snap();
+    assert!((graph.mix().summation_gain_stereo() - 1.0 / 2.0_f32.sqrt()).abs() < 1e-6);
+
+    // Both lanes silent: only the pair is left, so the law is unity.
+    graph.mix_mut().inputs[3].gain.set_gain(0.0);
+    graph.mix_mut().inputs[3].gain.snap();
+    assert!((graph.mix().summation_gain_stereo() - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn multichannel_summation_headroom_counts_every_active_slot() {
+    use crate::decode::ChannelLayout;
+
+    let sr = 48000.0;
+    let mut cfg = EngineConfig {
+        mix_slots: 3,
+        bus_summation: config::SummationHeadroom::InverseN,
+        ..EngineConfig::default()
+    };
+    cfg.crossfade.enabled = false;
+    let mut graph = DspGraph::from_config(&cfg, sr);
+    graph.set_multichannel_layout(&ChannelLayout::FivePointOne);
+    graph.mix_mut().inputs[2].gain.set_gain(0.5);
+    graph.mix_mut().inputs[2].gain.snap();
+
+    let ch = 6;
+    let n = 32;
+    let mut primary = vec![0.25f32; n * ch];
+    let mut sec1 = vec![0.125f32; n * ch];
+    let mut sec2 = vec![0.5f32; n * ch];
+    graph.process_block_multichannel_streams(
+        &mut primary,
+        ch,
+        &mut [(&mut sec1, ch), (&mut sec2, ch)],
+    );
+    // 0.25 + 0.125 + 0.5·0.5 = 0.625; weights are 1 + 1 + 0.5 = 2.5
+    // (slot 0 is unity, the lane enters at its applied gain), 1/N → 0.25.
+    let want = 0.625 / 2.5;
+    for ch_idx in 0..ch {
+        for i in 0..n {
+            let v = primary[i * ch + ch_idx];
+            assert!(
+                (v - want).abs() < 1e-5,
+                "MC headroom mismatch ch {ch_idx} frame {i}: {v} (want {want})"
+            );
+        }
+    }
+}
+
+#[test]
 fn mix_slot_count_is_clamped_to_the_bus_bound() {
     let sr = 48000.0;
 
@@ -913,6 +1025,64 @@ fn matrix_fir_matches_the_reference_pipeline_on_the_multichannel_path() {
     // passed the block through.
     let dest_energy: f32 = (0..frames).map(|i| graph_io[i * channels + 2].abs()).sum();
     assert!(dest_energy > 1e-3, "matrix FIR route produced no output");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn matrix_fir_runs_on_the_stereo_path() {
+    let path = std::env::temp_dir().join(format!(
+        "shadowplayer_matrix_fir_stereo_{}.wav",
+        std::process::id()
+    ));
+    write_matrix_fir_wav(&path, &[0.75, -0.25, 0.125, 0.0]);
+
+    let mut cfg = EngineConfig {
+        dither_enabled: false,
+        ..EngineConfig::default()
+    };
+    cfg.limiter.enabled = false;
+    // A 2-channel route: the stage must be selected by the stereo path, not
+    // only by the multichannel one.
+    cfg.channel_routing = config::ChannelRoutingConfig {
+        enabled: true,
+        matrix: Vec::new(),
+        fir_routes: vec![config::MatrixFirRouteConfig {
+            source: 0,
+            destination: 1,
+            ir_path: Some(path.display().to_string()),
+            gain_db: 0.0,
+            delay_ms: 0.0,
+        }],
+    };
+
+    let mut graph = DspGraph::from_config(&cfg, 48_000.0);
+    let mut pipeline = DspPipeline::from_config(&cfg, 48_000.0);
+
+    let frames = 1_024;
+    let mut graph_l: Vec<f32> = (0..frames)
+        .map(|i| if i == 0 { 0.5 } else { 0.0 })
+        .collect();
+    let mut graph_r = vec![0.1f32; frames];
+    let mut pipeline_l = graph_l.clone();
+    let mut pipeline_r = graph_r.clone();
+
+    graph.process_block(&mut graph_l, &mut graph_r);
+    pipeline.process_block(&mut pipeline_l, &mut pipeline_r);
+
+    for i in 0..frames {
+        assert!(
+            (graph_l[i] - pipeline_l[i]).abs() < 1e-6 && (graph_r[i] - pipeline_r[i]).abs() < 1e-6,
+            "stereo matrix FIR graph/pipeline mismatch at frame {i}: L {} vs {}, R {} vs {}",
+            graph_l[i],
+            pipeline_l[i],
+            graph_r[i],
+            pipeline_r[i]
+        );
+    }
+    // The route feeds the right channel from the left impulse; a passthrough
+    // would leave the right channel at its constant 0.1 input.
+    let routed: f32 = graph_r.iter().map(|s| (s - 0.1).abs()).sum();
+    assert!(routed > 1e-3, "stereo matrix FIR route produced no output");
     let _ = std::fs::remove_file(path);
 }
 

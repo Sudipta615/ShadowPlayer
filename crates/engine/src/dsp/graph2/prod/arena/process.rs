@@ -70,6 +70,34 @@ impl DspGraph {
         Self::run_plan_generation(&mut self.active, id, planes, self.non_finite_policy);
     }
 
+    /// The plan a stereo block should run.
+    ///
+    /// The compiled **stereo plan** deliberately omits the routing head, so a
+    /// default configuration takes the same bit-exact path it always has. When
+    /// channel routing is active — a routing matrix, per-channel trim / EQ,
+    /// bass management, or a sparse matrix-FIR route — the routing head is
+    /// prepended by selecting the multichannel plan on the same two planes.
+    /// [`RoutingNode`](super::nodes::routing_node::RoutingNode) processes the
+    /// channel count it is handed, so a 2-channel stream gets exactly the
+    /// stage a multichannel one does; a stage that is inactive still returns
+    /// immediately, keeping the default path unchanged.
+    ///
+    /// A compiled chain that does not contain the routing head at all (a
+    /// deliberately narrowed [`ChainRequest`](crate::dsp::graph2::ChainRequest))
+    /// has no `NormalMc`-only step, so it stays on `Normal`.
+    #[inline]
+    fn stereo_plan_id(generation: &swap::GraphGeneration, channels: usize) -> PlanId {
+        let routing_compiled =
+            generation.plans.normal_mc.steps.len() > generation.plans.normal.steps.len();
+        if !routing_compiled {
+            return PlanId::Normal;
+        }
+        match generation.nodes.get(node_id::ROUTING) {
+            Some(GraphNode::Routing(routing)) if routing.applies_to(channels) => PlanId::NormalMc,
+            _ => PlanId::Normal,
+        }
+    }
+
     /// f64 variant of [`Self::run_plan`] (Quality mode).
     ///
     /// Applies the **same** non-finite containment as the f32 path, after the
@@ -178,9 +206,10 @@ impl DspGraph {
                     &mut self.scratch.scratch_trans_l[..n],
                     &mut self.scratch.scratch_trans_r[..n],
                 ];
+                let old_plan = Self::stereo_plan_id(old_gen, 2);
                 Self::run_plan_generation(
                     old_gen,
-                    PlanId::Normal,
+                    old_plan,
                     &mut old_planes,
                     self.non_finite_policy,
                 );
@@ -507,10 +536,11 @@ impl DspGraph {
             return;
         }
 
+        let plan = Self::stereo_plan_id(&self.active, 2);
         match self.precision_mode {
             PrecisionMode::Performance => {
                 let mut planes = [left as &mut [f32], right as &mut [f32]];
-                self.run_plan(PlanId::Normal, &mut planes);
+                self.run_plan(plan, &mut planes);
             }
             PrecisionMode::Quality => {
                 // Promote the block to f64, run the f64 chain, demote back.
@@ -525,7 +555,7 @@ impl DspGraph {
                 }
                 {
                     let mut planes = [&mut l64[..n] as &mut [f64], &mut r64[..n] as &mut [f64]];
-                    self.run_plan_f64(PlanId::Normal, &mut planes);
+                    self.run_plan_f64(plan, &mut planes);
                 }
                 for i in 0..n {
                     left[i] = l64[i] as f32;
@@ -584,8 +614,9 @@ impl DspGraph {
         if n == 0 || self.dop_bypass || self.bit_perfect {
             return;
         }
+        let plan = Self::stereo_plan_id(&self.active, 2);
         let mut planes = [left as &mut [f64], right as &mut [f64]];
-        self.run_plan_f64(PlanId::Normal, &mut planes);
+        self.run_plan_f64(plan, &mut planes);
         // Publish the per-slot / aux meters after the plan run, mirroring the
         // f32 entry point (`process_block_inner`) so the public f64 path
         // reports live metering too.

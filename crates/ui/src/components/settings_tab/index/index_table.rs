@@ -2,7 +2,7 @@
 //! settings categories. Data only; the scoring lives in `mod.rs`.
 use super::{SettingsCategory, SettingsEntry};
 
-pub static SETTINGS_INDEX: [SettingsEntry; 118] = [
+pub static SETTINGS_INDEX: [SettingsEntry; 120] = [
     SettingsEntry {
         category: SettingsCategory::Playback,
         card: "Playback Speed & Pitch Transposition",
@@ -174,6 +174,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 118] = [
     SettingsEntry {
         category: SettingsCategory::Output,
         card: "Native DSD Modulation & Apodizing",
+        label: "DoP from PCM",
+        description: "Frame the PCM→SDM bitstream as DoP when native DSD is unavailable",
+    },
+    SettingsEntry {
+        category: SettingsCategory::Output,
+        card: "Native DSD Modulation & Apodizing",
         label: "SDM Modulator",
         description: "Fifth- or seventh-order one-bit modulator design",
     },
@@ -332,6 +338,12 @@ pub static SETTINGS_INDEX: [SettingsEntry; 118] = [
         card: "Auxiliary Bus & Psychoacoustic Enhancer",
         label: "Auxiliary Return Bus",
         description: "Enable parallel effects return loop with dedicated return gain",
+    },
+    SettingsEntry {
+        category: SettingsCategory::MixBus,
+        card: "Auxiliary Bus & Psychoacoustic Enhancer",
+        label: "Bus Summation Headroom",
+        description: "Scale every mix-bus input by 1/√N or 1/N, weighted by each lane's applied gain",
     },
     SettingsEntry {
         category: SettingsCategory::MixBus,

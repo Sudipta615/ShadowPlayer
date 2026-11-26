@@ -84,6 +84,7 @@ impl AudioEngine {
     pub(super) fn sdm_report(&self) -> crate::playback_info::SdmReport {
         let mut report = crate::playback_info::SdmReport {
             active: self.dsd.sdm_active,
+            dop: self.dsd.sdm_dop_active(),
             modulator: Some(self.config.sdm.modulator),
             requested_rate: Some(self.config.sdm.rate),
             fallback_reason: self.dsd.sdm_fallback_reason.clone(),
@@ -96,8 +97,15 @@ impl AudioEngine {
             report.stage_factor = plan.stage_factor;
             report.multiple = plan.multiple;
         }
-        if let Some(stage) = self.dsd.sdm_output.as_ref() {
-            let t = stage.telemetry();
+        let telemetry = if let Some(stage) = self.dsd.sdm_output.as_ref() {
+            Some(stage.telemetry())
+        } else {
+            self.dsd
+                .sdm_dop_output
+                .as_ref()
+                .map(|stage| stage.telemetry())
+        };
+        if let Some(t) = telemetry {
             report.clips = t.clips;
             report.state_recoveries = t.state_recoveries;
             report.input_peak = t.input_peak;

@@ -38,7 +38,8 @@ pub use enums::{
     DitherPolicy, DsdNoiseFilter, DsdOutput, FallbackPolicy, FilterType, LoudnessMode, NoiseShaper,
     OutputAccessMode, OutputAccessState, PerformanceMode, PrecisionMode, QualityLatencyProfile,
     RateFallbackPolicy, ResamplerFilter, ResamplerQuality, ResamplerQualityInfo, SdmModulator,
-    SdmRate, SpeedMode, TimeStretchQuality, TransitionMode, UltrasonicFilter, VolumeMode,
+    SdmRate, SpeedMode, SummationHeadroom, TimeStretchQuality, TransitionMode, UltrasonicFilter,
+    VolumeMode,
 };
 pub use eq_text::{
     parse_curve, write_graphic, write_parametric, EqTextError, ImportedCurve, MAX_FREQ_HZ,

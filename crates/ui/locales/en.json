@@ -12,6 +12,7 @@
   "S04074FBB8EAB85B7": "‹ Back to Folders",
   "S0449E2B0D04F69FB": "No exclusive-mode backend is compiled in, so this build cannot open a device without the operating system's mixer. Playback is not bit-perfect here.",
   "S047707614EA5E464": "No FIR routes loaded",
+  "S4F60628101309120": "DoP from PCM",
   "S05779989792F4072": "Enable Crossfeed",
   "S05AA4E66B74E7FD1": "No tracks match yet.",
   "S05CDEDDA9284DB76": "Measurement saved to {path}",
@@ -90,7 +91,7 @@
   "S17EA5197A736908E": "Clear history",
   "S17FF0EE010CC8A9A": "Surround (5.1)",
   "S180AEB13CF68FB97": "Threshold & Depth",
-  "S188F79E857CB79C6": "ShadowPlayer includes a multi-track mixing engine allowing you to inject auxiliary stems, click tracks, or commentary channels alongside your primary music. Each channel slot provides independent float gain (0.0x to 2.0x), true stereo pan balancing (-1.0 Left to +1.0 Right), and instantaneous mute toggling.",
+  "SBAC4B98A2CEF8471": "ShadowPlayer includes a multi-track mixing engine allowing you to inject auxiliary stems, click tracks, or commentary channels alongside your primary music. Each channel slot provides independent float gain (0.0x to 1.0x), true stereo pan balancing (-1.0 Left to +1.0 Right), and instantaneous mute toggling.",
   "S18CFD4E19705CDB3": "The recommendation engine is ranking your library. This stays off the audio thread, so playback keeps running.",
   "S192BD2E10078A2D1": "No Playlist Selected",
   "S192F406841C97C2D": "Imported File Locations:",
@@ -305,6 +306,7 @@
   "S4EA0F21FC2A338A1": "Move up",
   "S4F3BAC5375A3D7F8": "Filter Slope",
   "S4FADD265E23DD537": "SDM Conversion",
+  "S4FE2362DC57F8293": "Bus Summation Headroom",
   "S5000BDAB5A32F780": "Configured Folders",
   "S5013919EF1B04196": "You can also drag and drop audio files or entire folders directly into ShadowPlayer at any time.",
   "S5037321907974B38": "Overlap time in seconds between fading out song and fading in next song",
@@ -829,6 +831,7 @@
   "SDC4932D8AABB325F": "Next track",
   "SDC673E73B5C13AEA": "Delete",
   "SDC76DA3F35BF400E": "Audio Engine Stream Recovery",
+  "SDD3A0B97434FD2B2": "Frame the PCM→SDM bitstream as DoP when native DSD is unavailable. Requires a stereo source and an exclusive 24-bit PCM stream at dsd_rate/16; otherwise the engine reports the PCM fallback.",
   "SDDAA683A7FAA2D5E": "{analyzed} of {total} tracks analyzed · {feedback} feedback events",
   "SDDABA94F15E24F5D": "Exit Pure Direct (Restore DSP Chain)",
   "SDE0B06B549269586": "Sort by Duration",
@@ -960,5 +963,6 @@
   "SFF5EEB2A47D95656": "Polyphase FIR filter quality used when rate conversion is required",
   "SFFCE72DBF9B56B3F": "Stereo Field Enhancer",
   "SFFDF8E71C18FAB23": "Sample Rate Policies & Resampling Precision",
-  "SFFE6E788D7AF4B82": "3. Interface Elements & Layout Walkthrough"
+  "SFFE6E788D7AF4B82": "3. Interface Elements & Layout Walkthrough",
+  "S7E6B100836E9B234": "Scale every mix-bus input by 1/√N or 1/N when lanes are active, trading level for headroom. Each lane's applied gain weights its share of N, so trimming a lane returns headroom to the rest. Off keeps the historical unity-per-input sum."
 }

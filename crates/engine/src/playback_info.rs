@@ -31,8 +31,12 @@ pub enum PlaybackState {
 /// stayed on PCM.
 #[derive(Debug, Clone)]
 pub struct SdmReport {
-    /// True only while PCM is being modulated to native DSD.
+    /// True while PCM is being modulated to a one-bit stream (native DSD or
+    /// DoP synthesis).
     pub active: bool,
+    /// True when the one-bit stream is framed as DoP into a PCM transport
+    /// (`active && dop`) rather than sent as native DSD (`active && !dop`).
+    pub dop: bool,
     /// Modulator design actually in use.
     pub modulator: Option<config::SdmModulator>,
     /// Rate the user requested (`Auto` or a fixed multiple).
@@ -67,6 +71,7 @@ impl Default for SdmReport {
     fn default() -> Self {
         Self {
             active: false,
+            dop: false,
             modulator: None,
             requested_rate: None,
             dsd_rate: 0,

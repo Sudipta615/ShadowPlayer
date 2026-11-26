@@ -6,7 +6,7 @@ use audio_session::engine::config::{
     AudioBackend, BassManagementConfig, ChannelMixConfig, ChannelRoutingConfig, CrossfadeCurve,
     DacCorrectionConfig, DsdNoiseFilter, DsdOutput, FallbackPolicy, LfeConfig, LoudnessMode,
     NoiseShaper, PrecisionMode, ResamplerFilter, ResamplerQuality, SampleRatePolicy, SdmConfig,
-    SpatialQuality, SpeedMode, TransitionMode, UltrasonicFilter, VolumeMode,
+    SpatialQuality, SpeedMode, SummationHeadroom, TransitionMode, UltrasonicFilter, VolumeMode,
 };
 use audio_session::engine::output::devices::OutputDeviceInfo;
 use audio_session::engine::AudioSource;
@@ -28,6 +28,54 @@ pub enum SettingsViewMode {
     #[default]
     Standard,
     ProStudio,
+}
+
+/// Number of mix-bus slots the panel remembers lane state for. Mirrors the
+/// engine's `MAX_MIX_SLOTS` (8); slots 0/1 are the transition pair, so the
+/// lane editor addresses slots 2..`LANE_SLOTS - 1`.
+pub const LANE_SLOTS: usize = 8;
+
+/// One mix-bus lane as the panel remembers it: which source it carries and the
+/// trim it applies. Both halves are persisted — the source so the lane comes
+/// back on the next launch, the trim so it returns at the same level, pan and
+/// mute.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LaneState {
+    /// File the lane plays, or `None` for an empty slot. Lane sources are files
+    /// because the engine opens a decoder per lane; the panel restores them
+    /// into the same slot on the next launch.
+    pub source: Option<PathBuf>,
+    /// Linear lane gain in `[0, 1]` (the engine's lane-gain bound).
+    pub gain: f32,
+    /// Pan in `[-1, 1]`.
+    pub pan: f32,
+    /// Whether the lane contributes silence.
+    pub muted: bool,
+    /// Whether the lane is attached at all.
+    pub active: bool,
+}
+
+impl Default for LaneState {
+    fn default() -> Self {
+        Self {
+            source: None,
+            gain: 1.0,
+            pan: 0.0,
+            muted: false,
+            active: true,
+        }
+    }
+}
+
+impl LaneState {
+    /// Whether this lane is the factory value (no source, nothing to replay).
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+fn default_lanes() -> [LaneState; LANE_SLOTS] {
+    std::array::from_fn(|_| LaneState::default())
 }
 
 /// Everything the settings panel needs to remember between launches.
@@ -190,13 +238,19 @@ pub struct SettingsTabState {
     // Mix Bus
     #[serde(skip)]
     pub add_track_path: String,
+    /// Lane the mix-bus editor is currently addressing.
     pub track_slot: u8,
-    pub track_gain: f32,
-    pub track_pan: f32,
-    pub track_muted: bool,
-    pub track_active: bool,
+    /// Per-slot lane state, indexed by mix-bus slot. Persisted so a lane's
+    /// source, gain, pan and mute survive a relaunch; the source is re-opened
+    /// and the trim replayed once at startup by `sync_all_to_session`.
+    #[serde(default = "default_lanes")]
+    pub lanes: [LaneState; LANE_SLOTS],
     pub aux_enabled: bool,
     pub aux_return_gain: f32,
+    /// Automatic summation-headroom law for the N-input mix bus. `Off` keeps
+    /// the historical unity-per-input sum.
+    #[serde(default)]
+    pub bus_summation: SummationHeadroom,
     pub duck_source_slot: u8,
     pub duck_threshold_db: f32,
     pub duck_depth_db: f32,
@@ -254,6 +308,27 @@ pub struct SettingsTabState {
     pub section_mixbus: bool,
     pub section_capture: bool,
     pub section_advanced: bool,
+}
+
+impl SettingsTabState {
+    /// The persisted state for one mix-bus slot, or the factory lane when the
+    /// slot is outside the bus bound.
+    pub fn lane_state(&self, slot: u8) -> LaneState {
+        self.lanes.get(slot as usize).cloned().unwrap_or_default()
+    }
+
+    /// Mutable access to one slot's lane; `None` for an out-of-range slot.
+    pub fn lane_state_mut(&mut self, slot: u8) -> Option<&mut LaneState> {
+        self.lanes.get_mut(slot as usize)
+    }
+
+    /// First mix-bus slot with no lane and no source, i.e. where a newly added
+    /// lane can be placed without losing another lane's persisted trim.
+    pub fn first_free_lane_slot(&self) -> Option<u8> {
+        (2..LANE_SLOTS)
+            .find(|&slot| self.lanes[slot].source.is_none())
+            .map(|slot| slot as u8)
+    }
 }
 
 impl Default for SettingsTabState {
@@ -334,12 +409,10 @@ impl Default for SettingsTabState {
 
             add_track_path: String::new(),
             track_slot: 2,
-            track_gain: 1.0,
-            track_pan: 0.0,
-            track_muted: false,
-            track_active: true,
+            lanes: default_lanes(),
             aux_enabled: false,
             aux_return_gain: 1.0,
+            bus_summation: SummationHeadroom::Off,
             duck_source_slot: 0,
             duck_threshold_db: -18.0,
             duck_depth_db: 12.0,
@@ -443,7 +516,9 @@ pub struct SettingsTabActions {
     pub voice_budget_changed: bool,
 
     // Mix Bus
-    pub add_track: Option<AudioSource>,
+    /// Lane attachment request: the mix-bus slot the panel assigned (so the
+    /// source and its trim stay together) plus the file to open.
+    pub add_track: Option<(u8, AudioSource)>,
     pub remove_track: Option<u8>,
     pub track_gain_changed: Option<(u8, f32)>,
     pub track_pan_changed: Option<(u8, f32)>,
@@ -451,6 +526,8 @@ pub struct SettingsTabActions {
     pub track_active_changed: Option<(u8, bool)>,
     pub aux_changed: bool,
     pub duck_tracks: bool,
+    /// The user selected a different mix-bus summation-headroom law.
+    pub bus_summation_changed: Option<SummationHeadroom>,
 
     // Chain presets (whole-chain named profiles)
     /// Save the current chain under this name (replacing a same-named preset).
@@ -643,6 +720,46 @@ mod tests {
             state.allowed_sample_rates.is_empty(),
             "an absent whitelist means every hardware-supported rate stays available"
         );
+    }
+
+    #[test]
+    fn lane_state_round_trip_and_old_settings_default_it() {
+        // Settings written before per-slot lane state existed have no array;
+        // every lane must load at its factory value rather than panic or zero
+        // out a lane's level.
+        let old: SettingsTabState = serde_json::from_str("{}").expect("old settings JSON");
+        assert_eq!(old.lane_state(2), LaneState::default());
+        assert!(old.lane_state(2).is_default());
+        assert_eq!(old.first_free_lane_slot(), Some(2));
+
+        let mut state = SettingsTabState::default();
+        {
+            let lane = state.lane_state_mut(3).expect("slot 3 is addressable");
+            lane.source = Some(PathBuf::from("/music/reference.wav"));
+            lane.gain = 0.25;
+            lane.pan = -0.5;
+            lane.muted = true;
+            lane.active = false;
+        }
+        // A lane with a source is not a free slot, so the next add goes to 2.
+        assert_eq!(state.first_free_lane_slot(), Some(2));
+
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SettingsTabState = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back.lane_state(3),
+            LaneState {
+                source: Some(PathBuf::from("/music/reference.wav")),
+                gain: 0.25,
+                pan: -0.5,
+                muted: true,
+                active: false,
+            }
+        );
+        // Other lanes keep their own state: switching the editor slot must not
+        // carry one lane's values onto another.
+        assert_eq!(back.lane_state(2), LaneState::default());
+        assert!(back.lane_state(LANE_SLOTS as u8).is_default());
     }
 
     #[test]

@@ -648,6 +648,17 @@ pub struct SdmConfig {
     /// When true, native DSD sources (DSF/DFF) bypass SDM modulation and play bit-perfect.
     #[serde(default = "default_true")]
     pub dsd_bypass: bool,
+    /// When native DSD cannot be opened, frame the same modulated one-bit
+    /// stream as DoP (DSD over PCM) instead of falling back to plain PCM.
+    ///
+    /// This requires a stereo source and an exclusive 24-bit-capable PCM
+    /// stream at `dsd_rate / 16` (176.4/192 kHz for DSD64, 352.8/384 kHz for
+    /// DSD128, …). Off by default: DoP synthesis is a distinct transport, and
+    /// a converter that accepts 24-bit PCM at those rates is not the same as
+    /// one that accepts native DSD. When off, or when the PCM stream is not
+    /// available, the engine reports the PCM fallback and its reason.
+    #[serde(default)]
+    pub dop: bool,
 }
 
 fn default_true() -> bool {
@@ -661,6 +672,7 @@ impl Default for SdmConfig {
             modulator: crate::SdmModulator::default(),
             rate: crate::SdmRate::default(),
             dsd_bypass: true,
+            dop: false,
         }
     }
 }

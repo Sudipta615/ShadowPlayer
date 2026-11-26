@@ -6,9 +6,11 @@ use super::super::widgets::{
     badge_label, card_header, dual_tone_slider, pill_btn, segment_picker, setting_card,
     setting_item, setting_item_toggle, setting_item_with_info, toggle_switch,
 };
-use super::super::{SettingsTabActions, SettingsTabState};
+use super::super::{LaneState, SettingsTabActions, SettingsTabState, LANE_SLOTS};
 use crate::theme::Theme;
-use audio_session::engine::config::{ChannelMixTemplate, CrossoverFilterType, CrossoverSlope};
+use audio_session::engine::config::{
+    ChannelMixTemplate, CrossoverFilterType, CrossoverSlope, SummationHeadroom,
+};
 use audio_session::engine::AudioSource;
 use eframe::egui::{self, Vec2};
 
@@ -55,8 +57,18 @@ pub(in crate::components::settings_tab) fn render_mixbus_category(
                     .clicked()
                     && !state.add_track_path.is_empty()
                 {
-                    actions.add_track =
-                        Some(AudioSource::File(state.add_track_path.clone().into()));
+                    // The panel owns the lane→slot mapping: recording the
+                    // source beside its slot is what lets the lane (and its
+                    // trim) come back on the next launch. The engine honours
+                    // the requested slot instead of picking the first free
+                    // one, so the two mappings cannot drift apart.
+                    if let Some(slot) = state.first_free_lane_slot() {
+                        let path = std::path::PathBuf::from(&state.add_track_path);
+                        if let Some(lane) = state.lane_state_mut(slot) {
+                            lane.source = Some(path.clone());
+                        }
+                        actions.add_track = Some((slot, AudioSource::File(path)));
+                    }
                 }
             },
         );
@@ -67,11 +79,14 @@ pub(in crate::components::settings_tab) fn render_mixbus_category(
             &tr!("Select mixer channel strip to control"),
             theme,
             |ui| {
+                // Slots 0/1 are the transition pair; lanes run to the engine's
+                // bus bound, and a higher slot would be silently ignored.
+                let last_slot = (LANE_SLOTS - 1) as f32;
                 let mut slot = state.track_slot as f32;
                 if ui
                     .add(
                         egui::DragValue::new(&mut slot)
-                            .range(2.0..=16.0)
+                            .range(2.0..=last_slot)
                             .min_size(Vec2::new(76.0, 24.0)),
                     )
                     .changed()
@@ -83,7 +98,13 @@ pub(in crate::components::settings_tab) fn render_mixbus_category(
                     .add(pill_btn(tr!(Msg::SB4BA4B46A7C22BDB), false, theme))
                     .clicked()
                 {
-                    actions.remove_track = Some(state.track_slot);
+                    let slot = state.track_slot;
+                    actions.remove_track = Some(slot);
+                    // The lane is gone, so its source and trim must not haunt
+                    // the slot when a later lane lands there.
+                    if let Some(lane) = state.lane_state_mut(slot) {
+                        *lane = LaneState::default();
+                    }
                 }
             },
         );
@@ -94,21 +115,46 @@ pub(in crate::components::settings_tab) fn render_mixbus_category(
             &tr!("Fine-tune channel volume level and stereo pan balance"),
             theme,
             |ui| {
+                let slot = state.track_slot;
                 ui.label(tr!(Msg::S05EEC723A5F2B92C));
-                let mut g = state.track_gain;
-                if dual_tone_slider(ui, &mut g, 0.0..=2.0, 0.01, 0.0, theme) {
-                    state.track_gain = g;
-                    actions.track_gain_changed = Some((state.track_slot, g));
+                let mut g = state.lane_state(slot).gain;
+                // The engine clamps a lane's gain to [0, 1]; a 2.0 ceiling
+                // would advertise a boost that is silently discarded, and the
+                // summation law reads this gain as the lane's weight.
+                if dual_tone_slider(ui, &mut g, 0.0..=1.0, 0.01, 0.0, theme) {
+                    if let Some(trim) = state.lane_state_mut(slot) {
+                        trim.gain = g;
+                    }
+                    actions.track_gain_changed = Some((slot, g));
                 }
-                badge_label(ui, format!("{:.2}x", state.track_gain), theme);
+                let gain = state.lane_state(slot).gain;
+                badge_label(ui, format!("{:.2}x", gain), theme);
+                // A mixer strip reads in dB; the multiplier alone hides that
+                // 0.50x is −6 dB. Zero gain is silence, not a finite dB value.
+                badge_label(
+                    ui,
+                    if gain <= 0.0001 {
+                        "-∞ dB".to_string()
+                    } else {
+                        let db = 20.0 * gain.log10();
+                        if db > -0.05 {
+                            "0.0 dB".to_string()
+                        } else {
+                            format!("{db:.1} dB")
+                        }
+                    },
+                    theme,
+                );
 
                 ui.label(tr!(Msg::S2DFAE419ECFC86C2));
-                let mut p = state.track_pan;
+                let mut p = state.lane_state(slot).pan;
                 if dual_tone_slider(ui, &mut p, -1.0..=1.0, 0.02, 0.0, theme) {
-                    state.track_pan = p;
-                    actions.track_pan_changed = Some((state.track_slot, p));
+                    if let Some(trim) = state.lane_state_mut(slot) {
+                        trim.pan = p;
+                    }
+                    actions.track_pan_changed = Some((slot, p));
                 }
-                badge_label(ui, format!("{:+.2}", state.track_pan), theme);
+                badge_label(ui, format!("{:+.2}", state.lane_state(slot).pan), theme);
             },
         );
 
@@ -118,15 +164,20 @@ pub(in crate::components::settings_tab) fn render_mixbus_category(
             &tr!("Mute and active playback enable state"),
             theme,
             |ui| {
-                let mut m = state.track_muted;
+                let slot = state.track_slot;
+                let mut m = state.lane_state(slot).muted;
                 if ui.checkbox(&mut m, "Mute").changed() {
-                    state.track_muted = m;
-                    actions.track_mute_changed = Some((state.track_slot, m));
+                    if let Some(trim) = state.lane_state_mut(slot) {
+                        trim.muted = m;
+                    }
+                    actions.track_mute_changed = Some((slot, m));
                 }
-                let mut a = state.track_active;
+                let mut a = state.lane_state(slot).active;
                 if ui.checkbox(&mut a, "Active").changed() {
-                    state.track_active = a;
-                    actions.track_active_changed = Some((state.track_slot, a));
+                    if let Some(trim) = state.lane_state_mut(slot) {
+                        trim.active = a;
+                    }
+                    actions.track_active_changed = Some((slot, a));
                 }
             },
         );
@@ -291,6 +342,25 @@ pub(in crate::components::settings_tab) fn render_mixbus_category(
                         actions.aux_changed = true;
                     }
                     badge_label(ui, format!("{:.2}x", state.aux_return_gain), theme);
+                }
+            },
+        );
+
+        setting_item(
+            ui,
+            &tr!("Bus Summation Headroom"),
+            &tr!(
+                "Scale every mix-bus input by 1/√N or 1/N when lanes are active, trading level for headroom. Each lane's applied gain weights its share of N, so trimming a lane returns headroom to the rest. Off keeps the historical unity-per-input sum."
+            ),
+            theme,
+            |ui| {
+                let options = [
+                    (SummationHeadroom::Off, "Off"),
+                    (SummationHeadroom::InverseSqrt, "1/√N"),
+                    (SummationHeadroom::InverseN, "1/N"),
+                ];
+                if segment_picker(ui, &mut state.bus_summation, &options, theme) {
+                    actions.bus_summation_changed = Some(state.bus_summation);
                 }
             },
         );

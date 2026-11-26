@@ -2,15 +2,46 @@
 
 use crate::decode::Decoder;
 use crate::dsp::graph2::prod::{DuckState, MAX_DUCK_TARGETS};
-use crate::engine::lanes::LaneTrack;
+use crate::engine::lanes::{LaneTrack, MAX_LANES};
 use crate::source::AudioSource;
 
 impl super::AudioEngine {
     /// Add a track as an independent lane on the first free mix-bus slot ≥ 2.
+    pub(super) fn handle_add_track(&mut self, source: AudioSource) {
+        let Some(slot) = self.next_lane_slot() else {
+            log::warn!("AddTrack: no free lane slots (bus full)");
+            self.emit_event(crate::events::EngineEvent::Error(
+                "AddTrack: mix bus has no free lane slots".into(),
+            ));
+            return;
+        };
+        self.handle_add_track_at(slot as u8, source);
+    }
+
+    /// Add a track as a lane on a **specific** mix-bus slot ≥ 2.
     /// Control path: opens the decoder, grows the bus generation if needed
     /// (glitch-free swap), and registers the lane. The decode loop picks it
     /// up at the next block boundary.
-    pub(super) fn handle_add_track(&mut self, source: AudioSource) {
+    ///
+    /// The caller owns the slot mapping here, so a slot outside the lane range
+    /// or one that already carries a lane is rejected: silently remapping would
+    /// attach the trim (and any duck target) saved for one stream to another.
+    pub(super) fn handle_add_track_at(&mut self, slot: u8, source: AudioSource) {
+        let slot = slot as usize;
+        if !(2..MAX_LANES + 2).contains(&slot) {
+            log::warn!("AddTrackAt: slot {slot} is outside the lane range");
+            self.emit_event(crate::events::EngineEvent::Error(format!(
+                "AddTrackAt: mix-bus slot {slot} cannot carry a lane"
+            )));
+            return;
+        }
+        if self.lanes.iter().any(|lane| lane.slot == slot) {
+            log::warn!("AddTrackAt: slot {slot} already carries a lane");
+            self.emit_event(crate::events::EngineEvent::Error(format!(
+                "AddTrackAt: mix-bus slot {slot} is already in use"
+            )));
+            return;
+        }
         let path = match &source {
             AudioSource::File(p) => p.clone(),
             _ => {
@@ -29,13 +60,6 @@ impl super::AudioEngine {
                 )));
                 return;
             }
-        };
-        let Some(slot) = self.next_lane_slot() else {
-            log::warn!("AddTrack: no free lane slots (bus full)");
-            self.emit_event(crate::events::EngineEvent::Error(
-                "AddTrack: mix bus has no free lane slots".into(),
-            ));
-            return;
         };
         // Grow the bus on demand via the glitch-free generation swap so the
         // lane's slot exists in the active generation.

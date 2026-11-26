@@ -14,7 +14,9 @@ use config::EngineConfig;
 #[cfg(feature = "audio-output")]
 use crate::output::DeviceMonitor;
 use crate::{
-    buffer::{EngineCommand, FixedFrameBuffer, PlaybackInfo, DEFAULT_SAMPLE_RATE},
+    buffer::{
+        EngineCommand, FixedFrameBuffer, PlaybackInfo, DEFAULT_SAMPLE_RATE, MAX_AUDIO_BLOCK_FRAMES,
+    },
     dsp::{graph2::prod::Graph2Engine, GraphicEq},
     playlist::Playlist,
     sink::SampleSink,
@@ -281,6 +283,9 @@ impl AudioEngine {
         if self.meters.is_enabled() {
             self.meters.process_interleaved(samples, channels);
         }
+        if self.dsd.sdm_dop_active() {
+            return self.push_sdm_dop(samples, channels);
+        }
         if self.dsd.sdm_active {
             return self.push_sdm(samples, channels);
         }
@@ -399,6 +404,56 @@ impl AudioEngine {
             "native DSD ring rejected a pre-checked block"
         );
         n
+    }
+
+    /// Route a working-rate PCM block through the PCM→SDM→DoP stage and into
+    /// the PCM sink as 24-bit DoP frames.
+    ///
+    /// Returns the number of **input** frames consumed, which is what the
+    /// decode loop retries against. A short sink write does not re-modulate the
+    /// source: the converted DoP tail is kept in `dsd.dop_pending` and drained
+    /// on the next call before any new input is converted. The pending tail is
+    /// therefore never larger than one converted block.
+    #[inline]
+    fn push_sdm_dop(&mut self, samples: &[f32], channels: usize) -> usize {
+        let mut pending = std::mem::take(&mut self.dsd.dop_pending);
+        // Drain the previous block's tail first. Do not convert more input
+        // while it is non-empty, or the tail would grow without bound.
+        if !pending.is_empty() {
+            let accepted = self.sample_sink.push_interleaved(&pending, 2);
+            if accepted > 0 {
+                pending.drain(..(accepted * 2).min(pending.len()));
+            }
+            if !pending.is_empty() {
+                self.dsd.dop_pending = pending;
+                return 0;
+            }
+        }
+        if channels != 2 {
+            self.dsd.dop_pending = pending;
+            return 0;
+        }
+        let frames = (samples.len() / 2).min(MAX_AUDIO_BLOCK_FRAMES);
+        if frames == 0 {
+            self.dsd.dop_pending = pending;
+            return 0;
+        }
+        let Some(stage) = self.dsd.sdm_dop_output.as_mut() else {
+            self.dsd.dop_pending = pending;
+            return 0;
+        };
+        stage.process_block(&samples[..frames * 2], &mut pending);
+        if !pending.is_empty() {
+            let produced = pending.len() / 2;
+            let accepted = self.sample_sink.push_interleaved(&pending, 2);
+            if accepted >= produced {
+                pending.clear();
+            } else if accepted > 0 {
+                pending.drain(..accepted * 2);
+            }
+        }
+        self.dsd.dop_pending = pending;
+        frames
     }
 
     #[cfg(feature = "audio-output")]

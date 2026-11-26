@@ -177,8 +177,12 @@ impl DspState {
                 audio_session::engine::config::VoicePriority::DistanceWeighted,
             );
         }
-        if let Some(src) = s.add_track.clone() {
-            session.add_track(src);
+        if let Some((slot, src)) = s.add_track.clone() {
+            session.add_track_at(slot, src);
+            // A newly attached lane starts at factory values; re-apply the
+            // stored trims so a lane added back into the same slot keeps the
+            // level, pan and mute the panel remembers for it.
+            self.sync_lane_trims_to_session(session);
         }
         if let Some(slot) = s.remove_track {
             session.remove_track(slot);
@@ -198,6 +202,9 @@ impl DspState {
         if s.aux_changed {
             let st = &self.settings_tab;
             session.set_aux(st.aux_enabled, st.aux_return_gain);
+        }
+        if let Some(law) = s.bus_summation_changed {
+            session.set_bus_summation(law);
         }
         if s.duck_tracks {
             let st = &self.settings_tab;
