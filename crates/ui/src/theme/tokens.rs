@@ -1,3 +1,8 @@
+//! Design tokens: colours, radii, strokes, spacing and typography scales.
+//!
+//! The single source of truth for theme values; components read tokens rather
+//! than hard-coding colours or sizes.
+
 use eframe::egui::{self, Color32, CornerRadius, Margin, Stroke, TextStyle, Vec2};
 use serde::{Deserialize, Serialize};
 

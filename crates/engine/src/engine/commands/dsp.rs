@@ -371,11 +371,10 @@ impl AudioEngine {
     /// Select the final quantization noise shaper.
     ///
     /// A converter's dither design is built when the device stream opens, so
-    /// this arms the next stream. Updating the process-wide construction
-    /// default keeps host-created converters consistent with this choice.
+    /// this arms the next stream. Each output stores its own copy of the
+    /// family at open; there is no process-wide mutable shaper to race.
     pub(super) fn handle_set_noise_shaper(&mut self, shaper: config::NoiseShaper) {
         self.config.noise_shaper = shaper;
-        crate::dsp::dither::set_configured_noise_shaper(shaper);
         info!("Noise shaper set to {:?} (next stream)", shaper);
     }
 

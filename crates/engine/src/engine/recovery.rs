@@ -106,6 +106,7 @@ impl AudioEngine {
             audio_backend,
             self.config.output_device.as_deref(),
             self.config.fallback_policy,
+            self.config.noise_shaper,
         )?;
         // Sync the user's dither preference to the new output. The new
         // output defaults to dither enabled; we re-apply the user's
@@ -322,6 +323,9 @@ impl AudioEngine {
 
         self.audio_output = Some(new_output);
         self.output_sample_rate = actual_rate;
+        // The monitor's conversion ratio is tied to the old output clock;
+        // rebuild it for the new rate (or report why it could not reopen).
+        self.sync_talkback();
         // A re-opened device gets the same warmup as a fresh stream, unless a
         // native DSD/DoP/SDM transport owns the sink.
         self.arm_dac_warmup();

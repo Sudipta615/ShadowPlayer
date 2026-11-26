@@ -1,18 +1,18 @@
-//! Ambisonics: the encode → decode round trip for orders 1–3, and the
-//! *documented* behaviour for orders 4 and above.
+//! Ambisonics: the encode → decode round trip and bus rotation for every
+//! order the engine implements (1–9).
 //!
-//! Two claims are checked here:
+//! Three claims are checked here:
 //!
-//! * For orders 1, 2 and 3 the engine implements an exact Wigner rotation
-//!   and a sampling decoder, so a plane wave encoded into the bus must
-//!   decode back to the speaker gains the SH maths says it should, and a
-//!   rotation by `q` followed by a rotation by `q⁻¹` must be the identity.
-//! * For order 4 and above the rotation is **not** implemented, and the
-//!   engine says so: `rotation_supported` reports false and
-//!   `rotate_bus_frame_n` leaves the frame untouched rather than rotating
-//!   the low orders and leaving the high ones behind. A half-rotated frame
-//!   is worse than an unrotated one, so the documented behaviour is the one
-//!   under test — not a guess at what "should" happen.
+//! * For orders 1–9 a plane wave encoded into the bus must decode back to
+//!   the speaker gains the SH maths says it should.
+//! * For orders 1–3 the engine uses exact closed-form Wigner blocks; for
+//!   orders 4–9 it recovers each degree block from the same ACN/N3D basis
+//!   the encoder uses. A rotation by `q` followed by a rotation by `q⁻¹`
+//!   must be the identity, and rotating a frame must commute with encoding
+//!   the rotated direction.
+//! * `rotation_supported` reports true for every order up to
+//!   [`MAX_ROTATABLE_ORDER`], and no supported order is silently left
+//!   untouched.
 
 use engine::spatial::ambisonic::decoder::order_weights;
 use engine::spatial::ambisonic::{
@@ -21,18 +21,23 @@ use engine::spatial::ambisonic::{
 };
 use engine::spatial::{sh_n, Quat, SpeakerLayout, Vec3};
 
-/// The orders the engine implements an exact rotation for.
-const EXACT_ORDERS: [u8; 3] = [1, 2, 3];
+/// The orders the engine implements a rotation for.
+const EXACT_ORDERS: [u8; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /// The tolerance for an order-1/2 rotation. The Wigner blocks are computed in
 /// f64 and cast to f32, so the round trip is limited by the f32 rounding of
 /// the intermediate frame.
 const TIGHT: f32 = 1e-4;
 
-/// The tolerance for an order-3 rotation. The engine's own in-crate test uses
-/// the same bound: the order-3 block is a 7×7 matrix of f32 coefficients
-/// applied to seven terms, so the accumulated rounding is larger.
+/// The tolerance for an order-3 rotation. The order-3 block is a 7×7 matrix
+/// of f32 coefficients applied to seven terms, so the accumulated rounding is
+/// larger.
 const LOOSE: f32 = 2e-3;
+
+/// The tolerance for the order-4+ numeric recovery. The solve itself runs in
+/// f64, but the basis it samples is the encoder's f32 `sh_n`, so the recovered
+/// matrix carries that quantisation plus the f32 frame round-off.
+const RECOVERED: f32 = 5e-3;
 
 /// A direction that is not on any axis.
 fn oblique_direction() -> Vec3 {
@@ -80,7 +85,52 @@ fn a_plane_wave_encodes_into_the_sh_basis_of_its_direction() {
 }
 
 #[test]
-fn the_encode_decode_round_trip_is_exact_for_orders_one_to_three() {
+fn the_third_order_cubic_pair_matches_the_acn_mapping() {
+    // ACN 9 is Q (m = −3, sin 3φ) and ACN 15 is P (m = +3, cos 3φ). They
+    // were swapped in the hard-coded basis, so the engine encoded one into
+    // the other while remaining self-consistent with its own decoder.
+    let s358 = (35.0f32 / 8.0).sqrt();
+    let mut sh = [0.0f32; 16];
+
+    sh_n(3, Vec3::X, &mut sh);
+    assert!((sh[9]).abs() < 1e-6, "Q at +X must be 0, got {}", sh[9]);
+    assert!(
+        (sh[15] - s358).abs() < 1e-6,
+        "P at +X must be {s358}, got {}",
+        sh[15]
+    );
+
+    sh_n(3, Vec3::Y, &mut sh);
+    assert!(
+        (sh[9] + s358).abs() < 1e-6,
+        "Q at +Y must be -{s358}, got {}",
+        sh[9]
+    );
+    assert!((sh[15]).abs() < 1e-6, "P at +Y must be 0, got {}", sh[15]);
+}
+
+#[test]
+fn the_order_four_zonal_harmonic_matches_the_closed_form() {
+    // ACN 20 is Y_4^0. In the engine's N3D convention it is
+    // 3/8·(35z⁴ − 30z² + 3). The order-4+ Legendre recurrence used to seed
+    // the m = 0 column with zero, which made this channel — and every other
+    // m = 0 channel above order 3 — wrong while encode/decode stayed
+    // self-consistent.
+    for z in [-0.9f32, -0.3, 0.0, 0.4, 0.8] {
+        let x = (1.0 - z * z).sqrt();
+        let mut sh = [0.0f32; 25];
+        sh_n(4, Vec3::new(x, 0.0, z), &mut sh);
+        let expected = 0.375 * (35.0 * z.powi(4) - 30.0 * z * z + 3.0);
+        assert!(
+            (sh[20] - expected).abs() < 1e-5,
+            "Y_4^0 at z={z}: {} vs {expected}",
+            sh[20]
+        );
+    }
+}
+
+#[test]
+fn the_encode_decode_round_trip_is_exact_for_orders_one_to_nine() {
     // The decoder's matrix is D[k][c] = w[c]·Y_c(speaker_k) / N, and the
     // encoder's bus is Y_c(source)·gain. The decoded speaker gain is
     // therefore the sum over the bus, which this test recomputes from the
@@ -187,7 +237,13 @@ fn a_plane_wave_is_decoded_into_the_speakers_that_face_it() {
 #[test]
 fn a_rotation_by_q_followed_by_its_inverse_is_the_identity() {
     for order in EXACT_ORDERS {
-        let tolerance = if order == 3 { LOOSE } else { TIGHT };
+        let tolerance = if order >= 4 {
+            RECOVERED
+        } else if order == 3 {
+            LOOSE
+        } else {
+            TIGHT
+        };
         for q in [
             Quat::from_euler_rad(0.7, 0.3, -0.2),
             Quat::from_euler_rad(std::f32::consts::FRAC_PI_2, 0.0, 0.0),
@@ -216,7 +272,13 @@ fn a_rotation_commutes_with_the_spherical_harmonic_basis() {
     // rotated direction. This is the property that makes the rotation
     // physically meaningful rather than an arbitrary matrix.
     for order in EXACT_ORDERS {
-        let tolerance = if order == 3 { LOOSE } else { TIGHT };
+        let tolerance = if order >= 4 {
+            RECOVERED
+        } else if order == 3 {
+            LOOSE
+        } else {
+            TIGHT
+        };
         for q in [
             Quat::from_euler_rad(0.7, 0.3, -0.2),
             Quat::from_euler_rad(std::f32::consts::FRAC_PI_2, 0.0, 0.0),
@@ -245,36 +307,40 @@ fn a_rotation_commutes_with_the_spherical_harmonic_basis() {
 }
 
 #[test]
-fn order_four_and_above_are_documented_as_not_rotated() {
-    // The documented behaviour, not a guess: orders above 3 are refused, and
-    // `rotate_bus_frame_n` leaves the frame completely untouched so the
-    // field stays self-consistent.
-    assert_eq!(MAX_ROTATABLE_ORDER, 3, "the highest rotatable order is 3");
+fn orders_four_to_nine_are_rotated() {
+    // The limitation used to be that order 4+ was left untouched. These
+    // orders now report support and the frame really changes, degree block by
+    // degree block, instead of passing the high channels through unrotated.
+    assert_eq!(MAX_ROTATABLE_ORDER, 9, "the highest rotatable order is 9");
+    let q = Quat::from_euler_rad(0.7, 0.3, -0.2);
     for order in 4u8..=9 {
         assert!(
-            !rotation_supported(order),
-            "order {order} must not claim to be rotatable"
+            rotation_supported(order),
+            "order {order} must claim to be rotatable"
         );
 
         let mut frame = vec![0.0f32; channel_count(order)];
         encode_plane_wave_n(order, oblique_direction(), 1.0, &mut frame);
         let original = frame.clone();
 
-        rotate_bus_frame_n(Quat::from_euler_rad(0.7, 0.3, -0.2), order, &mut frame);
+        rotate_bus_frame_n(q, order, &mut frame);
 
-        for (k, (a, b)) in original.iter().zip(frame.iter()).enumerate() {
-            assert_eq!(
-                a.to_bits(),
-                b.to_bits(),
-                "order {order}: channel {k} was rotated ({a} -> {b}); the \
-                 documented behaviour is that orders above 3 are left untouched"
-            );
-        }
+        let energy: f32 = original
+            .iter()
+            .zip(frame.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum();
+        assert!(
+            energy > 1e-3,
+            "order {order}: the rotation left the frame unchanged (energy {energy})"
+        );
     }
-    assert!(
-        rotation_supported(1) && rotation_supported(2) && rotation_supported(3),
-        "orders 1 to 3 must claim to be rotatable"
-    );
+    for order in 1u8..=9 {
+        assert!(
+            rotation_supported(order),
+            "order {order} must claim to be rotatable"
+        );
+    }
 }
 
 #[test]

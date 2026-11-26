@@ -89,9 +89,6 @@ impl AudioEngine {
                 }
             }
         }
-        // The output converters are built on their own threads at stream open;
-        // publish the configured shaper before any of them can be constructed.
-        crate::dsp::dither::set_configured_noise_shaper(config.noise_shaper);
         let (cmd_tx, cmd_rx) = channel::bounded(256);
         let (event_tx, event_rx) = channel::bounded(256);
         #[cfg(feature = "audio-output")]
@@ -179,6 +176,8 @@ impl AudioEngine {
             #[cfg(feature = "audio-output")]
             device_monitor,
             capture: None,
+            talkback: None,
+            talkback_error: None,
             measurement: None,
 
             telemetry: EngineTelemetry::default(),
@@ -284,6 +283,18 @@ impl AudioEngine {
         }
         if self.dsd.sdm_active {
             return self.push_sdm(samples, channels);
+        }
+        // DoP carries encoded words in the PCM sample positions and the DAC
+        // warmup is deliberately signal-free; a monitor mix would corrupt the
+        // first and defeat the second.
+        if !self.dsd.native_dsd_active
+            && !self.dsd.dop_active
+            && self.dac_warmup_frames_remaining == 0
+        {
+            if let Some(talkback) = self.talkback.as_mut() {
+                let mixed = talkback.render(samples, channels, false);
+                return self.sample_sink.push_interleaved(mixed, channels);
+            }
         }
         self.sample_sink.push_interleaved(samples, channels)
     }

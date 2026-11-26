@@ -5,11 +5,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam::channel::Sender;
+use url::Url;
 
 use super::{
     AutotagMatch, AutotagOutcome, AutotagResult, WorkerEvent, ACOUSTID_APP_KEY, MB_RATE_LIMIT,
     MB_USER_AGENT,
 };
+
+/// Metadata responses are small; anything larger is not a lookup result.
+const MAX_JSON_BYTES: u64 = 2 * 1024 * 1024;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -192,88 +196,87 @@ pub(super) fn base64_encode(data: &[u8]) -> String {
 /// Query the AcoustID API and return `(recording_id, confidence)` pairs above
 /// the minimum threshold (0.6).
 fn acoustid_lookup(fingerprint: &str, duration_secs: u32) -> Result<Vec<(String, f32)>, String> {
-    let url = format!(
-        "https://api.acoustid.org/v2/lookup\
-         ?client={client}\
-         &meta=recordings\
-         &duration={dur}\
-         &fingerprint={fp}",
-        client = ACOUSTID_APP_KEY,
-        dur = duration_secs,
-        fp = fingerprint,
-    );
-
-    let response = http_get(&url, MB_USER_AGENT)?;
+    let url = acoustid_url(fingerprint, duration_secs)?;
+    let response = http_get(url.as_str(), MB_USER_AGENT, MAX_JSON_BYTES)?;
     parse_acoustid_response(&response)
 }
 
-/// Minimal HTTP GET using the standard library's TCP stack (no reqwest/curl).
+/// Build the AcoustID lookup URL with each value percent-encoded.
 ///
-/// For HTTPS we use a lightweight TLS shim. In the current implementation this
-/// is a plain HTTP call over port 443 with TLS handled by the OS (via
-/// `rustls-platform-verifier` on a background thread in a real deployment).
-/// This simplified version uses a synchronous blocking connect and sends a
-/// minimal HTTP/1.1 request.
-fn http_get(url: &str, user_agent: &str) -> Result<String, String> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpStream;
+/// The fingerprint is base64, so `+` and `/` occur routinely; pasting it into
+/// a query string unchanged would turn `+` into a space and corrupt the
+/// fingerprint.
+fn acoustid_url(fingerprint: &str, duration_secs: u32) -> Result<Url, String> {
+    let mut url = Url::parse("https://api.acoustid.org/v2/lookup")
+        .map_err(|e| format!("invalid AcoustID endpoint: {e}"))?;
+    url.query_pairs_mut()
+        .append_pair("client", ACOUSTID_APP_KEY)
+        .append_pair("meta", "recordings")
+        .append_pair("duration", &duration_secs.to_string())
+        .append_pair("fingerprint", fingerprint);
+    Ok(url)
+}
 
-    // Parse the URL manually (no `url` crate dependency).
-    let without_scheme = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .ok_or("unsupported scheme")?;
-    let (host_port, path) = without_scheme
-        .split_once('/')
-        .map(|(h, p)| (h, format!("/{p}")))
-        .unwrap_or((without_scheme, "/".to_string()));
-    let (host, port) = host_port
-        .split_once(':')
-        .map(|(h, p)| (h, p.parse::<u16>().unwrap_or(443)))
-        .unwrap_or((host_port, 443));
+/// Fetch a small JSON document over HTTPS with a hard size cap.
+///
+/// Redirects are not followed: the two metadata APIs answer directly, and a
+/// redirect could move an AcoustID fingerprint (and the application key) to a
+/// host the user did not opt into.
+fn http_get(url: &str, user_agent: &str, limit: u64) -> Result<String, String> {
+    use std::io::Read;
 
-    // Connect with a 10-second timeout.
-    let addr = format!("{host}:{port}");
-    let stream = TcpStream::connect(&addr).map_err(|e| format!("connect to {addr}: {e}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(15))).ok();
+    let parsed = Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
+    if parsed.scheme() != "https" {
+        return Err(format!("refusing non-HTTPS {} URL", parsed.scheme()));
+    }
 
-    // Send a plain HTTP/1.1 request (works for non-TLS; in production use rustls).
-    let mut stream = stream;
-    let request = format!(
-        "GET {path} HTTP/1.1\r\n\
-         Host: {host}\r\n\
-         User-Agent: {ua}\r\n\
-         Accept: application/json\r\n\
-         Connection: close\r\n\
-         \r\n",
-        path = path,
-        host = host,
-        ua = user_agent,
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| format!("write: {e}"))?;
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(8))
+        .timeout_read(Duration::from_secs(15))
+        .timeout_write(Duration::from_secs(10))
+        .redirects(0)
+        .build();
 
-    // Read the response.
-    let mut reader = BufReader::new(&stream);
-    // Skip HTTP headers.
-    let mut line = String::new();
-    loop {
-        line.clear();
-        reader
-            .read_line(&mut line)
-            .map_err(|e| format!("read header: {e}"))?;
-        if line == "\r\n" || line.is_empty() {
-            break;
+    let response = agent
+        .get(parsed.as_str())
+        .set("User-Agent", user_agent)
+        .set("Accept", "application/json")
+        .call()
+        .map_err(|error| format!("request failed: {error}"))?;
+
+    let status = response.status();
+    if status != 200 {
+        return Err(format!("HTTP status {status}"));
+    }
+    if let Some(length) = response
+        .header("Content-Length")
+        .and_then(|value| value.trim().parse::<u64>().ok())
+    {
+        if length > limit {
+            return Err(format!(
+                "response of {length} bytes exceeds the {limit} byte limit"
+            ));
         }
     }
-    // Read body.
+
     let mut body = String::new();
-    use std::io::Read;
-    reader
+    response
+        .into_reader()
+        .take(limit + 1)
         .read_to_string(&mut body)
         .map_err(|e| format!("read body: {e}"))?;
+    if body.len() as u64 > limit {
+        return Err(format!("response body exceeds the {limit} byte limit"));
+    }
     Ok(body)
+}
+
+/// `true` for a canonical MusicBrainz recording id (UUID shape).
+fn is_recording_id(value: &str) -> bool {
+    value.len() == 36
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
 }
 
 /// Parse AcoustID JSON response. Returns `(recording_id, score)` pairs.
@@ -309,6 +312,12 @@ pub(super) fn parse_acoustid_response(json: &str) -> Result<Vec<(String, f32)>, 
 
 /// Fetch full metadata for a MusicBrainz recording ID.
 fn musicbrainz_lookup(recording_id: &str, score: f32) -> Result<Vec<AutotagMatch>, String> {
+    // The id came from a remote AcoustID response; only a UUID shape may
+    // become a URL path segment.
+    if !is_recording_id(recording_id) {
+        return Err(format!("invalid recording id {recording_id:?}"));
+    }
+
     let url = format!(
         "https://musicbrainz.org/ws/2/recording/{id}\
          ?inc=artists+releases+genres\
@@ -316,7 +325,7 @@ fn musicbrainz_lookup(recording_id: &str, score: f32) -> Result<Vec<AutotagMatch
         id = recording_id,
     );
 
-    let response = http_get(&url, MB_USER_AGENT)?;
+    let response = http_get(&url, MB_USER_AGENT, MAX_JSON_BYTES)?;
     parse_mb_recording(&response, recording_id, score)
 }
 
@@ -442,3 +451,45 @@ pub(super) fn parse_mb_recording(
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_is_percent_encoded_in_the_lookup_url() {
+        let fingerprint = "AQADtEmi+P/2SSo";
+        let url = acoustid_url(fingerprint, 245).unwrap();
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("api.acoustid.org"));
+
+        let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs.get("fingerprint").map(String::as_str),
+            Some(fingerprint)
+        );
+        assert_eq!(pairs.get("duration").map(String::as_str), Some("245"));
+        assert_eq!(
+            pairs.get("client").map(String::as_str),
+            Some(ACOUSTID_APP_KEY)
+        );
+
+        // A raw `+` in the URL would be decoded as a space.
+        assert!(!url.as_str().contains("+P/"));
+        assert!(url.as_str().contains("%2BP%2F"));
+    }
+
+    #[test]
+    fn only_uuid_shaped_recording_ids_are_accepted() {
+        assert!(is_recording_id("8f6bd1e4-fbe1-4f50-aa9b-94c450ec0f11"));
+        assert!(!is_recording_id("../../admin"));
+        assert!(!is_recording_id("8f6bd1e4"));
+        assert!(!is_recording_id(""));
+    }
+
+    #[test]
+    fn plain_http_is_refused_before_any_connection() {
+        let error = http_get("http://api.acoustid.org/v2/lookup", MB_USER_AGENT, 1024).unwrap_err();
+        assert!(error.contains("non-HTTPS"), "{error}");
+    }
+}

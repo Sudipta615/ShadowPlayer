@@ -11,13 +11,10 @@ pub struct DitherNode {
 }
 
 impl DitherNode {
-    pub fn new(sample_rate: f32) -> Self {
-        Self::with_type(crate::dsp::dither::configured_dither_type(), sample_rate)
-    }
-
     /// Construct with an explicit dither family. The graph's dither node is
     /// the 16-bit reference node; the production integer boundary is the
-    /// output converter, which reads the same configured default.
+    /// output converter, which receives the same family from the engine
+    /// configuration when its stream opens.
     pub fn with_type(dither_type: DitherType, sample_rate: f32) -> Self {
         Self {
             dither: Dither::with_sample_rate(dither_type, 16, sample_rate as u32),

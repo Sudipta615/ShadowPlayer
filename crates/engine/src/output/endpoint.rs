@@ -215,6 +215,12 @@ impl EndpointWorker {
     /// controller. `master_rate` is the decode loop's rate domain. Control
     /// path — allocation is legal here; the audio-side push is
     /// allocation-free.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "One open call takes the full negotiated endpoint configuration; \
+                  grouping it into a struct would move the same fields without \
+                  making the call site clearer."
+    )]
     pub fn open(
         mut config: EndpointConfig,
         capacity_frames: usize,
@@ -223,6 +229,7 @@ impl EndpointWorker {
         resampler_filter: config::ResamplerFilter,
         resampler_cutoff_ratio: f32,
         precision: config::PrecisionMode,
+        noise_shaper: config::NoiseShaper,
     ) -> Result<Self, OutputError> {
         config.gain = config.gain.clamp(0.0, 4.0);
         let ring = EndpointRing::new(config.id.clone(), capacity_frames)
@@ -232,6 +239,7 @@ impl EndpointWorker {
             config.backend,
             config.device.as_deref(),
             config::FallbackPolicy::Allow,
+            noise_shaper,
         )?;
         let rate = output.sample_rate();
         output.start()?;

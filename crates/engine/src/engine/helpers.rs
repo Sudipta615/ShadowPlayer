@@ -38,13 +38,30 @@ impl AudioEngine {
                     self.emit_event(EngineEvent::PlaybackStarted);
                 }
                 PlaybackState::Paused => {
-                    if let Some(ref output) = self.audio_output {
+                    // A live talkback monitor keeps the primary stream
+                    // draining while transport is paused; the program tail
+                    // is discarded so the microphone is what plays.
+                    if self.talkback.is_some() {
+                        if let Some(ref output) = self.audio_output {
+                            output.reset_buffer();
+                            output.resume();
+                        } else {
+                            self.sample_sink.reset();
+                        }
+                    } else if let Some(ref output) = self.audio_output {
                         output.pause();
                     }
                     self.emit_event(EngineEvent::PlaybackPaused);
                 }
                 PlaybackState::Stopped => {
-                    if let Some(ref output) = self.audio_output {
+                    if self.talkback.is_some() {
+                        if let Some(ref output) = self.audio_output {
+                            output.reset_buffer();
+                            output.resume();
+                        } else {
+                            self.sample_sink.reset();
+                        }
+                    } else if let Some(ref output) = self.audio_output {
                         output.pause();
                     }
                     self.emit_event(EngineEvent::PlaybackStopped);

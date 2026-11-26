@@ -38,7 +38,7 @@ use std::thread::JoinHandle;
 
 use alsa::pcm::{Access, Format as AlsaFormat, HwParams, PCM};
 use alsa::{Direction, ValueOr};
-use config::AudioBackend;
+use config::{AudioBackend, NoiseShaper};
 
 use crate::buffer::{DsdByteBuffer, FixedFrameBuffer, UnderrunState};
 use crate::decode::dsd::DsdWireFormat;
@@ -221,6 +221,10 @@ pub struct AlsaOutput {
     io_faults: Arc<AtomicU32>,
     stream_errors: StreamErrorState,
     dither_enabled: Arc<AtomicBool>,
+    /// Noise-shaping family captured when this stream was opened. Stored per
+    /// output so opening another stream cannot change this converter's
+    /// shaping behind its back.
+    noise_shaper: NoiseShaper,
     /// Live PCM handle (shared so the owner can `drop()` it to unblock the
     /// render thread's pending write during shutdown); `None` while stopped.
     pcm: Option<PcmArc>,
@@ -382,6 +386,7 @@ impl AlsaOutput {
         backend: AudioBackend,
         target_device: Option<&str>,
         fallback_policy: config::FallbackPolicy,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
         let device = Self::resolve_device(target_device)?;
         let (pcm, container) = Self::open_pcm_best(&device, 44_100, 2)?;
@@ -408,6 +413,7 @@ impl AlsaOutput {
             io_faults: Arc::new(AtomicU32::new(0)),
             stream_errors: StreamErrorState::default(),
             dither_enabled: Arc::new(AtomicBool::new(true)),
+            noise_shaper,
             pcm: Some(pcm),
             rate: actual_rate,
             pcm_rate: actual_rate,
@@ -439,6 +445,7 @@ impl AlsaOutput {
         let channels = self.channels as usize;
         let container = self.container;
         let dither_enabled = Arc::clone(&self.dither_enabled);
+        let noise_shaper = self.noise_shaper;
         let sample_rate = self.pcm_rate;
         // The thread owns its own handle; the struct keeps one to `drop()`
         // the stream and unblock a pending write during shutdown.
@@ -503,7 +510,7 @@ impl AlsaOutput {
                         Container::I32 => TargetFormat::I32,
                         Container::I16 => TargetFormat::I16,
                     },
-                    crate::dsp::dither::configured_dither_type(),
+                    crate::dsp::dither::DitherType::from_noise_shaper(noise_shaper),
                     sample_rate,
                 );
                 let mut declick = UnderrunState::new(sample_rate);

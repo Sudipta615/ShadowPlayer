@@ -197,7 +197,11 @@ const WINDOWS_RESERVED: [&str; 22] = [
 /// and are rejected outright on Windows). A device name (`CON`, `NUL`, `COM1`,
 /// … — reserved with or without an extension) gets a leading underscore, which
 /// is all Windows needs to treat it as an ordinary name.
-pub(crate) fn sanitize_component(component: &str) -> String {
+///
+/// Public because tag-derived file names are written by more than one
+/// service (batch organize and the Tools converter); both must use this one
+/// implementation instead of growing a second sanitiser.
+pub fn sanitize_component(component: &str) -> String {
     let mut cleaned = String::with_capacity(component.len());
     for ch in component.chars() {
         // Whitespace is normalised below; only the other control characters

@@ -7,7 +7,7 @@ use std::sync::{
     Arc,
 };
 
-use config::{AudioBackend, FallbackPolicy};
+use config::{AudioBackend, FallbackPolicy, NoiseShaper};
 use cpal::{
     traits::{DeviceTrait, HostTrait},
     Device, SampleFormat, StreamConfig,
@@ -179,10 +179,14 @@ pub struct CpalOutput {
     actual_sample_rate: u32,
     /// Lock-free diagnostic mailbox for backend stream failures.
     stream_errors: StreamErrorState,
-    /// Whether TPDF dither should be applied at the integer-quantization
+    /// Whether dither should be applied at the integer-quantization
     /// boundary. Consulted by the i16/u16 audio callbacks. For f32 output
     /// this flag has no effect (no quantization happens).
     dither_enabled: Arc<AtomicBool>,
+    /// Noise-shaping family captured when this stream was opened. Stored per
+    /// output so opening another stream cannot change this converter's
+    /// shaping behind its back.
+    noise_shaper: NoiseShaper,
     /// Counter for samples that exceeded ±1.0 and were clamped. Read with
     /// `take_clips()` (resets to 0 on read).
     clip_counter: Arc<AtomicU32>,
@@ -212,8 +216,15 @@ impl CpalOutput {
         buffer: Arc<FixedFrameBuffer>,
         backend: AudioBackend,
         target_device: Option<&str>,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
-        Self::new_with_policy(buffer, backend, target_device, FallbackPolicy::Allow)
+        Self::new_with_policy(
+            buffer,
+            backend,
+            target_device,
+            FallbackPolicy::Allow,
+            noise_shaper,
+        )
     }
 
     /// Create a new cpal output with explicit fallback policy.
@@ -222,8 +233,15 @@ impl CpalOutput {
         backend: AudioBackend,
         target_device: Option<&str>,
         fallback_policy: FallbackPolicy,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
-        match Self::new_raw(buffer.clone(), backend, target_device, fallback_policy) {
+        match Self::new_raw(
+            buffer.clone(),
+            backend,
+            target_device,
+            fallback_policy,
+            noise_shaper,
+        ) {
             Ok(output) => Ok(output),
             Err(e) => {
                 if fallback_policy == FallbackPolicy::Strict {
@@ -237,8 +255,13 @@ impl CpalOutput {
                         target_device,
                         e
                     );
-                    let mut output =
-                        Self::new_raw(buffer, AudioBackend::Auto, None, fallback_policy)?;
+                    let mut output = Self::new_raw(
+                        buffer,
+                        AudioBackend::Auto,
+                        None,
+                        fallback_policy,
+                        noise_shaper,
+                    )?;
                     output.requested_backend = backend;
                     output.is_fallback = true;
                     output.fallback_reason = Some(e.to_string());
@@ -255,6 +278,7 @@ impl CpalOutput {
         backend: AudioBackend,
         target_device: Option<&str>,
         fallback_policy: FallbackPolicy,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
         // Do not open a shared cpal stream while claiming an exclusive
         // product mode. Unsupported backend requests are surfaced to the
@@ -567,6 +591,7 @@ impl CpalOutput {
             actual_sample_rate,
             stream_errors: StreamErrorState::default(),
             dither_enabled: Arc::new(AtomicBool::new(true)),
+            noise_shaper,
             clip_counter: Arc::new(AtomicU32::new(0)),
             nan_counter: Arc::new(AtomicU32::new(0)),
             hardware_volume_db: Arc::new(AtomicU32::new(0.0f32.to_bits())),
@@ -619,6 +644,7 @@ impl CpalOutput {
                         AudioBackend::Auto,
                         None,
                         self.fallback_policy,
+                        self.noise_shaper,
                     )?;
                     fallback.start_raw()?;
                     fallback.requested_backend = self.requested_backend;

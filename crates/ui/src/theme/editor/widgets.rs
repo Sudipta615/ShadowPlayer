@@ -1,3 +1,5 @@
+//! Low-level widgets for the theme editor (colour pickers, sliders, previews).
+
 use eframe::egui::{self, Align, Color32, CornerRadius, Layout, Margin, Stroke, Vec2};
 
 use crate::theme::tokens::{

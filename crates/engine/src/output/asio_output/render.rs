@@ -117,6 +117,7 @@ impl AsioRenderContext {
         sample_type: ASIOSampleType,
         buffer_size_frames: usize,
         sample_rate: u32,
+        noise_shaper: crate::config::NoiseShaper,
     ) -> Self {
         Self {
             ring_buffer,
@@ -139,7 +140,7 @@ impl AsioRenderContext {
             declick: UnsafeCell::new(UnderrunState::new(sample_rate)),
             converter: UnsafeCell::new(AudioFormatConverter::new_at_rate(
                 target_format_for(sample_type),
-                crate::dsp::dither::configured_dither_type(),
+                crate::dsp::dither::DitherType::from_noise_shaper(noise_shaper),
                 sample_rate,
             )),
             // `DSD_BYTES_PER_WORD_HEADROOM` covers DSD64 (1 byte per 8 frames
@@ -510,7 +511,14 @@ mod tests {
              test is measuring a starvation path instead of the conversion"
         );
 
-        let ctx = AsioRenderContext::new(Arc::clone(&ring), channels, sample_type, frames, 48_000);
+        let ctx = AsioRenderContext::new(
+            Arc::clone(&ring),
+            channels,
+            sample_type,
+            frames,
+            48_000,
+            crate::config::NoiseShaper::Tpdf,
+        );
         ctx.dither_enabled.store(dither, Ordering::Relaxed);
 
         let width = sample_type_byte_size(sample_type);
@@ -828,6 +836,7 @@ mod tests {
             ASIOSampleType::Float32LSB,
             frames,
             rate,
+            crate::config::NoiseShaper::Tpdf,
         );
 
         let mut out: Vec<Vec<u8>> = (0..2).map(|_| vec![0u8; frames * 4]).collect();

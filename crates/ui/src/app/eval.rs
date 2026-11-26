@@ -1,3 +1,8 @@
+//! Development-only automation hooks (`SHADOWPLAYER_EVAL*`).
+//!
+//! Compiled out of release builds; drives the UI to a chosen state, captures a
+//! screenshot and exits. See the `eval-tools` feature.
+
 use super::*;
 
 /// Fixture titles for the synthetic library rows.

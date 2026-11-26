@@ -548,6 +548,50 @@ fn capture_readback_is_idle_before_anything_is_recorded() {
     );
 }
 
+// ── Talkback read-back ──────────────────────────────────────────────
+//
+// The monitor is a real device handle, so `talkback_active` must mean "the
+// microphone is open", not "the host asked for it". A config selection and a
+// gain are still reported while it is idle, because that is what the next
+// push-to-talk press will use.
+
+#[test]
+fn talkback_readback_is_idle_before_it_is_enabled() {
+    let engine = AudioEngine::new_default().unwrap();
+    let s = engine.handle().settings();
+
+    assert!(
+        !s.talkback_active,
+        "a freshly constructed engine must report no live monitor"
+    );
+    assert_eq!(s.talkback_device, None);
+    assert_eq!(s.talkback_gain_db, 0.0);
+    assert_eq!(s.talkback_underruns, 0);
+    assert_eq!(s.talkback_overruns, 0);
+    assert_eq!(s.talkback_error, None);
+}
+
+#[test]
+fn enabling_talkback_without_a_running_engine_does_not_claim_it_is_live() {
+    let mut engine = AudioEngine::new_default().unwrap();
+    let handle = engine.handle();
+
+    handle.start_talkback(Some("studio-mic".to_string()), -6.0);
+    engine.tick();
+
+    let s = handle.settings();
+    assert!(
+        !s.talkback_active,
+        "a stopped engine must not open a microphone"
+    );
+    assert_eq!(
+        s.talkback_device.as_deref(),
+        Some("studio-mic"),
+        "the selection must survive for the next start"
+    );
+    assert_eq!(s.talkback_gain_db, -6.0);
+}
+
 #[test]
 fn input_enumeration_answers_with_a_device_list_not_a_silent_no_op() {
     let mut engine = AudioEngine::new_default().unwrap();

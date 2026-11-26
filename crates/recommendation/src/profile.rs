@@ -1,3 +1,7 @@
+//! User listening profile: feedback events, taste vectors and recommendations.
+//!
+//! Pure data plus ranking helpers; no I/O beyond what the service layer drives.
+
 use crate::{AlbumId, ArtistId, FeatureVector, GenreId, Track, TrackId, FEATURE_COUNT};
 use std::collections::HashMap;
 use std::hash::Hash;

@@ -24,6 +24,7 @@ mod multichannel;
 mod output;
 mod playback;
 mod playlist;
+mod talkback;
 
 pub(crate) use correction::PendingMeasurement;
 
@@ -209,6 +210,8 @@ impl AudioEngine {
                     if let Ok(actual) = output.reconfigure_sample_rate(target) {
                         self.output_sample_rate = actual;
                         self.graph.update_sample_rate(actual as f32);
+                        // The monitor follows the PCM output clock.
+                        self.sync_talkback();
                     }
                 }
             }
@@ -965,6 +968,10 @@ impl AudioEngine {
             }
             EngineCommand::EnumerateInputDevices => self.handle_enumerate_inputs(),
             EngineCommand::CaptureStop => self.handle_capture_stop(),
+
+            // ── Talkback / duplex monitor ──
+            EngineCommand::SetTalkback(config) => self.handle_set_talkback(config),
+            EngineCommand::SetTalkbackEnabled(enabled) => self.handle_set_talkback_enabled(enabled),
 
             // ── Runtime DSP & Mix Controls (Punch List P1 Items 20 & 21) ──
             EngineCommand::SetSpatialEnabled(enabled) => {

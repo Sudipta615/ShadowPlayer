@@ -27,13 +27,13 @@
 //! - `basic_panner_stereo` — [`BasicPanner`]: the equal-power panner, the
 //!   cheapest of the three.
 //! - `ambisonic_encode` — [`AmbisonicEncoder::encode`]: one plane-wave
-//!   encoding into the ACN/SN3D bus, per order.
+//!   encoding into the ACN/N3D bus, per order.
 //! - `ambisonic_decode` — [`AmbisonicDecoder::process_bus`]: the bus →
 //!   speakers decode matrix.
-//! - `ambisonic_rotate` — [`rotate_bus_frame_n`]: the exact Wigner-d bus
-//!   rotation. Only orders 1–3 have exact blocks; above that the engine
-//!   deliberately does **not** rotate, and `rotation_supported` says so. The
-//!   bench therefore measures orders 1, 2 and 3 only.
+//! - `ambisonic_rotate` — [`rotate_bus_frame_n`]: the bus rotation. Orders
+//!   1–3 use their closed-form Wigner-d blocks; orders 4–9 recover each
+//!   degree block from the encoder's own ACN/N3D basis by least squares. The
+//!   bench measures every order so the step in cost is visible.
 //! - `ambisonic_render` — [`AmbisonicRenderer`]: the whole ambisonic path in
 //!   one call — bus rotation followed by decode onto the layout.
 //!
@@ -211,12 +211,12 @@ fn bench_spatial(c: &mut Criterion) {
         group.finish();
     }
 
-    // ── Ambisonic bus rotation (exact for orders 1..=3 only) ───────────────
+    // ── Ambisonic bus rotation (closed form 1..=3, recovered 4..=9) ────────
     {
         let q = engine::spatial::Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), 0.3);
         let mut group = c.benchmark_group("spatial/ambisonic_rotate");
         group.throughput(Throughput::Elements(1));
-        for order in [1u8, 2, 3] {
+        for order in 1u8..=9 {
             let width = engine::spatial::channel_count(order);
             let mut frame = vec![0.25f32; width];
             group.bench_with_input(BenchmarkId::from_parameter(order), &order, |b, _order| {

@@ -52,7 +52,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
-use config::AudioBackend;
+use config::{AudioBackend, NoiseShaper};
 use cpal::SampleFormat;
 use objc2_core_audio::{
     kAudioDevicePropertyAvailableNominalSampleRates, kAudioDevicePropertyBufferFrameSize,
@@ -509,6 +509,10 @@ pub struct CoreAudioOutput {
     device_uid: Option<String>,
     backend: AudioBackend,
     dither_enabled: bool,
+    /// Noise-shaping family captured when this stream was opened. Stored per
+    /// output so opening another stream cannot change this converter's
+    /// shaping behind its back.
+    noise_shaper: NoiseShaper,
     // Negotiated state (updated on start / reconfigure).
     sample_rate: u32,
     channels: u16,
@@ -540,6 +544,7 @@ impl CoreAudioOutput {
         buffer: Arc<FixedFrameBuffer>,
         backend: AudioBackend,
         target_device: Option<&str>,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
         let (device, name, uid) = resolve_device(target_device).ok_or(OutputError::NoDevice)?;
         // A quick sanity check that the device is alive before we touch it.
@@ -580,6 +585,7 @@ impl CoreAudioOutput {
             device_uid: uid,
             backend,
             dither_enabled: true,
+            noise_shaper,
             sample_rate,
             channels,
             buffer_size,
@@ -695,6 +701,7 @@ impl CoreAudioOutput {
             self.interleaved,
             self.buffer_size as usize,
             self.sample_rate,
+            self.noise_shaper,
         );
         let ctx_ptr = Box::into_raw(Box::new(ctx));
         let mut proc_id: AudioDeviceIOProcID = None;

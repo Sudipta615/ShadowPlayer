@@ -37,7 +37,7 @@ mod tests {
     const EPS: f32 = 1e-4;
 
     #[test]
-    fn sh_basis_matches_documented_sn3d_convention() {
+    fn sh_basis_matches_documented_n3d_convention() {
         let s3 = 3.0f32.sqrt();
         assert_eq!(sh_foa(Vec3::Y), [1.0, s3, 0.0, 0.0]);
         assert_eq!(sh_foa(Vec3::X), [1.0, 0.0, 0.0, s3]);
@@ -51,7 +51,7 @@ mod tests {
     }
 
     #[test]
-    fn order2_basis_matches_documented_sn3d_convention() {
+    fn order2_basis_matches_documented_n3d_convention() {
         let s15 = 15.0f32.sqrt();
         let s5h = 5.0f32.sqrt() * 0.5;
         let s15h = s15 * 0.5;

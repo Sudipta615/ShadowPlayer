@@ -47,6 +47,32 @@ pub mod cpal_input;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub use cpal_input::{enumerate_input_devices, CpalInputCapture};
 
+/// Open a real capture endpoint (microphone, line-in, interface input).
+///
+/// This is the one construction path for a portable input device. Recording
+/// and the talkback monitor both go through it so a device-name match, a
+/// missing default input, and a format refusal behave identically in both.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) fn open_input_capture(
+    device: Option<&str>,
+    ring_capacity_frames: usize,
+) -> Result<Box<dyn SystemCapture>, CaptureError> {
+    CpalInputCapture::new(device, ring_capacity_frames)
+        .map(|c| Box::new(c) as Box<dyn SystemCapture>)
+}
+
+/// No input backend on this target. Refuse explicitly rather than presenting
+/// a device that would never deliver samples.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+pub(crate) fn open_input_capture(
+    _device: Option<&str>,
+    _ring_capacity_frames: usize,
+) -> Result<Box<dyn SystemCapture>, CaptureError> {
+    Err(CaptureError::NoDevice(
+        "this target has no portable input backend".to_string(),
+    ))
+}
+
 // The Windows system-mix implementation reuses its parent module's COM plumbing.
 #[cfg(all(target_os = "windows", feature = "wasapi-native"))]
 pub use crate::output::wasapi_loopback::WasapiLoopbackCapture;

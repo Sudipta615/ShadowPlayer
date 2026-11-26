@@ -1,3 +1,7 @@
+//! `TrackRepo`: CRUD, upsert, search and identity lookups for tracks.
+//!
+//! One repository per domain; all SQL for tracks lives here.
+
 use super::{TrackRepo, TrackScanEntry, UPSERT_TRACK_SQL};
 use crate::db::Database;
 use crate::repos::common::{fts_query, like_prefix, map_track, parse_id};

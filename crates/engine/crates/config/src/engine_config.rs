@@ -120,6 +120,11 @@ pub struct EngineConfig {
     /// config file written before it round-trips unchanged.
     #[serde(default)]
     pub capture: CaptureConfig,
+    /// Talkback / duplex monitor mix. Off by default; enabling it opens the
+    /// selected input device and mixes it into the primary output's front
+    /// L/R pair.
+    #[serde(default)]
+    pub talkback: crate::TalkbackConfig,
     #[serde(default)]
     pub spatial: SpatialConfig,
     /// Optional explicit path for the active spatial scene's auto-save file
@@ -604,6 +609,7 @@ impl Default for EngineConfig {
             correction: CorrectionConfig::default(),
             dac_correction: crate::DacCorrectionConfig::default(),
             capture: crate::CaptureConfig::default(),
+            talkback: crate::TalkbackConfig::default(),
             spatial: SpatialConfig::default(),
             spatial_autosave_path: None,
             endpoints: Vec::new(),

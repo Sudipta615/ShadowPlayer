@@ -1,3 +1,7 @@
+//! Dispatch for the central panel: main views, right drawer and modal overlay.
+//!
+//! Converts widget callbacks into app state changes; holds no state of its own.
+
 use super::super::*;
 use super::PlaybackView;
 

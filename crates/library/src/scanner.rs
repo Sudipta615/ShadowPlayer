@@ -1,3 +1,7 @@
+//! Library scanner: walk folders, extract metadata, assign identity, emit events.
+//!
+//! The canonical scan -> library identity pipeline; runs on a worker thread.
+
 use crate::artwork::ArtworkManager;
 use crossbeam::channel::Sender;
 use database::{Database, TrackRepo};

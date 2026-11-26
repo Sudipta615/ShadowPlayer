@@ -1,3 +1,8 @@
+//! Left navigation rail: library sections, playlists and the brand wordmark.
+//!
+//! Pure drawing over borrowed state; selection changes are reported as typed
+//! actions to the app coordinator.
+
 use crate::theme::Theme;
 use domain::ids::PlaylistId;
 use domain::models::Playlist;

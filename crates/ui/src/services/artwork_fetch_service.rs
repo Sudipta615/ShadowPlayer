@@ -16,10 +16,12 @@
 //!
 //! - Runs on a dedicated background thread, respecting rate limits.
 //! - Never blocks the UI thread.
+//! - Every request, including redirects, is HTTPS-only and byte-capped.
+//! - Downloaded bytes are decoded under the library's image bounds before
+//!   being written as a thumbnail or folder cover.
 //! - Network timeouts and 404s are treated as soft failures; never panics.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,13 +30,21 @@ use std::time::Duration;
 use crossbeam::channel::{self, Receiver, Sender};
 use domain::ids::TrackId;
 use domain::models::Track;
-use library::ArtworkManager;
+use library::{validate_image_bytes, ArtworkManager};
+use url::Url;
 
 const USER_AGENT: &str = concat!(
     "ShadowPlayer/",
     env!("CARGO_PKG_VERSION"),
     " ( https://github.com/Sudipta615/shadowplayer )"
 );
+
+/// Metadata responses are small; anything larger is not a search result.
+const MAX_JSON_BYTES: u64 = 2 * 1024 * 1024;
+/// Cover art is downloaded whole, so allow a generous but finite image.
+const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
+/// A redirect chain longer than this is either broken or hostile.
+const MAX_REDIRECTS: usize = 3;
 
 /// Progress snapshot for the bulk cover art fetcher.
 #[derive(Debug, Clone, Default)]
@@ -209,16 +219,42 @@ fn worker_loop(
         // Try Cover Art Archive via MusicBrainz or public mirror
         match fetch_album_art(&album, &artist) {
             Some(image_bytes) => {
+                // The bytes came from the network: decode them under the same
+                // bounds used for thumbnails before they touch the library or
+                // a `cover.*` file. Invalid bytes are a soft failure.
+                let Some(format) = validate_image_bytes(&image_bytes) else {
+                    log::warn!(
+                        "ArtworkFetchService: rejecting invalid image for {artist} — {album}"
+                    );
+                    failed += 1;
+                    done += 1;
+                    continue;
+                };
+
                 // Save thumbnail for every track in this album
                 for tid in &track_ids {
                     manager.save_thumbnail(tid, &image_bytes);
                 }
 
-                // If path parent is writable, try writing cover.jpg
+                // With a valid image, add a folder cover beside the audio file.
+                // `create_new` never replaces an existing file or follows a
+                // symlink placed where the cover would go.
                 if let Some(parent) = path.parent() {
-                    let cover_path = parent.join("cover.jpg");
-                    if !cover_path.exists() {
-                        let _ = std::fs::write(&cover_path, &image_bytes);
+                    let cover_name = match format {
+                        image::ImageFormat::Jpeg => Some("cover.jpg"),
+                        image::ImageFormat::Png => Some("cover.png"),
+                        _ => None,
+                    };
+                    if let Some(name) = cover_name {
+                        let cover_path = parent.join(name);
+                        if let Ok(mut file) = std::fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&cover_path)
+                        {
+                            let _ = file.write_all(&image_bytes);
+                            let _ = file.sync_all();
+                        }
                     }
                 }
 
@@ -254,18 +290,21 @@ fn worker_loop(
 fn fetch_album_art(album: &str, artist: &str) -> Option<Vec<u8>> {
     // 1. First attempt: Query MusicBrainz release search to find MBID
     if let Some(mbid) = search_mb_release(album, artist) {
-        // Query Cover Art Archive
-        let caa_url = format!("http://coverartarchive.org/release/{mbid}/front-250.jpg");
-        if let Ok(bytes) = http_get_bytes(&caa_url, USER_AGENT, 3) {
-            if !bytes.is_empty() {
-                return Some(bytes);
+        // Query Cover Art Archive. The id came from a remote document, so it
+        // must look like a UUID before it becomes a URL path segment.
+        if is_mbid(&mbid) {
+            let caa_url = format!("https://coverartarchive.org/release/{mbid}/front-250.jpg");
+            if let Ok(bytes) = http_get_bytes(&caa_url, USER_AGENT, MAX_IMAGE_BYTES) {
+                if !bytes.is_empty() {
+                    return Some(bytes);
+                }
             }
         }
     }
 
     // 2. Fallback: Search iTunes Store public album search API (open, high coverage, zero auth)
     if let Some(art_url) = search_itunes_artwork(album, artist) {
-        if let Ok(bytes) = http_get_bytes(&art_url, USER_AGENT, 3) {
+        if let Ok(bytes) = http_get_bytes(&art_url, USER_AGENT, MAX_IMAGE_BYTES) {
             if !bytes.is_empty() {
                 return Some(bytes);
             }
@@ -273,6 +312,14 @@ fn fetch_album_art(album: &str, artist: &str) -> Option<Vec<u8>> {
     }
 
     None
+}
+
+/// `true` for a canonical MusicBrainz release id (UUID shape).
+fn is_mbid(value: &str) -> bool {
+    value.len() == 36
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
 }
 
 /// Query MusicBrainz API for a release matching album and artist.
@@ -284,9 +331,9 @@ fn search_mb_release(album: &str, artist: &str) -> Option<String> {
     );
     let encoded_query = url_encode(&query);
     let url =
-        format!("http://musicbrainz.org/ws/2/release/?query={encoded_query}&limit=1&fmt=json");
+        format!("https://musicbrainz.org/ws/2/release/?query={encoded_query}&limit=1&fmt=json");
 
-    let json_str = http_get_text(&url, USER_AGENT, 2).ok()?;
+    let json_str = http_get_text(&url, USER_AGENT, MAX_JSON_BYTES).ok()?;
     let val: serde_json::Value = serde_json::from_str(&json_str).ok()?;
     val.get("releases")
         .and_then(|r| r.as_array())
@@ -299,9 +346,9 @@ fn search_mb_release(album: &str, artist: &str) -> Option<String> {
 /// Query iTunes API for album artwork URL.
 fn search_itunes_artwork(album: &str, artist: &str) -> Option<String> {
     let term = url_encode(&format!("{artist} {album}"));
-    let url = format!("http://itunes.apple.com/search?term={term}&entity=album&limit=1");
+    let url = format!("https://itunes.apple.com/search?term={term}&entity=album&limit=1");
 
-    let json_str = http_get_text(&url, USER_AGENT, 2).ok()?;
+    let json_str = http_get_text(&url, USER_AGENT, MAX_JSON_BYTES).ok()?;
     let val: serde_json::Value = serde_json::from_str(&json_str).ok()?;
     let raw_url = val
         .get("results")
@@ -310,8 +357,10 @@ fn search_itunes_artwork(album: &str, artist: &str) -> Option<String> {
         .and_then(|first| first.get("artworkUrl100"))
         .and_then(|u| u.as_str())?;
 
-    // Upgrade thumbnail 100x100 to 500x500 for crisp audiophile album art
-    Some(raw_url.replace("100x100bb", "500x500bb"))
+    // Upgrade thumbnail 100x100 to 500x500 for crisp audiophile album art.
+    // The API has historically returned plain-http artwork URLs; the fetch
+    // helper refuses those, so upgrade instead of following a downgrade.
+    Some(raw_url.replacen("http://", "https://", 1))
 }
 
 fn url_encode(s: &str) -> String {
@@ -328,102 +377,102 @@ fn url_encode(s: &str) -> String {
     out
 }
 
-/// Fetch text response from HTTP endpoint, following redirects up to `max_redirects`.
-fn http_get_text(url: &str, user_agent: &str, max_redirects: u8) -> Result<String, String> {
-    let bytes = http_get_bytes(url, user_agent, max_redirects)?;
+/// Fetch text from an HTTPS endpoint, capped at `limit` bytes.
+fn http_get_text(url: &str, user_agent: &str, limit: u64) -> Result<String, String> {
+    let bytes = http_get_bytes(url, user_agent, limit)?;
     String::from_utf8(bytes).map_err(|e| format!("UTF-8 decode: {e}"))
 }
 
-/// Fetch raw bytes from HTTP endpoint with redirect support.
-fn http_get_bytes(url: &str, user_agent: &str, max_redirects: u8) -> Result<Vec<u8>, String> {
-    if max_redirects == 0 {
-        return Err("too many redirects".into());
-    }
+/// Fetch raw bytes over HTTPS, following at most [`MAX_REDIRECTS`] redirects.
+///
+/// Plain HTTP is refused at every hop: album metadata and artwork are not
+/// secrets, but a downgrade would let anyone on the path choose the image that
+/// gets written into the user's library. The response body is streamed through
+/// a hard byte cap, independent of `Content-Length`.
+fn http_get_bytes(url: &str, user_agent: &str, limit: u64) -> Result<Vec<u8>, String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(8))
+        .timeout_read(Duration::from_secs(15))
+        .timeout_write(Duration::from_secs(10))
+        // Redirects are resolved below so each hop can be re-validated.
+        .redirects(0)
+        .build();
 
-    let without_scheme = url
-        .strip_prefix("http://")
-        .or_else(|| url.strip_prefix("https://"))
-        .ok_or("unsupported scheme")?;
-
-    let (host_port, path) = without_scheme
-        .split_once('/')
-        .map(|(h, p)| (h, format!("/{p}")))
-        .unwrap_or((without_scheme, "/".to_string()));
-
-    let (host, port) = host_port
-        .split_once(':')
-        .map(|(h, p)| (h, p.parse::<u16>().unwrap_or(80)))
-        .unwrap_or((host_port, 80));
-
-    let addr = format!("{host}:{port}");
-    let stream = TcpStream::connect(&addr).map_err(|e| format!("connect to {addr}: {e}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(12))).ok();
-
-    let mut stream = stream;
-    let request = format!(
-        "GET {path} HTTP/1.1\r\n\
-         Host: {host}\r\n\
-         User-Agent: {ua}\r\n\
-         Accept: */*\r\n\
-         Connection: close\r\n\
-         \r\n",
-        path = path,
-        host = host,
-        ua = user_agent,
-    );
-
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| format!("write: {e}"))?;
-
-    let mut reader = BufReader::new(stream);
-    let mut status_line = String::new();
-    reader
-        .read_line(&mut status_line)
-        .map_err(|e| format!("read status: {e}"))?;
-
-    let status_code: u16 = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    let mut headers = std::collections::HashMap::new();
-    let mut line = String::new();
-    loop {
-        line.clear();
-        reader
-            .read_line(&mut line)
-            .map_err(|e| format!("read header: {e}"))?;
-        if line == "\r\n" || line.is_empty() {
-            break;
+    let mut current = url.to_string();
+    for _ in 0..=MAX_REDIRECTS {
+        let parsed = Url::parse(&current).map_err(|e| format!("invalid URL: {e}"))?;
+        if parsed.scheme() != "https" {
+            return Err(format!("refusing non-HTTPS {} URL", parsed.scheme()));
         }
-        if let Some((k, v)) = line.split_once(':') {
-            headers.insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
-        }
-    }
 
-    // Handle 301, 302, 307 redirects
-    if (status_code == 301 || status_code == 302 || status_code == 307 || status_code == 308)
-        && headers.contains_key("location")
-    {
-        let redirect_url = &headers["location"];
-        let target = if redirect_url.starts_with("http") {
-            redirect_url.to_string()
-        } else {
-            format!("http://{host}{redirect_url}")
+        let response = match agent
+            .get(&current)
+            .set("User-Agent", user_agent)
+            .set("Accept", "*/*")
+            .call()
+        {
+            Ok(response) => response,
+            Err(ureq::Error::Status(code, response)) if (300..400).contains(&code) => response,
+            Err(ureq::Error::Status(code, _)) => return Err(format!("HTTP status {code}")),
+            Err(error) => return Err(format!("request failed: {error}")),
         };
-        return http_get_bytes(&target, user_agent, max_redirects - 1);
+
+        let status = response.status();
+        if (300..400).contains(&status) {
+            let location = response
+                .header("Location")
+                .ok_or("redirect without a Location header")?;
+            current = parsed
+                .join(location)
+                .map_err(|e| format!("invalid redirect target: {e}"))?
+                .to_string();
+            continue;
+        }
+        if status != 200 {
+            return Err(format!("HTTP status {status}"));
+        }
+
+        if let Some(length) = response
+            .header("Content-Length")
+            .and_then(|value| value.trim().parse::<u64>().ok())
+        {
+            if length > limit {
+                return Err(format!(
+                    "response of {length} bytes exceeds the {limit} byte limit"
+                ));
+            }
+        }
+
+        let mut body = Vec::new();
+        response
+            .into_reader()
+            .take(limit + 1)
+            .read_to_end(&mut body)
+            .map_err(|e| format!("read body: {e}"))?;
+        if body.len() as u64 > limit {
+            return Err(format!("response body exceeds the {limit} byte limit"));
+        }
+        return Ok(body);
     }
 
-    if status_code != 200 {
-        return Err(format!("HTTP status {status_code}"));
+    Err("too many redirects".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_http_is_refused_before_any_connection() {
+        let error = http_get_bytes("http://example.com/cover.jpg", USER_AGENT, 1024).unwrap_err();
+        assert!(error.contains("non-HTTPS"), "{error}");
     }
 
-    let mut body = Vec::new();
-    reader
-        .read_to_end(&mut body)
-        .map_err(|e| format!("read body: {e}"))?;
-
-    Ok(body)
+    #[test]
+    fn only_uuid_shaped_mbids_become_url_paths() {
+        assert!(is_mbid("8f6bd1e4-fbe1-4f50-aa9b-94c450ec0f11"));
+        assert!(!is_mbid("../../etc/passwd"));
+        assert!(!is_mbid("not-an-mbid"));
+        assert!(!is_mbid(""));
+    }
 }

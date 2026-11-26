@@ -166,6 +166,7 @@ fn selecting_an_unimplemented_backend_is_refused_under_the_strict_policy() {
             backend,
             None,
             config::FallbackPolicy::Strict,
+            config::NoiseShaper::Tpdf,
         );
         assert!(
             result.is_err(),

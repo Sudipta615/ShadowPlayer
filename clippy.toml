@@ -1,0 +1,5 @@
+# Advisory complexity thresholds. The strict CI clippy step keeps `-D warnings`
+# for everything else; these lints are reported (not denied) so existing code
+# keeps building while new code is nudged toward smaller functions.
+too-many-lines-threshold = 100
+cognitive-complexity-threshold = 30

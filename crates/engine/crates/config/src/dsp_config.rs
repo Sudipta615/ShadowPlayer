@@ -1148,6 +1148,48 @@ pub struct DacCorrectionConfig {
     pub profiles: Vec<DacCorrectionProfileConfig>,
 }
 
+/// Talkback / duplex monitor configuration.
+///
+/// The talkback monitor captures one input device and mixes it into the
+/// **front L/R** of the primary output while it is enabled. It is a monitor
+/// mix, not a second input path through the program DSP: the program chain,
+/// loudness meters, and endpoint fan-out are untouched.
+///
+/// There is deliberately no automatic feedback suppression or ducking. The
+/// microphone is live only while [`Self::enabled`] is true (push-to-talk is
+/// the intended host control), and a monitor speaker that can hear the
+/// microphone can still feed back — that is a room decision, not something
+/// this config silently guesses at.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TalkbackConfig {
+    /// Whether the monitor is live. Changing this opens or closes the input
+    /// device, so it is an explicit control, not an always-on default.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Input device name (case-insensitive substring) or `None` for the
+    /// platform default input.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// Monitor gain in dB, clamped to `-60.0 ..= 12.0`.
+    #[serde(default)]
+    pub gain_db: f32,
+}
+
+fn default_talkback_gain_db() -> f32 {
+    0.0
+}
+
+impl Default for TalkbackConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            device: None,
+            gain_db: default_talkback_gain_db(),
+        }
+    }
+}
+
 /// Capture (recording) state, read back by hosts via `EngineSettings`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CaptureConfig {

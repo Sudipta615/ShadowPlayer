@@ -42,6 +42,7 @@ impl AudioEngine {
                     self.config.resampler_filter,
                     self.config.resampler_cutoff_ratio,
                     self.config.precision_mode,
+                    self.config.noise_shaper,
                 )
                 .map_err(|e| EngineError::Config(format!("Endpoint open: {e}")))?,
             );
@@ -64,6 +65,7 @@ impl AudioEngine {
             audio_backend,
             self.config.output_device.as_deref(),
             self.config.fallback_policy,
+            self.config.noise_shaper,
         )?;
         // Sync the user's dither preference to the new output. Outputs
         // default to dither enabled; if the user has it disabled in config,
@@ -127,6 +129,10 @@ impl AudioEngine {
             .or_else(|| self.config.output_device.clone());
         self.graph.set_dac_device(dac_device);
         self.update_playback_state(PlaybackState::Stopped);
+        // Open the monitor after the stream exists and its rate is known;
+        // when transport starts stopped the monitor keeps the primary stream
+        // running so push-to-talk is audible without a track.
+        self.sync_talkback();
         self.recovery.stream_recovery_attempts = 0;
         self.recovery.stream_recovery_burst_start = None;
         info!(
@@ -253,6 +259,10 @@ impl AudioEngine {
 
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Release);
+        // A stopped engine does not keep the microphone open. The config
+        // keeps the user's device/gain so the next start can reopen it.
+        self.talkback = None;
+        self.talkback_error = None;
         for endpoint in &mut self.endpoints {
             endpoint.stop();
         }

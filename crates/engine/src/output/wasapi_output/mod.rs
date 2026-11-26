@@ -76,7 +76,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
-use config::AudioBackend;
+use config::{AudioBackend, NoiseShaper};
 use windows::Win32::{
     Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0},
     Media::Audio::{IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator},
@@ -146,6 +146,10 @@ pub struct WasapiOutput {
     /// when the stream runs in an i16/i32 container (no-op for f32). Read by
     /// the render thread each period, mirroring the cpal callbacks.
     dither_enabled: Arc<AtomicBool>,
+    /// Noise-shaping family captured when this stream was opened. Stored per
+    /// output so opening another stream cannot change this converter's
+    /// shaping behind its back.
+    noise_shaper: NoiseShaper,
     hardware_volume_db: Arc<AtomicU32>,
     /// The activated device, kept so `reconfigure_sample_rate` can activate
     /// a fresh client (a client can only be initialized once). Wrapped in
@@ -176,6 +180,7 @@ impl WasapiOutput {
         buffer: Arc<FixedFrameBuffer>,
         backend: AudioBackend,
         target_device: Option<&str>,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
         // One COM apartment per thread; the render thread initializes its own.
         // CoInitializeEx returns the HRESULT directly in windows 0.59.
@@ -215,6 +220,7 @@ impl WasapiOutput {
             stream_errors: StreamErrorState::default(),
             render_failure: Arc::new(RenderFailure::default()),
             dither_enabled: Arc::new(AtomicBool::new(true)),
+            noise_shaper,
             hardware_volume_db: Arc::new(AtomicU32::new(0.0f32.to_bits())),
             device: Some(SendCom(device)),
             client: Some(SendCom(client)),
@@ -293,7 +299,7 @@ impl WasapiOutput {
                 WasapiContainer::I32 => TargetFormat::I32,
                 WasapiContainer::F32 => TargetFormat::F32,
             },
-            crate::dsp::dither::configured_dither_type(),
+            crate::dsp::dither::DitherType::from_noise_shaper(self.noise_shaper),
             self.client().sample_rate,
         );
 

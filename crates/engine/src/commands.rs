@@ -585,6 +585,16 @@ pub enum EngineCommand {
     /// Stop the active capture and finalize its WAV file.
     CaptureStop,
 
+    // ── Talkback / duplex monitor ──────────────────────────────────────
+    /// Replace the talkback monitor configuration (enable, input device,
+    /// monitor gain). Enabling opens the input device; disabling closes it.
+    /// See [`config::TalkbackConfig`] for the boundaries: PCM primary output
+    /// only, no automatic feedback suppression or ducking.
+    SetTalkback(config::TalkbackConfig),
+    /// Push-to-talk toggle that keeps the configured device and gain. This is
+    /// the command to send on key-down/key-up.
+    SetTalkbackEnabled(bool),
+
     // ── Runtime DSP & Mix Controls (Punch List P1 Items 20 & 21) ───────
     /// Spatial master: live enabled toggle.
     SetSpatialEnabled(bool),

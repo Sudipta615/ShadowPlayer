@@ -1,3 +1,5 @@
+//! Theme editor: live colour/token editing, preview and save-as-new flow.
+
 mod state;
 mod widgets;
 

@@ -80,6 +80,8 @@ impl AudioEngine {
             if let Ok(actual) = output.reconfigure_sample_rate(target) {
                 self.output_sample_rate = actual;
                 self.graph.update_sample_rate(actual as f32);
+                // The monitor follows the PCM output clock.
+                self.sync_talkback();
             }
         }
     }

@@ -95,8 +95,9 @@ impl RenderContext {
         interleaved: bool,
         buffer_size: usize,
         sample_rate: u32,
+        noise_shaper: crate::config::NoiseShaper,
     ) -> Self {
-        let dither_type = crate::dsp::dither::configured_dither_type();
+        let dither_type = crate::dsp::dither::DitherType::from_noise_shaper(noise_shaper);
         Self {
             buffer,
             paused,

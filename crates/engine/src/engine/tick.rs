@@ -87,7 +87,15 @@ impl AudioEngine {
                 }
             }
             PlaybackState::Buffering => Duration::from_millis(2),
-            PlaybackState::Paused | PlaybackState::Stopped => Duration::from_millis(50),
+            PlaybackState::Paused | PlaybackState::Stopped => {
+                if self.talkback.is_some() {
+                    // A live monitor is a real-time stream even without a
+                    // track: pace it like one instead of the idle 50 ms.
+                    Duration::from_millis(10)
+                } else {
+                    Duration::from_millis(50)
+                }
+            }
         }
     }
 
@@ -236,6 +244,11 @@ impl AudioEngine {
                 }
                 self.recovery.successful_playback_ticks = 0;
             }
+        } else {
+            // Monitor-only stream: the primary output is kept running while
+            // talkback is live, so feed it timed blocks instead of letting
+            // the device starve.
+            self.pump_talkback_idle();
         }
 
         if now.duration_since(self.telemetry.last_cpu_reset) >= Duration::from_secs(2) {
@@ -865,11 +878,11 @@ impl AudioEngine {
         }
 
         if config.noise_shaper != self.config.noise_shaper {
-            crate::dsp::dither::set_configured_noise_shaper(config.noise_shaper);
-            // Converters own their selected family at construction; a live
+            // Each converter stores the family it was opened with; a live
             // change cannot be applied without rebuilding a render thread.
             // Say so instead of letting the new config claim a shaper the
-            // running stream is not using.
+            // running stream is not using. The new value is used by the next
+            // stream open.
             if self.audio_output.is_some() {
                 log::info!(
                     "noise shaper set to {:?}; the running output stream keeps its current \
@@ -913,6 +926,10 @@ impl AudioEngine {
                 );
             }
         }
+
+        // The monitor follows the config that just landed: enable/disable,
+        // device, gain, and output rate are all reconciled here.
+        self.sync_talkback();
     }
 
     pub fn is_running(&self) -> bool {

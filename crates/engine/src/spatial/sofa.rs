@@ -176,7 +176,10 @@ pub fn import_sofa(bytes: &[u8], source: Option<String>) -> Result<HrtfCorpus, S
     if r_dim != 2 {
         return Err(SofaImportError::InvalidData("Data.IR requires 2 receivers"));
     }
-    let expect = r_dim * m * n;
+    let expect = r_dim
+        .checked_mul(m)
+        .and_then(|v| v.checked_mul(n))
+        .ok_or_else(|| SofaImportError::Truncated("Data.IR shape overflow".into()))?;
     if ir_flat.len() != expect {
         return Err(SofaImportError::MissingVariable("Data.IR"));
     }
@@ -192,15 +195,25 @@ pub fn import_sofa(bytes: &[u8], source: Option<String>) -> Result<HrtfCorpus, S
 
     // Flat [I, R, M, N] strides. Receiver 0 = left, receiver 1 = right
     // (offset by one stride_r); we use I = 0 (a single impulse block).
-    let stride_r = m * n;
+    let stride_r = m
+        .checked_mul(n)
+        .ok_or_else(|| SofaImportError::Truncated("Data.IR stride overflow".into()))?;
     let stride_m = n;
 
-    let mut measurements = Vec::with_capacity(m);
+    let mut measurements = Vec::new();
+    measurements
+        .try_reserve_exact(m)
+        .map_err(|_| SofaImportError::Truncated("measurement allocation failed".into()))?;
     for (src, position) in positions.iter().enumerate().take(m) {
         let dir = source_position_direction(position, spherical)
             .ok_or(SofaImportError::InvalidData("SourcePosition zero radius"))?;
-        let mut left = Vec::with_capacity(n);
-        let mut right = Vec::with_capacity(n);
+        let mut left = Vec::new();
+        left.try_reserve_exact(n)
+            .map_err(|_| SofaImportError::Truncated("HRIR allocation failed".into()))?;
+        let mut right = Vec::new();
+        right
+            .try_reserve_exact(n)
+            .map_err(|_| SofaImportError::Truncated("HRIR allocation failed".into()))?;
         for s in 0..n {
             let base = src * stride_m + s;
             left.push(ir_flat[base]);
@@ -304,10 +317,25 @@ fn read_float_matrix(
         return Err(SofaImportError::MissingVariable(name));
     }
     let (rows, cols) = (dims[0], dims[1]);
-    if cols == 0 || flat.len() != rows * cols {
+    let expected = rows
+        .checked_mul(cols)
+        .ok_or_else(|| SofaImportError::Truncated(format!("{name} shape overflow")))?;
+    if cols == 0 || flat.len() != expected {
         return Err(SofaImportError::MissingVariable(name));
     }
     Ok(flat.chunks_exact(cols).map(|c| c.to_vec()).collect())
+}
+
+/// Checked product of a variable's dimensions.
+///
+/// The header supplies every factor, so the product must not be allowed to
+/// wrap (which would turn a huge declared shape into a small, wrong buffer).
+fn element_count(dims: &[usize], name: &str) -> Result<usize, SofaImportError> {
+    dims.iter().try_fold(1usize, |count, &dim| {
+        count
+            .checked_mul(dim)
+            .ok_or_else(|| SofaImportError::Truncated(format!("{name} shape overflow")))
+    })
 }
 
 /// Read a float variable as flat data + its dimension vector.
@@ -319,7 +347,7 @@ fn read_float_dims(
         .variable(name)
         .ok_or(SofaImportError::MissingVariable(name))?;
     let dims = r.shape(var);
-    let n: usize = dims.iter().product();
+    let n = element_count(&dims, name)?;
     match var.nc_type {
         NcType::Float => {
             let data = r.variable_float_data(var, n)?;
@@ -327,7 +355,11 @@ fn read_float_dims(
         }
         NcType::Double => {
             let data = r.variable_double_data(var, n)?;
-            Ok((data.iter().map(|&v| v as f32).collect(), dims))
+            let mut out = Vec::new();
+            out.try_reserve_exact(data.len())
+                .map_err(|_| SofaImportError::Truncated("float conversion allocation".into()))?;
+            out.extend(data.iter().map(|&v| v as f32));
+            Ok((out, dims))
         }
         _ => Err(SofaImportError::MissingVariable(name)),
     }
@@ -339,7 +371,7 @@ fn read_sampling_rate(r: &mut CdfReader<'_>) -> Result<u32, SofaImportError> {
         .variable("Data.SamplingRate")
         .ok_or(SofaImportError::IrRate)?;
     let shape = r.shape(var);
-    let n: usize = shape.iter().product();
+    let n = element_count(&shape, "Data.SamplingRate")?;
     if n == 0 {
         return Err(SofaImportError::IrRate);
     }
@@ -400,6 +432,16 @@ struct CdfReader<'a> {
     variables: Vec<(String, Var)>,
 }
 
+/// Header lists (dimensions, attributes, variables) are tiny in a real SOFA
+/// file. Refusing larger counts keeps a crafted header from driving a
+/// multi-gigabyte allocation before the first byte is validated.
+const MAX_HEADER_ENTRIES: usize = 65_536;
+/// Dimensions per variable. NetCDF allows more; SOFA never needs it.
+const MAX_VARIABLE_DIMS: usize = 1_024;
+/// A single dimension extent. HRTF grids are far smaller, and the bound also
+/// keeps `u64 as usize` lossless on 32-bit targets.
+const MAX_DIM_EXTENT: u64 = 1 << 30;
+
 /// An attribute's value block, located lazily in the buffer.
 struct Attr {
     nc_type: NcType,
@@ -456,6 +498,11 @@ impl<'a> CdfReader<'a> {
         for _ in 0..n_dims {
             let _name = r.string()?;
             let len = r.int(cdf2)?;
+            if len > MAX_DIM_EXTENT {
+                return Err(SofaImportError::NotSupported(format!(
+                    "dimension length {len} is larger than this importer accepts"
+                )));
+            }
             r.dimensions.push(len);
         }
 
@@ -467,12 +514,20 @@ impl<'a> CdfReader<'a> {
         for _ in 0..n_vars {
             let name = r.string()?;
             let ndims = r.i32()?;
-            if ndims < 0 {
-                return Err(SofaImportError::Truncated("negative dim count".into()));
+            if ndims < 0 || ndims as usize > MAX_VARIABLE_DIMS {
+                return Err(SofaImportError::Truncated(format!(
+                    "variable {name:?} has an implausible dimension count"
+                )));
             }
             let mut dims = Vec::with_capacity(ndims as usize);
             for _ in 0..ndims {
-                dims.push(r.i32()? as u32);
+                let dim = r.i32()?;
+                if dim < 0 {
+                    return Err(SofaImportError::Truncated(format!(
+                        "variable {name:?} refers to a negative dimension id"
+                    )));
+                }
+                dims.push(dim as u32);
             }
             // Variable-scope attributes are skipped (we read global attrs).
             let _vars = r.attr_list(cdf2)?;
@@ -497,7 +552,15 @@ impl<'a> CdfReader<'a> {
     }
 
     fn list_count(&mut self, cdf2: bool) -> Result<usize, SofaImportError> {
-        self.int(cdf2).map(|v| v as usize)
+        let count = self.int(cdf2)?;
+        let count = usize::try_from(count)
+            .map_err(|_| SofaImportError::Truncated("header count is too large".into()))?;
+        if count > MAX_HEADER_ENTRIES {
+            return Err(SofaImportError::Truncated(format!(
+                "header count {count} exceeds the {MAX_HEADER_ENTRIES} entry limit"
+            )));
+        }
+        Ok(count)
     }
     fn int(&mut self, wide: bool) -> Result<u64, SofaImportError> {
         if wide {
@@ -531,11 +594,15 @@ impl<'a> CdfReader<'a> {
     }
 
     fn bytes(&mut self, n: usize) -> Result<&'a [u8], SofaImportError> {
-        if self.pos + n > self.data.len() {
+        let end = self
+            .pos
+            .checked_add(n)
+            .ok_or_else(|| SofaImportError::Truncated("read offset overflow".into()))?;
+        if end > self.data.len() {
             return Err(SofaImportError::Truncated("read past end".into()));
         }
-        let s = &self.data[self.pos..self.pos + n];
-        self.pos += n;
+        let s = &self.data[self.pos..end];
+        self.pos = end;
         Ok(s)
     }
 
@@ -563,8 +630,13 @@ impl<'a> CdfReader<'a> {
             })?;
             let count = self.u32()? as usize;
             let pos = self.pos;
-            let size = type_size(ty) * count;
-            let padded = (size + 3) & !3;
+            let size = type_size(ty)
+                .checked_mul(count)
+                .ok_or_else(|| SofaImportError::Truncated("attribute size overflow".into()))?;
+            let padded = size
+                .checked_add(3)
+                .map(|v| v & !3)
+                .ok_or_else(|| SofaImportError::Truncated("attribute size overflow".into()))?;
             self.bytes(padded)?;
             out.push((
                 name.clone(),
@@ -611,58 +683,78 @@ impl<'a> CdfReader<'a> {
             .collect()
     }
 
-    fn variable_float_data(&self, v: &Var, n: usize) -> Result<Vec<f32>, SofaImportError> {
-        if v.begin as usize + n * 4 > self.data.len() {
-            return Err(SofaImportError::Truncated("variable float data".into()));
+    /// Validate that `n` elements of `width` bytes starting at `begin` lie
+    /// inside the file, and return the resolved start offset.
+    ///
+    /// Every factor is header-controlled, so all of the arithmetic is checked;
+    /// a crafted `begin`/shape must fail here, never overflow into a short read.
+    fn checked_span(&self, begin: u64, n: usize, width: usize) -> Result<usize, SofaImportError> {
+        let start = usize::try_from(begin)
+            .map_err(|_| SofaImportError::Truncated("variable offset is too large".into()))?;
+        let len = n
+            .checked_mul(width)
+            .ok_or_else(|| SofaImportError::Truncated("variable size overflow".into()))?;
+        let end = start
+            .checked_add(len)
+            .ok_or_else(|| SofaImportError::Truncated("variable offset overflow".into()))?;
+        if end > self.data.len() {
+            return Err(SofaImportError::Truncated("variable data past end".into()));
         }
-        Ok((0..n)
-            .map(|i| {
-                let s = (v.begin as usize) + i * 4;
-                let b = &self.data[s..s + 4];
-                match self.endian {
-                    Endian::Big => f32::from_be_bytes([b[0], b[1], b[2], b[3]]),
-                    Endian::Little => f32::from_le_bytes([b[0], b[1], b[2], b[3]]),
-                }
-            })
-            .collect())
+        Ok(start)
+    }
+
+    fn variable_float_data(&self, v: &Var, n: usize) -> Result<Vec<f32>, SofaImportError> {
+        let start = self.checked_span(v.begin, n, 4)?;
+        let mut out = Vec::new();
+        out.try_reserve_exact(n)
+            .map_err(|_| SofaImportError::Truncated("variable allocation failed".into()))?;
+        for i in 0..n {
+            let s = start + i * 4;
+            let b = &self.data[s..s + 4];
+            out.push(match self.endian {
+                Endian::Big => f32::from_be_bytes([b[0], b[1], b[2], b[3]]),
+                Endian::Little => f32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+            });
+        }
+        Ok(out)
     }
 
     fn variable_double_data(&self, v: &Var, n: usize) -> Result<Vec<f64>, SofaImportError> {
-        if v.begin as usize + n * 8 > self.data.len() {
-            return Err(SofaImportError::Truncated("variable double data".into()));
+        let start = self.checked_span(v.begin, n, 8)?;
+        let mut out = Vec::new();
+        out.try_reserve_exact(n)
+            .map_err(|_| SofaImportError::Truncated("variable allocation failed".into()))?;
+        for i in 0..n {
+            let s = start + i * 8;
+            let b = &self.data[s..s + 8];
+            out.push(match self.endian {
+                Endian::Big => f64::from_be_bytes(
+                    b.try_into()
+                        .expect("invariant: the slice is exactly eight bytes"),
+                ),
+                Endian::Little => f64::from_le_bytes(
+                    b.try_into()
+                        .expect("invariant: the slice is exactly eight bytes"),
+                ),
+            });
         }
-        Ok((0..n)
-            .map(|i| {
-                let s = (v.begin as usize) + i * 8;
-                let b = &self.data[s..s + 8];
-                match self.endian {
-                    Endian::Big => f64::from_be_bytes(
-                        b.try_into()
-                            .expect("invariant: the slice is exactly eight bytes"),
-                    ),
-                    Endian::Little => f64::from_le_bytes(
-                        b.try_into()
-                            .expect("invariant: the slice is exactly eight bytes"),
-                    ),
-                }
-            })
-            .collect())
+        Ok(out)
     }
 
     fn variable_int_data(&self, v: &Var, n: usize) -> Result<Vec<i32>, SofaImportError> {
-        if v.begin as usize + n * 4 > self.data.len() {
-            return Err(SofaImportError::Truncated("variable int data".into()));
+        let start = self.checked_span(v.begin, n, 4)?;
+        let mut out = Vec::new();
+        out.try_reserve_exact(n)
+            .map_err(|_| SofaImportError::Truncated("variable allocation failed".into()))?;
+        for i in 0..n {
+            let s = start + i * 4;
+            let b = &self.data[s..s + 4];
+            out.push(match self.endian {
+                Endian::Big => i32::from_be_bytes([b[0], b[1], b[2], b[3]]),
+                Endian::Little => i32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+            });
         }
-        Ok((0..n)
-            .map(|i| {
-                let s = (v.begin as usize) + i * 4;
-                let b = &self.data[s..s + 4];
-                match self.endian {
-                    Endian::Big => i32::from_be_bytes([b[0], b[1], b[2], b[3]]),
-                    Endian::Little => i32::from_le_bytes([b[0], b[1], b[2], b[3]]),
-                }
-            })
-            .collect())
+        Ok(out)
     }
 }
 
@@ -693,12 +785,13 @@ fn read_attr_strings(data: &[u8], a: &Attr) -> Option<Vec<String>> {
     if a.nc_type != NcType::Char {
         return None;
     }
-    let size = type_size(a.nc_type) * a.count;
+    let size = type_size(a.nc_type).checked_mul(a.count)?;
     let start = a.pos;
-    if start + size > data.len() {
+    let end = start.checked_add(size)?;
+    if end > data.len() {
         return None;
     }
-    let raw = &data[start..start + size];
+    let raw = &data[start..end];
     let s = String::from_utf8_lossy(raw);
     let parts: Vec<String> = s.split('\0').map(|x| x.to_string()).collect();
     Some(parts)
@@ -998,5 +1091,87 @@ mod tests {
         let opts = super::super::hrtf::HrtfLoadOptions::default();
         let ds = super::super::hrtf::HrtfDataset::from_corpus(&corpus, &opts);
         assert!(ds.is_ok(), "corpus must feed HrtfDataset; err: {ds:?}");
+    }
+
+    /// A 16-byte header that claims 4 billion global attributes used to drive
+    /// a ~200 GB `Vec::with_capacity` and abort the process. Counts are now
+    /// bounded before they are trusted as an allocation size.
+    #[test]
+    fn hostile_header_counts_are_rejected_without_allocating() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"CDF\x01"); // magic, CDF-1
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // numrecs
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // dimensions
+        bytes.extend_from_slice(&u32::MAX.to_be_bytes()); // global attributes
+        let error = import_sofa(&bytes, None).unwrap_err();
+        assert!(
+            matches!(error, SofaImportError::Truncated(_)),
+            "got {error:?}"
+        );
+    }
+
+    #[test]
+    fn hostile_dimension_extents_are_rejected() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"CDF\x01");
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // numrecs
+        bytes.extend_from_slice(&1u32.to_be_bytes()); // one dimension
+        bytes.extend_from_slice(&1u32.to_be_bytes()); // name length
+        bytes.extend_from_slice(b"x\0\0\0"); // name + padding
+        bytes.extend_from_slice(&u32::MAX.to_be_bytes()); // extent
+        let error = import_sofa(&bytes, None).unwrap_err();
+        assert!(
+            matches!(error, SofaImportError::NotSupported(_)),
+            "got {error:?}"
+        );
+    }
+
+    #[test]
+    fn negative_variable_dimension_count_is_rejected() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"CDF\x01");
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // numrecs
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // no dimensions
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // no global attributes
+        bytes.extend_from_slice(&1u32.to_be_bytes()); // one variable
+        bytes.extend_from_slice(&1u32.to_be_bytes()); // name length
+        bytes.extend_from_slice(b"v\0\0\0");
+        bytes.extend_from_slice(&(-1i32).to_be_bytes()); // dimension count
+        let error = import_sofa(&bytes, None).unwrap_err();
+        assert!(
+            matches!(error, SofaImportError::Truncated(_)),
+            "got {error:?}"
+        );
+    }
+
+    #[test]
+    fn variable_offsets_are_checked_before_reading() {
+        let data = vec![0u8; 16];
+        let r = CdfReader {
+            data: &data,
+            pos: 0,
+            endian: Endian::Big,
+            dimensions: Vec::new(),
+            attributes: Vec::new(),
+            variables: Vec::new(),
+        };
+        let var = Var {
+            nc_type: NcType::Float,
+            dims: Vec::new(),
+            begin: u64::MAX,
+        };
+        assert!(matches!(
+            r.variable_float_data(&var, 1),
+            Err(SofaImportError::Truncated(_))
+        ));
+        let var = Var {
+            nc_type: NcType::Float,
+            dims: Vec::new(),
+            begin: 8,
+        };
+        assert!(matches!(
+            r.variable_float_data(&var, usize::MAX),
+            Err(SofaImportError::Truncated(_))
+        ));
     }
 }

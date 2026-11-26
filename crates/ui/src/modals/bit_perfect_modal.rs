@@ -1,3 +1,5 @@
+//! Bit-perfect diagnostics modal: negotiated backend, sample rate, fallback cause.
+
 use audio_session::engine::diagnostics::BitPerfectCause;
 use audio_session::AudioSession;
 use domain::models::Track;

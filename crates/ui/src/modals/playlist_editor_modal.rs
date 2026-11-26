@@ -1,3 +1,6 @@
+//! Floating playlist manager window: create, rename, reorder and delete
+//! playlists and their tracks.
+
 use domain::ids::{PlaylistId, TrackId};
 use domain::models::{Playlist, Track};
 use eframe::egui::{self, Color32, CornerRadius, Key, Margin, Pos2, Rect, Sense, Stroke, Vec2};

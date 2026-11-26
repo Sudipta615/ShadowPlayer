@@ -101,6 +101,10 @@ impl AudioEngine {
             self.dsd.sdm_output = None;
             self.dsd.sdm_plan = None;
             self.graph.set_dop_bypass(false);
+            // The primary output is PCM again and may have a different rate
+            // than when the monitor was built; its conversion ratio belongs
+            // to that PCM clock.
+            self.sync_talkback();
         }
 
         // ── DSD output mode selection (§7) ─────────────────────────────────
@@ -355,6 +359,9 @@ impl AudioEngine {
                     self.graph.update_sample_rate(actual_rate as f32);
                 }
             }
+            // PCM transport: the monitor must follow the output clock this
+            // track selected. Idempotent when the rate did not move.
+            self.sync_talkback();
         }
 
         #[cfg(feature = "resample")]
@@ -953,6 +960,9 @@ impl AudioEngine {
         self.dsd.dop_active = false;
         self.dsd.dop_rate = 0;
         self.graph.set_dop_bypass(false);
+        // DoP bypass ends here: the primary output is PCM again, at the DoP
+        // container rate, so the monitor's ratio is reconciled with it.
+        self.sync_talkback();
 
         self.clock.reset_track(info.sample_rate);
         self.analyzer.set_sample_rate(info.sample_rate);
@@ -1130,6 +1140,9 @@ impl AudioEngine {
         self.dsd.dop_active = false;
         self.dsd.dop_rate = 0;
         self.graph.set_dop_bypass(false);
+        // DoP bypass ends here: the primary output is PCM again, at the DoP
+        // container rate, so the monitor's ratio is reconciled with it.
+        self.sync_talkback();
 
         self.clock.reset_track(info.sample_rate);
         self.analyzer.set_sample_rate(info.sample_rate);

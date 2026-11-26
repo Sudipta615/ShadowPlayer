@@ -1,3 +1,8 @@
+//! CD ripping: drive probing, TOC reading and per-track extraction.
+//!
+//! Wraps the native CD backend and reports progress through channels; never
+//! runs on the UI thread.
+
 use super::*;
 use crate::dynlib;
 use crate::transcode::{self, TranscodeOptions};

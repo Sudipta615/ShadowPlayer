@@ -4,6 +4,7 @@ pub mod autoeq_catalog_service;
 pub mod autotag_service;
 pub mod control_service;
 pub mod crossfade_preview;
+pub mod error;
 pub mod file_task_service;
 pub mod import_service;
 pub mod loudness_service;
@@ -28,6 +29,7 @@ pub use control_service::{
     set_multi_instance_enabled, ControlEndpoint, ControlRequest, ControlResponse, ControlService,
 };
 pub use crossfade_preview::CrossfadePreview;
+pub use error::ServiceError;
 pub use file_task_service::{FileTask, FileTaskEvent, FileTaskService};
 pub use import_service::{ImportKind, ImportResult, ImportService};
 pub use loudness_service::{LoudnessProgress, LoudnessService};

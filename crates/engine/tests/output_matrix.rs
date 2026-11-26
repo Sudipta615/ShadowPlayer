@@ -134,6 +134,7 @@ fn each_endpoint_applies_its_own_trim() {
             config::ResamplerFilter::Fft,
             0.95,
             config::PrecisionMode::Performance,
+            config::NoiseShaper::Tpdf,
         )
         .unwrap_or_else(|e| panic!("the null endpoint must open: {e}"));
         assert!(worker.is_running());
@@ -178,6 +179,7 @@ fn an_endpoint_with_a_unity_trim_is_a_passthrough() {
         config::ResamplerFilter::Fft,
         0.95,
         config::PrecisionMode::Performance,
+        config::NoiseShaper::Tpdf,
     )
     .expect("the null endpoint must open");
 
@@ -207,6 +209,7 @@ fn an_endpoint_reports_its_own_counters() {
         config::ResamplerFilter::Fft,
         0.95,
         config::PrecisionMode::Performance,
+        config::NoiseShaper::Tpdf,
     )
     .expect("the null endpoint must open");
 

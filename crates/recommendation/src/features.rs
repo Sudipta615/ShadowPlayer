@@ -1,3 +1,7 @@
+//! Audio feature extraction: per-track descriptors and serialised feature vectors.
+//!
+//! Bump `FEATURE_SCHEMA_VERSION` when semantics change.
+
 use crate::audio::{downmix_and_resample_into, ResamplePlan};
 use crate::{AudioReadError, AudioWindowSource};
 use std::error::Error;

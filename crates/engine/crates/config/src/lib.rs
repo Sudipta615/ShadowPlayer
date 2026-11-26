@@ -26,7 +26,7 @@ pub use dsp_config::{
     DacCorrectionProfileConfig, DynamicEqBandConfig, DynamicEqConfig, EqBandConfig, EqConfig,
     EqMode, EqPreset, GraphicEqConfig, GraphicEqLayout, LfeConfig, LimiterConfig, LimiterMode,
     LoudnessConfig, MatrixFirRouteConfig, MultibandCompressorConfig, SdmConfig,
-    StereoEnhancerConfig,
+    StereoEnhancerConfig, TalkbackConfig,
 };
 pub use engine_config::{
     default_resampler_cutoff_ratio, AuxBusConfig, ConfigIssue, ConfigIssueKind, ConfigSeverity,

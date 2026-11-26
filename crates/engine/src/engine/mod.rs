@@ -22,6 +22,7 @@ mod recovery;
 pub mod settings;
 mod spatial_persistence;
 mod stream;
+mod talkback;
 mod telemetry;
 #[cfg(test)]
 mod tests;
@@ -167,6 +168,13 @@ pub struct AudioEngine {
     /// recording and room measurement Windows-only even though the engine half
     /// (writer, drain, sweep orchestration) never was.
     capture: Option<ActiveCapture>,
+
+    /// Live talkback / duplex monitor, when enabled. Opening it is a control
+    /// action; the tick loop only pumps and mixes it into the primary output.
+    pub(crate) talkback: Option<talkback::TalkbackMonitor>,
+    /// Last talkback open failure, published in `EngineSettings`. `None`
+    /// when the monitor is closed or running normally.
+    pub(crate) talkback_error: Option<String>,
 
     /// Room measurement in flight (sweep playing + capture
     /// scheduled). Control-thread only; `None` when idle.

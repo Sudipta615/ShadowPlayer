@@ -67,8 +67,9 @@ fn open_capture(
         // input request, so fall through rather than failing a valid one.
     }
 
-    crate::output::capture::CpalInputCapture::new(device, RING_FRAMES)
-        .map(|c| Box::new(c) as Box<dyn SystemCapture>)
+    // Use the shared portable-input constructor so recording and talkback
+    // cannot diverge on device matching or failure wording.
+    crate::output::capture::open_input_capture(device, RING_FRAMES)
 }
 
 impl AudioEngine {

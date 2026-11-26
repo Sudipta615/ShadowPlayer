@@ -483,3 +483,20 @@ lto = "thin"
 [profile.bench]
 lto = "thin"
 
+
+# Local profile tuning (memory-safe: incremental stays off per ~/.cargo/config.toml).
+[profile.dev]
+codegen-units = 16
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.test]
+codegen-units = 16
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+opt-level = 2
+debug = false

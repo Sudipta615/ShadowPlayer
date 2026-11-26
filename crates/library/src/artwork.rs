@@ -10,6 +10,39 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
+/// Decode untrusted image bytes under the bounds the whole app relies on.
+///
+/// The byte cap stops a download from exhausting memory before decoding even
+/// starts; the dimension and allocation limits stop a decompression bomb
+/// (a tiny file that claims an enormous pixel grid).
+fn decode_bounded(image_bytes: &[u8]) -> Option<image::DynamicImage> {
+    const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+    if image_bytes.is_empty() || image_bytes.len() > MAX_IMAGE_BYTES {
+        return None;
+    }
+
+    let mut reader = ImageReader::new(Cursor::new(image_bytes))
+        .with_guessed_format()
+        .ok()?;
+
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    reader.limits(limits);
+
+    reader.decode().ok()
+}
+
+/// Validate untrusted image bytes and report the detected container format.
+///
+/// Byte-for-byte the same validation used before a thumbnail is produced, so
+/// network bytes can be checked once and then safely handed to the library.
+pub fn validate_image_bytes(image_bytes: &[u8]) -> Option<image::ImageFormat> {
+    decode_bounded(image_bytes)?;
+    image::guess_format(image_bytes).ok()
+}
+
 pub struct ArtworkManager {
     cache_dir: PathBuf,
 }
@@ -39,25 +72,7 @@ impl ArtworkManager {
     /// storage and faster seek times on mechanical HDDs, while keeping visual
     /// quality identical for table and card views.
     pub fn save_thumbnail(&self, track_id: &TrackId, image_bytes: &[u8]) -> Option<PathBuf> {
-        // Security bounds: cap raw input bytes to 32MB to prevent memory exhaustion
-        const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
-        if image_bytes.is_empty() || image_bytes.len() > MAX_IMAGE_BYTES {
-            return None;
-        }
-
-        let mut reader = ImageReader::new(Cursor::new(image_bytes))
-            .with_guessed_format()
-            .ok()?;
-
-        // Security bounds against decompression bombs (pixel flood attack):
-        // Limit max dimensions and total memory allocation.
-        let mut limits = image::Limits::default();
-        limits.max_image_width = Some(8192);
-        limits.max_image_height = Some(8192);
-        limits.max_alloc = Some(64 * 1024 * 1024);
-        reader.limits(limits);
-
-        let img = reader.decode().ok()?;
+        let img = decode_bounded(image_bytes)?;
 
         // `thumbnail` is a fast box filter; Lanczos3 would cost far more CPU
         // for no visible gain at this size.
@@ -191,6 +206,16 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn image_validation_reports_the_container_and_refuses_garbage() {
+        assert_eq!(
+            validate_image_bytes(&png_of(8, 8)),
+            Some(image::ImageFormat::Png)
+        );
+        assert_eq!(validate_image_bytes(b"this is not a picture"), None);
+        assert_eq!(validate_image_bytes(&[]), None);
     }
 
     #[test]

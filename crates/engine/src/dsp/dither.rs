@@ -133,46 +133,10 @@ impl DitherType {
     }
 }
 
-/// Construction-time default for output backends.
-///
-/// The engine has one global dither policy (`EngineConfig::dither_enabled`)
-/// and one global shaper (`EngineConfig::noise_shaper`); per-endpoint
-/// overrides are not part of the config surface yet. Output converters are
-/// constructed on their own render/control threads, so this is an atomic
-/// process configuration value read at construction — never on the audio
-/// thread and never per sample. A change takes effect on the next stream
-/// open, which is exactly when a converter is rebuilt.
-static CONFIGURED_NOISE_SHAPER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
-/// Select the shaper new output converters use.
-pub fn set_configured_noise_shaper(shaper: config::NoiseShaper) {
-    use std::sync::atomic::Ordering;
-    let code = match shaper {
-        config::NoiseShaper::Tpdf => 0,
-        config::NoiseShaper::Shibata => 1,
-        config::NoiseShaper::Ns5 => 2,
-        config::NoiseShaper::Ns9 => 3,
-        config::NoiseShaper::Lns15 => 4,
-    };
-    CONFIGURED_NOISE_SHAPER.store(code, Ordering::Relaxed);
-}
-
-/// The shaper new output converters will use.
-pub fn configured_noise_shaper() -> config::NoiseShaper {
-    use std::sync::atomic::Ordering;
-    match CONFIGURED_NOISE_SHAPER.load(Ordering::Relaxed) {
-        1 => config::NoiseShaper::Shibata,
-        2 => config::NoiseShaper::Ns5,
-        3 => config::NoiseShaper::Ns9,
-        4 => config::NoiseShaper::Lns15,
-        _ => config::NoiseShaper::Tpdf,
-    }
-}
-
-/// [`DitherType`] for [`configured_noise_shaper`].
-pub fn configured_dither_type() -> DitherType {
-    DitherType::from_noise_shaper(configured_noise_shaper())
-}
+// Output converters take their shaper explicitly from `EngineConfig` when the
+// stream opens, and store it for the lifetime of that stream. There is
+// deliberately no process-wide mutable shaper: opening one output must never
+// change the family another output was built with.
 
 /// Shibata F-weighted noise shaping coefficients for 44.1 kHz (9-tap IIR error feedback).
 /// Derived from Shibata's psychoacoustically optimised design.

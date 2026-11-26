@@ -1181,6 +1181,43 @@ impl EngineHandle {
         let _ = self.send_command(EngineCommand::CaptureStop);
     }
 
+    /// Replace the talkback monitor configuration. Enabling opens the input
+    /// device and mixes it into the primary output's front L/R pair; the
+    /// program DSP chain and endpoint fan-out are untouched.
+    ///
+    /// This is a control action, not a sample-path operation. Failure to open
+    /// the device is reported through `EngineSettings::talkback_error` on the
+    /// next settings snapshot (the command channel has no reply).
+    pub fn set_talkback(&self, config: config::TalkbackConfig) {
+        let _ = self.send_command(EngineCommand::SetTalkback(config));
+    }
+
+    /// Push-to-talk key-down: enable the monitor with the given input device
+    /// (`None` = platform default) and gain. Replaces the previous device/gain
+    /// selection.
+    ///
+    /// PCM primary output only. There is no automatic feedback suppression or
+    /// ducking — the microphone is live exactly while this is enabled.
+    pub fn start_talkback(&self, device: Option<String>, gain_db: f32) {
+        self.set_talkback(config::TalkbackConfig {
+            enabled: true,
+            device,
+            gain_db,
+        });
+    }
+
+    /// Push-to-talk key-up: close the monitor but keep its device and gain for
+    /// the next [`Self::start_talkback`] or [`Self::set_talkback`] call.
+    pub fn stop_talkback(&self) {
+        let _ = self.send_command(EngineCommand::SetTalkbackEnabled(false));
+    }
+
+    /// Enable or disable the monitor without changing its last device/gain.
+    /// Equivalent to [`Self::stop_talkback`] when `enabled` is false.
+    pub fn set_talkback_enabled(&self, enabled: bool) {
+        let _ = self.send_command(EngineCommand::SetTalkbackEnabled(enabled));
+    }
+
     /// Set sample rate policy (TrackNative, DevicePreferred, Fixed, etc.).
     pub fn set_sample_rate_policy(&self, policy: config::SampleRatePolicy) {
         let _ = self.send_command(EngineCommand::SetSampleRatePolicy(policy));

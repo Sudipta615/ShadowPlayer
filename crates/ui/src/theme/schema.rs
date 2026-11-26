@@ -1,3 +1,7 @@
+//! Theme schema: serialisable theme document, migration and validation.
+//!
+//! The on-disk format the theme manager reads and writes.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

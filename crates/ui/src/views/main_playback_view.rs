@@ -1,3 +1,5 @@
+//! Main playback view: now-playing hero, queue and transport layout.
+
 use database::{FavoritesRepo, PlaylistRepo, TrackRepo};
 use domain::ids::TrackId;
 use domain::models::Track;

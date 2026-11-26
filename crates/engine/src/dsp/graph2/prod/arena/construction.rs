@@ -329,7 +329,10 @@ impl GraphGeneration {
             GraphNode::Routing(RoutingNode::new(sample_rate)),
             GraphNode::Resampler(ResamplerNode::new(sample_rate, sample_rate)),
             GraphNode::Limiter(LimiterNode::new(sample_rate)),
-            GraphNode::Dither(DitherNode::new(sample_rate)),
+            GraphNode::Dither(DitherNode::with_type(
+                crate::dsp::dither::DitherType::from_noise_shaper(config.noise_shaper),
+                sample_rate,
+            )),
             GraphNode::Aux(AuxBusNode::new(send_bus, sample_rate)),
             GraphNode::Correction(CorrectionNode::new(sample_rate)),
             GraphNode::Spatial(SpatialNode::new(sample_rate)),

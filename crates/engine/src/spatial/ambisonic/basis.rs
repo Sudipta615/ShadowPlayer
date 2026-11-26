@@ -1,4 +1,4 @@
-//! Spherical harmonic basis evaluation for Higher-Order Ambisonics (ACN / SN3D).
+//! Spherical harmonic basis evaluation for Higher-Order Ambisonics (ACN / N3D).
 //!
 //! Supports orders 0 through 9 (up to 100 channels). Orders 0–3 use exact closed-form
 //! polynomials; orders 4–9 use the associated Legendre recurrence relation.
@@ -31,7 +31,7 @@ pub const AMBISONIC_CHANNELS_ORDER_3: usize = 16;
 /// for order 9), used to size the allocation-free per-frame scratch.
 pub const AMBISONIC_CHANNELS_MAX: usize = 100;
 
-/// Real spherical-harmonic basis for a unit direction, ACN/SN3D, order 1:
+/// Real spherical-harmonic basis for a unit direction, ACN/N3D, order 1:
 /// `[W, Y, Z, X]` = `[1, √3·y, √3·z, √3·x]`.
 #[inline]
 pub fn sh_foa(dir: Vec3) -> [f32; 4] {
@@ -39,7 +39,7 @@ pub fn sh_foa(dir: Vec3) -> [f32; 4] {
     [1.0, s3 * dir.y, s3 * dir.z, s3 * dir.x]
 }
 
-/// Real spherical-harmonic basis, ACN/SN3D, order ≤ [`MAX_AMBISONIC_ORDER`].
+/// Real spherical-harmonic basis, ACN/N3D, order ≤ [`MAX_AMBISONIC_ORDER`].
 /// Writes `channel_count(order)` values into `out` (panics if too short);
 /// order 1 is exactly [`sh_foa`], order 2 appends ACN 4–8, order 3 appends
 /// ACN 9–15. `dir` is normalised defensively; a zero direction reads as
@@ -71,13 +71,13 @@ pub fn sh_n(order: u8, dir: Vec3, out: &mut [f32]) {
         let s218 = (21.0f32 / 8.0).sqrt();
         let s7h = 7.0f32.sqrt() * 0.5;
         let s105h = 105.0f32.sqrt() * 0.5;
-        out[9] = s358 * x * (x * x - 3.0 * y * y);
+        out[9] = s358 * y * (3.0 * x * x - y * y);
         out[10] = s105 * x * y * z;
         out[11] = s218 * y * (5.0 * z * z - 1.0);
         out[12] = s7h * z * (5.0 * z * z - 3.0);
         out[13] = s218 * x * (5.0 * z * z - 1.0);
         out[14] = s105h * z * (x * x - y * y);
-        out[15] = s358 * y * (y * y - 3.0 * x * x);
+        out[15] = s358 * x * (x * x - 3.0 * y * y);
     }
     if order >= 4 {
         sh_n_high_order(order, x, y, z, out);
@@ -114,6 +114,12 @@ fn sh_n_high_order(order: u8, x: f32, y: f32, z: f32, out: &mut [f32]) {
 
     let mut plm = [[0.0f64; MAXL]; MAXL];
     plm[0][0] = 1.0;
+    // P_1^0 = z. The diagonal loop below starts at m = 1 and the general
+    // recurrence at l = 2, so without this seed the whole m = 0 column is
+    // generated from a zero and every order-4+ zonal harmonic is wrong.
+    if maxm > 1 {
+        plm[1][0] = z64;
+    }
     let sinth2 = 1.0 - z64 * z64;
     let sinth = sinth2.max(0.0).sqrt();
 
@@ -167,7 +173,7 @@ fn sh_n_high_order(order: u8, x: f32, y: f32, z: f32, out: &mut [f32]) {
             //
             // Left uncorrected, every ODD-m channel of order ≥ 4 came out with
             // the opposite sign to the same basis function's lower-order
-            // siblings: ACN 5, 12, 14, … were mirrored relative to ACN/SN3D.
+            // siblings: ACN 5, 12, 14, … were mirrored relative to ACN/N3D.
             // A self-consistent encode/decode pair cancels the error, but any
             // standard ACN HOA stream fed to this engine decodes to a mirrored
             // image from order 4 up, and a band-limited or order-crossover

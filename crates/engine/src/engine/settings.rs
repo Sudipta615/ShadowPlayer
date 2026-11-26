@@ -207,6 +207,25 @@ pub struct EngineSettings {
     /// `None` = nothing captured yet this session.
     pub capture_device: Option<String>,
 
+    // ── Talkback / duplex monitor ─────────────────────────────────────
+    /// Whether the monitor is currently open and mixing into the primary
+    /// output. `false` while a push-to-talk key is up.
+    pub talkback_active: bool,
+    /// The input device the monitor actually opened, or the configured
+    /// selection while it is idle. `None` = platform default.
+    pub talkback_device: Option<String>,
+    /// Monitor gain actually in force, in dB (clamped to `-60.0 ..= 12.0`).
+    pub talkback_gain_db: f32,
+    /// Frames the monitor could not produce because capture had not delivered
+    /// them yet (since the monitor opened).
+    pub talkback_underruns: u64,
+    /// Frames dropped because the capture FIFO was full (since the monitor
+    /// opened). A fast input clock or a stalled tick loop raises this.
+    pub talkback_overruns: u64,
+    /// Why the last monitor open failed, if it did. Cleared by a successful
+    /// open or by disabling the monitor.
+    pub talkback_error: Option<String>,
+
     // ── Spatial ───────────────────────────────────────────────────────
     pub spatial_enabled: bool,
     pub spatial_quality: config::SpatialQuality,
@@ -285,6 +304,13 @@ impl Default for EngineSettings {
 
             capture_active: false,
             capture_device: None,
+
+            talkback_active: false,
+            talkback_device: None,
+            talkback_gain_db: 0.0,
+            talkback_underruns: 0,
+            talkback_overruns: 0,
+            talkback_error: None,
 
             spatial_enabled: false,
             spatial_quality: config::SpatialQuality::default(),
@@ -462,6 +488,29 @@ impl crate::engine::AudioEngine {
 
             capture_active: self.capture.is_some(),
             capture_device: cap.last_device.clone(),
+
+            talkback_active: self.talkback.is_some(),
+            talkback_device: self
+                .talkback
+                .as_ref()
+                .map(|monitor| monitor.device_name().to_string())
+                .or_else(|| self.config.talkback.device.clone()),
+            talkback_gain_db: self
+                .talkback
+                .as_ref()
+                .map(|monitor| monitor.gain_db())
+                .unwrap_or_else(|| super::talkback::clamp_gain_db(self.config.talkback.gain_db)),
+            talkback_underruns: self
+                .talkback
+                .as_ref()
+                .map(|monitor| monitor.underrun_frames())
+                .unwrap_or(0),
+            talkback_overruns: self
+                .talkback
+                .as_ref()
+                .map(|monitor| monitor.overrun_frames())
+                .unwrap_or(0),
+            talkback_error: self.talkback_error.clone(),
 
             spatial_enabled: ctl.spatial_enabled(),
             spatial_quality: cfg.spatial.quality,

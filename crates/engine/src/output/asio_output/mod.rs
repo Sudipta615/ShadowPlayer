@@ -33,6 +33,7 @@ use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use config::NoiseShaper;
 use cpal::SampleFormat;
 
 #[cfg(windows)]
@@ -299,6 +300,11 @@ pub struct AsioOutput {
     /// Source→output channel remap (`map[out_ch] = source_ch`), shared with
     /// every (re)built render context so it survives DSD mode switches.
     channel_map: Arc<arc_swap::ArcSwap<Option<Vec<u16>>>>,
+    /// Noise-shaping family captured when this stream was opened. Stored per
+    /// output so opening another stream cannot change this converter's
+    /// shaping behind its back.
+    #[cfg(windows)]
+    noise_shaper: NoiseShaper,
     /// The live IASIO COM driver (Windows only). `None` on non-Windows or
     /// when the driver could not be instantiated.
     #[cfg(windows)]
@@ -344,6 +350,7 @@ impl AsioOutput {
         driver_name_or_id: Option<&str>,
         target_sample_rate: u32,
         ring_buffer: Arc<FixedFrameBuffer>,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
         use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
@@ -357,7 +364,12 @@ impl AsioOutput {
         let com_initialized = true;
 
         // Helper to early-return with COM cleanup.
-        let result = Self::new_inner(driver_name_or_id, target_sample_rate, ring_buffer);
+        let result = Self::new_inner(
+            driver_name_or_id,
+            target_sample_rate,
+            ring_buffer,
+            noise_shaper,
+        );
         match result {
             Ok(out) => Ok(out),
             Err(e) => {
@@ -375,6 +387,7 @@ impl AsioOutput {
         driver_name_or_id: Option<&str>,
         target_sample_rate: u32,
         ring_buffer: Arc<FixedFrameBuffer>,
+        noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
         // ── 2. Enumerate and select driver ───────────────────────────────
         let drivers = enumerate_asio_drivers();
@@ -457,6 +470,7 @@ impl AsioOutput {
             wire_type,
             buffer_size as usize,
             driver.get_sample_rate()? as u32,
+            noise_shaper,
         );
         context.channel_map = Arc::clone(&channel_map);
         let context = Arc::new(context);
@@ -523,6 +537,7 @@ impl AsioOutput {
             errors: StreamErrorState::default(),
             driver_info: Some(driver_info),
             channel_map,
+            noise_shaper,
             driver: Some(driver),
             com_initialized: true,
             dsd_active: false,
@@ -540,6 +555,7 @@ impl AsioOutput {
         _driver_name_or_id: Option<&str>,
         _target_sample_rate: u32,
         _ring_buffer: Arc<FixedFrameBuffer>,
+        _noise_shaper: NoiseShaper,
     ) -> Result<Self, OutputError> {
         Err(OutputError::StreamOpen(
             "ASIO backend is Windows-only".to_string(),
@@ -716,6 +732,7 @@ impl AsioOutput {
             wire_type,
             buf_size as usize,
             actual as u32,
+            self.noise_shaper,
         );
         ctx.channel_map = Arc::clone(&self.channel_map);
         if dsd_mode {

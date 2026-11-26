@@ -242,12 +242,12 @@ impl ShadowPlayerApp {
         // finished catalog into the modal state.
         if self.dsp_state.autoeq.is_open {
             if let Err(error) = self.autoeq_catalog.ensure_started() {
-                self.dsp_state.autoeq.set_catalog_error(error);
+                self.dsp_state.autoeq.set_catalog_error(error.to_string());
             }
             if let Some(result) = self.autoeq_catalog.poll() {
                 match result {
                     Ok(catalog) => self.dsp_state.autoeq.set_catalog(catalog),
-                    Err(error) => self.dsp_state.autoeq.set_catalog_error(error),
+                    Err(error) => self.dsp_state.autoeq.set_catalog_error(error.to_string()),
                 }
                 ctx.request_repaint();
             } else if self.autoeq_catalog.is_loading() {

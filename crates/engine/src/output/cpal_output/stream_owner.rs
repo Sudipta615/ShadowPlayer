@@ -23,6 +23,7 @@ impl CpalOutput {
         let sample_rate = self.actual_sample_rate;
         let callback_initialized = Arc::new(AtomicBool::new(false));
         let dither_enabled = Arc::clone(&self.dither_enabled);
+        let noise_shaper = self.noise_shaper;
         let clip_counter = Arc::clone(&self.clip_counter);
         let nan_counter = Arc::clone(&self.nan_counter);
 
@@ -190,7 +191,7 @@ impl CpalOutput {
                             let mut declick = UnderrunState::new(sample_rate);
                             let mut converter = AudioFormatConverter::new_at_rate(
                                 TargetFormat::I16,
-                                crate::dsp::dither::configured_dither_type(),
+                                DitherType::from_noise_shaper(noise_shaper),
                                 sample_rate,
                             );
 
@@ -236,7 +237,7 @@ impl CpalOutput {
                             let mut declick = UnderrunState::new(sample_rate);
                             let mut converter = AudioFormatConverter::new_at_rate(
                                 TargetFormat::U16,
-                                crate::dsp::dither::configured_dither_type(),
+                                DitherType::from_noise_shaper(noise_shaper),
                                 sample_rate,
                             );
 

@@ -35,7 +35,7 @@
 //! **VBAP-style [`VbapRenderer`]** (speaker-geometry triangulation, 2D
 //! reduction for coplanar layouts, out-of-coverage fallback), the
 //! **ambisonic path** ([`AmbisonicRenderer`]: a documented FOA bus — ACN /
-//! SN3D — encoded by any spatial source and decoded onto any layout, Part
+//! N3D — encoded by any spatial source and decoded onto any layout, Part
 //! VI), and the **binaural renderer** ([`BinauralRenderer`]: a head model —
 //! Woodworth ITD + Duda-Martens head shadow, Part VII) that renders the
 //! whole hybrid scene straight to headphones — object behavior
@@ -142,7 +142,7 @@
 //! Higher-order ambisonics is implemented ([`ambisonic`]): the exact
 //! order-N SH basis (order-1 FOA pinned, order-2 `U/V/T/R/S` and order-3
 //! ACN 9–15 per the published Furse–Malham table), per-order max-rE
-//! decoder weights, and exact order-1/2/3 bus rotation (§34). Scenes
+//! decoder weights, and bus rotation for orders 1–9 (§34). Scenes
 //! persist through the scene-file format (Part XXVI):
 //! [`SpatialScene::to_config`] / [`SpatialScene::from_config`] convert
 //! losslessly to a Serde-serializable, renderer-independent model saved via
@@ -152,7 +152,7 @@
 //! through the head model at the block boundary. Measured HRTF corpora load from the
 //! JSON interchange or, with the optional `sofa-import` feature, natively
 //! from the NetCDF-classic subset of a `.sofa` file ([`sofa`]). Still
-//! future: order-4+ and spatial recording. **Native NetCDF-4/HDF5 (`nc4`)
+//! future: spatial recording. **Native NetCDF-4/HDF5 (`nc4`)
 //! SOFA is deliberately deferred** — a documented seam (module docs of
 //! [`sofa`]) — because the only robust HDF5 readers link `libhdf5`, which
 //! conflicts with this layer's parent crate's pure-Rust, no-FFI rule; the

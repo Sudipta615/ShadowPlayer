@@ -474,17 +474,6 @@ These are boundaries we cannot honestly remove with a documentation edit.
 Deliberate product choices live in
 [What ShadowPlayer is not](#what-shadowplayer-is-not).
 
-- **Pre-1.0 formats can change.** Database schemas and settings formats may
-  migrate between releases. Migrations run automatically and are one-way.
-- **Exclusive output can be refused by the operating system.** ALSA, WASAPI
-  Exclusive, ASIO, and CoreAudio hog mode all depend on device access that
-  another application, a driver, or a permission prompt can deny. ShadowPlayer
-  falls back to shared mode and reports the backend it actually got.
-- **Some format and tooling boundaries are inherited.** Musepack (`.mpc`) and
-  TAK (`.tak`) have no validated pure-Rust decoder in this tree and fail with a
-  named error. CD ripping and FLAC/Opus export load `libcdio`/`libcdio-paranoia`,
-  optionally `libcddb`, and `libsndfile` at runtime; the build succeeds without
-  them and the Tools card names anything missing.
 - **Accessibility is broad, not certified.** AccessKit is enabled, icon-only
   controls carry accessible names, and the main editing surfaces work from the
   keyboard. The app has not had a professional screen-reader audit, so the
@@ -494,6 +483,10 @@ Deliberate product choices live in
   seven carry a complete set of the English source keys. The Help manual's
   prose is English in every locale regardless of the interface language. See
   [docs/LOCALIZATION.md](docs/LOCALIZATION.md).
+- **CD ripping and export depend on optional native libraries.** CD ripping
+  and FLAC/Opus export load `libcdio`/`libcdio-paranoia`, optionally
+  `libcddb`, and `libsndfile` at runtime; the build succeeds without them and
+  the Tools card names anything missing.
 - **Engine-level boundaries are inherited in full.** The engine owns the
   precise contracts; these are the player-facing summaries. See the
   [engine limitations](crates/engine/README.md#-known-limitations) for each one
@@ -501,14 +494,9 @@ Deliberate product choices live in
   - **No Musepack or TAK decoding, and no plan to add it.** Neither format has
     a validated pure-Rust decoder, so both fail with a named error rather than
     being mis-parsed.
-  - **No talkback or duplex monitoring.** Input capture works, but routing a
-    live input back into the output path is not implemented.
   - **No test opens a physical DAC.** CI exercises the whole output path
     through a hardware-free null sink, so real driver negotiation and real
     hardware clocks remain environment-dependent.
-  - **Ambisonic bus rotation is exact only for orders 1–3.** A higher-order bus
-    is left unrotated rather than partially rotated; encoding and decoding
-    still work up to order 9.
   - **Several stereo-designed stages run on the front L/R pair only in a
     `>2`-channel stream.** The mixer, EQ, compressor, convolution, balance,
     crossfeed, stereo and bass enhancement, time-stretch, creative FX, and the
@@ -544,6 +532,24 @@ Deliberate product choices live in
 
 ---
 
+## Versioning and hardware realities
+
+These are not limitations of the product, but they shape what you can expect.
+
+- **Pre-1.0 formats can change.** Database schemas and settings formats may
+  migrate between releases. Migrations run automatically and are one-way.
+- **Exclusive output can be refused by the operating system.** ALSA, WASAPI
+  Exclusive, ASIO, and CoreAudio hog mode all depend on device access that
+  another application, a driver, or a permission prompt can deny. ShadowPlayer
+  falls back to shared mode and reports the backend it actually got — this is
+  true of every player, not a ShadowPlayer-specific gap.
+- **Musepack (`.mpc`) and TAK (`.tak`) are not supported.** Neither format
+  has a validated pure-Rust decoder in this tree, so both fail with a named
+  error rather than being mis-parsed. This is a deliberate omission, not a
+  missing feature.
+
+---
+
 ## What ShadowPlayer is not
 
 These are deliberate omissions, not missing features. They keep the app small,
@@ -552,9 +558,12 @@ predictable, and focused on the music you own.
 - **Not a streaming client, account system, or telemetry product.** No cloud
   library, no cloud recommendation feed, no usage reporting. The on-device For
   You mix is computed locally and never uploaded. Auto-tagging, cover-art
-  lookup, podcast subscriptions, and the update check contact the network only
+  lookup, and the update check contact the network only
   when you invoke them.
 - **Not a video player.** Audio is the product.
+- **Not a Musepack or TAK player.** Neither format has a validated pure-Rust
+  decoder in this tree, so both fail with a named error rather than being
+  mis-parsed.
 - **Not a background updater.** The update check is opt-in, downloads are
   SHA-256 verified, and installing is a deliberate act you perform.
 - **Not a LAN remote-control server.** The control socket binds only to

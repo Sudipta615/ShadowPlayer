@@ -387,6 +387,7 @@ pub fn create_output(
     backend: config::AudioBackend,
     target_device: Option<&str>,
     fallback_policy: config::FallbackPolicy,
+    noise_shaper: config::NoiseShaper,
 ) -> Result<Box<dyn Output>, OutputError> {
     if backend == config::AudioBackend::Null {
         return Ok(Box::new(super::null_output::NullOutput::new(
@@ -399,7 +400,12 @@ pub fn create_output(
         _ => {}
     }
     if backend == config::AudioBackend::ExclusiveWasapi {
-        match super::wasapi_output::WasapiOutput::new(buffer.clone(), backend, target_device) {
+        match super::wasapi_output::WasapiOutput::new(
+            buffer.clone(),
+            backend,
+            target_device,
+            noise_shaper,
+        ) {
             Ok(out) => {
                 log::info!("Audio output: using native WASAPI exclusive backend");
                 return Ok(Box::new(out));
@@ -414,7 +420,12 @@ pub fn create_output(
     }
     #[cfg(feature = "asio-native")]
     if backend == config::AudioBackend::ExclusiveAsio {
-        match super::asio_output::AsioOutput::new(target_device, 44100, buffer.clone()) {
+        match super::asio_output::AsioOutput::new(
+            target_device,
+            44100,
+            buffer.clone(),
+            noise_shaper,
+        ) {
             Ok(out) => {
                 log::info!("Audio output: using native ASIO backend");
                 return Ok(Box::new(out));
@@ -432,6 +443,7 @@ pub fn create_output(
         backend,
         target_device,
         fallback_policy,
+        noise_shaper,
     )?))
 }
 
@@ -453,6 +465,7 @@ pub fn create_output(
     backend: config::AudioBackend,
     target_device: Option<&str>,
     fallback_policy: config::FallbackPolicy,
+    noise_shaper: config::NoiseShaper,
 ) -> Result<Box<dyn Output>, OutputError> {
     if backend == config::AudioBackend::Null {
         return Ok(Box::new(super::null_output::NullOutput::new(
@@ -471,6 +484,7 @@ pub fn create_output(
             backend,
             target_device,
             fallback_policy,
+            noise_shaper,
         ) {
             Ok(out) => {
                 log::info!("Audio output: using native ALSA exclusive backend");
@@ -486,8 +500,12 @@ pub fn create_output(
     }
     #[cfg(target_os = "macos")]
     if backend == config::AudioBackend::ExclusiveCoreAudioHog {
-        match super::coreaudio_output::CoreAudioOutput::new(buffer.clone(), backend, target_device)
-        {
+        match super::coreaudio_output::CoreAudioOutput::new(
+            buffer.clone(),
+            backend,
+            target_device,
+            noise_shaper,
+        ) {
             Ok(out) => {
                 log::info!("Audio output: using native CoreAudio hog-mode backend");
                 return Ok(Box::new(out));
@@ -502,7 +520,12 @@ pub fn create_output(
     }
     #[cfg(feature = "asio-native")]
     if backend == config::AudioBackend::ExclusiveAsio {
-        match super::asio_output::AsioOutput::new(target_device, 44100, buffer.clone()) {
+        match super::asio_output::AsioOutput::new(
+            target_device,
+            44100,
+            buffer.clone(),
+            noise_shaper,
+        ) {
             Ok(out) => {
                 log::info!("Audio output: using native ASIO backend");
                 return Ok(Box::new(out));
@@ -520,6 +543,7 @@ pub fn create_output(
         backend,
         target_device,
         fallback_policy,
+        noise_shaper,
     )?))
 }
 
