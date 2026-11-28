@@ -600,7 +600,7 @@ pub struct MixBusNode {
     pub crossfade_enabled: bool,
     /// Automatic summation-headroom law. `Off` is the bit-exact default; the
     /// scale is derived from the active inputs weighted by their applied
-    /// gains (see [`Self::summation_gain_stereo`] / [`Self::summation_gain_mc`]).
+    /// gains (see `summation_gain_stereo` / `summation_gain_mc`).
     pub headroom: config::SummationHeadroom,
     /// Program-gated ducking. `None` = ducking disabled, which
     /// keeps the sum bit-exact. Runtime gain is advanced once per block by

@@ -36,7 +36,7 @@
 //! | Vicanek matched design | Martin Vicanek, *Matched Second Order Digital Filters*, as ported by Signalsmith Audio (`filters.h`, `BiquadDesign::vicanek`) |
 //! | Orfanidis-style Nyquist matching | Nyquist-matched (Orfanidis, JAES 45(6) 444–455) peaking / high-shelf shapes (`biquad.rs` decramped); centre gain + DC/Nyquist exactness is test-pinned |
 //! | Butterworth section Q `1/(2·sin(π/N·(k − ½)))` | bmc0/dsp `parse_width` (`bwN`), the standard Butterworth pole placement |
-//! | `|H|²` from `φ = sin²(ω/2)` | J. O. Smith's allpass/energy identity, in the exact arrangement Equalizer APO's `BiQuad::gainAt` uses |
+//! | `\|H\|²` from `φ = sin²(ω/2)` | J. O. Smith's allpass/energy identity, in the exact arrangement Equalizer APO's `BiQuad::gainAt` uses |
 //!
 //! Nothing here allocates, and nothing here touches the realtime thread beyond
 //! a handful of transcendental calls at coefficient time.

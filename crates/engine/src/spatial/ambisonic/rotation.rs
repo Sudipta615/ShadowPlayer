@@ -36,7 +36,7 @@ pub fn rotation_supported(order: u8) -> bool {
 ///
 /// The order-4+ recovery is a least-squares solve over a deterministic
 /// Fibonacci sphere, not a closed-form Wigner-D table. It uses the same
-/// `sh_n` basis function as [`encode_plane_wave_n`], so a rotated bus frame
+/// `sh_n` basis function as `encode_plane_wave_n`, so a rotated bus frame
 /// is exactly the frame you get by encoding the rotated direction; the
 /// result is allocation-free and runs in the audio path.
 pub fn rotate_bus_frame_n(q: Quat, order: u8, frame: &mut [f32]) {

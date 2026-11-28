@@ -411,7 +411,7 @@ impl ParametricEq {
 
     /// Enable or disable the EQ.
     ///
-    /// The switch is a wet/dry crossfade over [`BYPASS_FADE_MS`], not an
+    /// The switch is a wet/dry crossfade over `BYPASS_FADE_MS`, not an
     /// instant change of what the stage does: a hard bypass steps the output
     /// by the whole curve, which is audible as a click on every toggle.
     pub fn set_enabled(&mut self, enabled: bool) {
