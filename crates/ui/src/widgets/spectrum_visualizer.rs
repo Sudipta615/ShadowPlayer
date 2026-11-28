@@ -78,9 +78,9 @@ impl<'a> SpectrumVisualizerWidget<'a> {
                 .clamp(bin_start + 1, spec_len);
 
             let mut max_db = -120.0_f32;
-            for b in bin_start..bin_end {
-                if b < spec_len && self.spectrum_db[b] > max_db {
-                    max_db = self.spectrum_db[b];
+            for spectrum in self.spectrum_db[bin_start..bin_end].iter() {
+                if *spectrum > max_db {
+                    max_db = *spectrum;
                 }
             }
 

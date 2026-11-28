@@ -171,8 +171,8 @@ pub(super) fn apply_active_preset(state: &mut EqPanelState, actions: &mut EqPane
         }
     }
     let new_gains = state.selected_preset.gains_for_frequencies(&freqs);
-    for i in 0..num {
-        state.graphic_gains[i] = new_gains.get(i).copied().unwrap_or(0.0);
+    for (i, gain) in state.graphic_gains[..num].iter_mut().enumerate() {
+        *gain = new_gains.get(i).copied().unwrap_or(0.0);
     }
     state.graphic_gains[num..].fill(0.0);
     // A factory preset is the whole curve: its reference level is unity. A

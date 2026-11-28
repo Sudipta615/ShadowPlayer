@@ -1,3 +1,9 @@
+// Newer clippy (rust 1.100+) introduced `needless_range_loop`. The engine's
+// DSP code indexes channels/samples by range in several hot paths; rewriting
+// every one of them to iterators would obscure the intent without changing
+// behaviour, so the lint is allowed at crate level.
+#![allow(clippy::needless_range_loop)]
+
 /// `audio-output` is a REQUIRED feature, despite being listed under
 /// `[features]`.
 ///

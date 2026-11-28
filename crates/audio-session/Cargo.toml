@@ -19,5 +19,4 @@ engine = { package = "audio-engine", path = "../engine", features = ["clap-host"
 config = { package = "config", path = "../engine/crates/config" }
 crossbeam = "0.8"
 log = "0.4"
-parking_lot = "0.12"
 thiserror = "2.0"

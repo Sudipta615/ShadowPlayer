@@ -361,8 +361,6 @@ ureq = { version = "2.12", optional = true }
 etcetera = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-env_logger = "0.11"
-termcolor = "1.4"
 # Loudness/ReplayGain tag write-back (`tag-write` feature): pure-Rust
 # metadata library for reading & writing ID3v2, Vorbis, MP4, and APEv2 tags.
 lofty = { version = "0.25", optional = true }

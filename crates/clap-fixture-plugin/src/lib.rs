@@ -810,6 +810,7 @@ unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_
     written == STATE_LEN as i64
 }
 
+#[allow(clippy::needless_range_loop)]
 unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_istream) -> bool {
     if plugin.is_null() || stream.is_null() {
         return false;
