@@ -433,7 +433,7 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 # windows-core is a direct dependency so the `#[implement(...)]` COM
 # macro (re-exported as `windows::core::implement`) can resolve the
 # `::windows_core::` paths it generates.
-windows-core = "0.59"
+windows-core = "0.100"
 windows = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
