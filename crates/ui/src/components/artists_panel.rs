@@ -103,11 +103,15 @@ impl<'a> ArtistsView<'a> {
 
                     if let Some(tex) = detail_tex {
                         egui::Image::new(&tex)
-                            .corner_radius(CornerRadius::same(44))
+                            .corner_radius(CornerRadius::same((avatar_size.y / 2.0) as u8))
                             .fit_to_exact_size(avatar_size)
                             .paint_at(ui, avatar_rect);
                     } else {
-                        p.circle_filled(avatar_rect.center(), 44.0, self.theme.artwork_placeholder);
+                        p.circle_filled(
+                            avatar_rect.center(),
+                            avatar_size.y / 2.0,
+                            self.theme.artwork_placeholder,
+                        );
                         crate::components::icons::draw_artist(
                             ui,
                             avatar_rect.shrink2(Vec2::new(26.0, 26.0)),

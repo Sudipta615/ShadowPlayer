@@ -80,6 +80,17 @@ jobs:
       - name: Cross-platform packaging inputs
         run: cargo test -p shadowplayer --test platform_parity -- --test-threads=1
 
+      # Orphaned integration guards: these suites used to live outside CI and
+      # rot silently. They now run on every push/PR.
+      - name: UI integration guards
+        run: |
+          cargo test -p ui --test font_coverage -- --test-threads=1
+          cargo test -p ui --test modal_layout -- --test-threads=1
+          cargo test -p ui --test spacing_scale -- --test-threads=1
+          cargo test -p ui --test theme_purity -- --test-threads=1
+          cargo test -p ui --test ui_docs_truth -- --test-threads=1
+          cargo test -p shadowplayer --test remote_binary -- --test-threads=1
+
       # A 100,000-track library has to stay inside the published budgets
       # (docs/PERFORMANCE.md). The measurement is a release build: the
       # budgets are about the shipped player, not about a debug build's
@@ -531,3 +542,44 @@ jobs:
       - coverage
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/dist.yml
+
+  # Rolling "latest" release so every green push to main ships a downloadable
+  # build for all six targets. Re-uploading with --clobber keeps a single
+  # stable URL per platform instead of a new release per commit.
+  publish-latest:
+    name: Publish rolling latest release
+    needs: dist
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download all distributables
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view latest >/dev/null 2>&1; then
+            find dist -type f -print0 | sort -z | while IFS= read -r -d '' f; do
+              gh release upload latest "$f" --clobber
+            done
+          else
+            assets=()
+            while IFS= read -r -d '' f; do assets+=("$f"); done < <(find dist -type f -print0 | sort -z)
+            gh release create latest "${assets[@]}" \
+              --title "Latest build" \
+              --notes "Rolling build of \`main\` at ${{ github.sha }}." \
+              --prerelease
+          fi
+          find dist -type f | sort | while IFS= read -r f; do
+            echo "Artifact download URL:https://github.com/${{ github.repository }}/releases/download/latest/$(basename "$f")"
+          done

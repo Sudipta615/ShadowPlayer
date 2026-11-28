@@ -67,6 +67,22 @@ jobs:
       - name: Build the distributable binary
         run: cargo build --release -p shadowplayer --target ${{ matrix.target }}
 
+      - name: Install appimagetool
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) url="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" ;;
+            aarch64) url="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage" ;;
+            *) echo "unsupported arch $arch" >&2; exit 1 ;;
+          esac
+          wget -q "$url" -O "$HOME/.local/bin/appimagetool"
+          chmod +x "$HOME/.local/bin/appimagetool"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$HOME/.local/bin/appimagetool" --version
+
       - name: Package native artefacts (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -102,6 +118,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the artefacts
+        id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist-${{ matrix.target }}
@@ -110,3 +127,6 @@ jobs:
           # These are pre-release builds; the reviewed copies live on the
           # draft release, which has its own retention.
           retention-days: 14
+
+      - name: Print the artifact download URL
+        run: echo "Artifact download URL:${{ steps.upload.outputs.artifact-url }}"

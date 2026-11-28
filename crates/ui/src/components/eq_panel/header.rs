@@ -235,7 +235,7 @@ pub(super) fn render_header(
             let redo_btn = ui.add_enabled(
                 can_redo,
                 egui::Button::new(
-                    egui::RichText::new("↷")
+                    egui::RichText::new("↻")
                         .font(crate::theme::font(12.0))
                         .color(if can_redo {
                             theme.text_primary
@@ -257,7 +257,7 @@ pub(super) fn render_header(
             let undo_btn = ui.add_enabled(
                 can_undo,
                 egui::Button::new(
-                    egui::RichText::new("↶")
+                    egui::RichText::new("↺")
                         .font(crate::theme::font(12.0))
                         .color(if can_undo {
                             theme.text_primary

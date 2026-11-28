@@ -115,7 +115,7 @@ fn the_readme_mentions_every_engine_limitation() {
     let limitations = engine_limitations(&engine);
     assert_eq!(
         limitations.len(),
-        15,
+        14,
         "the engine now documents {} limitations ({limitations:?}); add each one \
          to the player README's Known Limitations and update this test",
         limitations.len()
@@ -128,7 +128,6 @@ fn the_readme_mentions_every_engine_limitation() {
         "musepack",
         "talkback",
         "physical",
-        "ambisonic",
         "front l/r",
         "sparse matrix fir",
         "dac correction",

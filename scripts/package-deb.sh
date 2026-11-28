@@ -8,6 +8,9 @@ binary="${1:-$here/target/release/shadowplayer}"
 target="${2:-$(uname -m)-unknown-linux-gnu}"
 out_dir="${3:-$here/target/distrib}"
 
+# Ship the remote controller alongside the player.
+remote_binary="${REMOTE_BINARY:-$(dirname "$binary")/shadowplayer-remote}"
+
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$here/crates/app/Cargo.toml" | head -1)"
 if [[ -z "$version" ]]; then
     version="0.30.0"
@@ -36,9 +39,13 @@ mkdir -p "$pkg_dir/DEBIAN" \
          "$pkg_dir/usr/share/metainfo" \
          "$pkg_dir/usr/share/doc/shadowplayer"
 
-# 1. Install binary
+# 1. Install binaries
 cp "$binary" "$pkg_dir/usr/bin/shadowplayer"
 chmod 755 "$pkg_dir/usr/bin/shadowplayer"
+if [[ -x "$remote_binary" ]]; then
+    cp "$remote_binary" "$pkg_dir/usr/bin/shadowplayer-remote"
+    chmod 755 "$pkg_dir/usr/bin/shadowplayer-remote"
+fi
 
 # 2. Desktop file and metainfo
 cp "$here/crates/app/assets/shadowplayer.desktop" "$pkg_dir/usr/share/applications/"
@@ -67,7 +74,8 @@ Version: ${version}
 Section: sound
 Priority: optional
 Architecture: ${arch}
-Maintainer: ShadowPlayer Developers <https://github.com/shadowplayer/shadowplayer>
+Maintainer: ShadowPlayer Developers <https://github.com/Sudipta615/ShadowPlayer>
+Depends: libasound2 (>= 1.2.0), libc6 (>= 2.31), libgcc-s1
 Description: Audiophile playback for the music you already own.
  A local-first desktop music player built in Rust: bit-perfect output,
  studio-grade DSP chain, 100,000-track library that stays fast, and

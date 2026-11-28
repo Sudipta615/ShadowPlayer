@@ -11,6 +11,7 @@ accounts, cloud, or telemetry.
 [![Version](https://img.shields.io/badge/version-0.33.0-blue?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey?style=flat-square)](#platform-support)
+[![CI](https://github.com/Sudipta615/ShadowPlayer/actions/workflows/ci.yml/badge.svg)](https://github.com/Sudipta615/ShadowPlayer/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org/)
 
 [Why ShadowPlayer](#why-shadowplayer) ·
@@ -185,14 +186,14 @@ Release.
 
 | Platform | What you get |
 | :--- | :--- |
-| Linux x86-64 / arm64 | `.deb`, `.rpm`, `AppImage`, and a shell installer |
-| Windows x86-64 / arm64 | `.msi` and a `.zip` |
-| macOS x86-64 / arm64 | `.dmg` and a `.tar.gz` |
+| Linux x86-64 / arm64 | `.deb`, `AppImage`, and a portable `.tar.gz` |
+| Windows x86-64 / arm64 | Inno Setup `.exe` and a portable `.zip` |
+| macOS x86-64 / arm64 | `.dmg` and a `.zip` |
 
 Download the artefact for your platform from the
 [releases page](https://github.com/Sudipta615/ShadowPlayer/releases) and run it.
-Nothing is installed outside your user account except by the `.deb`, `.rpm`,
-and `.msi` packages, which install the binary and the icon.
+Nothing is installed outside your user account except by the `.deb` and the
+Windows Inno Setup installer, which install the binary and the icon.
 
 **From source**
 
@@ -502,11 +503,16 @@ Deliberate product choices live in
     crossfeed, stereo and bass enhancement, time-stretch, creative FX, and the
     output resampler leave the centre, surrounds, and LFE untouched; the engine
     reports exactly which stages are front-pair-only.
-  - **Sparse matrix FIR runs on stereo only when routes apply to two
-    channels.** The stereo entry points switch to the routing-capable plan at
-    runtime when a route's input/output pair fits a stereo stream; with no
-    stereo route active the compiled stereo plan and its bit-exact path are
-    unchanged.
+  - **Talkback is a primary-output, PCM-only monitor mix, with no automatic
+    feedback control.** The microphone is downmixed to mono and summed into
+    the front L/R pair after the program limiter while talkback is enabled;
+    native DSD and DoP transports bypass it, and there is no ducking or
+    feedback suppression.
+  - **Sparse matrix FIR runs through the routing head, on stereo as well as
+    multichannel.** A FIR route and a direct scalar route for the same
+    source/destination sum, and the FIR partition latency is not compensated
+    against the direct path, so a FIR-only profile must leave that matrix entry
+    at zero.
   - **DAC correction is a device profile, not room correction.** Profiles are
     matched by device name and output rate; the engine neither measures nor
     derives them.
@@ -531,9 +537,10 @@ Deliberate product choices live in
     without it, or when that stream cannot be negotiated, the engine reports
     the PCM fallback rather than claiming DSD. DSD256 is still not real-time on
     a low-power dual-core.
-  - **The N-input mix bus sums at unity unless you opt into a headroom law.**
-    `bus_summation` defaults to `Off`, so eight unity-gain slots reach +18 dB
-    coherent before the limiter; `InverseSqrt`/`InverseN` scale the bus by
+  - **Summation headroom is an opt-in bus law, off by default.**
+    `bus_summation` on the N-input mix bus defaults to `Off`, so eight
+    unity-gain slots reach +18 dB coherent before the limiter;
+    `InverseSqrt`/`InverseN` scale the bus by
     `1/√N`/`1/N`, weighted by each lane's applied gain, so a trimmed lane gives
     headroom back to the rest of the bus.
   - **`plugin-dylib` is not sandboxed.** Plugins run in-process behind only a

@@ -32,6 +32,20 @@ pub const DEFAULT_MONO_FONT: BundledFontFamily = BundledFontFamily {
     display: include_bytes!("../../assets/fonts/families/JetBrainsMono-Medium.ttf"),
 };
 
+/// Devanagari fallback for the Hindi catalogue. Inter covers none of the
+/// script, so without this face every Hindi string renders as `.notdef` boxes.
+pub const DEVANAGARI_FONT: &[u8] =
+    include_bytes!("../../assets/fonts/fallback/NotoSansDevanagari-Regular.ttf");
+
+/// CJK fallback for the Japanese and Chinese catalogues, and for CJK metadata
+/// in the library. Noto Sans CJK JP carries the unified ideographs, kana, and
+/// Hangul, so it also covers Japanese/Chinese tags the user did not translate.
+pub const CJK_FONT: &[u8] = include_bytes!("../../assets/fonts/fallback/NotoSansCJKjp-Regular.otf");
+
+/// Font keys appended to every family chain after the Latin faces. A theme
+/// selects the Latin voice; these faces only fill in scripts it cannot draw.
+const SCRIPT_FALLBACKS: [&str; 2] = ["fallback-devanagari", "fallback-cjk"];
+
 /// Curated OFL families available to themes. Keep this list small enough that
 /// the binary stays lean, and broad enough to cover editorial, geometric,
 /// warm, retro, and technical typography.
@@ -207,13 +221,16 @@ pub fn install_fonts(ctx: &egui::Context) {
 ///
 /// Unknown families are ignored and their role falls back to Inter, so a
 /// third-party theme can never leave the UI without a usable font. Every
-/// selected family is followed by Inter and egui's default fonts, which keeps
-/// emoji and uncommon glyphs working.
+/// selected family is followed by Inter, the Devanagari and CJK script
+/// fallbacks, and egui's default fonts, which keeps emoji and uncommon glyphs
+/// working.
 pub fn apply_theme_fonts(ctx: &egui::Context, selection: &ThemeFonts) {
     let mut fonts = FontDefinitions::default();
 
     add_font(&mut fonts, "inter-regular", INTER_FONT.regular);
     add_font(&mut fonts, "inter-medium", INTER_FONT.display);
+    add_font(&mut fonts, "fallback-devanagari", DEVANAGARI_FONT);
+    add_font(&mut fonts, "fallback-cjk", CJK_FONT);
 
     let default_proportional = fonts
         .families
@@ -245,7 +262,8 @@ pub fn apply_theme_fonts(ctx: &egui::Context, selection: &ThemeFonts) {
         proportional.push("theme-body".to_owned());
     }
     proportional.push("inter-regular".to_owned());
-    proportional.extend(default_proportional);
+    proportional.extend(SCRIPT_FALLBACKS.iter().map(|key| (*key).to_owned()));
+    proportional.extend(default_proportional.clone());
     fonts
         .families
         .insert(FontFamily::Proportional, proportional);
@@ -256,15 +274,8 @@ pub fn apply_theme_fonts(ctx: &egui::Context, selection: &ThemeFonts) {
     }
     display_chain.push("inter-medium".to_owned());
     display_chain.push("inter-regular".to_owned());
-    display_chain.extend(
-        fonts
-            .families
-            .get(&FontFamily::Proportional)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|name| name != "theme-body" && name != "inter-regular"),
-    );
+    display_chain.extend(SCRIPT_FALLBACKS.iter().map(|key| (*key).to_owned()));
+    display_chain.extend(default_proportional);
     fonts.families.insert(display_family(), display_chain);
 
     let mut monospace = Vec::new();
@@ -272,6 +283,7 @@ pub fn apply_theme_fonts(ctx: &egui::Context, selection: &ThemeFonts) {
         monospace.push("theme-mono".to_owned());
     }
     monospace.push("inter-regular".to_owned());
+    monospace.extend(SCRIPT_FALLBACKS.iter().map(|key| (*key).to_owned()));
     monospace.extend(default_monospace);
     fonts.families.insert(FontFamily::Monospace, monospace);
 

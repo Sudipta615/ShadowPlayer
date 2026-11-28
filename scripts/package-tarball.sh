@@ -21,13 +21,23 @@ fi
 archive_name="shadowplayer-${version}-${target}"
 stage="$out_dir/$archive_name"
 
+# `cargo build -p shadowplayer` builds both binaries. Ship the remote next to
+# the player so the documented headless/remote workflow works from the tarball.
+remote_binary="${REMOTE_BINARY:-$(dirname "$binary")/shadowplayer-remote}"
+
 echo "Creating portable tarball for $archive_name..."
 rm -rf "$stage"
 mkdir -p "$stage/bin" "$stage/share/applications" "$stage/share/metainfo"
 
-# 1. Install binary
+# 1. Install binaries
 cp "$binary" "$stage/bin/shadowplayer"
 chmod 755 "$stage/bin/shadowplayer"
+if [[ -x "$remote_binary" ]]; then
+    cp "$remote_binary" "$stage/bin/shadowplayer-remote"
+    chmod 755 "$stage/bin/shadowplayer-remote"
+else
+    echo "notice: $remote_binary not found; tarball will not include shadowplayer-remote" >&2
+fi
 
 # 2. Desktop file and metainfo
 cp "$here/crates/app/assets/shadowplayer.desktop" "$stage/share/applications/"
@@ -71,6 +81,10 @@ mkdir -p "$prefix/bin" "$prefix/share/applications" "$prefix/share/metainfo" "$p
 
 cp "$here/bin/shadowplayer" "$prefix/bin/"
 chmod 755 "$prefix/bin/shadowplayer"
+if [[ -f "$here/bin/shadowplayer-remote" ]]; then
+    cp "$here/bin/shadowplayer-remote" "$prefix/bin/"
+    chmod 755 "$prefix/bin/shadowplayer-remote"
+fi
 
 cp "$here/share/applications/shadowplayer.desktop" "$prefix/share/applications/"
 cp "$here/share/metainfo/io.github.shadowplayer.metainfo.xml" "$prefix/share/metainfo/"
@@ -104,6 +118,7 @@ fi
 
 echo "Uninstalling ShadowPlayer from $prefix..."
 rm -f "$prefix/bin/shadowplayer"
+rm -f "$prefix/bin/shadowplayer-remote"
 rm -f "$prefix/share/applications/shadowplayer.desktop"
 rm -f "$prefix/share/metainfo/io.github.shadowplayer.metainfo.xml"
 rm -f "$prefix/share/icons/hicolor/"*"/apps/shadowplayer."*

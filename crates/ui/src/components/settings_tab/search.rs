@@ -146,7 +146,7 @@ pub(super) fn render_settings_search_results(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             ui.label(
-                                                egui::RichText::new("Jump ➔")
+                                                egui::RichText::new("Jump →")
                                                     .font(crate::theme::font(10.5))
                                                     .color(theme.accent),
                                             );

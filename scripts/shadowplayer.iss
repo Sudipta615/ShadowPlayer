@@ -6,7 +6,7 @@
 #define MyAppVersion "0.30.0"
 #endif
 #define MyAppPublisher "ShadowPlayer Developers"
-#define MyAppURL "https://github.com/shadowplayer/shadowplayer"
+#define MyAppURL "https://github.com/Sudipta615/ShadowPlayer"
 #ifndef MyAppExeName
 #define MyAppExeName "shadowplayer.exe"
 #endif
@@ -14,6 +14,9 @@
 ; preserve the original in-tree layout.
 #ifndef MyAppBinary
 #define MyAppBinary "..\target\release\shadowplayer.exe"
+#endif
+#ifndef MyAppRemote
+#define MyAppRemote "..\target\release\shadowplayer-remote.exe"
 #endif
 #ifndef MyAppArch
 #define MyAppArch "x86_64"
@@ -58,6 +61,9 @@ Name: "associate_audio"; Description: "Associate lossless audio files (.flac, .w
 
 [Files]
 Source: "{#MyAppBinary}"; DestDir: "{app}"; Flags: ignoreversion
+#if FileExists(MyAppRemote)
+Source: "{#MyAppRemote}"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\crates\app\assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion

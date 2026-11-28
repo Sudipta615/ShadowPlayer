@@ -8,6 +8,8 @@ binary="${1:-$here/target/release/shadowplayer}"
 target="${2:-$(uname -m)-unknown-linux-gnu}"
 out_dir="${3:-$here/target/distrib}"
 
+remote_binary="${REMOTE_BINARY:-$(dirname "$binary")/shadowplayer-remote}"
+
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$here/crates/app/Cargo.toml" | head -1)"
 if [[ -z "$version" ]]; then
     version="0.30.0"
@@ -35,9 +37,13 @@ mkdir -p "$appdir/usr/bin" \
          "$appdir/usr/share/icons/hicolor/256x256/apps" \
          "$appdir/usr/share/icons/hicolor/scalable/apps"
 
-# 1. Install binary
+# 1. Install binaries
 cp "$binary" "$appdir/usr/bin/shadowplayer"
 chmod 755 "$appdir/usr/bin/shadowplayer"
+if [[ -x "$remote_binary" ]]; then
+    cp "$remote_binary" "$appdir/usr/bin/shadowplayer-remote"
+    chmod 755 "$appdir/usr/bin/shadowplayer-remote"
+fi
 
 # 2. Desktop file and metainfo
 cp "$here/crates/app/assets/shadowplayer.desktop" "$appdir/usr/share/applications/"
@@ -62,9 +68,11 @@ EOF
 chmod 755 "$appdir/AppRun"
 
 # 5. Pack into AppImage if appimagetool is available
-if command -v appimagetool >/dev/null 2>&1; then
-    ARCH="$arch" appimagetool "$appdir" "$appimage"
+appimagetool_bin="${APPIMAGETOOL:-appimagetool}"
+if command -v "$appimagetool_bin" >/dev/null 2>&1; then
+    APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$arch" "$appimagetool_bin" "$appdir" "$appimage"
     echo "Created $appimage"
+    rm -rf "$appdir"
 else
     echo "Notice: appimagetool not found in PATH."
     echo "AppDir prepared successfully at: $appdir"

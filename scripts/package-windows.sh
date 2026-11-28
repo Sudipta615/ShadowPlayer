@@ -8,6 +8,8 @@ binary="${1:-$here/target/release/shadowplayer.exe}"
 target="${2:-x86_64-pc-windows-msvc}"
 out_dir="${3:-$here/target/distrib}"
 
+remote_binary="${REMOTE_BINARY:-$(dirname "$binary")/shadowplayer-remote.exe}"
+
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$here/crates/app/Cargo.toml" | head -1)"
 if [[ -z "$version" ]]; then
     version="0.30.0"
@@ -22,8 +24,11 @@ stage="$out_dir/$base_name"
 rm -rf "$stage"
 mkdir -p "$stage"
 
-# 1. Install binary
+# 1. Install binaries
 cp "$binary" "$stage/shadowplayer.exe"
+if [[ -x "$remote_binary" ]]; then
+    cp "$remote_binary" "$stage/shadowplayer-remote.exe"
+fi
 cp "$here/crates/app/assets/icon.ico" "$stage/"
 cp "$here/README.md" "$stage/"
 cp "$here/LICENSE" "$stage/"
@@ -63,6 +68,7 @@ if command -v iscc >/dev/null 2>&1; then
     echo "Compiling Inno Setup installer for $arch..."
     iscc "/DMyAppVersion=$version" "/DMyAppArch=$arch" \
         "/DMyAppArm64=$arm64" "/DMyAppBinary=$iscc_binary" \
+        "/DMyAppRemote=$(cygpath -w "$remote_binary" 2>/dev/null || echo "$remote_binary")" \
         "$here/scripts/shadowplayer.iss"
     echo "Installer generated successfully."
 else

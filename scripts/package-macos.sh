@@ -8,6 +8,8 @@ binary="${1:-$here/target/release/shadowplayer}"
 target="${2:-$(uname -m)-apple-darwin}"
 out_dir="${3:-$here/target/distrib}"
 
+remote_binary="${REMOTE_BINARY:-$(dirname "$binary")/shadowplayer-remote}"
+
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$here/crates/app/Cargo.toml" | head -1)"
 if [[ -z "$version" ]]; then
     version="0.30.0"
@@ -17,7 +19,7 @@ echo "Packaging macOS bundle for target $target..."
 mkdir -p "$out_dir"
 
 # 1. Create .app bundle
-"$here/crates/app/macos/package-app.sh" "$binary" "$out_dir"
+"$here/crates/app/macos/package-app.sh" "$binary" "$out_dir" "$remote_binary"
 
 app_path="$out_dir/ShadowPlayer.app"
 base_name="shadowplayer-${version}-${target}"

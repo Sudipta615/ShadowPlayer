@@ -29,19 +29,33 @@ const VECTOR_DRAWN: &[char] = &[];
 #[test]
 fn every_user_facing_character_has_a_glyph() {
     let ui_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let fonts = [
+    // The Latin faces every theme uses, plus the script fallbacks appended to
+    // every family chain. Coverage is the union: a character needs a glyph in
+    // *some* bundled face, not in Inter specifically.
+    let latin_fonts = [
         "assets/fonts/Inter-Regular.ttf",
         "assets/fonts/Inter-Medium.ttf",
     ];
+    let fallback_fonts = [
+        "assets/fonts/fallback/NotoSansDevanagari-Regular.ttf",
+        "assets/fonts/fallback/NotoSansCJKjp-Regular.otf",
+    ];
 
-    let mut all_codepoints: Option<BTreeSet<u32>> = None;
-    for font in fonts {
+    let mut supported = BTreeSet::new();
+    for font in latin_fonts.iter().chain(fallback_fonts.iter()) {
         let data = fs::read(ui_dir.join(font)).unwrap_or_else(|e| {
             panic!("could not read bundled font {font}: {e}");
         });
         let codepoints = cmap_codepoints(&data).unwrap_or_else(|e| {
             panic!("could not parse the cmap table of {font}: {e}");
         });
+        supported.extend(codepoints);
+    }
+    // Inter remains the universal face: if it stops covering Latin or the
+    // ellipsis the fallbacks cannot paper over it.
+    for font in latin_fonts {
+        let data = fs::read(ui_dir.join(font)).expect("bundled Latin face");
+        let codepoints = cmap_codepoints(&data).expect("parseable Latin face");
         assert!(
             codepoints.contains(&u32::from('A')),
             "{font} does not cover basic Latin"
@@ -50,15 +64,7 @@ fn every_user_facing_character_has_a_glyph() {
             codepoints.contains(&u32::from('…')),
             "{font} does not cover the ellipsis the UI relies on"
         );
-        all_codepoints = Some(match all_codepoints {
-            Some(mut previous) => {
-                previous.retain(|cp| codepoints.contains(cp));
-                previous
-            }
-            None => codepoints,
-        });
     }
-    let supported = all_codepoints.expect("at least one font");
     let vector_drawn: BTreeSet<u32> = VECTOR_DRAWN.iter().copied().map(u32::from).collect();
 
     let mut failures = Vec::new();
@@ -89,6 +95,38 @@ fn every_user_facing_character_has_a_glyph() {
                     literal.text,
                 ));
             }
+        }
+    }
+
+    // The catalogues are user-facing text too, and they are the reason the
+    // script fallbacks exist. Scanning them keeps a new translation from
+    // silently shipping tofu, and keeps the fallback subset honest.
+    let locales = ui_dir.join("locales");
+    let mut locale_files: Vec<PathBuf> = fs::read_dir(&locales)
+        .unwrap_or_else(|e| panic!("could not read {}: {e}", locales.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    locale_files.sort();
+    assert!(
+        !locale_files.is_empty(),
+        "no locale catalogues found under {}",
+        locales.display()
+    );
+    for path in locale_files {
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()));
+        for (offset, ch) in text.char_indices() {
+            let cp = u32::from(ch);
+            if cp < 0x80 || supported.contains(&cp) || vector_drawn.contains(&cp) {
+                continue;
+            }
+            let line = text[..offset].matches('\n').count() + 1;
+            failures.push(format!(
+                "{}:{line}: U+{cp:04X} {ch:?} has no glyph in the bundled fonts",
+                path.display(),
+            ));
         }
     }
 

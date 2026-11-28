@@ -12,6 +12,14 @@ typography without depending on fonts installed on the host system.
 | `families/DMSans-*.ttf` | DM Sans | https://github.com/google/fonts/tree/main/ofl/dmsans |
 | `families/BricolageGrotesque-*.ttf` | Bricolage Grotesque | https://github.com/google/fonts/tree/main/ofl/bricolagegrotesque |
 | `families/JetBrainsMono-*.ttf` | JetBrains Mono | https://github.com/google/fonts/tree/main/ofl/jetbrainsmono |
+| `fallback/NotoSansDevanagari-Regular.ttf` | Noto Sans Devanagari | https://github.com/notofonts/devanagari |
+| `fallback/NotoSansCJKjp-Regular.otf` | Noto Sans CJK JP | https://github.com/notofonts/noto-cjk |
+
+The two `fallback/` faces are appended to every family chain after the Latin
+faces, so a theme can change the Latin voice without hiding Hindi, Japanese,
+or Chinese text. Noto Sans CJK JP carries the unified ideographs, kana, and
+Hangul, which also covers CJK metadata in the library; it is the JP face
+extracted from the upstream `NotoSansCJK-Regular.ttc` collection.
 
 All families are licensed under the SIL Open Font License 1.1. The original
 licence text for each family is in `licenses/`; Inter's licence is

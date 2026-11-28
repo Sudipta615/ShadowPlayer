@@ -14,6 +14,7 @@ set -euo pipefail
 
 binary="${1:-target/release/shadowplayer}"
 out_dir="${2:-target/distrib}"
+remote_binary="${3:-$(dirname "$binary")/shadowplayer-remote}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 app="$out_dir/ShadowPlayer.app"
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$here/../Cargo.toml" | head -1)"
@@ -30,6 +31,10 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/shadowplayer"
 chmod 755 "$app/Contents/MacOS/shadowplayer"
+if [[ -x "$remote_binary" ]]; then
+    cp "$remote_binary" "$app/Contents/MacOS/shadowplayer-remote"
+    chmod 755 "$app/Contents/MacOS/shadowplayer-remote"
+fi
 cp "$here/Info.plist" "$app/Contents/Info.plist"
 cp "$here/../assets/icon.icns" "$app/Contents/Resources/icon.icns"
 

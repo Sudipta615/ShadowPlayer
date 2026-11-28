@@ -159,6 +159,10 @@ pub struct MprisService {
     last_playback: Option<(bool, bool, u64)>,
 }
 
+// The Linux backend is the only one that talks D-Bus, and `zbus` is a
+// Linux-only dependency. Compiling the module unconditionally makes every
+// Windows and macOS build fail to resolve `zbus`, so the gate is load-bearing.
+#[cfg(target_os = "linux")]
 mod linux;
 
 impl MprisService {
